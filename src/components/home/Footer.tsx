@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Container } from "@/components/ui/container";
 import { useAuth } from "@/contexts/AuthContext";
-import { Gem, FlaskConical, CalendarDays, User } from "lucide-react";
+import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield } from "lucide-react";
 import { ENROLLMENT_URL, TESTS_URL, BOOKING_URL, AUTH_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
@@ -15,47 +15,59 @@ const Footer = () => {
         {/* Quick Links Section */}
         <div className="mb-12 pb-8 border-b border-gray-800">
           <h3 className="text-lg font-semibold mb-4 text-center">Quick Access</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <a
-              href={`${ENROLLMENT_URL}?source=footer`}
-              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
-            >
-              <Gem className="h-6 w-6 mb-2 text-conve-red" />
-              <span className="text-sm font-medium text-center group-hover:text-conve-red transition-colors">
-                View Membership Plans
-              </span>
-            </a>
-            <a
-              href={`${TESTS_URL}?source=footer`}
-              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
-            >
-              <FlaskConical className="h-6 w-6 mb-2 text-conve-red" />
-              <span className="text-sm font-medium text-center group-hover:text-conve-red transition-colors">
-                Browse Lab Tests
-              </span>
-            </a>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <button
-              onClick={() => {
-                if (bookingModal) {
-                  bookingModal.openModal('footer');
-                  return;
-                }
-                window.location.href = withSource(BOOKING_URL, 'footer');
-              }}
+              onClick={() => bookingModal?.openModal('footer') || (window.location.href = BOOKING_URL)}
               className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
             >
               <CalendarDays className="h-6 w-6 mb-2 text-conve-red" />
-              <span className="text-sm font-medium text-center group-hover:text-conve-red transition-colors">
+              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
                 Book Appointment
               </span>
             </button>
             <a
-              href={`${AUTH_URL}?source=footer`}
+              href="/login?redirect=/dashboard"
               className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
             >
               <User className="h-6 w-6 mb-2 text-conve-red" />
-              <span className="text-sm font-medium text-center group-hover:text-conve-red transition-colors">
-                Patient Login
+              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
+                Patient Portal
+              </span>
+            </a>
+            <a
+              href="/login?redirect=/dashboard/phlebotomist"
+              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
+            >
+              <Shield className="h-6 w-6 mb-2 text-conve-red" />
+              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
+                Staff Portal
+              </span>
+            </a>
+            <a
+              href="/login?redirect=/dashboard/concierge_doctor"
+              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
+            >
+              <Stethoscope className="h-6 w-6 mb-2 text-conve-red" />
+              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
+                Provider Portal
+              </span>
+            </a>
+            <a
+              href="/pricing"
+              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
+            >
+              <Gem className="h-6 w-6 mb-2 text-conve-red" />
+              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
+                Membership
+              </span>
+            </a>
+            <a
+              href="/lab-testing"
+              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
+            >
+              <FlaskConical className="h-6 w-6 mb-2 text-conve-red" />
+              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
+                Lab Tests
               </span>
             </a>
           </div>

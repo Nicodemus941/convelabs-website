@@ -4,12 +4,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Divider } from "@/components/auth/Divider";
-import { GoogleButton } from "@/components/auth/GoogleButton";
 import { toast } from "sonner";
 import { Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { validateEmail, validatePassword, FormErrorMessage } from "@/components/auth/FormValidation";
-import { supabase } from '@/integrations/supabase/client';
 
 interface LoginFormProps {
   handleSuperAdminLogin: (email: string, password: string) => Promise<void>;
@@ -23,7 +20,6 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
   const [emailError, setEmailError] = useState<string | undefined>();
   const [passwordError, setPasswordError] = useState<string | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isDemoLoading, setIsDemoLoading] = useState(false);
   const { login } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -87,88 +83,6 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
     }
   };
 
-  const handleDemoLogin = async () => {
-    setIsDemoLoading(true);
-    try {
-      // Try sign in first, since the user already exists
-      const { error: signInError, data: signInData } = await supabase.auth.signInWithPassword({
-        email: 'demo@gmail.com',
-        password: 'Nick2024',
-      });
-      
-      if (!signInError && signInData?.session) {
-        toast.success('Signed in as demo patient');
-        navigate('/appointments');
-        return;
-      }
-      
-      // If sign-in fails for some reason other than "user not found", show the error
-      if (signInError && signInError.message !== "Invalid login credentials") {
-        throw signInError;
-      }
-      
-      // Otherwise, try to create the user
-      const authResponse = await supabase.auth.signUp({
-        email: 'demo@gmail.com',
-        password: 'Nick2024',
-        options: {
-          data: {
-            firstName: 'Demo',
-            lastName: 'Patient',
-            full_name: 'Demo Patient',
-            role: 'patient'
-          }
-        }
-      });
-      
-      if (authResponse.error) {
-        // If user already exists, just try to sign in again
-        if (authResponse.error.message.includes("User already registered")) {
-          const { error: retrySignInError } = await supabase.auth.signInWithPassword({
-            email: 'demo@gmail.com',
-            password: 'Nick2024',
-          });
-          
-          if (retrySignInError) throw retrySignInError;
-          toast.success('Signed in as demo patient');
-          navigate('/appointments');
-          return;
-        }
-        throw authResponse.error;
-      }
-      
-      const userId = authResponse.data?.user?.id;
-      
-      // Update user profile with additional info
-      if (userId) {
-        // Create a profile object with explicit typing and all required fields
-        const profileData = {
-          id: userId,
-          full_name: 'Demo Patient',
-          address_street: '123 Test Street',
-          address_city: 'Orlando',
-          address_state: 'FL',
-          address_zipcode: '32801',
-          date_of_birth: new Date('1990-01-01').toISOString(),
-          phone: '555-123-4567'
-        };
-        
-        const { error: profileError } = await supabase
-          .from('user_profiles')
-          .upsert(profileData);
-          
-        if (profileError) throw profileError;
-      }
-      
-      toast.success('Demo patient account created and logged in successfully');
-      navigate('/appointments');
-    } catch (error: any) {
-      console.error('Error with demo login:', error);
-      toast.error(`Failed to log in as demo patient: ${error.message}`);
-    } finally {
-      setIsDemoLoading(false);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -243,27 +157,6 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
         </Button>
       </form>
 
-      {/* Demo Account Login Button */}
-      <Button
-        type="button"
-        variant="outline" 
-        onClick={handleDemoLogin}
-        disabled={isDemoLoading}
-        className="w-full border-conve-red text-conve-red hover:bg-conve-red/10"
-      >
-        {isDemoLoading ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Accessing Demo Account...
-          </>
-        ) : (
-          "Use Demo Account"
-        )}
-      </Button>
-
-      <Divider text="OR" />
-      
-      <GoogleButton redirectUrl={returnPath} />
     </div>
   );
 };

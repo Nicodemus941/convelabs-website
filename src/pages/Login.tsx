@@ -5,17 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { LoginForm } from "@/components/auth/LoginForm";
 import { useSuperAdminLogin } from "@/utils/auth/superAdminLogin";
 import { useToast } from "@/components/ui/use-toast";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { LoginHeader } from "@/components/auth/LoginHeader";
-import { AuthFooter } from "@/components/auth/AuthFooter";
-import { Loader2 } from "lucide-react";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { Loader2, ArrowLeft } from "lucide-react";
 
 const Login = () => {
   const { resetError, error: authError, user, isLoading } = useAuth();
   const { toast } = useToast();
   const { handleSuperAdminLogin } = useSuperAdminLogin();
   const navigate = useNavigate();
-  const location = useLocation();
   const [searchParams] = useSearchParams();
   
   // Extract redirect path from query params if exists
@@ -59,32 +56,44 @@ const Login = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="flex flex-col items-center justify-center">
-            <div className="w-12 h-12 border-4 border-t-conve-red border-r-conve-red border-b-gray-200 border-l-gray-200 rounded-full animate-spin mb-4"></div>
-            <p className="text-gray-600">Checking authentication status...</p>
-          </div>
-        </div>
+        <Loader2 className="h-8 w-8 animate-spin text-conve-red" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md">
-        <LoginHeader />
+        {/* Back to home */}
+        <div className="mb-6">
+          <Link to="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="h-4 w-4" />
+            Back to ConveLabs
+          </Link>
+        </div>
 
-        <Card className="luxury-card">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <Link to="/" className="text-3xl font-bold text-conve-red">
+            ConveLabs<span className="text-foreground">.</span>
+          </Link>
+          <p className="text-muted-foreground text-sm mt-1">Luxury mobile phlebotomy services</p>
+        </div>
+
+        <Card>
           <CardHeader>
             <CardTitle className="text-xl font-semibold">Welcome Back</CardTitle>
-            <CardDescription>
-              Sign in to access your account
-            </CardDescription>
+            <CardDescription>Sign in to access your account</CardDescription>
           </CardHeader>
-
           <CardContent>
             <LoginForm handleSuperAdminLogin={handleSuperAdminLogin} redirectPath={redirectPath} />
-            <AuthFooter type="login" />
+
+            <div className="mt-6 space-y-3 text-center text-sm">
+              <p className="text-muted-foreground">
+                Don't have an account?{' '}
+                <Link to="/signup" className="text-conve-red font-medium hover:underline">Sign up</Link>
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
