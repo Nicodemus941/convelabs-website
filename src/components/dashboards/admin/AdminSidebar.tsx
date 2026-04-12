@@ -1,12 +1,16 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
-  FileText, Settings, Mail, Webhook, BarChart3,
-  CalendarDays, UserPlus, CreditCard
+  FileText, Settings, Mail, Webhook,
+  CalendarDays
 } from 'lucide-react';
 
-const SIDEBAR_SECTIONS = [
+type SidebarItem = { name: string; icon: any; path: string; roles?: string[] };
+type SidebarSection = { label: string; items: SidebarItem[] };
+
+const SIDEBAR_SECTIONS: SidebarSection[] = [
   {
     label: 'MAIN',
     items: [
@@ -32,15 +36,17 @@ const SIDEBAR_SECTIONS = [
   {
     label: 'SYSTEM',
     items: [
-      { name: 'Documentation', icon: FileText, path: '/dashboard/super_admin/documentation' },
-      { name: 'Webhooks', icon: Webhook, path: '/dashboard/super_admin/webhooks' },
-      { name: 'Settings', icon: Settings, path: '/dashboard/super_admin/settings' },
+      { name: 'Documentation', icon: FileText, path: '/dashboard/super_admin/documentation', roles: ['super_admin'] },
+      { name: 'Webhooks', icon: Webhook, path: '/dashboard/super_admin/webhooks', roles: ['super_admin'] },
+      { name: 'Settings', icon: Settings, path: '/dashboard/super_admin/settings', roles: ['super_admin'] },
     ],
   },
 ];
 
 const AdminSidebar: React.FC = () => {
   const location = useLocation();
+  const { user } = useAuth();
+  const userRole = user?.role || 'patient';
 
   const isActive = (path: string) => {
     if (path === '/dashboard/super_admin') {
@@ -61,13 +67,16 @@ const AdminSidebar: React.FC = () => {
 
       {/* Navigation */}
       <nav className="flex-1 py-4 overflow-y-auto">
-        {SIDEBAR_SECTIONS.map((section) => (
+        {SIDEBAR_SECTIONS.map((section) => {
+          const visibleItems = section.items.filter(item => !item.roles || item.roles.includes(userRole));
+          if (visibleItems.length === 0) return null;
+          return (
           <div key={section.label} className="mb-5">
             <p className="px-5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
               {section.label}
             </p>
             <div className="space-y-0.5">
-              {section.items.map((item) => {
+              {visibleItems.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.path);
                 return (
@@ -87,7 +96,8 @@ const AdminSidebar: React.FC = () => {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </nav>
 
       {/* Footer */}
