@@ -121,6 +121,9 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                           selected={field.value ? new Date(field.value) : undefined}
                           onSelect={field.onChange}
                           disabled={(date) => date > new Date()}
+                          captionLayout="dropdown-buttons"
+                          fromYear={1920}
+                          toYear={new Date().getFullYear()}
                           initialFocus
                           className="p-3 pointer-events-auto"
                         />

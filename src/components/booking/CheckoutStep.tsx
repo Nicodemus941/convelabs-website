@@ -8,7 +8,7 @@ import { Separator } from '@/components/ui/separator';
 import { ChevronLeft, Loader2, CreditCard } from 'lucide-react';
 import { FormField, FormItem, FormControl, FormLabel, FormMessage } from '@/components/ui/form';
 import { BookingFormValues } from '@/types/appointmentTypes';
-import { calculateTotal, getServiceById } from '@/services/pricing/pricingService';
+import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
 
@@ -23,15 +23,18 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const { watch, getValues } = methods;
   const [tipAmount, setTipAmount] = useState(0);
 
-  const serviceId = getValues('serviceDetails.selectedService');
+  const serviceId = getValues('serviceDetails.visitType') || getValues('serviceDetails.selectedService');
   const serviceDetails = getValues('serviceDetails');
+  const locationCity = getValues('locationDetails.city') || '';
   const additionalPatients = watch('additionalPatients') || [];
   const termsAccepted = watch('termsAccepted');
 
   const service = getServiceById(serviceId);
+  const extendedArea = isExtendedArea(locationCity);
   const breakdown = calculateTotal(serviceId, {
     sameDay: serviceDetails?.sameDay,
     weekend: serviceDetails?.weekend,
+    extendedArea,
   }, tipAmount, additionalPatients.length);
 
   const selectedDate = watch('date');

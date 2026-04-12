@@ -47,19 +47,19 @@ const ServiceSelectionStep: React.FC<ServiceSelectionStepProps> = ({
   const [showAll, setShowAll] = useState(false);
 
   const availableServices: Service[] = services.length > 0 ? services : [
-    { id: 'routine-blood-draw', name: 'Routine Blood Draws', duration: 10, credits: 1, description: 'Standard blood collection procedure' },
-    { id: 'fasting-blood-draw', name: 'Fasting Blood Draws', duration: 10, credits: 1, description: 'Requires 8-12 hours of fasting' },
-    { id: 'stat-blood-draw', name: 'STAT Blood Draws', duration: 10, credits: 1, description: 'Urgent collection with expedited processing' },
-    { id: 'therapeutic-phlebotomy', name: 'Therapeutic Phlebotomy', duration: 30, credits: 1, description: 'Removal of blood for therapeutic purposes' },
+    { id: 'routine-blood-draw', name: 'Routine Blood Draws', duration: 60, credits: 1, description: 'Standard blood collection procedure' },
+    { id: 'fasting-blood-draw', name: 'Fasting Blood Draws', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting' },
+    { id: 'stat-blood-draw', name: 'STAT Blood Draws', duration: 60, credits: 1, description: 'Urgent collection with expedited processing' },
+    { id: 'therapeutic-phlebotomy', name: 'Therapeutic Phlebotomy', duration: 60, credits: 1, description: 'Removal of blood for therapeutic purposes' },
     { id: 'glucose-tolerance', name: 'Glucose Tolerance Test (GTT)', duration: 120, credits: 1, description: 'Measures how your body processes sugar' },
-    { id: 'pregnancy-blood-test', name: 'Pregnancy Blood Test', duration: 10, credits: 1, description: 'Blood test to detect pregnancy hormones' },
-    { id: 'urine-collection', name: 'Urine Collection', duration: 10, credits: 1, description: 'Collection of urine sample' },
-    { id: 'stool-sample', name: 'Stool Sample Pickup', duration: 5, credits: 1, description: 'Collection of prepared stool sample' },
-    { id: 'genetic-test', name: 'Genetic Test Kit Collection', duration: 20, credits: 1, description: 'Collection of samples for genetic testing' },
-    { id: 'hormone-test', name: 'Hormone Test Kit Collection', duration: 20, credits: 1, description: 'Collection for hormone testing' },
-    { id: 'wellness-panel', name: 'Wellness Panel Kit Collection', duration: 20, credits: 1, description: 'Comprehensive wellness testing' },
-    { id: 'life-insurance', name: 'Life Insurance Exam', duration: 45, credits: 1, description: 'Medical exam for life insurance' },
-    { id: 'specialty-kit', name: 'Specialty Kit Processing', duration: 45, credits: 1, description: 'DUTCH, Genova and specialty kits' },
+    { id: 'pregnancy-blood-test', name: 'Pregnancy Blood Test', duration: 60, credits: 1, description: 'Blood test to detect pregnancy hormones' },
+    { id: 'urine-collection', name: 'Urine Collection', duration: 60, credits: 1, description: 'Collection of urine sample' },
+    { id: 'stool-sample', name: 'Stool Sample Pickup', duration: 60, credits: 1, description: 'Collection of prepared stool sample' },
+    { id: 'genetic-test', name: 'Genetic Test Kit Collection', duration: 60, credits: 1, description: 'Collection of samples for genetic testing' },
+    { id: 'hormone-test', name: 'Hormone Test Kit Collection', duration: 60, credits: 1, description: 'Collection for hormone testing' },
+    { id: 'wellness-panel', name: 'Wellness Panel Kit Collection', duration: 60, credits: 1, description: 'Comprehensive wellness testing' },
+    { id: 'life-insurance', name: 'Life Insurance Exam', duration: 60, credits: 1, description: 'Medical exam for life insurance' },
+    { id: 'specialty-kit', name: 'Specialty Kit Processing', duration: 60, credits: 1, description: 'DUTCH, Genova and specialty kits' },
   ];
 
   const topServices = availableServices.filter(s => TOP_SERVICES.includes(s.id));

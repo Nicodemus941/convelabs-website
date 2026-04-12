@@ -9,6 +9,7 @@ export interface SurchargeOptions {
   sameDay?: boolean;
   weekend?: boolean;
   extendedHours?: boolean;
+  extendedArea?: boolean;
 }
 
 export interface PriceBreakdown {
@@ -31,7 +32,21 @@ const SURCHARGES = {
   sameDay: { label: 'Same-Day Appointment', amount: 50 },
   weekend: { label: 'Weekend Service', amount: 75 },
   extendedHours: { label: 'Extended Hours', amount: 50 },
+  extendedArea: { label: 'Extended Service Area', amount: 75 },
 };
+
+// Cities/areas that incur the extended service area surcharge (+$75, +30min)
+export const EXTENDED_AREA_CITIES = [
+  'lake nona', 'celebration', 'kissimmee', 'sanford', 'eustis',
+  'clermont', 'montverde', 'deltona', 'geneva',
+];
+
+export const DEFAULT_APPOINTMENT_DURATION = 60; // 1 hour
+export const EXTENDED_AREA_EXTRA_DURATION = 30; // +30 min for extended areas
+
+export function isExtendedArea(city: string): boolean {
+  return EXTENDED_AREA_CITIES.includes(city.toLowerCase().trim());
+}
 
 export function getServiceCatalog(): ServiceOption[] {
   return SERVICE_CATALOG;
@@ -43,7 +58,7 @@ export function getServiceById(serviceId: string): ServiceOption | undefined {
 
 export function calculateBasePrice(serviceId: string): number {
   const service = getServiceById(serviceId);
-  return service?.basePrice ?? 150; // default to mobile price
+  return service?.basePrice ?? 150;
 }
 
 export function calculateSurcharges(options: SurchargeOptions): { label: string; amount: number }[] {
@@ -51,6 +66,7 @@ export function calculateSurcharges(options: SurchargeOptions): { label: string;
   if (options.sameDay) items.push(SURCHARGES.sameDay);
   if (options.weekend) items.push(SURCHARGES.weekend);
   if (options.extendedHours) items.push(SURCHARGES.extendedHours);
+  if (options.extendedArea) items.push(SURCHARGES.extendedArea);
   return items;
 }
 

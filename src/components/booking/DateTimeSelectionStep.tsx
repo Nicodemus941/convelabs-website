@@ -154,24 +154,23 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   {isSunday ? (
                     <p className="text-sm text-muted-foreground py-4">No appointments available on Sundays.</p>
                   ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                       {activeWindows.map((window) => {
                         const isSelected = field.value === window.time;
 
                         return (
-                          <div key={window.time}>
-                            <Button
-                              type="button"
-                              variant={isSelected ? "default" : "outline"}
-                              className="w-full text-xs sm:text-sm"
-                              onClick={() => {
-                                field.onChange(window.time);
-                              }}
-                            >
-                              <Clock className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
-                              {window.label}
-                            </Button>
-                          </div>
+                          <Button
+                            key={window.time}
+                            type="button"
+                            variant={isSelected ? "default" : "outline"}
+                            className="w-full text-[11px] sm:text-xs px-2 py-2 h-auto whitespace-nowrap"
+                            onClick={() => {
+                              field.onChange(window.time);
+                            }}
+                          >
+                            <Clock className="mr-1 h-3 w-3 flex-shrink-0" />
+                            {window.label}
+                          </Button>
                         );
                       })}
                     </div>
