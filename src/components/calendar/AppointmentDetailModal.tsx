@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { User, Calendar, Clock, MapPin, FileText, Phone, Mail, AlertCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { User, Calendar, Clock, MapPin, FileText, Phone, Mail, Edit3, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -30,8 +32,19 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   onUpdate,
 }) => {
   const [isUpdating, setIsUpdating] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [editDate, setEditDate] = useState('');
+  const [editTime, setEditTime] = useState('');
+  const [editNotes, setEditNotes] = useState('');
 
   if (!appointment) return null;
+
+  const initEdit = () => {
+    setEditDate(appointment.appointment_date?.split('T')[0] || '');
+    setEditTime(appointment.appointment_time || '');
+    setEditNotes(appointment.notes || '');
+    setEditMode(true);
+  };
 
   const patientName = appointment.notes?.startsWith('Patient: ')
     ? appointment.notes.split(' | ')[0].replace('Patient: ', '')
@@ -61,6 +74,28 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const handleCancel = async () => {
     if (!window.confirm('Are you sure you want to cancel this appointment?')) return;
     await handleStatusChange('cancelled');
+  };
+
+  const handleSaveEdit = async () => {
+    setIsUpdating(true);
+    const updates: any = {};
+    if (editDate) {
+      const timePart = appointment.appointment_date?.split('T')[1] || '12:00:00+00';
+      updates.appointment_date = `${editDate}T${timePart}`;
+      updates.rescheduled_at = new Date().toISOString();
+    }
+    if (editNotes !== appointment.notes) updates.notes = editNotes;
+
+    const { error } = await supabase.from('appointments').update(updates).eq('id', appointment.id);
+    if (error) {
+      toast.error('Failed to update appointment');
+    } else {
+      toast.success('Appointment updated');
+      setEditMode(false);
+      onUpdate();
+      onClose();
+    }
+    setIsUpdating(false);
   };
 
   const dateStr = appointment.appointment_date
@@ -139,8 +174,54 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             </div>
           )}
 
+          {/* Edit Mode */}
+          {editMode && (
+            <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
+              <div className="flex items-center gap-2 mb-2">
+                <Edit3 className="h-4 w-4 text-conve-red" />
+                <span className="font-medium text-sm">Reschedule / Edit</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs">New Date</Label>
+                  <Input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="h-9" />
+                </div>
+                <div>
+                  <Label className="text-xs">Time</Label>
+                  <Input value={editTime} onChange={e => setEditTime(e.target.value)} placeholder="9:00 AM" className="h-9" />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Notes</Label>
+                <Input value={editNotes} onChange={e => setEditNotes(e.target.value)} className="h-9" />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={handleSaveEdit} disabled={isUpdating} className="bg-conve-red hover:bg-conve-red-dark text-white">
+                  {isUpdating ? 'Saving...' : 'Save Changes'}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditMode(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Amount */}
+          {appointment.total_amount > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <DollarSign className="h-4 w-4 text-green-600" />
+              <span className="font-bold">${appointment.total_amount.toFixed(2)}</span>
+              {appointment.payment_status && (
+                <Badge variant="outline" className="text-xs">{appointment.payment_status}</Badge>
+              )}
+            </div>
+          )}
+
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-2 pt-2 border-t">
+            {!editMode && appointment.status !== 'completed' && appointment.status !== 'cancelled' && (
+              <Button size="sm" variant="outline" onClick={initEdit} disabled={isUpdating}>
+                <Edit3 className="h-3.5 w-3.5 mr-1" /> Reschedule
+              </Button>
+            )}
             {appointment.status === 'scheduled' && (
               <>
                 <Button size="sm" onClick={() => handleStatusChange('confirmed')} disabled={isUpdating}

@@ -68,15 +68,18 @@ const AdminCalendar: React.FC = () => {
   };
 
   // Convert appointments to FullCalendar events
-  const calendarEvents = appointments.map(appt => ({
-    id: appt.id,
-    title: `${appt.appointment_time || ''} ${getPatientName(appt)}`.trim(),
-    start: appt.appointment_date,
-    className: `fc-event-${appt.status}`,
-    backgroundColor: STATUS_COLORS[appt.status] || '#6b7280',
-    borderColor: 'transparent',
-    extendedProps: { appointment: appt },
-  }));
+  const calendarEvents = appointments.map(appt => {
+    const name = getPatientName(appt);
+    return {
+      id: appt.id,
+      title: name,
+      start: appt.appointment_date,
+      className: `fc-event-${appt.status}`,
+      backgroundColor: STATUS_COLORS[appt.status] || '#1e293b',
+      borderColor: 'transparent',
+      extendedProps: { appointment: appt },
+    };
+  });
 
   const handleEventClick = (info: any) => {
     const appt = info.event.extendedProps.appointment;
