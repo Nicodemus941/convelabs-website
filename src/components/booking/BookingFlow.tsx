@@ -90,17 +90,24 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
     }
   });
 
-  // Fetch available services on component mount
+  // Fetch available services on component mount (once)
   useEffect(() => {
+    let mounted = true;
     const fetchServices = async () => {
       setIsServicesLoading(true);
-      const services = await getAllServiceOptions(true);
-      setAvailableServices(services);
-      setIsServicesLoading(false);
+      try {
+        const services = await getAllServiceOptions(true);
+        if (mounted) setAvailableServices(services);
+      } catch (err) {
+        console.error('Failed to load services:', err);
+      } finally {
+        if (mounted) setIsServicesLoading(false);
+      }
     };
 
     fetchServices();
-  }, [getAllServiceOptions]);
+    return () => { mounted = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill user data if available
   useEffect(() => {
