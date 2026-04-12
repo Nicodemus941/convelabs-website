@@ -15,6 +15,7 @@ const TenantOnboarding = lazy(() => import('../pages/TenantOnboarding'));
 const TenantDashboard = lazy(() => import('../pages/tenant/Dashboard'));
 const TenantBookAppointment = lazy(() => import('../pages/TenantBookAppointment'));
 const BookAppointment = lazy(() => import('../pages/BookAppointment'));
+const PhlebotomistApp = lazy(() => import('../pages/PhlebotomistApp'));
 
 export const routes = [
   <Route key="profile" path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />,
@@ -31,6 +32,7 @@ export const routes = [
   <Route key="admin-marketing-campaigns" path="/admin/marketing/campaigns" element={<RoleProtectedRoute allowedRoles={['admin', 'office_manager', 'super_admin']}><MarketingCampaigns /></RoleProtectedRoute>} />,
   <Route key="admin-marketing-scheduled" path="/admin/marketing/scheduled" element={<RoleProtectedRoute allowedRoles={['admin', 'office_manager', 'super_admin']}><ScheduledCampaigns /></RoleProtectedRoute>} />,
   <Route key="admin-marketing-analytics" path="/admin/marketing/analytics" element={<RoleProtectedRoute allowedRoles={['admin', 'office_manager', 'super_admin']}><MarketingAnalytics /></RoleProtectedRoute>} />,
+  <Route key="phleb-app" path="/phleb-app" element={<ProtectedRoute><PhlebotomistApp /></ProtectedRoute>} />,
 ];
 
 export const ProtectedRoutes = () => null;

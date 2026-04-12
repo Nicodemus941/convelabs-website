@@ -32,6 +32,7 @@ const VSLabCorp = lazy(() => import('../pages/VSLabCorp'));
 const LocationPage = lazy(() => import('../pages/LocationPage'));
 const NationwideMobilePhlebotomy = lazy(() => import('../pages/NationwideMobilePhlebotomy'));
 const RateAppointment = lazy(() => import('../pages/RateAppointment'));
+const TrackAppointment = lazy(() => import('../pages/TrackAppointment'));
 
 // Legacy redirect component
 const LocationRedirect: React.FC<{ slug: string }> = ({ slug }) => (
@@ -69,8 +70,9 @@ export const routes = [
   <Route key="vs-labcorp" path="/vs-labcorp" element={<VSLabCorp />} />,
   <Route key="nationwide" path="/nationwide-mobile-phlebotomy-network" element={<NationwideMobilePhlebotomy />} />,
 
-  // Rating
+  // Rating & Tracking
   <Route key="rate-appointment" path="/rate/:appointmentId" element={<RateAppointment />} />,
+  <Route key="track-appointment" path="/track/:appointmentId" element={<TrackAppointment />} />,
   
   // Dynamic location route
   <Route key="location-dynamic" path="/locations/:slug" element={<LocationPage />} />,
