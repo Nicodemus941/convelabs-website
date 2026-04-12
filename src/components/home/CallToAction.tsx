@@ -10,10 +10,10 @@ const CallToAction = () => {
     <section className="py-16 sm:py-20 bg-conve-red text-white">
       <div className="container mx-auto px-4 max-w-3xl text-center">
         <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-          Schedule Your At-Home Blood Draw
+          Blood Work Done Right — At Your Door
         </h2>
         <p className="text-lg sm:text-xl opacity-90 mb-8 max-w-xl mx-auto">
-          Licensed phlebotomists. Same-day availability. Starting at $125.
+          Licensed phlebotomists. Same-day availability. Office visits from $55. Mobile from $150. Members save up to 25%.
         </p>
         <Button
           onClick={() => bookingModal?.openModal("final_cta")}

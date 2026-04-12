@@ -24,12 +24,12 @@ const PricingSection = () => {
       price: "$499",
       period: "/year",
       visitsIncluded: "4 visits included",
-      effectiveCost: "$125/visit",
+      effectiveCost: "Members save 15-25%",
       annualSavings: "$101",
       icon: <Shield className="h-6 w-6" />,
       features: [
         "4 premium lab visits per year",
-        "$125 per visit vs $150 non-member",
+        "15-25% discount on all services",
         "Mon-Sun, 6 AM - 1:30 PM scheduling",
         "At-home or in-office visits",
         "Result tracking included"
@@ -44,13 +44,13 @@ const PricingSection = () => {
       period: "/month",
       altPrice: "$1,499/year (save $289)",
       visitsIncluded: "12 visits included",
-      effectiveCost: "$125/visit",
+      effectiveCost: "Members save 15-25%",
       annualSavings: "$301",
       icon: <Crown className="h-6 w-6" />,
       popular: true,
       features: [
         "12 lab visits per year (1/month)",
-        "$125 per visit vs $150 non-member",
+        "15-25% discount on all services",
         "Same-day scheduling available",
         "Health insights dashboard",
         "Credit rollover (up to 3 months)",
@@ -312,7 +312,7 @@ const PricingSection = () => {
                 <tr>
                   <td className="px-4 py-3 font-medium text-sm">Per Visit Cost</td>
                   <td className="px-4 py-3 text-center text-sm">$150</td>
-                  <td className="px-4 py-3 text-center text-sm text-green-600 font-bold">$125</td>
+                  <td className="px-4 py-3 text-center text-sm text-green-600 font-bold">From $112</td>
                   <td className="px-4 py-3 text-center text-sm text-green-600 font-bold bg-conve-red/5">$125</td>
                   <td className="px-4 py-3 text-center text-sm text-green-600 font-bold">~$83*</td>
                 </tr>

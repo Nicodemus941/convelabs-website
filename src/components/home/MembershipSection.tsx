@@ -1,18 +1,63 @@
 
 import React from "react";
-import { Check, ArrowRight } from "lucide-react";
+import { Check, ArrowRight, Calendar, Percent, Crown, Star } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { withSource, ENROLLMENT_URL } from '@/lib/constants/urls';
 
+const TIERS = [
+  {
+    name: 'Essential',
+    price: 29,
+    period: '/month',
+    annual: '$299/year (save 15%)',
+    discount: '15% off',
+    badge: null,
+    color: 'border-blue-200 bg-blue-50/30',
+    features: [
+      '15% off all services',
+      'Weekend appointments (Sat 6 AM - 9:30 AM)',
+      'Priority scheduling',
+      'Digital receipts & history',
+    ],
+  },
+  {
+    name: 'Premium',
+    price: 59,
+    period: '/month',
+    annual: '$599/year (save 15%)',
+    discount: '20% off',
+    badge: 'Most Popular',
+    color: 'border-conve-red/30 bg-red-50/30 ring-2 ring-conve-red/10',
+    features: [
+      '20% off all services',
+      'Weekend appointments (Sat 6 AM - 9:30 AM)',
+      'Priority same-day scheduling',
+      'Family member add-ons at $45 each',
+      'Extended hours availability',
+      'Digital receipts & history',
+    ],
+  },
+  {
+    name: 'Concierge',
+    price: 149,
+    period: '/month',
+    annual: '$1,499/year (save 16%)',
+    discount: '25% off',
+    badge: 'Best Value',
+    color: 'border-amber-200 bg-amber-50/30',
+    features: [
+      '25% off all services',
+      'Weekend & extended hours',
+      'Dedicated phlebotomist',
+      'Same-day guaranteed',
+      'NDA available for VIP clients',
+      'Family member add-ons at $45 each',
+      'Concierge phone support',
+    ],
+  },
+];
+
 const MembershipSection = () => {
-  const benefits = [
-    "Priority scheduling 7 days a week, 6 AM - 1:30 PM",
-    "TRT and hormone monitoring protocols",
-    "Same-day scheduling available",
-    "Dedicated phlebotomist (Concierge Elite)",
-    "Practice Partner program for physicians",
-    "Private results portal with mobile access"
-  ];
-  
   const handleRedirectToMembership = () => {
     window.location.href = withSource(ENROLLMENT_URL, 'membership_section');
   };
@@ -20,75 +65,80 @@ const MembershipSection = () => {
   return (
     <section id="membership" className="py-20 bg-gray-50">
       <div className="container mx-auto px-4">
-        <div className="grid md:grid-cols-2 gap-12 items-center">
-          <div className="order-2 md:order-1">
-            <h2 className="text-3xl md:text-4xl font-bold mb-6">Membership Plans Starting at $499/year</h2>
-            <p className="text-lg text-gray-700 mb-8">
-              Save up to $25/visit vs our $150 non-member rate. Choose from 4 tiers designed for individuals, executives, VIPs, and medical practices.
-            </p>
-            
-            <div className="mb-10 space-y-4">
-              {benefits.map((benefit, index) => (
-                <div key={index} className="flex items-center">
-                  <div className="flex-shrink-0 w-6 h-6 bg-conve-red/10 rounded-full flex items-center justify-center mr-3">
-                    <Check className="h-4 w-4 text-conve-red" />
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 rounded-full border border-green-200 mb-4">
+            <Percent className="h-4 w-4 text-green-600" />
+            <span className="text-sm font-semibold text-green-800">Save up to 25% on every visit</span>
+          </div>
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">Membership Plans</h2>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            Members save on every service and unlock weekend appointments. No credits, no confusion — just a straight discount on whatever you book.
+          </p>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {TIERS.map((tier) => (
+            <div key={tier.name} className={`relative border-2 rounded-2xl p-6 bg-white ${tier.color}`}>
+              {tier.badge && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-conve-red text-white text-xs font-semibold px-3 py-1 rounded-full">
+                  {tier.badge}
+                </div>
+              )}
+
+              <h3 className="text-xl font-bold">{tier.name}</h3>
+
+              <div className="mt-3">
+                <span className="text-4xl font-bold">${tier.price}</span>
+                <span className="text-muted-foreground">{tier.period}</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">{tier.annual}</p>
+
+              <div className="mt-2 inline-flex items-center gap-1 bg-green-100 text-green-800 text-sm font-semibold px-2.5 py-1 rounded-full">
+                <Percent className="h-3.5 w-3.5" />
+                {tier.discount} all services
+              </div>
+
+              <div className="mt-5 space-y-3">
+                {tier.features.map((feature, i) => (
+                  <div key={i} className="flex items-start gap-2.5">
+                    <Check className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <span className="text-sm">{feature}</span>
                   </div>
-                  <span className="text-gray-800">{benefit}</span>
-                </div>
-              ))}
-            </div>
-            
-            <button 
-              onClick={handleRedirectToMembership}
-              className="luxury-button py-3 px-8 inline-flex items-center"
-            >
-              View All Plans <ArrowRight className="ml-2 h-4 w-4" />
-            </button>
-          </div>
-          
-          <div className="order-1 md:order-2">
-            <div className="luxury-card p-8 border border-gray-100 shadow-lg bg-white">
-              <div className="mb-6 px-4 py-2 bg-green-600/10 text-green-600 rounded-md inline-block font-medium">
-                Most Economical
+                ))}
               </div>
-              <h3 className="text-2xl font-bold mb-2">Health Starter</h3>
-              <div className="flex items-baseline mb-6">
-                <span className="text-4xl font-bold">$499</span>
-                <span className="text-gray-600 ml-1">/year</span>
-              </div>
-              <p className="text-gray-700 mb-6">4 visits at $125/visit — save $25/visit vs the $150 non-member rate.</p>
-              
-              <div className="space-y-3 mb-8">
-                <div className="flex items-start">
-                  <Check className="h-5 w-5 text-green-600 mr-3 mt-0.5" />
-                  <span>4 lab visits per year</span>
-                </div>
-                <div className="flex items-start">
-                  <Check className="h-5 w-5 text-green-600 mr-3 mt-0.5" />
-                  <span>At-home or in-office visits</span>
-                </div>
-                <div className="flex items-start">
-                  <Check className="h-5 w-5 text-green-600 mr-3 mt-0.5" />
-                  <span>7-day scheduling: Mon-Sun, 6 AM - 1:30 PM</span>
-                </div>
-              </div>
-              
-              <div className="text-center text-sm mb-6">
-                <p>Other plans available:</p>
-                <div className="font-medium">
-                  <span className="text-conve-gold">$149</span>/month (Proactive Health) | 
-                  <span className="text-conve-gold"> $299</span>/month (Concierge Elite)
-                </div>
-              </div>
-              
-              <button 
-                onClick={handleRedirectToMembership} 
-                className="luxury-button w-full text-center block py-3"
+
+              <Button
+                onClick={handleRedirectToMembership}
+                className={`w-full mt-6 rounded-xl ${
+                  tier.badge ? 'bg-conve-red hover:bg-conve-red-dark text-white' : ''
+                }`}
+                variant={tier.badge ? 'default' : 'outline'}
               >
-                See All Plans
-              </button>
+                Get Started <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
             </div>
+          ))}
+        </div>
+
+        {/* Non-member comparison */}
+        <div className="mt-10 text-center">
+          <div className="inline-flex items-center gap-3 bg-white border rounded-xl px-6 py-3 text-sm">
+            <span className="text-muted-foreground">Non-member mobile visit:</span>
+            <span className="line-through text-muted-foreground">$150</span>
+            <span className="font-bold text-green-600">Essential: $127.50</span>
+            <span className="font-bold text-green-600">Premium: $120</span>
+            <span className="font-bold text-green-600">Concierge: $112.50</span>
           </div>
+        </div>
+
+        {/* Practice Partner CTA */}
+        <div className="mt-8 text-center">
+          <p className="text-muted-foreground text-sm">
+            Are you a medical practice?{' '}
+            <a href="/b2b" className="text-conve-red font-semibold hover:underline">
+              Learn about Practice Partner pricing →
+            </a>
+          </p>
         </div>
       </div>
     </section>

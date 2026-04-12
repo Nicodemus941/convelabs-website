@@ -10,7 +10,7 @@ import {
 const faqs = [
   {
     q: "How much does a mobile blood draw cost?",
-    a: "A mobile blood draw starts at $125 per visit. Additional patients at the same location are just $35 each. Lab test fees are separate and depend on which tests your doctor orders. We have no hidden fees — the price you see is the price you pay.",
+    a: "A mobile blood draw starts at $150 per visit ($55 for office visits). Additional patients at the same location are $75 each. Members save 15-25% on all services and get access to weekend appointments. No hidden fees — the price you see is the price you pay.",
   },
   {
     q: "What areas do you serve?",
@@ -22,7 +22,7 @@ const faqs = [
   },
   {
     q: "Is mobile phlebotomy covered by insurance?",
-    a: "Many insurance plans cover the lab tests themselves. The mobile blood draw service fee ($125) is typically an out-of-pocket convenience fee. We can provide a superbill for insurance reimbursement.",
+    a: "Many insurance plans cover the lab tests themselves. The mobile blood draw service fee ($150) is typically an out-of-pocket convenience fee. Members pay reduced rates. We can provide a superbill for insurance reimbursement.",
   },
   {
     q: "What lab tests can you perform?",

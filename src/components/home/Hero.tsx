@@ -73,8 +73,8 @@ const Hero = () => {
               variants={itemVariants}
               className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold leading-tight tracking-tight text-foreground mb-6"
             >
-              Mobile Blood Draw{" "}
-              <span className="text-conve-red">At Your Home</span>
+              Blood Work Done Right{" "}
+              <span className="text-conve-red">— At Your Door</span>
             </motion.h1>
 
             {/* Subtitle */}
@@ -82,8 +82,7 @@ const Hero = () => {
               variants={itemVariants}
               className="text-lg sm:text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto mb-4"
             >
-              Licensed phlebotomists come to you. Same-day appointments available
-              across Central Florida.
+              Skip the lab. A licensed phlebotomist comes to your home, office, or hotel. Results in 24-48 hours.
             </motion.p>
 
             {/* Price anchor */}
@@ -91,24 +90,37 @@ const Hero = () => {
               variants={itemVariants}
               className="text-base sm:text-lg font-semibold text-foreground mb-8"
             >
-              In-office visits from{" "}
+              Office visits from{" "}
               <span className="text-conve-red text-xl sm:text-2xl">$55</span>{" "}
-              · Mobile visits from{" "}
+              · Mobile from{" "}
               <span className="text-conve-red text-xl sm:text-2xl">$150</span>{" "}
-              · No hidden fees
+              · <span className="text-green-600">Members save up to 25%</span>
             </motion.p>
 
-            {/* Book Now CTA */}
-            <motion.div variants={itemVariants} className="mb-10">
+            {/* Dual CTA */}
+            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
               <Button
                 onClick={handleBookNow}
                 size="lg"
                 className="h-14 px-10 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-lg rounded-xl shadow-luxury-red hover:shadow-luxury-red-hover transition-all"
               >
-                Book Now
+                Book Your Visit — From $55
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
+              <Button
+                onClick={() => window.location.href = '/pricing'}
+                size="lg"
+                variant="outline"
+                className="h-14 px-8 font-semibold text-lg rounded-xl border-2"
+              >
+                See Pricing & Membership
+              </Button>
             </motion.div>
+
+            {/* Social proof */}
+            <motion.p variants={itemVariants} className="text-sm text-muted-foreground mb-8">
+              Trusted by <span className="font-semibold text-foreground">500+ patients</span> across Central Florida
+            </motion.p>
 
             {/* Trust signals row */}
             <motion.div

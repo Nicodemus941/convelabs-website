@@ -12,7 +12,7 @@ const MembershipCTA = () => {
     {
       icon: <Crown className="h-7 w-7 text-conve-red" />,
       title: "Executive & Athlete Plans",
-      description: "Regular monitoring, same-day scheduling, and priority booking that fits your travel and training calendar. Starting at $125/visit.",
+      description: "Regular monitoring, same-day scheduling, and priority booking. Members save 15-25% on every visit plus weekend access.",
       highlight: "Most Popular"
     },
     {
@@ -30,12 +30,12 @@ const MembershipCTA = () => {
   ];
 
   const valueProps = [
-    "Save up to $25/visit vs non-member $150 rate",
-    "Extended hours: 6:00 AM - 1:30 PM, 7 days/week",
-    "Flexible credit system with rollover protection",
-    "Plans for individuals, practices & VIP clients",
-    "Founding member rates locked permanently",
-    "Trusted by elite clients across Central Florida"
+    "Save 15-25% on every service — no credits to track",
+    "Weekend appointments: Saturday 6 AM - 9:30 AM (members only)",
+    "Priority and same-day scheduling",
+    "Plans from $29/month for individuals to $149/month for concierge",
+    "Family member add-ons at just $45 per person",
+    "Trusted by 500+ patients across Central Florida"
   ];
 
   const containerVariants = {

@@ -31,9 +31,9 @@ const DesktopNavigation = () => {
       <a href="/#how-it-works" onClick={(e) => handleHashLink(e, "#how-it-works")} className="text-base font-medium text-gray-700 hover:text-conve-red transition-colors">
         How It Works
       </a>
-      <a href="/#pricing" onClick={(e) => handleHashLink(e, "#pricing")} className="text-base font-medium text-gray-700 hover:text-conve-red transition-colors">
+      <Link to="/pricing" className={linkClass("/pricing")}>
         Pricing
-      </a>
+      </Link>
       <a href="/#service-areas" onClick={(e) => handleHashLink(e, "#service-areas")} className="text-base font-medium text-gray-700 hover:text-conve-red transition-colors">
         Service Areas
       </a>
