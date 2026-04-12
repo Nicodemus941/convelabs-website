@@ -37,6 +37,7 @@ export interface BookingFormValues {
   date: Date;
   time: string;
   serviceDetails: {
+    visitType?: string;
     selectedService: string;
     additionalNotes: string;
     sameDay: boolean;
@@ -87,6 +88,7 @@ export const bookingFormSchema = z.object({
   date: z.date(),
   time: z.string(),
   serviceDetails: z.object({
+    visitType: z.string().optional(),
     selectedService: z.string(),
     additionalNotes: z.string().optional(),
     sameDay: z.boolean().optional(),

@@ -62,6 +62,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const methods = useFormContext<BookingFormValues>();
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");
+  const [calendarOpen, setCalendarOpen] = useState(false);
   
   // Debug logs
   useEffect(() => {
@@ -99,7 +100,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               render={({ field }) => (
                 <FormItem className="flex flex-col">
                   <FormLabel>Appointment Date</FormLabel>
-                  <Popover>
+                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                     <PopoverTrigger asChild>
                       <FormControl>
                         <Button
@@ -121,8 +122,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         selected={field.value}
                         onSelect={(date) => {
                           if (date) {
-                            console.log('Date selected:', date);
                             field.onChange(date);
+                            setCalendarOpen(false);
                           }
                         }}
                         disabled={(date) => 

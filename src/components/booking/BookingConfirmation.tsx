@@ -124,7 +124,7 @@ const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
                 <div className="ml-6 mt-2 space-y-1">
                   <p className="text-sm flex">
                     <span className="text-muted-foreground w-24">Name:</span>
-                    <span>Valerie Stoll-Lopez</span>
+                    <span>Assigned based on your location</span>
                   </p>
                   <p className="text-sm">
                     <span className="text-muted-foreground">Your phlebotomist will contact you before your appointment.</span>

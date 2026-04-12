@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MessageCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClaudeAIChat } from '@/components/ai/ClaudeAIChat';
@@ -33,6 +33,12 @@ interface BookingChatAssistantProps {
 
 const BookingChatAssistant: React.FC<BookingChatAssistantProps> = ({ currentStep }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [showLabel, setShowLabel] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowLabel(false), 5000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const stepContext = STEP_LABELS[currentStep] || 'booking';
   const systemPrompt = `${BOOKING_SYSTEM_PROMPT}\n\nThe patient is currently on the "${stepContext}" step of booking.`;
@@ -41,13 +47,20 @@ const BookingChatAssistant: React.FC<BookingChatAssistantProps> = ({ currentStep
     <>
       {/* Floating chat button */}
       {!isOpen && (
-        <Button
-          onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 h-14 w-14 rounded-full shadow-lg bg-conve-red hover:bg-conve-red-dark text-white"
-          size="icon"
-        >
-          <MessageCircle className="h-6 w-6" />
-        </Button>
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2">
+          {showLabel && (
+            <div className="bg-white shadow-lg rounded-full px-4 py-2 text-sm font-medium text-foreground animate-in fade-in slide-in-from-right-2">
+              Need help?
+            </div>
+          )}
+          <Button
+            onClick={() => setIsOpen(true)}
+            className="h-14 w-14 rounded-full shadow-lg bg-conve-red hover:bg-conve-red-dark text-white"
+            size="icon"
+          >
+            <MessageCircle className="h-6 w-6" />
+          </Button>
+        </div>
       )}
 
       {/* Chat panel */}

@@ -78,7 +78,7 @@ const BookingReviewStep: React.FC<BookingReviewStepProps> = ({
               {showEstimatedArrival && (
                 <p>
                   <span className="text-gray-500">Phlebotomist:</span>{" "}
-                  Valerie Stoll-Lopez
+                  Will be assigned based on your location
                 </p>
               )}
             </div>

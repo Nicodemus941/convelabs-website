@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { analytics } from '@/utils/analytics';
 import { verifyAppointmentCheckout } from '@/services/stripe/appointmentCheckout';
 import BookingFlow from '@/components/booking/BookingFlow';
+import Header from '@/components/home/Header';
 
 type PageMode = 'booking' | 'verifying' | 'confirmed' | 'cancelled' | 'error';
 
@@ -97,12 +98,21 @@ const BookNow: React.FC = () => {
         <meta name="description" content="Schedule your at-home lab services with ConveLabs. Book a convenient appointment for mobile phlebotomy services." />
       </Helmet>
 
-      <div className="min-h-[100dvh] bg-background">
+      <Header />
+      <div className="min-h-[100dvh] bg-gradient-to-b from-gray-50/50 to-background">
         <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 md:py-12">
 
           {/* Booking flow */}
           {mode === 'booking' && (
-            <BookingFlow />
+            <>
+              <div className="text-center mb-8">
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Book Your Appointment</h1>
+                <p className="text-muted-foreground mt-2 max-w-lg mx-auto">
+                  Licensed phlebotomists at your door. Same-day appointments available across Central Florida.
+                </p>
+              </div>
+              <BookingFlow />
+            </>
           )}
 
           {/* Cancelled: Return from Stripe */}
