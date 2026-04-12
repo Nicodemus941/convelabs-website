@@ -20,6 +20,7 @@ import SettingsTab from "@/components/dashboards/admin/SettingsTab";
 import MarketingTab from "@/components/dashboards/admin/MarketingTab";
 import StaffManagementTab from "@/components/dashboards/admin/StaffManagementTab";
 import WebhookEventMonitor from "@/components/dashboards/admin/WebhookEventMonitor";
+import AdminCalendar from "@/components/calendar/AdminCalendar";
 
 const Dashboard = () => {
   const { "*": urlPath } = useParams<{ "*": string }>();
@@ -67,7 +68,8 @@ const Dashboard = () => {
           {adminTab === "settings" && <SettingsTab />}
           {adminTab === "marketing" && <MarketingTab />}
           {adminTab === "webhooks" && <WebhookEventMonitor />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks"].includes(adminTab) && (
+          {adminTab === "calendar" && <AdminCalendar />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar"].includes(adminTab) && (
             <Navigate to="/dashboard/super_admin" replace />
           )}
         </DashboardWrapper>

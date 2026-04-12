@@ -98,7 +98,8 @@ const SuperAdminDashboard = () => {
   const adminLinks = [
     { title: 'User Management', icon: <Users className="h-5 w-5" />, link: '/dashboard/super_admin/users', desc: 'Manage accounts & roles' },
     { title: 'Staff Management', icon: <Briefcase className="h-5 w-5" />, link: '/dashboard/super_admin/staff', desc: 'Staff profiles & assignments' },
-    { title: 'Appointments', icon: <Calendar className="h-5 w-5" />, link: '/dashboard/super_admin/appointments', desc: 'View & manage all appointments' },
+    { title: 'Calendar', icon: <Calendar className="h-5 w-5" />, link: '/dashboard/super_admin/calendar', desc: 'Visual appointment calendar' },
+    { title: 'Appointments', icon: <Calendar className="h-5 w-5" />, link: '/dashboard/super_admin/appointments', desc: 'Table view & management' },
     { title: 'Services', icon: <Package className="h-5 w-5" />, link: '/dashboard/super_admin/services', desc: 'Service catalog & pricing' },
     { title: 'Marketing', icon: <Mail className="h-5 w-5" />, link: '/dashboard/super_admin/marketing', desc: 'Email campaigns' },
     { title: 'Settings', icon: <Settings className="h-5 w-5" />, link: '/dashboard/super_admin/settings', desc: 'System configuration' },
