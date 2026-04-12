@@ -219,55 +219,54 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   return (
     <div className="w-full max-w-4xl mx-auto">
-      {/* Progress indicator — desktop */}
-      {currentStep < BookingStep.Confirmation && (
-        <>
-          <div className="hidden md:flex justify-between items-center mb-6">
-            {STEP_LABELS.map((step, index) => (
-              <div key={step} className={`flex items-center ${index < STEP_LABELS.length - 1 ? 'flex-1' : ''}`}>
-                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
-                  index <= currentStep
-                    ? 'bg-conve-red text-white'
-                    : 'bg-muted text-muted-foreground'
-                }`}>
-                  {index + 1}
-                </div>
-                <div className={`ml-2 text-sm font-medium ${
-                  index <= currentStep ? 'text-foreground' : 'text-muted-foreground'
-                }`}>{step}</div>
-                {index < STEP_LABELS.length - 1 && (
-                  <div className={`flex-1 h-px mx-4 transition-colors ${
-                    index < currentStep ? 'bg-conve-red' : 'bg-muted'
-                  }`} />
-                )}
-              </div>
-            ))}
-            <div className="ml-4">
-              <PriceEstimateBadge />
-            </div>
-          </div>
-
-          {/* Progress indicator — mobile */}
-          <div className="md:hidden mb-6 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">
-                Step {currentStep + 1} of {totalSteps}: {STEP_LABELS[currentStep]}
-              </span>
-              <PriceEstimateBadge />
-            </div>
-            <div className="w-full bg-muted rounded-full h-1.5">
-              <div
-                className="bg-conve-red h-1.5 rounded-full transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-          </div>
-
-          <BookingTrustBadges />
-        </>
-      )}
-
       <FormProvider {...methods}>
+        {/* Progress indicator — desktop */}
+        {currentStep < BookingStep.Confirmation && (
+          <>
+            <div className="hidden md:flex justify-between items-center mb-6">
+              {STEP_LABELS.map((step, index) => (
+                <div key={step} className={`flex items-center ${index < STEP_LABELS.length - 1 ? 'flex-1' : ''}`}>
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
+                    index <= currentStep
+                      ? 'bg-conve-red text-white'
+                      : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {index + 1}
+                  </div>
+                  <div className={`ml-2 text-sm font-medium ${
+                    index <= currentStep ? 'text-foreground' : 'text-muted-foreground'
+                  }`}>{step}</div>
+                  {index < STEP_LABELS.length - 1 && (
+                    <div className={`flex-1 h-px mx-4 transition-colors ${
+                      index < currentStep ? 'bg-conve-red' : 'bg-muted'
+                    }`} />
+                  )}
+                </div>
+              ))}
+              <div className="ml-4">
+                <PriceEstimateBadge />
+              </div>
+            </div>
+
+            {/* Progress indicator — mobile */}
+            <div className="md:hidden mb-6 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  Step {currentStep + 1} of {totalSteps}: {STEP_LABELS[currentStep]}
+                </span>
+                <PriceEstimateBadge />
+              </div>
+              <div className="w-full bg-muted rounded-full h-1.5">
+                <div
+                  className="bg-conve-red h-1.5 rounded-full transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            <BookingTrustBadges />
+          </>
+        )}
         <form onSubmit={(e) => e.preventDefault()} className="mt-4">
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
