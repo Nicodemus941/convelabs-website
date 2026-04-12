@@ -123,8 +123,11 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
           // Get duration for this appointment type
           const duration = appt.duration_minutes || DURATION_MAP[appt.service_type || 'mobile'] || 60;
-          // Add 15min buffer for travel between appointments
-          const totalBlockedMinutes = duration + 15;
+          // Add travel buffer: 15min default, 30min if appointment is in an extended area
+          const EXTENDED_ZIPS = ['32746', '34715', '34787', '32708', '32779', '32833', '34786', '32836', '32803', '32789'];
+          const isExtended = appt.zipcode && EXTENDED_ZIPS.some(z => appt.zipcode?.startsWith(z.substring(0, 3)));
+          const travelBuffer = isExtended ? 30 : 15;
+          const totalBlockedMinutes = duration + travelBuffer;
 
           // Block all 30-min slots that this appointment covers
           const slotsToBlock = Math.ceil(totalBlockedMinutes / 30);
