@@ -11,8 +11,8 @@ import LabDestinationSelector from './LabDestinationSelector';
 interface LabOrderUploadStepProps {
   onNext: () => void;
   onBack: () => void;
-  onFileSelected: (file: File | null) => void;
-  selectedFile: File | null;
+  onFilesSelected: (files: File[]) => void;
+  selectedFiles: File[];
   onInsuranceFileSelected?: (file: File | null) => void;
   selectedInsuranceFile?: File | null;
 }
@@ -27,8 +27,8 @@ const REQUIRES_LAB_DESTINATION = ['mobile', 'senior', 'specialty-kit'];
 const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   onNext,
   onBack,
-  onFileSelected,
-  selectedFile,
+  onFilesSelected,
+  selectedFiles,
   onInsuranceFileSelected,
   selectedInsuranceFile,
 }) => {
@@ -46,19 +46,19 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   );
   const [faxNumber, setFaxNumber] = useState(getValues('labOrder.doctorFaxNumber') || '');
 
-  // Lab order dropzone
+  // Lab order dropzone — supports multiple files
   const onDropLabOrder = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      onFileSelected(acceptedFiles[0]);
+      onFilesSelected([...selectedFiles, ...acceptedFiles]);
       setValue('labOrder.hasFile', true);
       setValue('labOrder.skipped', false);
     }
-  }, [onFileSelected, setValue]);
+  }, [onFilesSelected, selectedFiles, setValue]);
 
   const { getRootProps: getLabOrderRootProps, getInputProps: getLabOrderInputProps, isDragActive: isLabOrderDragActive } = useDropzone({
     onDrop: onDropLabOrder,
     accept: { 'application/pdf': ['.pdf'], 'image/jpeg': ['.jpg', '.jpeg'], 'image/png': ['.png'], 'image/heic': ['.heic'] },
-    maxFiles: 1,
+    multiple: true,
     maxSize: 10 * 1024 * 1024,
   });
 
@@ -77,9 +77,10 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     maxSize: 10 * 1024 * 1024,
   });
 
-  const handleRemoveFile = () => {
-    onFileSelected(null);
-    setValue('labOrder.hasFile', false);
+  const handleRemoveFile = (index: number) => {
+    const updated = selectedFiles.filter((_, i) => i !== index);
+    onFilesSelected(updated);
+    if (updated.length === 0) setValue('labOrder.hasFile', false);
   };
 
   const handleRemoveInsurance = () => {
@@ -109,7 +110,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     onNext();
   };
 
-  const hasLabOrder = selectedFile !== null || (mode === 'fax' && faxNumber.length >= 10) || mode === 'skip';
+  const hasLabOrder = selectedFiles.length > 0 || (mode === 'fax' && faxNumber.length >= 10) || mode === 'skip';
   const hasInsurance = !isInsuranceRequired || selectedInsuranceFile !== null;
   const hasLabDest = !needsLabDestination || (labDestination && labDestination.length > 0);
   const canProceed = hasLabOrder && hasInsurance && hasLabDest;
@@ -136,7 +137,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
             {isLabOrderRequired && <span className="text-red-500 ml-1">*</span>}
           </label>
 
-          {mode === 'upload' && !selectedFile && (
+          {mode === 'upload' && (
             <div
               {...getLabOrderRootProps()}
               className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors ${
@@ -152,16 +153,21 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
             </div>
           )}
 
-          {mode === 'upload' && selectedFile && (
-            <div className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg p-3">
-              <FileText className="h-6 w-6 text-green-600 flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">{selectedFile.name}</p>
-                <p className="text-xs text-muted-foreground">{(selectedFile.size / 1024).toFixed(0)} KB</p>
-              </div>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRemoveFile}>
-                <X className="h-4 w-4" />
-              </Button>
+          {mode === 'upload' && selectedFiles.length > 0 && (
+            <div className="space-y-2">
+              {selectedFiles.map((file, index) => (
+                <div key={index} className="flex items-center gap-3 bg-green-50 border border-green-200 rounded-lg p-3">
+                  <FileText className="h-5 w-5 text-green-600 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveFile(index)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">You can add more files by dropping or clicking above.</p>
             </div>
           )}
 

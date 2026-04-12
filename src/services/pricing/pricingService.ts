@@ -31,7 +31,7 @@ const SERVICE_CATALOG: ServiceOption[] = [
 ];
 
 const SURCHARGES = {
-  sameDay: { label: 'Same-Day Appointment', amount: 50 },
+  sameDay: { label: 'Same-Day / STAT Appointment', amount: 100 },
   weekend: { label: 'Weekend Service', amount: 75 },
   extendedHours: { label: 'Extended Hours', amount: 50 },
   extendedArea: { label: 'Extended Service Area', amount: 75 },

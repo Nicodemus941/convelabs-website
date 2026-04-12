@@ -54,7 +54,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
   const [availableServices, setAvailableServices] = useState([]);
   const [isServicesLoading, setIsServicesLoading] = useState(true);
-  const [labOrderFile, setLabOrderFile] = useState<File | null>(null);
+  const [labOrderFiles, setLabOrderFiles] = useState<File[]>([]);
   const [insuranceFile, setInsuranceFile] = useState<File | null>(null);
   // Sub-step within combined steps
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -148,14 +148,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         weekend: data.serviceDetails.weekend,
       }, tipAmount, additionalPatientCount);
 
-      // Upload lab order file if present
-      let labOrderFilePath: string | undefined;
-      if (labOrderFile) {
-        const fileName = `${Date.now()}_${labOrderFile.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('lab-orders')
-          .upload(fileName, labOrderFile);
-        if (!uploadError) labOrderFilePath = fileName;
+      // Upload lab order files if present
+      for (const file of labOrderFiles) {
+        const fileName = `laborder_${Date.now()}_${file.name}`;
+        await supabase.storage.from('lab-orders').upload(fileName, file);
       }
 
       // Upload insurance file if present
@@ -332,8 +328,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                 <LabOrderUploadStep
                   onNext={handleNext}
                   onBack={() => setShowLabOrder(false)}
-                  onFileSelected={setLabOrderFile}
-                  selectedFile={labOrderFile}
+                  onFilesSelected={setLabOrderFiles}
+                  selectedFiles={labOrderFiles}
                   onInsuranceFileSelected={setInsuranceFile}
                   selectedInsuranceFile={insuranceFile}
                 />

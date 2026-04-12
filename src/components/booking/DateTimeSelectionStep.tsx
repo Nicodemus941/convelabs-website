@@ -29,8 +29,8 @@ interface DateTimeSelectionStepProps {
   considerDistance?: boolean;
 }
 
-// 30-minute arrival windows
-const arrivalWindows = [
+// All windows (fasting + general — 6:00 AM - 1:30 PM)
+const allDayWindows = [
   { time: "6:00 AM", label: "6:00 - 6:30 AM" },
   { time: "6:30 AM", label: "6:30 - 7:00 AM" },
   { time: "7:00 AM", label: "7:00 - 7:30 AM" },
@@ -48,6 +48,14 @@ const arrivalWindows = [
   { time: "1:00 PM", label: "1:00 - 1:30 PM" },
 ];
 
+// Routine blood draws — 9:00 AM - 1:30 PM only
+const routineWindows = allDayWindows.filter(w => {
+  const hour = parseInt(w.time);
+  const isPM = w.time.includes('PM');
+  const hour24 = isPM && hour !== 12 ? hour + 12 : (!isPM && hour === 12 ? 0 : hour);
+  return hour24 >= 9;
+});
+
 const weekendWindows = [
   { time: "6:00 AM", label: "6:00 - 6:30 AM" },
   { time: "6:30 AM", label: "6:30 - 7:00 AM" },
@@ -57,6 +65,11 @@ const weekendWindows = [
   { time: "8:30 AM", label: "8:30 - 9:00 AM" },
   { time: "9:00 AM", label: "9:00 - 9:30 AM" },
 ];
+
+// Services that use routine hours (9am-1:30pm)
+const ROUTINE_SERVICES = ['routine-blood-draw'];
+// Services that skip time selection (STAT/same-day)
+const STAT_SERVICES = ['stat-blood-draw'];
 
 const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, onBack, considerDistance }) => {
   const methods = useFormContext<BookingFormValues>();
@@ -74,15 +87,24 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     });
   }, [selectedDate, selectedTime, considerDistance, methods]);
   
+  const selectedService = methods.watch('serviceDetails.selectedService');
   const isWeekend = selectedDate && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6);
   const isSunday = selectedDate && selectedDate.getDay() === 0;
-  const activeWindows = isWeekend ? weekendWindows : arrivalWindows;
+  const isStat = STAT_SERVICES.includes(selectedService || '');
+  const isRoutine = ROUTINE_SERVICES.includes(selectedService || '');
+
+  // Choose windows based on service type
+  const activeWindows = isWeekend
+    ? weekendWindows
+    : isRoutine
+    ? routineWindows
+    : allDayWindows;
   
   // Get Current Date
   const today = new Date();
   
-  // Check if both date and time are selected
-  const canContinue = selectedDate && selectedTime;
+  // Check if both date and time are selected (STAT auto-selects "Next Available")
+  const canContinue = selectedDate && (selectedTime || isStat);
   
   return (
     <Card>
@@ -151,7 +173,21 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Appointment Time</FormLabel>
-                  {isSunday ? (
+                  {isStat ? (
+                    <div className="py-4 space-y-2">
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                        <p className="font-medium text-amber-900">STAT / Same-Day Appointment</p>
+                        <p className="text-sm text-amber-700 mt-1">
+                          We'll schedule you for the next available window during operating hours. An additional $100 surcharge applies.
+                        </p>
+                      </div>
+                      {(() => {
+                        // Auto-set time to "Next Available" for STAT
+                        if (!field.value) field.onChange('Next Available');
+                        return null;
+                      })()}
+                    </div>
+                  ) : isSunday ? (
                     <p className="text-sm text-muted-foreground py-4">No appointments available on Sundays.</p>
                   ) : (
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
@@ -176,11 +212,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     </div>
                   )}
                   <FormDescription>
-                    {isSunday
+                    {isStat
+                      ? "Next available within operating hours (+$100)"
+                      : isSunday
                       ? "We are closed on Sundays"
                       : isWeekend
                       ? "Limited Saturday hours (6 AM - 9:30 AM)"
-                      : "Arrival windows: Mon-Fri 6 AM - 1:30 PM"}
+                      : isRoutine
+                      ? "Routine draw hours: 9 AM - 1:30 PM"
+                      : "Available: Mon-Fri 6 AM - 1:30 PM"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
