@@ -11,6 +11,7 @@ import ServiceAreasMap from "@/components/home/ServiceAreasMap";
 import MembershipCTA from "@/components/home/MembershipCTA";
 import FAQSection from "@/components/home/FAQSection";
 import CallToAction from "@/components/home/CallToAction";
+import LeadCapture from "@/components/home/LeadCapture";
 import Footer from "@/components/home/Footer";
 import { PageTransition } from "@/components/ui/page-transition";
 import { VisitorOptimizationProvider } from "@/components/optimization/VisitorOptimizationProvider";
@@ -190,6 +191,7 @@ const Home = () => {
             <ServiceAreasMap />
             <MembershipCTA />
             <FAQSection />
+            <LeadCapture />
             <CallToAction />
           </PageTransition>
         </main>

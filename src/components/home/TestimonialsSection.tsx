@@ -95,16 +95,6 @@ const TestimonialsSection = () => {
             />
           </div>
           
-          <div className="hidden md:flex justify-center mt-12">
-            <div className="flex gap-3">
-              <button aria-label="Previous testimonial" className="w-10 h-10 flex items-center justify-center rounded-full border border-gray-200 text-gray-400 hover:text-conve-red hover:border-conve-red transition-colors">
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-              <button aria-label="Next testimonial" className="w-10 h-10 flex items-center justify-center rounded-full border border-gray-200 text-gray-400 hover:text-conve-red hover:border-conve-red transition-colors">
-                <ArrowRight className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </section>
