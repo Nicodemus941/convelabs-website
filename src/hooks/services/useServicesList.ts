@@ -29,7 +29,7 @@ export function useServicesList() {
       console.error("Error fetching services:", err);
       setError(err);
       setIsLoading(false);
-      toast.error(`Failed to fetch services: ${err.message}`);
+      // Don't show toast for service fetch errors — fallback services will be used
       return [];
     }
   };

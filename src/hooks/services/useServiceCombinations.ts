@@ -29,7 +29,6 @@ export function useServiceCombinations() {
       console.error("Error fetching service combinations:", err);
       setError(err);
       setIsLoading(false);
-      toast.error(`Failed to fetch service combinations: ${err.message}`);
       return [];
     }
   };
