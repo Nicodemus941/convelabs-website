@@ -16,7 +16,11 @@ import {
 } from "@/components/auth/FormValidation";
 import { UserRole } from "@/types/auth";
 
-export const SignupForm = () => {
+interface SignupFormProps {
+  onSignupComplete?: (email: string) => void;
+}
+
+export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
@@ -102,8 +106,11 @@ export const SignupForm = () => {
       const result = await signup(email, password, firstName, lastName, role);
       
       if (result.success) {
-        toast.success("Account created successfully! Redirecting to dashboard...");
-        // Navigate is handled by the signup function in the Auth context
+        if (onSignupComplete) {
+          onSignupComplete(email);
+        } else {
+          toast.success("Account created successfully!");
+        }
       } else {
         throw new Error(result.error?.message || "Failed to create account");
       }
