@@ -165,9 +165,11 @@ const SuperAdminDashboard = () => {
                   {recentAppointments.map((appt) => (
                     <div key={appt.id} className="flex items-center justify-between py-3">
                       <div>
-                        <p className="font-medium text-sm">{appt.patient_name || appt.patient_email || 'Unknown'}</p>
+                        <p className="font-medium text-sm">
+                          {appt.notes?.startsWith('Patient: ') ? appt.notes.split(' | ')[0].replace('Patient: ', '') : appt.patient_email || 'Unknown'}
+                        </p>
                         <p className="text-xs text-muted-foreground">
-                          {appt.service_name || appt.service_type || 'Blood Draw'} · {appt.address ? appt.address.substring(0, 40) + '...' : ''}
+                          {appt.notes?.includes('Service: ') ? appt.notes.split('Service: ')[1]?.split(' | ')[0] : appt.service_type || 'Blood Draw'}
                         </p>
                       </div>
                       <div className="text-right">
