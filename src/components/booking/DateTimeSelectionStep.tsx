@@ -80,7 +80,21 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [loadingSlots, setLoadingSlots] = useState(false);
 
-  // Fetch booked slots when date changes
+  // Duration map by service type (in minutes)
+  const DURATION_MAP: Record<string, number> = {
+    'mobile': 60, 'in-office': 60, 'senior': 60, 'routine': 60, 'fasting': 60, 'stat': 60,
+    'therapeutic': 75, 'specialty-kit': 75, 'specialty-kit-genova': 80,
+  };
+
+  // Convert hour:min to a slot key like "9:00 AM"
+  const toSlotKey = (h: number, m: number): string => {
+    const period = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    const minStr = m < 30 ? '00' : '30';
+    return `${hour12}:${minStr} ${period}`;
+  };
+
+  // Fetch booked slots when date changes — accounts for duration
   useEffect(() => {
     if (!selectedDate) return;
     const fetchBookedSlots = async () => {
@@ -89,7 +103,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const dateStr = selectedDate.toISOString().split('T')[0];
         const { data } = await supabase
           .from('appointments')
-          .select('appointment_date')
+          .select('appointment_date, service_type, duration_minutes, address, zipcode')
           .gte('appointment_date', `${dateStr}T00:00:00`)
           .lte('appointment_date', `${dateStr}T23:59:59`)
           .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
@@ -104,12 +118,30 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
         data?.forEach(appt => {
           const dt = new Date(appt.appointment_date);
-          const h = dt.getUTCHours();
-          const m = dt.getUTCMinutes() < 30 ? '00' : '30';
-          const period = h >= 12 ? 'PM' : 'AM';
-          const hour12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
-          const key = `${hour12}:${m} ${period}`;
-          slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
+          const startHour = dt.getUTCHours();
+          const startMin = dt.getUTCMinutes();
+
+          // Get duration for this appointment type
+          const duration = appt.duration_minutes || DURATION_MAP[appt.service_type || 'mobile'] || 60;
+          // Add 15min buffer for travel between appointments
+          const totalBlockedMinutes = duration + 15;
+
+          // Block all 30-min slots that this appointment covers
+          const slotsToBlock = Math.ceil(totalBlockedMinutes / 30);
+          let currentMin = startMin < 30 ? 0 : 30;
+          let currentHour = startHour;
+
+          for (let i = 0; i < slotsToBlock; i++) {
+            const key = toSlotKey(currentHour, currentMin);
+            slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
+
+            // Advance 30 minutes
+            currentMin += 30;
+            if (currentMin >= 60) {
+              currentMin = 0;
+              currentHour += 1;
+            }
+          }
         });
 
         const booked = new Set<string>();
