@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
+import { supabase } from '@/integrations/supabase/client';
 
 interface DateTimeSelectionStepProps {
   onNext: () => void;
@@ -76,6 +77,55 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  // Fetch booked slots when date changes
+  useEffect(() => {
+    if (!selectedDate) return;
+    const fetchBookedSlots = async () => {
+      setLoadingSlots(true);
+      try {
+        const dateStr = selectedDate.toISOString().split('T')[0];
+        const { data } = await supabase
+          .from('appointments')
+          .select('appointment_date')
+          .gte('appointment_date', `${dateStr}T00:00:00`)
+          .lte('appointment_date', `${dateStr}T23:59:59`)
+          .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
+
+        const { count: staffCount } = await supabase
+          .from('staff_profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('specialty', 'phlebotomy');
+
+        const maxPerSlot = staffCount || 1;
+        const slotCounts = new Map<string, number>();
+
+        data?.forEach(appt => {
+          const dt = new Date(appt.appointment_date);
+          const h = dt.getUTCHours();
+          const m = dt.getUTCMinutes() < 30 ? '00' : '30';
+          const period = h >= 12 ? 'PM' : 'AM';
+          const hour12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+          const key = `${hour12}:${m} ${period}`;
+          slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
+        });
+
+        const booked = new Set<string>();
+        slotCounts.forEach((count, key) => {
+          if (count >= maxPerSlot) booked.add(key);
+        });
+
+        setBookedSlots(booked);
+      } catch (err) {
+        console.error('Failed to check availability:', err);
+      } finally {
+        setLoadingSlots(false);
+      }
+    };
+    fetchBookedSlots();
+  }, [selectedDate]);
   
   // Debug logs
   useEffect(() => {
@@ -193,19 +243,24 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
                       {activeWindows.map((window) => {
                         const isSelected = field.value === window.time;
+                        const isBooked = bookedSlots.has(window.time);
 
                         return (
                           <Button
                             key={window.time}
                             type="button"
                             variant={isSelected ? "default" : "outline"}
-                            className="w-full text-[11px] sm:text-xs px-2 py-2 h-auto whitespace-nowrap"
+                            className={`w-full text-[11px] sm:text-xs px-2 py-2 h-auto whitespace-nowrap ${
+                              isBooked ? 'opacity-40 line-through cursor-not-allowed' : ''
+                            }`}
                             onClick={() => {
-                              field.onChange(window.time);
+                              if (!isBooked) field.onChange(window.time);
                             }}
+                            disabled={isBooked}
                           >
                             <Clock className="mr-1 h-3 w-3 flex-shrink-0" />
                             {window.label}
+                            {isBooked && <span className="ml-1 text-[9px]">(booked)</span>}
                           </Button>
                         );
                       })}
