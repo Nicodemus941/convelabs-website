@@ -58,7 +58,19 @@ export function getServiceById(serviceId: string): ServiceOption | undefined {
   return SERVICE_CATALOG.find(s => s.id === serviceId);
 }
 
+// Provider partner pricing
+const PARTNER_PRICING: Record<string, number> = {
+  'partner-restoration-place': 125,
+  'partner-elite-medical-concierge': 72.25,
+  'partner-naturamed': 85,
+  'partner-aristotle-education': 185,
+};
+
 export function calculateBasePrice(serviceId: string): number {
+  // Check for partner pricing first
+  if (serviceId.startsWith('partner-')) {
+    return PARTNER_PRICING[serviceId] ?? 125;
+  }
   const service = getServiceById(serviceId);
   return service?.basePrice ?? 150;
 }

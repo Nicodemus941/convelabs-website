@@ -1,12 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Home, Building2, Heart, Check, FlaskConical, Syringe } from 'lucide-react';
+import { Home, Building2, Heart, Check, FlaskConical, Syringe, Handshake } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BookingFormValues } from '@/types/appointmentTypes';
 
 interface VisitTypeSelectorProps {
   onNext: () => void;
 }
+
+const PROVIDER_PARTNERS = [
+  { id: 'restoration-place', name: 'Restoration Place', price: 125 },
+  { id: 'elite-medical-concierge', name: 'Elite Medical Concierge', price: 72.25 },
+  { id: 'naturamed', name: 'NaturaMed', price: 85 },
+  { id: 'aristotle-education', name: 'Aristotle Education', price: 185 },
+];
 
 const VISIT_TYPES = [
   {
@@ -20,8 +28,6 @@ const VISIT_TYPES = [
     selectedColor: 'bg-red-50 border-red-500 ring-2 ring-red-500/20',
     iconColor: 'text-red-600',
     popular: true,
-    requiresLabOrder: true,
-    requiresInsurance: true,
   },
   {
     id: 'in-office',
@@ -37,9 +43,9 @@ const VISIT_TYPES = [
   {
     id: 'specialty-kit',
     name: 'Specialty Collection Kit',
-    subtitle: 'Office or mobile visit',
+    subtitle: 'DUTCH, Genova, etc.',
     price: 185,
-    description: 'For specialty kits (DUTCH, Genova, etc.) that require shipping via UPS or FedEx.',
+    description: 'For specialty kits that require shipping via UPS or FedEx.',
     icon: FlaskConical,
     color: 'bg-amber-50 border-amber-200 hover:border-amber-400',
     selectedColor: 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20',
@@ -55,29 +61,58 @@ const VISIT_TYPES = [
     color: 'bg-purple-50 border-purple-200 hover:border-purple-400',
     selectedColor: 'bg-purple-50 border-purple-500 ring-2 ring-purple-500/20',
     iconColor: 'text-purple-600',
-    requiresLabOrder: true,
-    requiresInsurance: true,
   },
   {
     id: 'therapeutic',
     name: 'Therapeutic Phlebotomy',
     subtitle: "Doctor's order required",
     price: 200,
-    description: 'Blood removal for therapeutic purposes. Requires a doctor\'s order specifying volume. 1hr 15min appointment.',
+    description: "Blood removal per doctor's order specifying volume. 1hr 15min appointment.",
     icon: Syringe,
     color: 'bg-teal-50 border-teal-200 hover:border-teal-400',
     selectedColor: 'bg-teal-50 border-teal-500 ring-2 ring-teal-500/20',
     iconColor: 'text-teal-600',
-    requiresLabOrder: true,
+  },
+  {
+    id: 'provider-partner',
+    name: 'Provider Partners',
+    subtitle: 'Select your provider',
+    price: null, // Dynamic based on partner
+    description: 'Booking through one of our partner practices? Select your provider for special pricing.',
+    icon: Handshake,
+    color: 'bg-emerald-50 border-emerald-200 hover:border-emerald-400',
+    selectedColor: 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20',
+    iconColor: 'text-emerald-600',
   },
 ];
 
 const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
   const { watch, setValue } = useFormContext<BookingFormValues>();
   const selectedType = watch('serviceDetails.visitType');
+  const [selectedPartner, setSelectedPartner] = useState('');
+  const [showPartnerSelect, setShowPartnerSelect] = useState(false);
 
   const handleSelect = (typeId: string) => {
+    if (typeId === 'provider-partner') {
+      // Show partner dropdown instead of auto-advancing
+      setShowPartnerSelect(true);
+      setValue('serviceDetails.visitType', typeId, { shouldValidate: true });
+      return;
+    }
+
     setValue('serviceDetails.visitType', typeId, { shouldValidate: true });
+    // Auto-advance after a brief visual feedback
+    setTimeout(() => onNext(), 300);
+  };
+
+  const handlePartnerSelect = (partnerId: string) => {
+    setSelectedPartner(partnerId);
+    const partner = PROVIDER_PARTNERS.find(p => p.id === partnerId);
+    if (partner) {
+      setValue('serviceDetails.visitType', `partner-${partnerId}`, { shouldValidate: true });
+      // Auto-advance
+      setTimeout(() => onNext(), 300);
+    }
   };
 
   return (
@@ -90,7 +125,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {VISIT_TYPES.map((type) => {
           const Icon = type.icon;
-          const isSelected = selectedType === type.id;
+          const isSelected = selectedType === type.id || (type.id === 'provider-partner' && selectedType?.startsWith('partner-'));
 
           return (
             <div
@@ -112,7 +147,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
                 </div>
               )}
 
-              <div className={`h-11 w-11 rounded-xl bg-white/80 flex items-center justify-center mb-3`}>
+              <div className="h-11 w-11 rounded-xl bg-white/80 flex items-center justify-center mb-3">
                 <Icon className={`h-5 w-5 ${type.iconColor}`} />
               </div>
 
@@ -120,8 +155,14 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
               <p className="text-xs text-muted-foreground">{type.subtitle}</p>
 
               <div className="mt-2">
-                <span className="text-2xl font-bold">${type.price}</span>
-                <span className="text-muted-foreground text-xs ml-1">/ visit</span>
+                {type.price !== null ? (
+                  <>
+                    <span className="text-2xl font-bold">${type.price}</span>
+                    <span className="text-muted-foreground text-xs ml-1">/ visit</span>
+                  </>
+                ) : (
+                  <span className="text-lg font-bold text-emerald-700">From $72.25</span>
+                )}
               </div>
 
               <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
@@ -132,17 +173,24 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
         })}
       </div>
 
-      <div className="flex justify-center pt-2">
-        <Button
-          type="button"
-          onClick={onNext}
-          disabled={!selectedType}
-          size="lg"
-          className="bg-conve-red hover:bg-conve-red-dark text-white px-8 rounded-xl"
-        >
-          Continue
-        </Button>
-      </div>
+      {/* Provider Partner dropdown */}
+      {showPartnerSelect && (
+        <div className="max-w-md mx-auto space-y-3 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+          <label className="text-sm font-medium">Select your provider</label>
+          <Select value={selectedPartner} onValueChange={handlePartnerSelect}>
+            <SelectTrigger className="bg-white">
+              <SelectValue placeholder="Choose provider..." />
+            </SelectTrigger>
+            <SelectContent>
+              {PROVIDER_PARTNERS.map((partner) => (
+                <SelectItem key={partner.id} value={partner.id}>
+                  {partner.name} — ${partner.price}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   );
 };

@@ -287,29 +287,50 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
               )}
 
               {/* Step 2: Service & Date (combined) */}
-              {currentStep === BookingStep.ServiceAndDate && !showDatePicker && (
-                <div>
-                  {isServicesLoading ? (
-                    <div className="flex justify-center items-center p-12">
-                      <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                      <span className="ml-2">Loading services...</span>
-                    </div>
-                  ) : (
-                    <ServiceSelectionStep
-                      services={availableServices}
-                      onNext={() => setShowDatePicker(true)}
-                      onCancel={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
-                    />
-                  )}
-                </div>
-              )}
+              {currentStep === BookingStep.ServiceAndDate && (() => {
+                const vt = methods.getValues('serviceDetails.visitType') || '';
+                // Specialty kit and office visit skip service selection
+                const skipServiceSelection = ['specialty-kit', 'in-office'].includes(vt);
 
-              {currentStep === BookingStep.ServiceAndDate && showDatePicker && (
-                <DateTimeSelectionStep
-                  onNext={handleNext}
-                  onBack={() => setShowDatePicker(false)}
-                />
-              )}
+                if (skipServiceSelection && !showDatePicker) {
+                  // Auto-set service to match visit type and go to date picker
+                  if (!methods.getValues('serviceDetails.selectedService')) {
+                    methods.setValue('serviceDetails.selectedService', vt);
+                  }
+                  return (
+                    <DateTimeSelectionStep
+                      onNext={handleNext}
+                      onBack={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                    />
+                  );
+                }
+
+                if (!showDatePicker) {
+                  return (
+                    <div>
+                      {isServicesLoading ? (
+                        <div className="flex justify-center items-center p-12">
+                          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                          <span className="ml-2">Loading services...</span>
+                        </div>
+                      ) : (
+                        <ServiceSelectionStep
+                          services={availableServices}
+                          onNext={() => setShowDatePicker(true)}
+                          onCancel={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                        />
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <DateTimeSelectionStep
+                    onNext={handleNext}
+                    onBack={() => setShowDatePicker(false)}
+                  />
+                );
+              })()}
 
               {/* Step 3: Patient Info */}
               {currentStep === BookingStep.PatientInfo && (
