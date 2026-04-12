@@ -1,0 +1,87 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const { appointmentId, notificationType, phoneNumber, eta, labName, trackingId } = await req.json()
+
+    console.log('SMS notification request:', { appointmentId, notificationType, phoneNumber })
+
+    const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')
+    const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')
+    const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER')
+
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+      throw new Error('Missing Twilio configuration')
+    }
+
+    let message = ''
+    switch (notificationType) {
+      case 'on_the_way':
+        message = `🚗 Your ConveLabs phlebotomist is on the way! Expected arrival: ${eta} minutes. Please be ready with your lab order and ID.`
+        break
+      case 'sample_delivered':
+        message = `✅ Your samples have been delivered to ${labName}. Tracking ID: ${trackingId}. You'll receive results within 24-48 hours.`
+        break
+      case 'completed':
+        message = `🎉 Your ConveLabs appointment is complete! Results will be available in your portal within 24-48 hours. Thank you for choosing ConveLabs!`
+        break
+      default:
+        message = 'ConveLabs appointment update'
+    }
+
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
+    
+    const formData = new URLSearchParams()
+    formData.append('To', phoneNumber)
+    formData.append('From', TWILIO_PHONE_NUMBER)
+    formData.append('Body', message)
+
+    const response = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formData,
+    })
+
+    const twilioResponse = await response.json()
+
+    if (!response.ok) {
+      throw new Error(`Twilio error: ${twilioResponse.message}`)
+    }
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        messageSid: twilioResponse.sid,
+        message: 'SMS sent successfully' 
+      }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    )
+
+  } catch (error) {
+    console.error('SMS notification error:', error)
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error.message 
+      }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    )
+  }
+})

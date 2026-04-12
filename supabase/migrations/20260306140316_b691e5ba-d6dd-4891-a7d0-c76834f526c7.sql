@@ -1,0 +1,1 @@
+UPDATE booking_holds SET status = 'held', updated_at = now() WHERE id = '76a035e0-3242-45b8-8607-a3f3a8a8e00e';

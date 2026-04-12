@@ -1,0 +1,42 @@
+project_id = "yluyonhrxxtyuiyrdixl"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage"]
+
+[functions.ai-sales-chat]
+verify_jwt = false
+
+[db]
+port = 54322
+
+[studio]
+port = 54323
+
+[functions.get-appointments-safe]
+verify_jwt = true
+
+[functions.create-corporate-checkout]
+verify_jwt = true
+
+[functions.corporate-seat-update]
+verify_jwt = true
+
+[functions.corporate-customer-portal]
+verify_jwt = true
+
+[functions.corporate-invite-employee]
+verify_jwt = true
+
+[functions.corporate-schedule-demo]
+verify_jwt = false
+
+[functions.corporate-signup]
+verify_jwt = false
+
+[functions.ghs-proxy]
+verify_jwt = false
+
+[functions.ghs-webhook]
+verify_jwt = false

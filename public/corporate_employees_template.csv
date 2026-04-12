@@ -1,0 +1,5 @@
+first_name,last_name,email,executive_upgrade
+John,Doe,john.doe@company.com,false
+Jane,Smith,jane.smith@company.com,true
+Mike,Johnson,mike.johnson@company.com,false
+Sarah,Williams,sarah.williams@company.com,true

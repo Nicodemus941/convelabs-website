@@ -1,0 +1,5 @@
+ALTER TABLE public.booking_holds
+ADD COLUMN IF NOT EXISTS service_price INTEGER,
+ADD COLUMN IF NOT EXISTS add_on_ids TEXT[],
+ADD COLUMN IF NOT EXISTS partner_code TEXT,
+ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'convelabs';

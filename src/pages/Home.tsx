@@ -1,0 +1,203 @@
+import React from "react";
+import { Helmet } from "react-helmet-async";
+import Header from "@/components/home/Header";
+import Hero from "@/components/home/Hero";
+import TrustBanner from "@/components/home/TrustBanner";
+import HowItWorks from "@/components/home/HowItWorks";
+import PricingTransparency from "@/components/home/PricingTransparency";
+import ServicesSection from "@/components/home/ServicesSection";
+import TestimonialsSection from "@/components/home/TestimonialsSection";
+import ServiceAreasMap from "@/components/home/ServiceAreasMap";
+import MembershipCTA from "@/components/home/MembershipCTA";
+import FAQSection from "@/components/home/FAQSection";
+import CallToAction from "@/components/home/CallToAction";
+import Footer from "@/components/home/Footer";
+import { PageTransition } from "@/components/ui/page-transition";
+import { VisitorOptimizationProvider } from "@/components/optimization/VisitorOptimizationProvider";
+import { FAQSchema } from "@/components/seo/FAQSchema";
+import { HowToSchema } from "@/components/seo/HowToSchema";
+import { OrganizationSchema } from "@/components/seo/OrganizationSchema";
+import { ReviewSchema } from "@/components/seo/ReviewSchema";
+
+const Home = () => {
+  return (
+    <VisitorOptimizationProvider>
+      <Helmet>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
+        <link rel="preconnect" href="https://app.greenhealthsystems.com" />
+        <link rel="canonical" href="https://convelabs.com/" />
+
+        <title>Mobile Blood Draw At Your Home | Same-Day Service Orlando | ConveLabs</title>
+        <meta
+          name="description"
+          content="Licensed phlebotomists come to your home, office, or hotel. Same-day mobile blood draw appointments in Orlando and Central Florida. In-office from $55, mobile from $150. Book online in 30 seconds."
+        />
+        <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+
+        {/* Geographic SEO */}
+        <meta name="geo.region" content="US-FL" />
+        <meta name="geo.placename" content="Orlando, Florida" />
+        <meta name="geo.position" content="28.5383,-81.3792" />
+
+        {/* Mobile */}
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <meta name="theme-color" content="#B91C1C" />
+
+        {/* Open Graph */}
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="Mobile Blood Draw At Your Home | ConveLabs Orlando" />
+        <meta
+          property="og:description"
+          content="Licensed phlebotomists come to you. Same-day appointments in Orlando & Central Florida. In-office from $55, mobile from $150."
+        />
+        <meta property="og:url" content="https://convelabs.com/" />
+        <meta property="og:site_name" content="ConveLabs" />
+        <meta property="og:locale" content="en_US" />
+
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="Mobile Blood Draw At Your Home | ConveLabs" />
+        <meta
+          name="twitter:description"
+          content="Licensed phlebotomists come to you. Same-day appointments. In-office from $55, mobile from $150."
+        />
+
+        {/* Schema: MedicalBusiness */}
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "MedicalBusiness",
+            name: "ConveLabs",
+            description:
+              "Mobile phlebotomy service in Central Florida. Licensed phlebotomists come to your home, office, or hotel for blood draws.",
+            url: "https://convelabs.com",
+            telephone: "+1-941-527-9169",
+            priceRange: "$$",
+            address: {
+              "@type": "PostalAddress",
+              addressLocality: "Orlando",
+              addressRegion: "FL",
+              addressCountry: "US",
+            },
+            geo: {
+              "@type": "GeoCoordinates",
+              latitude: 28.5383,
+              longitude: -81.3792,
+            },
+            openingHoursSpecification: {
+              "@type": "OpeningHoursSpecification",
+              dayOfWeek: [
+                "Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday", "Sunday",
+              ],
+              opens: "06:00",
+              closes: "20:00",
+            },
+            areaServed: [
+              "Orlando", "Winter Park", "Windermere", "Dr. Phillips",
+              "Bay Hill", "Lake Nona", "Celebration", "Heathrow",
+              "Kissimmee", "Lake Mary", "Altamonte Springs", "Sanford",
+            ],
+            aggregateRating: {
+              "@type": "AggregateRating",
+              ratingValue: "5.0",
+              reviewCount: "500",
+              bestRating: "5",
+              worstRating: "1",
+            },
+          })}
+        </script>
+      </Helmet>
+
+      {/* SEO schemas */}
+      <FAQSchema
+        faqs={[
+          {
+            question: "How much does a mobile blood draw cost?",
+            answer:
+              "ConveLabs in-office blood draws start at $55. Mobile blood draws start at $150 per visit. Additional patients at the same location are $75 each. No hidden fees.",
+          },
+          {
+            question: "Do you offer same-day appointments?",
+            answer:
+              "Yes, ConveLabs offers same-day mobile phlebotomy appointments when available across Orlando and Central Florida.",
+          },
+          {
+            question: "What areas do you serve?",
+            answer:
+              "We serve Orlando, Winter Park, Windermere, Dr. Phillips, Bay Hill, Lake Nona, Celebration, Heathrow, Kissimmee, Lake Mary, Altamonte Springs, Sanford, Oviedo, Maitland, Clermont, and surrounding areas.",
+          },
+          {
+            question: "Is mobile blood work covered by insurance?",
+            answer:
+              "Many insurance plans cover the lab tests. The mobile service fee ($150) is typically out-of-pocket. In-office visits start at $55. We provide superbills for reimbursement.",
+          },
+          {
+            question: "How quickly can you come to my location?",
+            answer:
+              "We offer same-day scheduling with early morning fasting appointments available starting at 6:00 AM.",
+          },
+        ]}
+      />
+      <HowToSchema
+        name="How to Book a Mobile Blood Draw with ConveLabs"
+        description="Book a licensed phlebotomist to come to your home in 3 simple steps."
+        estimatedCost="$55+"
+        totalTime="PT30M"
+        steps={[
+          { name: "Book Online", text: "Enter your ZIP code and choose an available appointment time." },
+          { name: "Phlebotomist Comes to You", text: "A licensed phlebotomist arrives at your location with professional equipment." },
+          { name: "Results Sent to Doctor", text: "Your lab results are delivered securely to your physician within 24-48 hours." },
+        ]}
+      />
+      <OrganizationSchema />
+      <ReviewSchema
+        businessName="ConveLabs"
+        ratingValue="5.0"
+        reviewCount="500"
+        reviews={[
+          {
+            author: "Dr. Michael Johnson, MD",
+            rating: "5",
+            reviewBody:
+              "ConveLabs provides exceptional mobile lab services for my patients. Professional and reliable.",
+          },
+          {
+            author: "Sarah W.",
+            rating: "5",
+            reviewBody:
+              "Same-day mobile blood draw saved me hours. The phlebotomist was on time and professional.",
+          },
+          {
+            author: "Robert T.",
+            rating: "5",
+            reviewBody:
+              "Outstanding service. Easy to book online and the phlebotomist was excellent.",
+          },
+        ]}
+      />
+
+      <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
+        <Header />
+        <main>
+          <PageTransition>
+            <Hero />
+            <TrustBanner />
+            <HowItWorks />
+            <PricingTransparency />
+            <ServicesSection />
+            <TestimonialsSection />
+            <ServiceAreasMap />
+            <MembershipCTA />
+            <FAQSection />
+            <CallToAction />
+          </PageTransition>
+        </main>
+        <Footer />
+      </div>
+    </VisitorOptimizationProvider>
+  );
+};
+
+export default Home;
