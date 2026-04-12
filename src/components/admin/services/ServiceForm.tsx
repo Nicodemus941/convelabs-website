@@ -63,7 +63,7 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
     try {
       const serviceData = {
         ...formData,
-        base_price: Math.round(formData.base_price * 100),
+        base_price: formData.base_price,
         staff_assignments: staffAssignments,
         add_ons: addOns
       };
@@ -153,10 +153,10 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
                     name="base_price"
                     type="number"
                     step="0.01"
-                    value={(formData.base_price / 100).toFixed(2)}
-                    onChange={(e) => setFormData(prev => ({ 
-                      ...prev, 
-                      base_price: Math.round(Number(e.target.value) * 100) 
+                    value={formData.base_price}
+                    onChange={(e) => setFormData(prev => ({
+                      ...prev,
+                      base_price: Number(e.target.value)
                     }))}
                     required
                   />

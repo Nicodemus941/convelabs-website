@@ -43,8 +43,8 @@ const ServiceManagementDashboard = () => {
     service.category.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const formatPrice = (priceInCents: number) => {
-    return `$${(priceInCents / 100).toFixed(2)}`;
+  const formatPrice = (price: number) => {
+    return `$${price.toFixed(0)}`;
   };
 
   const handleCreateService = async (serviceData: Partial<ServiceEnhanced>) => {
