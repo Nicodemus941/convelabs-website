@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/AuthContext";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Smartphone } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import TodayOverview from "./phlebotomist/TodayOverview";
 import TodayScheduleTab from "./phlebotomist/TodayScheduleTab";
@@ -46,8 +47,8 @@ const PhlebotomistDashboard = () => {
             <Button variant="outline" className="flex items-center gap-2" onClick={handleSendMessage}>
               <MessageSquare className="h-4 w-4" /> Message Office
             </Button>
-            <Button className="luxury-button">
-              Request Time Off
+            <Button className="bg-conve-red hover:bg-conve-red-dark text-white" asChild>
+              <Link to="/phleb-app"><Smartphone className="h-4 w-4 mr-1" /> Field App</Link>
             </Button>
           </div>
         </div>

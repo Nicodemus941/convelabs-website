@@ -1,347 +1,232 @@
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/AuthContext";
-import SMSAppointmentDashboard from "@/components/admin/SMSAppointmentDashboard";
-import { 
-  Card, CardContent, CardDescription, CardHeader, CardTitle 
-} from "@/components/ui/card";
-import { 
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
-} from "@/components/ui/table";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { 
-  Calendar, MessageSquare, Phone, Search, Users, Clock, AlertCircle 
-} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Calendar, Users, Clock, Plus, Search, ArrowRight, RefreshCw } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
 
 const OfficeManagerDashboard = () => {
   const { user } = useAuth();
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [stats, setStats] = useState({ today: 0, thisWeek: 0, completed: 0, scheduled: 0 });
 
-  // Mock data that would normally come from an API
-  const upcomingAppointments = [
-    { id: 1, patientName: "John Smith", date: "2025-05-18T10:00:00", address: "123 Main St, Orlando, FL", status: "confirmed", phlebotomist: "David Wilson" },
-    { id: 2, patientName: "Jane Doe", date: "2025-05-18T13:30:00", address: "456 Oak Ave, Orlando, FL", status: "pending", phlebotomist: "Unassigned" },
-    { id: 3, patientName: "Robert Johnson", date: "2025-05-18T15:00:00", address: "789 Pine Dr, Orlando, FL", status: "confirmed", phlebotomist: "Sarah Parker" },
-    { id: 4, patientName: "Emily Davis", date: "2025-05-19T09:00:00", address: "321 Elm St, Orlando, FL", status: "confirmed", phlebotomist: "David Wilson" },
-  ];
+  const fetchAppointments = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .order('appointment_date', { ascending: true })
+        .limit(50);
 
-  const recentInquiries = [
-    { id: 1, name: "Michael Brown", type: "Membership Question", timestamp: "Today, 9:15 AM", status: "New" },
-    { id: 2, name: "Lisa Wilson", type: "Appointment Rescheduling", timestamp: "Today, 8:30 AM", status: "Responded" },
-    { id: 3, name: "Thomas Lee", type: "Billing Inquiry", timestamp: "Yesterday, 4:45 PM", status: "New" },
-  ];
+      if (error) throw error;
+      setAppointments(data || []);
 
-  const phlebotomistSchedule = [
-    { name: "David Wilson", status: "Active", appointments: 3, nextAppointment: "Today, 10:00 AM" },
-    { name: "Sarah Parker", status: "Active", appointments: 2, nextAppointment: "Today, 11:30 AM" },
-    { name: "James Moore", status: "Off Duty", appointments: 0, nextAppointment: "Tomorrow, 9:00 AM" },
-  ];
+      // Calculate stats
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - now.getDay());
+
+      const today = (data || []).filter(a => a.appointment_date?.startsWith(todayStr)).length;
+      const thisWeek = (data || []).filter(a => new Date(a.appointment_date) >= weekStart).length;
+      const completed = (data || []).filter(a => a.status === 'completed').length;
+      const scheduled = (data || []).filter(a => a.status === 'scheduled').length;
+
+      setStats({ today, thisWeek, completed, scheduled });
+    } catch (err) {
+      console.error('Failed to fetch appointments:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchAppointments(); }, []);
+
+  const getPatientName = (appt: any): string => {
+    if (appt.notes?.startsWith('Patient: ')) {
+      return appt.notes.split(' | ')[0].replace('Patient: ', '');
+    }
+    return appt.patient_email || 'Unknown';
+  };
+
+  const filteredAppointments = appointments.filter(a => {
+    if (!searchQuery) return true;
+    const name = getPatientName(a).toLowerCase();
+    return name.includes(searchQuery.toLowerCase()) || a.address?.toLowerCase().includes(searchQuery.toLowerCase());
+  });
+
+  const handleStatusUpdate = async (id: string, newStatus: string) => {
+    const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', id);
+    if (error) { toast.error('Failed to update status'); return; }
+    toast.success(`Status updated to ${newStatus}`);
+    fetchAppointments();
+  };
+
+  const handleCancel = async (id: string) => {
+    if (!window.confirm('Cancel this appointment?')) return;
+    await handleStatusUpdate(id, 'cancelled');
+  };
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case 'scheduled': return 'bg-blue-100 text-blue-800';
+      case 'confirmed': return 'bg-green-100 text-green-800';
+      case 'en_route': return 'bg-orange-100 text-orange-800';
+      case 'completed': return 'bg-gray-100 text-gray-700';
+      case 'cancelled': return 'bg-red-100 text-red-800';
+      default: return 'bg-gray-100 text-gray-700';
+    }
+  };
 
   return (
-    <div className="p-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold mb-1">
-            Welcome, {user?.firstName || "Office Manager"}
-          </h1>
-          <p className="text-muted-foreground">
-            Manage appointments, patient inquiries, and staff schedules
-          </p>
+          <h1 className="text-2xl font-bold">Admin Dashboard</h1>
+          <p className="text-muted-foreground">Welcome, {user?.firstName || "Admin"}. Manage appointments and patients.</p>
         </div>
-        <div className="flex gap-2 mt-4 md:mt-0">
-          <Button variant="outline" className="flex items-center gap-2">
-            <Phone className="h-4 w-4" /> View Call Log
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchAppointments}>
+            <RefreshCw className="h-4 w-4 mr-1" /> Refresh
           </Button>
-          <Button className="flex items-center gap-2">
-            <Calendar className="h-4 w-4" /> Schedule Appointment
+          <Button size="sm" className="bg-conve-red hover:bg-conve-red-dark text-white" asChild>
+            <Link to="/book-now"><Plus className="h-4 w-4 mr-1" /> Create Appointment</Link>
           </Button>
         </div>
       </div>
 
-      {/* Dashboard Overview Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Today's Appointments</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">8</div>
-            <p className="text-xs text-muted-foreground mt-1">3 completed, 5 remaining</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">New Patient Inquiries</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">12</div>
-            <p className="text-xs text-muted-foreground mt-1">5 unresponded</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Phlebotomists On Duty</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">4</div>
-            <p className="text-xs text-muted-foreground mt-1">2 currently with patients</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Alert Status</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center">
-              <div className="text-green-500 font-bold flex items-center">
-                <div className="h-3 w-3 rounded-full bg-green-500 mr-2"></div>
-                All Systems Normal
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Last incident: 5 days ago</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs defaultValue="appointments">
-        <TabsList className="mb-6">
-          <TabsTrigger value="appointments">Appointments</TabsTrigger>
-          <TabsTrigger value="staff">Staff Management</TabsTrigger>
-          <TabsTrigger value="inquiries">Customer Inquiries</TabsTrigger>
-          <TabsTrigger value="sms">SMS Communications</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="appointments">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
               <div>
-                <CardTitle>Upcoming Appointments</CardTitle>
-                <CardDescription>Manage and view all scheduled appointments</CardDescription>
+                <p className="text-xs text-muted-foreground">Today</p>
+                <p className="text-2xl font-bold">{stats.today}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search className="h-4 w-4 absolute left-2.5 top-2.5 text-muted-foreground" />
-                  <input 
-                    type="text" 
-                    placeholder="Search appointments..." 
-                    className="pl-8 pr-4 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-conve-red"
-                  />
-                </div>
-                <Button variant="outline" className="text-sm">Filter</Button>
+              <Calendar className="h-8 w-8 text-blue-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">This Week</p>
+                <p className="text-2xl font-bold">{stats.thisWeek}</p>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Patient</TableHead>
-                      <TableHead>Date & Time</TableHead>
-                      <TableHead>Address</TableHead>
-                      <TableHead>Phlebotomist</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+              <Clock className="h-8 w-8 text-green-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Scheduled</p>
+                <p className="text-2xl font-bold">{stats.scheduled}</p>
+              </div>
+              <Users className="h-8 w-8 text-purple-500 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Completed</p>
+                <p className="text-2xl font-bold">{stats.completed}</p>
+              </div>
+              <Users className="h-8 w-8 text-gray-400 opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Appointments Table */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>All Appointments</CardTitle>
+              <CardDescription>{filteredAppointments.length} appointments</CardDescription>
+            </div>
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-2.5 top-2.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search patient or address..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8 pr-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-conve-red w-64"
+              />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-3">
+              {[1,2,3,4,5].map(i => <div key={i} className="h-12 bg-muted animate-pulse rounded" />)}
+            </div>
+          ) : filteredAppointments.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">No appointments found</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Patient</TableHead>
+                    <TableHead>Date & Time</TableHead>
+                    <TableHead>Service</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredAppointments.map((appt) => (
+                    <TableRow key={appt.id}>
+                      <TableCell className="font-medium">{getPatientName(appt)}</TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          {appt.appointment_date ? new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '—'}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{appt.appointment_time || ''}</div>
+                      </TableCell>
+                      <TableCell className="text-sm">{appt.service_type || '—'}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`text-xs ${statusColor(appt.status)}`}>
+                          {appt.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right space-x-1">
+                        {appt.status === 'scheduled' && (
+                          <>
+                            <Button variant="ghost" size="sm" onClick={() => handleStatusUpdate(appt.id, 'confirmed')}>Confirm</Button>
+                            <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleCancel(appt.id)}>Cancel</Button>
+                          </>
+                        )}
+                        {appt.status === 'confirmed' && (
+                          <Button variant="ghost" size="sm" onClick={() => handleStatusUpdate(appt.id, 'completed')}>Complete</Button>
+                        )}
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {upcomingAppointments.map((appointment) => (
-                      <TableRow key={appointment.id}>
-                        <TableCell className="font-medium">{appointment.patientName}</TableCell>
-                        <TableCell>
-                          {new Date(appointment.date).toLocaleString('en-US', {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: 'numeric',
-                            minute: '2-digit',
-                            hour12: true
-                          })}
-                        </TableCell>
-                        <TableCell>{appointment.address}</TableCell>
-                        <TableCell>{appointment.phlebotomist}</TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            appointment.status === 'confirmed' ? 'bg-green-100 text-green-800' : 
-                            appointment.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                            'bg-blue-100 text-blue-800'
-                          }`}>
-                            {appointment.status}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="sm">View</Button>
-                          <Button variant="ghost" size="sm">Edit</Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="mt-4 flex justify-between">
-                <div className="text-sm text-muted-foreground">Showing 4 of 24 appointments</div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" disabled>Previous</Button>
-                  <Button variant="outline" size="sm">Next</Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="staff">
-          <Card>
-            <CardHeader>
-              <CardTitle>Staff Management</CardTitle>
-              <CardDescription>Manage phlebotomist schedules and assignments</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="border rounded-lg p-4">
-                  <h3 className="font-medium text-lg mb-4">Phlebotomist Schedule</h3>
-                  
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Today's Appointments</TableHead>
-                          <TableHead>Next Appointment</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {phlebotomistSchedule.map((staff, index) => (
-                          <TableRow key={index}>
-                            <TableCell className="font-medium">{staff.name}</TableCell>
-                            <TableCell>
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                staff.status === 'Active' ? 'bg-green-100 text-green-800' : 
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {staff.status}
-                              </span>
-                            </TableCell>
-                            <TableCell>{staff.appointments}</TableCell>
-                            <TableCell>{staff.nextAppointment}</TableCell>
-                            <TableCell className="text-right">
-                              <Button variant="ghost" size="sm">Message</Button>
-                              <Button variant="ghost" size="sm">View Schedule</Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-
-                <div className="border rounded-lg p-4">
-                  <h3 className="font-medium text-lg mb-4">Phlebotomist Assignment</h3>
-                  
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Appointment</label>
-                      <select className="w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-conve-red">
-                        <option>Select appointment</option>
-                        <option>Jane Doe - Today, 1:30 PM</option>
-                        <option>Robert Johnson - Today, 3:00 PM</option>
-                        <option>Emily Davis - Tomorrow, 9:00 AM</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Phlebotomist</label>
-                      <select className="w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-conve-red">
-                        <option>Select phlebotomist</option>
-                        <option>David Wilson</option>
-                        <option>Sarah Parker</option>
-                        <option>James Moore</option>
-                      </select>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4">
-                    <Button>Assign Phlebotomist</Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="inquiries">
-          <Card>
-            <CardHeader>
-              <CardTitle>Customer Inquiries</CardTitle>
-              <CardDescription>Manage and respond to patient questions and requests</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div className="border rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Inquiry Type</TableHead>
-                        <TableHead>Time Received</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {recentInquiries.map((inquiry) => (
-                        <TableRow key={inquiry.id}>
-                          <TableCell className="font-medium">{inquiry.name}</TableCell>
-                          <TableCell>{inquiry.type}</TableCell>
-                          <TableCell>{inquiry.timestamp}</TableCell>
-                          <TableCell>
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              inquiry.status === 'New' ? 'bg-red-100 text-red-800' : 
-                              'bg-green-100 text-green-800'
-                            }`}>
-                              {inquiry.status}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="sm">View</Button>
-                            <Button variant="ghost" size="sm">Respond</Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-
-                <div className="border rounded-lg p-4">
-                  <h3 className="font-medium text-lg mb-4">Quick Response Templates</h3>
-                  
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <Button variant="outline" className="justify-start">
-                      <MessageSquare className="mr-2 h-4 w-4" /> Appointment Confirmation
-                    </Button>
-                    <Button variant="outline" className="justify-start">
-                      <MessageSquare className="mr-2 h-4 w-4" /> Rescheduling Guidelines
-                    </Button>
-                    <Button variant="outline" className="justify-start">
-                      <MessageSquare className="mr-2 h-4 w-4" /> Membership Benefits
-                    </Button>
-                    <Button variant="outline" className="justify-start">
-                      <MessageSquare className="mr-2 h-4 w-4" /> Insurance Information
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="sms">
-          <SMSAppointmentDashboard />
-        </TabsContent>
-      </Tabs>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };
