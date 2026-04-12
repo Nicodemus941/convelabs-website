@@ -115,7 +115,7 @@ const SuperAdminDashboard = () => {
         </div>
         <div className="flex gap-3">
           <Button variant="outline" asChild>
-            <Link to="/dashboard/super_admin/appointments">View All Appointments</Link>
+            <Link to="/dashboard/super_admin/calendar">View Calendar</Link>
           </Button>
           <Button className="bg-conve-red hover:bg-conve-red-dark text-white" asChild>
             <Link to="/book-now">Create Appointment</Link>

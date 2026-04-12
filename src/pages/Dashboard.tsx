@@ -21,6 +21,7 @@ import MarketingTab from "@/components/dashboards/admin/MarketingTab";
 import StaffManagementTab from "@/components/dashboards/admin/StaffManagementTab";
 import WebhookEventMonitor from "@/components/dashboards/admin/WebhookEventMonitor";
 import AdminCalendar from "@/components/calendar/AdminCalendar";
+import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
   const { "*": urlPath } = useParams<{ "*": string }>();
@@ -58,7 +59,7 @@ const Dashboard = () => {
     // Handle admin tabs
     return (
       <RoleProtectedRoute allowedRoles={["super_admin", "admin"]}>
-        <DashboardWrapper>
+        <AdminLayout>
           {adminTab === "users" && <UserManagementTab />}
           {adminTab === "staff" && <StaffManagementTab />}
           {adminTab === "services" && <AdminServicesTab />}
@@ -72,7 +73,7 @@ const Dashboard = () => {
           {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar"].includes(adminTab) && (
             <Navigate to="/dashboard/super_admin" replace />
           )}
-        </DashboardWrapper>
+        </AdminLayout>
       </RoleProtectedRoute>
     );
   }
@@ -84,13 +85,17 @@ const Dashboard = () => {
       case "super_admin":
         return (
           <RoleProtectedRoute allowedRoles={["super_admin"]}>
-            <SuperAdminDashboard />
+            <AdminLayout>
+              <SuperAdminDashboard />
+            </AdminLayout>
           </RoleProtectedRoute>
         );
       case "office_manager":
         return (
           <RoleProtectedRoute allowedRoles={["super_admin", "office_manager"]}>
-            <OfficeManagerDashboard />
+            <AdminLayout>
+              <OfficeManagerDashboard />
+            </AdminLayout>
           </RoleProtectedRoute>
         );
       case "phlebotomist":
