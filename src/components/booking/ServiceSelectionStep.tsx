@@ -75,11 +75,11 @@ const ServiceSelectionStep: React.FC<ServiceSelectionStepProps> = ({
 
   // Filter services based on visit type
   const isMobileOrSenior = ['mobile', 'senior'].includes(visitType);
-  const baseServices = services.length > 0 ? services : ALL_SERVICES;
+  // Always use fallback ALL_SERVICES for consistent IDs in the booking flow
+  const baseServices = ALL_SERVICES;
 
   let displayedServices: Service[];
   if (isMobileOrSenior) {
-    // Only show Routine, Fasting, STAT for mobile and senior
     displayedServices = baseServices.filter(s => MOBILE_SENIOR_SERVICES.includes(s.id));
   } else {
     const topIds = ['routine-blood-draw', 'fasting-blood-draw', 'stat-blood-draw', 'therapeutic-phlebotomy', 'glucose-tolerance'];
