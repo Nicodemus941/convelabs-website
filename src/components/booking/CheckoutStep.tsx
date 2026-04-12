@@ -25,13 +25,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
   const serviceId = getValues('serviceDetails.selectedService');
   const serviceDetails = getValues('serviceDetails');
+  const additionalPatients = watch('additionalPatients') || [];
   const termsAccepted = watch('termsAccepted');
 
   const service = getServiceById(serviceId);
   const breakdown = calculateTotal(serviceId, {
     sameDay: serviceDetails?.sameDay,
     weekend: serviceDetails?.weekend,
-  }, tipAmount);
+  }, tipAmount, additionalPatients.length);
 
   const selectedDate = watch('date');
 

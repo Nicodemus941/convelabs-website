@@ -57,10 +57,19 @@ export function calculateSurcharges(options: SurchargeOptions): { label: string;
 export function calculateTotal(
   serviceId: string,
   options: SurchargeOptions,
-  tipAmount: number = 0
+  tipAmount: number = 0,
+  additionalPatientCount: number = 0
 ): PriceBreakdown {
   const servicePrice = calculateBasePrice(serviceId);
   const surcharges = calculateSurcharges(options);
+
+  if (additionalPatientCount > 0) {
+    surcharges.push({
+      label: `Additional Patient${additionalPatientCount > 1 ? 's' : ''} (${additionalPatientCount})`,
+      amount: additionalPatientCount * 75,
+    });
+  }
+
   const surchargeTotal = surcharges.reduce((sum, s) => sum + s.amount, 0);
   const subtotal = servicePrice + surchargeTotal;
 

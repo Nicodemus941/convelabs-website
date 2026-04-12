@@ -28,11 +28,33 @@ interface DateTimeSelectionStepProps {
   considerDistance?: boolean;
 }
 
-// Time slots
-const timeSlots = [
-  "8:00 AM", "9:00 AM", "10:00 AM", "11:00 AM", 
-  "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", 
-  "4:00 PM", "5:00 PM"
+// 30-minute arrival windows
+const arrivalWindows = [
+  { time: "6:00 AM", label: "6:00 - 6:30 AM" },
+  { time: "6:30 AM", label: "6:30 - 7:00 AM" },
+  { time: "7:00 AM", label: "7:00 - 7:30 AM" },
+  { time: "7:30 AM", label: "7:30 - 8:00 AM" },
+  { time: "8:00 AM", label: "8:00 - 8:30 AM" },
+  { time: "8:30 AM", label: "8:30 - 9:00 AM" },
+  { time: "9:00 AM", label: "9:00 - 9:30 AM" },
+  { time: "9:30 AM", label: "9:30 - 10:00 AM" },
+  { time: "10:00 AM", label: "10:00 - 10:30 AM" },
+  { time: "10:30 AM", label: "10:30 - 11:00 AM" },
+  { time: "11:00 AM", label: "11:00 - 11:30 AM" },
+  { time: "11:30 AM", label: "11:30 AM - 12:00 PM" },
+  { time: "12:00 PM", label: "12:00 - 12:30 PM" },
+  { time: "12:30 PM", label: "12:30 - 1:00 PM" },
+  { time: "1:00 PM", label: "1:00 - 1:30 PM" },
+];
+
+const weekendWindows = [
+  { time: "6:00 AM", label: "6:00 - 6:30 AM" },
+  { time: "6:30 AM", label: "6:30 - 7:00 AM" },
+  { time: "7:00 AM", label: "7:00 - 7:30 AM" },
+  { time: "7:30 AM", label: "7:30 - 8:00 AM" },
+  { time: "8:00 AM", label: "8:00 - 8:30 AM" },
+  { time: "8:30 AM", label: "8:30 - 9:00 AM" },
+  { time: "9:00 AM", label: "9:00 - 9:30 AM" },
 ];
 
 const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, onBack, considerDistance }) => {
@@ -50,10 +72,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     });
   }, [selectedDate, selectedTime, considerDistance, methods]);
   
-  // Determine which time slots should be disabled
-  // For this example, we'll disable some slots on weekends
   const isWeekend = selectedDate && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6);
-  const disabledTimeSlots = isWeekend ? ["8:00 AM", "9:00 AM", "5:00 PM"] : [];
+  const isSunday = selectedDate && selectedDate.getDay() === 0;
+  const activeWindows = isWeekend ? weekendWindows : arrivalWindows;
   
   // Get Current Date
   const today = new Date();
@@ -127,33 +148,37 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Appointment Time</FormLabel>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {timeSlots.map((time) => {
-                      const disabled = disabledTimeSlots.includes(time);
-                      const isSelected = field.value === time;
-                      
-                      return (
-                        <div key={time}>
-                          <Button
-                            type="button"
-                            variant={isSelected ? "default" : "outline"}
-                            className={`w-full ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                            onClick={() => {
-                              if (!disabled) {
-                                console.log('Time selected:', time);
-                                field.onChange(time);
-                              }
-                            }}
-                            disabled={disabled}
-                          >
-                            <Clock className="mr-2 h-4 w-4" /> {time}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  {isSunday ? (
+                    <p className="text-sm text-muted-foreground py-4">No appointments available on Sundays.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {activeWindows.map((window) => {
+                        const isSelected = field.value === window.time;
+
+                        return (
+                          <div key={window.time}>
+                            <Button
+                              type="button"
+                              variant={isSelected ? "default" : "outline"}
+                              className="w-full text-xs sm:text-sm"
+                              onClick={() => {
+                                field.onChange(window.time);
+                              }}
+                            >
+                              <Clock className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
+                              {window.label}
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   <FormDescription>
-                    {isWeekend ? "Limited weekend hours available" : "Full weekday availability"}
+                    {isSunday
+                      ? "We are closed on Sundays"
+                      : isWeekend
+                      ? "Limited Saturday hours (6 AM - 9:30 AM)"
+                      : "Arrival windows: Mon-Fri 6 AM - 1:30 PM"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

@@ -60,6 +60,13 @@ export interface BookingFormValues {
     phone: string;
     dateOfBirth?: Date;
   };
+  additionalPatients?: Array<{
+    firstName: string;
+    lastName: string;
+    email?: string;
+    phone?: string;
+    dateOfBirth?: string;
+  }>;
   labOrder?: {
     skipped?: boolean;
     doctorFaxNumber?: string;
@@ -103,6 +110,13 @@ export const bookingFormSchema = z.object({
     phone: z.string().optional(),
     dateOfBirth: z.date().optional()
   }),
+  additionalPatients: z.array(z.object({
+    firstName: z.string().min(1, "First name required"),
+    lastName: z.string().min(1, "Last name required"),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    dateOfBirth: z.string().optional(),
+  })).optional(),
   labOrder: z.object({
     skipped: z.boolean().optional(),
     doctorFaxNumber: z.string().optional(),
@@ -138,7 +152,8 @@ export interface TimeSlot {
   available: boolean;
   booked?: boolean;
   phlebotomist_id?: string;
-  time?: string; // Added time property used in hooks
+  time?: string;
+  displayLabel?: string; // "9:00 AM - 9:30 AM" arrival window
   isAfterHours?: boolean;
   isWeekend?: boolean;
 }

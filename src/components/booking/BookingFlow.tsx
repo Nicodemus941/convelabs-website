@@ -126,10 +126,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
 
       const serviceId = data.serviceDetails.selectedService;
       const service = getServiceById(serviceId);
+      const additionalPatientCount = (data.additionalPatients || []).length;
       const breakdown = calculateTotal(serviceId, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
-      }, tipAmount);
+      }, tipAmount, additionalPatientCount);
 
       // Upload lab order file if present
       let labOrderFilePath: string | undefined;

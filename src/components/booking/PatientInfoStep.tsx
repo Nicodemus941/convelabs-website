@@ -1,8 +1,8 @@
 
 import React from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, ArrowLeft, ArrowRight } from 'lucide-react';
-import { useFormContext } from 'react-hook-form';
+import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X } from 'lucide-react';
+import { useFormContext, useFieldArray } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -27,6 +27,11 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
 }) => {
   const { control, watch, setValue } = useFormContext<BookingFormValues>();
   const dateOfBirth = watch('patientDetails.dateOfBirth');
+
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: 'additionalPatients',
+  });
   
   return (
     <Card className="shadow-sm">
@@ -182,6 +187,89 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
             />
           </div>
           
+          {/* Additional Patients */}
+          <div className="border-t pt-5 mt-2 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium text-sm">Additional Patients at Same Location</h3>
+                <p className="text-xs text-muted-foreground">$75 per additional patient</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => append({ firstName: '', lastName: '', email: '', phone: '', dateOfBirth: '' })}
+              >
+                <UserPlus className="h-4 w-4 mr-1" /> Add Patient
+              </Button>
+            </div>
+
+            {fields.map((field, index) => (
+              <Card key={field.id} className="p-4 bg-muted/30">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-sm font-medium">Patient {index + 2}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={() => remove(index)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <FormField
+                    control={control}
+                    name={`additionalPatients.${index}.firstName`}
+                    render={({ field: f }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input {...f} placeholder="First Name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={control}
+                    name={`additionalPatients.${index}.lastName`}
+                    render={({ field: f }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input {...f} placeholder="Last Name" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={control}
+                    name={`additionalPatients.${index}.email`}
+                    render={({ field: f }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input {...f} placeholder="Email (optional)" type="email" />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={control}
+                    name={`additionalPatients.${index}.phone`}
+                    render={({ field: f }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input {...f} placeholder="Phone (optional)" type="tel" />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </Card>
+            ))}
+          </div>
+
           <div className="flex justify-between pt-6 mt-2">
             <Button 
               type="button" 
