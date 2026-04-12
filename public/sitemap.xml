@@ -29,50 +29,117 @@
     </image:image>
   </url>
 
-  <!-- Location pages -->
+  <!-- Location pages (all 18 service areas) -->
+  <!-- Premium Locations -->
   <url>
-    <loc>https://www.convelabs.com/services/orlando</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://www.convelabs.com/locations/orlando</loc>
+    <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-    <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
-      <image:title>ConveLabs Orlando Services</image:title>
-      <image:caption>Lab testing and phlebotomy services in Orlando</image:caption>
-    </image:image>
+    <priority>0.95</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/services/winter-park</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://www.convelabs.com/locations/winter-park</loc>
+    <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
-    <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
-      <image:title>ConveLabs Winter Park Services</image:title>
-      <image:caption>Lab testing and phlebotomy services in Winter Park</image:caption>
-    </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/services/windermere</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://www.convelabs.com/locations/windermere</loc>
+    <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
-    <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
-      <image:title>ConveLabs Windermere Services</image:title>
-      <image:caption>Lab testing and phlebotomy services in Windermere</image:caption>
-    </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/services/doctor-phillips</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://www.convelabs.com/locations/doctor-phillips</loc>
+    <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
-    <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
-      <image:title>ConveLabs Doctor Phillips Services</image:title>
-      <image:caption>Lab testing and phlebotomy services in Doctor Phillips</image:caption>
-    </image:image>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/isleworth</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/bay-hill</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/golden-oak</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <!-- Mid-Tier Locations -->
+  <url>
+    <loc>https://www.convelabs.com/locations/lake-nona</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/celebration</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/heathrow-golf</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/lake-mary</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/reunion</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+  </url>
+  <!-- Extended Service Areas -->
+  <url>
+    <loc>https://www.convelabs.com/locations/altamonte-springs</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/kissimmee</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/sanford</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/clermont</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/maitland</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://www.convelabs.com/locations/oviedo</loc>
+    <lastmod>2026-04-12</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
   </url>
 
   <!-- Blog pages -->

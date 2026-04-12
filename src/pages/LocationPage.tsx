@@ -61,7 +61,7 @@ const LocationPage: React.FC = () => {
             "aggregateRating": {
               "@type": "AggregateRating",
               "ratingValue": "5.0",
-              "reviewCount": "127",
+              "reviewCount": "164",
             },
           })}
         </script>
