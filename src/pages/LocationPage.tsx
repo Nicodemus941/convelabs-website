@@ -4,7 +4,9 @@ import { Helmet } from "react-helmet-async";
 import { Container } from "@/components/ui/container";
 import DashboardWrapper from "@/components/dashboards/DashboardWrapper";
 import { Shield, Clock, Star, Phone, MapPin, CheckCircle } from "lucide-react";
-import { getLocationBySlug } from "@/data/locations";
+import { getLocationBySlug, getLocationFAQs, getNearbyCities } from "@/data/locations";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Link } from "react-router-dom";
 import { useBookingModalSafe } from "@/contexts/BookingModalContext";
 
 const LocationPage: React.FC = () => {
@@ -66,7 +68,23 @@ const LocationPage: React.FC = () => {
           })}
         </script>
         
-        <link rel="canonical" href={`https://convelabs.com${location.seo.canonicalPath}`} />
+        <link rel="canonical" href={`https://convelabs.com/locations/${location.slug}`} />
+
+        {/* FAQ Schema for rich snippets */}
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": getLocationFAQs(location).map(faq => ({
+              "@type": "Question",
+              "name": faq.question,
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": faq.answer,
+              },
+            })),
+          })}
+        </script>
       </Helmet>
 
       <DashboardWrapper>
@@ -163,6 +181,48 @@ const LocationPage: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* FAQ Section */}
+            <div className="mb-16">
+              <h2 className="text-2xl font-bold mb-6 font-playfair text-center">
+                Frequently Asked Questions — {location.name}
+              </h2>
+              <Accordion type="single" collapsible className="space-y-3 max-w-3xl mx-auto">
+                {getLocationFAQs(location).map((faq, i) => (
+                  <AccordionItem
+                    key={i}
+                    value={`faq-${i}`}
+                    className="border border-border rounded-xl px-5 data-[state=open]:bg-muted/30"
+                  >
+                    <AccordionTrigger className="text-left text-base font-medium hover:no-underline py-4">
+                      {faq.question}
+                    </AccordionTrigger>
+                    <AccordionContent className="text-muted-foreground text-sm leading-relaxed pb-4">
+                      {faq.answer}
+                    </AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </div>
+
+            {/* Nearby Cities */}
+            {getNearbyCities(location.slug).length > 0 && (
+              <div className="mb-16 text-center">
+                <h2 className="text-xl font-bold mb-4">Also Serving Nearby</h2>
+                <div className="flex flex-wrap justify-center gap-3">
+                  {getNearbyCities(location.slug).map((city) => (
+                    <Link
+                      key={city.slug}
+                      to={`/locations/${city.slug}`}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border rounded-full text-sm font-medium hover:border-conve-red hover:text-conve-red transition-colors"
+                    >
+                      <MapPin className="h-3.5 w-3.5" />
+                      {city.name}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Call to Action */}
             <div className="text-center luxury-gradient-bg p-12 rounded-2xl">

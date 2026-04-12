@@ -41,6 +41,7 @@ export interface LocationData {
   }[];
   ctaTitle: string;
   ctaDescription: string;
+  nearbyCities?: string[]; // slugs of nearby location pages
 }
 
 export const locations: Record<string, LocationData> = {
@@ -909,7 +910,7 @@ export const locations: Record<string, LocationData> = {
       { title: "Central Location", description: "Conveniently located between Orlando and Winter Park." },
       { title: "Business District Coverage", description: "Serving Maitland Center offices." },
       { title: "Fast Results", description: "24-48 hour turnaround." },
-      { title: "Transparent Pricing", description: "Starting at $125, no hidden fees." },
+      { title: "Transparent Pricing", description: "From $55 office / $150 mobile. Members save 15-25%." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Maitland",
     ctaDescription: "Convenient at-home lab testing for Maitland residents and professionals.",
@@ -923,3 +924,63 @@ export const getLocationBySlug = (slug: string): LocationData | undefined => {
 export const getAllLocationSlugs = (): string[] => {
   return Object.keys(locations);
 };
+
+// Nearby cities map for internal linking
+export const NEARBY_CITIES: Record<string, string[]> = {
+  'windermere': ['doctor-phillips', 'bay-hill', 'isleworth', 'golden-oak', 'orlando'],
+  'isleworth': ['windermere', 'bay-hill', 'doctor-phillips', 'golden-oak'],
+  'bay-hill': ['doctor-phillips', 'windermere', 'isleworth', 'orlando'],
+  'golden-oak': ['celebration', 'lake-nona', 'windermere', 'kissimmee'],
+  'lake-nona': ['orlando', 'celebration', 'kissimmee', 'golden-oak'],
+  'doctor-phillips': ['windermere', 'bay-hill', 'orlando', 'winter-park'],
+  'orlando': ['winter-park', 'doctor-phillips', 'maitland', 'altamonte-springs', 'lake-nona'],
+  'winter-park': ['orlando', 'maitland', 'oviedo', 'altamonte-springs'],
+  'celebration': ['kissimmee', 'golden-oak', 'lake-nona', 'reunion'],
+  'heathrow-golf': ['lake-mary', 'sanford', 'altamonte-springs', 'oviedo'],
+  'lake-mary': ['heathrow-golf', 'sanford', 'altamonte-springs', 'maitland'],
+  'reunion': ['celebration', 'kissimmee', 'clermont', 'golden-oak'],
+  'altamonte-springs': ['maitland', 'winter-park', 'orlando', 'lake-mary'],
+  'kissimmee': ['celebration', 'reunion', 'lake-nona', 'orlando'],
+  'sanford': ['lake-mary', 'heathrow-golf', 'oviedo', 'altamonte-springs'],
+  'clermont': ['windermere', 'reunion', 'winter-park'],
+  'maitland': ['winter-park', 'altamonte-springs', 'orlando', 'lake-mary'],
+  'oviedo': ['winter-park', 'sanford', 'lake-mary', 'orlando'],
+};
+
+export function getNearbyCities(slug: string): { slug: string; name: string }[] {
+  const nearby = NEARBY_CITIES[slug] || [];
+  return nearby
+    .map(s => locations[s] ? { slug: s, name: locations[s].name } : null)
+    .filter(Boolean) as { slug: string; name: string }[];
+}
+
+// Generate city-specific FAQs dynamically
+export function getLocationFAQs(location: LocationData): { question: string; answer: string }[] {
+  const name = location.name;
+  return [
+    {
+      question: `How much does mobile phlebotomy cost in ${name}?`,
+      answer: `Mobile blood draws in ${name} start at $150 per visit. Office visits are $55. Senior patients (65+) pay $100. Members save 15-25% on all services. Additional patients at the same location are $75 each.`,
+    },
+    {
+      question: `Is same-day mobile phlebotomy available in ${name}?`,
+      answer: `Yes! ConveLabs offers same-day appointments in ${name} when available. STAT/same-day appointments have a $100 surcharge. Our operating hours are Monday-Friday 6 AM - 1:30 PM, with Saturday appointments available for members.`,
+    },
+    {
+      question: `What areas in ${name} do you serve?`,
+      answer: `We serve all of ${name} and surrounding neighborhoods including ${location.serviceAreas.map(a => a.name).join(', ')}. Our licensed phlebotomists come to your home, office, or hotel.`,
+    },
+    {
+      question: `Do I need a doctor's order for blood work in ${name}?`,
+      answer: `For most lab tests, yes — a doctor's lab order is required. You can upload your lab order during booking, or we can retrieve it from your doctor's office via fax.`,
+    },
+    {
+      question: `How quickly do I get results from a blood draw in ${name}?`,
+      answer: `Most blood test results are available within 24-48 hours through your lab's patient portal (LabCorp, Quest Diagnostics, AdventHealth, or Orlando Health). We deliver your samples directly to the lab of your choice.`,
+    },
+    {
+      question: `Are ConveLabs phlebotomists licensed in ${name}?`,
+      answer: `Absolutely. All ConveLabs phlebotomists are licensed, certified, insured, and background-checked. We maintain HIPAA compliance and use hospital-grade equipment for every blood draw.`,
+    },
+  ];
+}
