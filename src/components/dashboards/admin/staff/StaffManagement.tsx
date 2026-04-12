@@ -18,7 +18,7 @@ const StaffManagement: React.FC = () => {
     error,
     fetchStaffProfiles: loadStaffProfiles,
   } = useStaffProfiles();
-  const [filters, setFilters] = useState({ role: '', specialty: '' });
+  const [filters, setFilters] = useState<Record<string, any>>({ role: '', specialty: '' });
   
   const [showForm, setShowForm] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
