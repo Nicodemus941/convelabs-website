@@ -22,64 +22,74 @@ const PAY_PER_VISIT = [
 
 const MEMBERSHIP_TIERS = [
   {
-    name: "Essential",
-    annual: 299,
-    discount: "15%",
+    name: "Member",
+    annual: 99,
     badge: null,
     color: "border-blue-200",
     badgeColor: "",
+    mobilePrice: "$130",
+    officePrice: "$49",
+    seniorPrice: "$85",
+    addlPatient: "$55",
     features: [
-      "15% off all services",
+      "Mobile visits: $130 (save $20)",
+      "Office visits: $49 (save $6)",
+      "Senior visits: $85 (save $15)",
       "Weekend appointments (Sat 6 AM - 9:30 AM)",
-      "Priority scheduling",
-      "Digital receipts & appointment history",
       "Online patient portal access",
     ],
   },
   {
-    name: "Premium",
-    annual: 599,
-    discount: "20%",
+    name: "VIP",
+    annual: 199,
     badge: "Most Popular",
     color: "border-conve-red",
     badgeColor: "bg-conve-red",
+    mobilePrice: "$115",
+    officePrice: "$45",
+    seniorPrice: "$75",
+    addlPatient: "$45",
     features: [
-      "20% off all services",
+      "Mobile visits: $115 (save $35)",
+      "Office visits: $45 (save $10)",
+      "Senior visits: $75 (save $25)",
       "Weekend appointments (Sat 6 AM - 9:30 AM)",
       "Priority same-day scheduling",
-      "Family member add-ons at $45 each",
+      "Family add-ons at $45 each",
       "Extended hours availability",
-      "Digital receipts & appointment history",
-      "Online patient portal access",
     ],
   },
   {
     name: "Concierge",
-    annual: 1499,
-    discount: "25%",
+    annual: 399,
     badge: "Best Value",
     color: "border-amber-400",
     badgeColor: "bg-amber-500",
+    mobilePrice: "$99",
+    officePrice: "$39",
+    seniorPrice: "$65",
+    addlPatient: "$35",
     features: [
-      "25% off all services",
+      "Mobile visits: $99 (save $51)",
+      "Office visits: $39 (save $16)",
+      "Senior visits: $65 (save $35)",
       "Weekend & extended hours",
       "Dedicated phlebotomist",
-      "Same-day guaranteed availability",
+      "Same-day guaranteed",
       "NDA available for VIP clients",
-      "Family member add-ons at $45 each",
+      "Family add-ons at $35 each",
       "Concierge phone support",
-      "Priority results notification",
     ],
   },
 ];
 
 const FAQS = [
-  { q: "What does the membership fee cover?", a: "The membership is an annual fee that gives you a percentage discount on every service you book (15-25% depending on tier), plus access to weekend appointments which are exclusive to members. It's not a credit system — you pay per visit at the discounted rate." },
-  { q: "Can non-members still book appointments?", a: "Absolutely. Non-members can book any service at our standard rates (office visits from $55, mobile from $150). However, non-members cannot book weekend appointments — those are member-exclusive." },
-  { q: "How does the family add-on work?", a: "Premium and Concierge members can add family members to their appointment for just $45 per additional patient at the same location." },
-  { q: "Can I cancel my membership?", a: "Yes, you can cancel anytime. Memberships are billed annually. If you cancel, you'll retain your benefits until the end of your current billing period." },
-  { q: "What's included in the Concierge tier?", a: "Concierge members get 25% off all services, a dedicated phlebotomist, guaranteed same-day availability, NDA options for privacy, and concierge phone support." },
-  { q: "Is the mobile blood draw covered by insurance?", a: "The lab tests themselves are generally covered by insurance. The mobile visit fee ($150, or discounted for members) is an out-of-pocket convenience fee. We provide superbills for reimbursement." },
+  { q: "What does the membership fee cover?", a: "The membership is a low annual fee ($99-$399) that unlocks discounted per-visit pricing on every service, plus access to weekend appointments which are member-exclusive. You pay per visit at the discounted rate — no credits or prepayment required." },
+  { q: "Can non-members still book appointments?", a: "Absolutely. Non-members can book any service at standard rates (office from $55, mobile from $150). However, weekend appointments are member-exclusive." },
+  { q: "How quickly does the membership pay for itself?", a: "The $99 Member tier pays for itself in just 5 mobile visits ($20 saved per visit). VIP pays for itself in 6 visits. Most patients recoup their fee within the first few appointments." },
+  { q: "How does the family add-on work?", a: "VIP and Concierge members can add family members for $45 or $35 per additional patient at the same location — significantly less than booking separate visits." },
+  { q: "Can I cancel my membership?", a: "Yes. Memberships are billed annually. If you cancel, you keep your benefits until the end of your billing period." },
+  { q: "What makes Concierge worth $399/year?", a: "Concierge members pay just $99 per mobile visit (vs $150 standard), get a dedicated phlebotomist, guaranteed same-day availability, NDA options, and concierge phone support. If you book 8+ visits per year, it saves over $400." },
 ];
 
 const Pricing = () => {
@@ -149,7 +159,7 @@ const Pricing = () => {
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">That's ${Math.round(tier.annual / 12)}/month billed annually</p>
                   <div className="mt-3 inline-flex items-center gap-1 bg-green-100 text-green-800 text-sm font-bold px-3 py-1 rounded-full">
-                    <Percent className="h-3.5 w-3.5" /> {tier.discount} off all services
+                    <Percent className="h-3.5 w-3.5" /> Mobile from {tier.mobilePrice}
                   </div>
                   <div className="mt-5 space-y-3">
                     {tier.features.map((f) => (
@@ -169,12 +179,12 @@ const Pricing = () => {
           <div className="mt-8 text-center">
             <Card className="inline-block">
               <CardContent className="py-4 px-6">
-                <p className="text-sm font-medium mb-2">Mobile blood draw savings example:</p>
+                <p className="text-sm font-medium mb-2">Mobile blood draw pricing comparison:</p>
                 <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
                   <span className="text-muted-foreground">Non-member: <span className="line-through">$150</span></span>
-                  <span className="text-blue-600 font-bold">Essential: $127.50</span>
-                  <span className="text-conve-red font-bold">Premium: $120</span>
-                  <span className="text-amber-600 font-bold">Concierge: $112.50</span>
+                  <span className="text-blue-600 font-bold">Member: $130</span>
+                  <span className="text-conve-red font-bold">VIP: $115</span>
+                  <span className="text-amber-600 font-bold">Concierge: $99</span>
                 </div>
               </CardContent>
             </Card>

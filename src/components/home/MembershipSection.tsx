@@ -6,52 +6,47 @@ import { withSource, ENROLLMENT_URL } from '@/lib/constants/urls';
 
 const TIERS = [
   {
-    name: 'Essential',
-    price: 29,
-    period: '/month',
-    annual: '$299/year (save 15%)',
-    discount: '15% off',
+    name: 'Member',
+    price: 99,
+    period: '/year',
+    highlight: 'Mobile visits from $130',
     badge: null,
     color: 'border-blue-200 bg-blue-50/30',
     features: [
-      '15% off all services',
-      'Weekend appointments (Sat 6 AM - 9:30 AM)',
-      'Priority scheduling',
-      'Digital receipts & history',
+      'Mobile visits: $130 (save $20)',
+      'Office visits: $49 (save $6)',
+      'Weekend appointments (members only)',
+      'Patient portal access',
     ],
   },
   {
-    name: 'Premium',
-    price: 59,
-    period: '/month',
-    annual: '$599/year (save 15%)',
-    discount: '20% off',
+    name: 'VIP',
+    price: 199,
+    period: '/year',
+    highlight: 'Mobile visits from $115',
     badge: 'Most Popular',
     color: 'border-conve-red/30 bg-red-50/30 ring-2 ring-conve-red/10',
     features: [
-      '20% off all services',
-      'Weekend appointments (Sat 6 AM - 9:30 AM)',
-      'Priority same-day scheduling',
-      'Family member add-ons at $45 each',
-      'Extended hours availability',
-      'Digital receipts & history',
+      'Mobile visits: $115 (save $35)',
+      'Office visits: $45 (save $10)',
+      'Weekend + priority scheduling',
+      'Family add-ons at $45 each',
+      'Extended hours',
     ],
   },
   {
     name: 'Concierge',
-    price: 149,
-    period: '/month',
-    annual: '$1,499/year (save 16%)',
-    discount: '25% off',
+    price: 399,
+    period: '/year',
+    highlight: 'Mobile visits from $99',
     badge: 'Best Value',
     color: 'border-amber-200 bg-amber-50/30',
     features: [
-      '25% off all services',
-      'Weekend & extended hours',
+      'Mobile visits: $99 (save $51)',
+      'Office visits: $39 (save $16)',
       'Dedicated phlebotomist',
-      'Same-day guaranteed',
-      'NDA available for VIP clients',
-      'Family member add-ons at $45 each',
+      'Same-day guaranteed + NDA',
+      'Family add-ons at $35 each',
       'Concierge phone support',
     ],
   },
@@ -91,11 +86,10 @@ const MembershipSection = () => {
                 <span className="text-4xl font-bold">${tier.price}</span>
                 <span className="text-muted-foreground">{tier.period}</span>
               </div>
-              <p className="text-xs text-muted-foreground mt-1">{tier.annual}</p>
 
               <div className="mt-2 inline-flex items-center gap-1 bg-green-100 text-green-800 text-sm font-semibold px-2.5 py-1 rounded-full">
                 <Percent className="h-3.5 w-3.5" />
-                {tier.discount} all services
+                {tier.highlight}
               </div>
 
               <div className="mt-5 space-y-3">
@@ -123,11 +117,11 @@ const MembershipSection = () => {
         {/* Non-member comparison */}
         <div className="mt-10 text-center">
           <div className="inline-flex items-center gap-3 bg-white border rounded-xl px-6 py-3 text-sm">
-            <span className="text-muted-foreground">Non-member mobile visit:</span>
+            <span className="text-muted-foreground">Non-member mobile:</span>
             <span className="line-through text-muted-foreground">$150</span>
-            <span className="font-bold text-green-600">Essential: $127.50</span>
-            <span className="font-bold text-green-600">Premium: $120</span>
-            <span className="font-bold text-green-600">Concierge: $112.50</span>
+            <span className="font-bold text-blue-600">Member: $130</span>
+            <span className="font-bold text-conve-red">VIP: $115</span>
+            <span className="font-bold text-amber-600">Concierge: $99</span>
           </div>
         </div>
 

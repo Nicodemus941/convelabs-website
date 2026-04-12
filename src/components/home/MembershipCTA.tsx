@@ -30,11 +30,11 @@ const MembershipCTA = () => {
   ];
 
   const valueProps = [
-    "Save 15-25% on every service — no credits to track",
+    "Mobile visits from $99 — save up to $51 per visit",
     "Weekend appointments: Saturday 6 AM - 9:30 AM (members only)",
     "Priority and same-day scheduling",
-    "Plans from $29/month for individuals to $149/month for concierge",
-    "Family member add-ons at just $45 per person",
+    "Plans from just $99/year — pays for itself in 5 visits",
+    "Family member add-ons from $35 per person",
     "Trusted by 500+ patients across Central Florida"
   ];
 

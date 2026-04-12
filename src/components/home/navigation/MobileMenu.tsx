@@ -176,7 +176,7 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }: MobileMenuProps) => {
                   <Crown className="h-5 w-5 text-amber-600" />
                   <div>
                     <div className="font-semibold text-sm">Membership Plans</div>
-                    <div className="text-xs text-muted-foreground">From $29/month</div>
+                    <div className="text-xs text-muted-foreground">From $99/year</div>
                   </div>
                 </div>
                 <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded-full">
