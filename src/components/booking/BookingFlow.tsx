@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTenant } from '@/contexts/tenant/TenantContext';
@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { calculateTotal, getServiceById } from '@/services/pricing/pricingService';
 import { createAppointmentCheckoutSession } from '@/services/stripe/appointmentCheckout';
+import { supabase } from '@/integrations/supabase/client';
 
 // Import step components
 import ServiceSelectionStep from './ServiceSelectionStep';
@@ -18,7 +19,9 @@ import PatientInfoStep from './PatientInfoStep';
 import LocationSelectionStep from './LocationSelectionStep';
 import BookingReviewStep from './BookingReviewStep';
 import CheckoutStep from './CheckoutStep';
+import LabOrderUploadStep from './LabOrderUploadStep';
 import BookingConfirmation from './BookingConfirmation';
+import BookingChatAssistant from './BookingChatAssistant';
 
 interface BookingFlowProps {
   tenantId?: string;
@@ -30,10 +33,11 @@ enum BookingStep {
   Service = 0,
   DateTime = 1,
   PatientInfo = 2,
-  Location = 3,
-  Review = 4,
-  Checkout = 5,
-  Confirmation = 6
+  LabOrder = 3,
+  Location = 4,
+  Review = 5,
+  Checkout = 6,
+  Confirmation = 7
 }
 
 const BookingFlow: React.FC<BookingFlowProps> = ({
@@ -51,6 +55,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
   const [availableServices, setAvailableServices] = useState([]);
   const [isServicesLoading, setIsServicesLoading] = useState(true);
+  const [labOrderFile, setLabOrderFile] = useState<File | null>(null);
 
   // Initialize form
   const methods = useForm<BookingFormValues>({
@@ -126,6 +131,21 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
         weekend: data.serviceDetails.weekend,
       }, tipAmount);
 
+      // Upload lab order file if present
+      let labOrderFilePath: string | undefined;
+      if (labOrderFile) {
+        const fileName = `${Date.now()}_${labOrderFile.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('lab-orders')
+          .upload(fileName, labOrderFile);
+        if (uploadError) {
+          console.error('Lab order upload failed:', uploadError);
+          // Non-blocking — continue without lab order
+        } else {
+          labOrderFilePath = fileName;
+        }
+      }
+
       // Build the appointment date string
       const appointmentDate = data.date instanceof Date
         ? data.date.toISOString()
@@ -179,7 +199,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
   };
 
   // Define the steps for the progress indicator
-  const steps = ['Service', 'Date & Time', 'Patient Info', 'Location', 'Review', 'Checkout'];
+  const steps = ['Service', 'Date & Time', 'Patient Info', 'Lab Order', 'Location', 'Review', 'Checkout'];
 
   return (
     <div className="w-full max-w-4xl mx-auto">
@@ -247,6 +267,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
             />
           )}
 
+          {currentStep === BookingStep.LabOrder && (
+            <LabOrderUploadStep
+              onNext={handleNext}
+              onBack={handleBack}
+              onFileSelected={setLabOrderFile}
+              selectedFile={labOrderFile}
+            />
+          )}
+
           {currentStep === BookingStep.Location && (
             <LocationSelectionStep
               onNext={handleNext}
@@ -282,6 +311,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({
           )}
         </form>
       </FormProvider>
+      {/* Floating AI chat assistant */}
+      {currentStep < BookingStep.Confirmation && (
+        <BookingChatAssistant currentStep={currentStep} />
+      )}
     </div>
   );
 };

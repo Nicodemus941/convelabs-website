@@ -1,11 +1,12 @@
 
 import React from 'react';
 import { format } from 'date-fns';
-import { Check, Calendar, Clock, MapPin, Phone, Mail, User } from 'lucide-react';
+import { Check, Calendar, Clock, MapPin, Phone, Mail, User, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface BookingConfirmationProps {
   appointmentId: string | null;
@@ -25,7 +26,9 @@ const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
   tenantName = 'ConveLabs'
 }) => {
   const navigate = useNavigate();
-  
+  const { user } = useAuth();
+  const isGuest = !user;
+
   const selectedService = services.find(s => s.id === formData.serviceDetails?.selectedService);
   
   return (
@@ -130,15 +133,32 @@ const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
             </div>
           </div>
           
+          {isGuest && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+              <UserPlus className="h-6 w-6 text-blue-600 mx-auto mb-2" />
+              <p className="font-medium text-blue-900">Create an account to track your appointments</p>
+              <p className="text-sm text-blue-700 mt-1">View status, rebook, and manage your health records.</p>
+              <Button
+                onClick={() => navigate(`/signup?email=${encodeURIComponent(formData.patientDetails?.email || '')}`)}
+                className="mt-3 bg-blue-600 hover:bg-blue-700 text-white"
+                size="sm"
+              >
+                Create Account
+              </Button>
+            </div>
+          )}
+
           <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
-            <Button 
-              onClick={() => navigate('/dashboard')}
-              className="w-full sm:w-auto"
-            >
-              Go to Dashboard
-            </Button>
-            <Button 
-              variant="outline" 
+            {!isGuest && (
+              <Button
+                onClick={() => navigate('/dashboard')}
+                className="w-full sm:w-auto"
+              >
+                Go to Dashboard
+              </Button>
+            )}
+            <Button
+              variant="outline"
               onClick={() => navigate('/')}
               className="w-full sm:w-auto"
             >

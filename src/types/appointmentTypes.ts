@@ -60,6 +60,11 @@ export interface BookingFormValues {
     phone: string;
     dateOfBirth?: Date;
   };
+  labOrder?: {
+    skipped?: boolean;
+    doctorFaxNumber?: string;
+    hasFile?: boolean;
+  };
   termsAccepted?: boolean;
 }
 
@@ -98,6 +103,11 @@ export const bookingFormSchema = z.object({
     phone: z.string().optional(),
     dateOfBirth: z.date().optional()
   }),
+  labOrder: z.object({
+    skipped: z.boolean().optional(),
+    doctorFaxNumber: z.string().optional(),
+    hasFile: z.boolean().optional(),
+  }).optional(),
   termsAccepted: z.boolean().optional()
 });
 
