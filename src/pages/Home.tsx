@@ -102,7 +102,7 @@ const Home = () => {
             aggregateRating: {
               "@type": "AggregateRating",
               ratingValue: "5.0",
-              reviewCount: "500",
+              reviewCount: "164",
               bestRating: "5",
               worstRating: "1",
             },
@@ -155,7 +155,7 @@ const Home = () => {
       <ReviewSchema
         businessName="ConveLabs"
         ratingValue="5.0"
-        reviewCount="500"
+        reviewCount="164"
         reviews={[
           {
             author: "Dr. Michael Johnson, MD",
