@@ -57,8 +57,12 @@ Deno.serve(async (req) => {
       // Check if this is a Founding Member signup (before August 1st)
       const isFoundingMember = metadata.founding_member === 'true';
       
+      // Handle appointment payments
+      if (metadata.type === 'appointment_payment') {
+        await handleAppointmentPayment(session);
+      }
       // Handle credit pack purchases
-      if (metadata.type === 'credit_pack') {
+      else if (metadata.type === 'credit_pack') {
         await handleCreditPackPurchase(session);
       }
       // Handle membership upgrades
@@ -392,6 +396,88 @@ async function handlePaymentFailure(invoice: any) {
     return data;
   } catch (error) {
     console.error('Error handling payment failure:', error);
+    throw error;
+  }
+}
+
+// Handle appointment payments (one-time blood draw bookings)
+async function handleAppointmentPayment(session: any) {
+  try {
+    const { metadata, id: checkoutSessionId, payment_intent } = session;
+
+    const appointmentDate = metadata.appointment_date;
+    const appointmentTime = metadata.appointment_time || null;
+    const servicePrice = parseInt(metadata.service_price || '0', 10); // cents
+    const tipAmount = parseInt(metadata.tip_amount || '0', 10); // cents
+    const userId = metadata.user_id || null;
+
+    // Build address string
+    const addressParts = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean);
+    const fullAddress = addressParts.join(', ');
+
+    // Find or determine patient_id
+    let patientId = userId;
+    if (!patientId) {
+      // Guest checkout — try to find user by email or use a placeholder
+      const email = metadata.patient_email;
+      if (email) {
+        const { data: existingUser } = await supabaseClient
+          .from('auth.users')
+          .select('id')
+          .eq('email', email)
+          .maybeSingle();
+        patientId = existingUser?.id || null;
+      }
+    }
+
+    // Create the appointment record
+    const { data: appointment, error: appointmentError } = await supabaseClient
+      .from('appointments')
+      .insert([{
+        appointment_date: appointmentDate,
+        appointment_time: appointmentTime,
+        status: 'scheduled',
+        payment_status: 'completed',
+        patient_id: patientId,
+        patient_name: `${metadata.patient_first_name} ${metadata.patient_last_name}`.trim(),
+        patient_email: metadata.patient_email,
+        patient_phone: metadata.patient_phone || null,
+        address: fullAddress,
+        zipcode: metadata.zip_code || '',
+        service_type: metadata.service_type || 'mobile',
+        service_name: metadata.service_name || 'Blood Draw',
+        notes: metadata.additional_notes || null,
+        total_amount: (servicePrice + tipAmount) / 100, // convert cents to dollars
+        service_price: servicePrice / 100,
+        tip_amount: tipAmount / 100,
+        surcharge_amount: 0,
+        stripe_checkout_session_id: checkoutSessionId,
+        stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
+        extended_hours: false,
+        weekend_service: metadata.weekend === 'true',
+      }])
+      .select()
+      .single();
+
+    if (appointmentError) {
+      throw new Error(`Failed to create appointment: ${appointmentError.message}`);
+    }
+
+    console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate}`);
+
+    // Try to send confirmation notification
+    try {
+      await supabaseClient.functions.invoke('send-appointment-confirmation', {
+        body: { appointmentId: appointment.id },
+      });
+    } catch (notifErr) {
+      console.error('Failed to send appointment confirmation:', notifErr);
+      // Don't fail the whole operation if notification fails
+    }
+
+    return appointment;
+  } catch (error) {
+    console.error('Error processing appointment payment:', error);
     throw error;
   }
 }

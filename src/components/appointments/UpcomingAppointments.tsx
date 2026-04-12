@@ -7,9 +7,11 @@ import { formatDate } from "@/utils/dateUtils";
 import { CalendarClock, MapPin, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { toast } from "@/components/ui/sonner";
 
 const UpcomingAppointments = () => {
-  const { getAppointments, isLoading, appointments } = useAppointments();
+  const { getAppointments, isLoading, appointments, cancelAppointment } = useAppointments();
   const [upcomingAppointments, setUpcomingAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
@@ -91,7 +93,36 @@ const UpcomingAppointments = () => {
                     <a href={`/appointments/${appointment.id}/details`}>View Details</a>
                   </Button>
                   {appointment.status === 'scheduled' && (
-                    <Button variant="destructive" size="sm">Cancel</Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" size="sm">Cancel</Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Cancel Appointment</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            Are you sure you want to cancel this appointment? This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Keep Appointment</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={async () => {
+                              const success = await cancelAppointment(appointment.id);
+                              if (success) {
+                                toast.success('Appointment cancelled');
+                                getAppointments();
+                              } else {
+                                toast.error('Failed to cancel appointment');
+                              }
+                            }}
+                          >
+                            Cancel Appointment
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   )}
                 </div>
               </CardContent>

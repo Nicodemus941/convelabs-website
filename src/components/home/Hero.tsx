@@ -6,7 +6,7 @@ import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 
 const Hero = () => {
   const handleBookNow = () => {
-    window.open(GHS_BOOKING_PAGE, '_blank', 'noopener,noreferrer');
+    window.location.href = GHS_BOOKING_PAGE;
   };
 
   const containerVariants = {

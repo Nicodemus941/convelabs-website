@@ -1,28 +1,32 @@
 /**
- * Centralized external URL constants for Green Health Systems platform.
- * All booking, enrollment, auth, and embed URLs are managed here.
- * Update this single file when URLs change.
+ * Centralized URL constants for ConveLabs platform.
  */
 
-// Primary booking route (keeps users on ConveLabs, embeds GHS booking flow)
+// Primary booking route (internal booking flow)
 export const BOOKING_URL = '/book-now';
 
-// Temporary external GHS booking page while availability sync is being fixed
-export const GHS_BOOKING_PAGE = 'https://greenhealthsystems.com/book/convelabs';
+// Booking result paths
+export const BOOKING_SUCCESS_PATH = '/book-now?status=success';
+export const BOOKING_CANCEL_PATH = '/book-now?status=cancel';
 
-// External URLs
-export const ENROLLMENT_URL = 'https://app.greenhealthsystems.com/enroll';
-export const AUTH_URL = 'https://app.greenhealthsystems.com/auth';
-export const TESTS_URL = 'https://app.greenhealthsystems.com/tests';
+// Enrollment / membership (internal routes)
+export const ENROLLMENT_URL = '/onboarding/plan-selection';
 
-// Embedded booking widget
-export const EMBED_URL = 'https://greenhealthsystems.com/embed/convelabs';
+// Auth (internal routes)
+export const AUTH_URL = '/login';
 
-// Origin for postMessage verification
-export const GHS_ORIGIN = 'greenhealthsystems.com';
+// Lab tests
+export const TESTS_URL = '/lab-testing';
 
-// Preconnect domain
-export const GHS_PRECONNECT = 'https://greenhealthsystems.com';
+// Legacy GHS aliases — all point to internal routes now
+/** @deprecated Use BOOKING_URL instead */
+export const GHS_BOOKING_PAGE = '/book-now';
+/** @deprecated No longer used */
+export const EMBED_URL = '/book-now';
+/** @deprecated No longer used */
+export const GHS_ORIGIN = '';
+/** @deprecated No longer used */
+export const GHS_PRECONNECT = '';
 
 /**
  * Helper to append UTM source to a URL
@@ -33,7 +37,7 @@ export const withSource = (base: string, source: string) => {
 };
 
 /**
- * Helper to build embed URL with UTM parameters
+ * Helper to build booking URL with UTM parameters
  */
 export const buildEmbedUrl = (params: {
   source?: string;
@@ -47,5 +51,5 @@ export const buildEmbedUrl = (params: {
   if (params.campaign) searchParams.set('utm_campaign', params.campaign);
   if (params.content) searchParams.set('utm_content', params.content);
   const qs = searchParams.toString();
-  return qs ? `${EMBED_URL}?${qs}` : EMBED_URL;
+  return qs ? `${BOOKING_URL}?${qs}` : BOOKING_URL;
 };

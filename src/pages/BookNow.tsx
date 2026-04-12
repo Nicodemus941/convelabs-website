@@ -1,21 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Loader2, AlertCircle, Phone } from 'lucide-react';
+import { Loader2, AlertCircle, Phone, CheckCircle } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { analytics } from '@/utils/analytics';
-import { getCheckoutStatus, type CheckoutStatusResponse } from '@/services/ghsBookingService';
-import BookingPaymentConfirmation from '@/components/booking/BookingPaymentConfirmation';
-import { GHS_BOOKING_PAGE } from '@/lib/constants/urls';
+import { verifyAppointmentCheckout } from '@/services/stripe/appointmentCheckout';
+import BookingFlow from '@/components/booking/BookingFlow';
 
 type PageMode = 'booking' | 'verifying' | 'confirmed' | 'cancelled' | 'error';
+
+interface ConfirmedBooking {
+  id: string;
+  appointment_date: string;
+  appointment_time?: string;
+  patient_name?: string;
+  patient_email?: string;
+  address?: string;
+  service_name?: string;
+  total_amount?: number;
+  tip_amount?: number;
+}
 
 const BookNow: React.FC = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get('session_id');
   const status = searchParams.get('status');
-  const zipFromUrl = searchParams.get('zip');
-  const partnerCode = searchParams.get('partner');
 
   const [mode, setMode] = useState<PageMode>(() => {
     if (status === 'success' && sessionId) return 'verifying';
@@ -23,10 +32,10 @@ const BookNow: React.FC = () => {
     return 'booking';
   });
 
-  const [booking, setBooking] = useState<CheckoutStatusResponse | null>(null);
+  const [booking, setBooking] = useState<ConfirmedBooking | null>(null);
   const [verifyError, setVerifyError] = useState('');
 
-  // Poll for checkout status on success return
+  // Poll for checkout verification on success return
   const verifyPayment = useCallback(async () => {
     if (!sessionId) return;
 
@@ -37,24 +46,22 @@ const BookNow: React.FC = () => {
     const poll = async () => {
       attempts++;
       try {
-        const result = await getCheckoutStatus(sessionId);
+        const result = await verifyAppointmentCheckout(sessionId);
 
-        if (result.status === 'completed') {
-          setBooking(result);
+        if (result.status === 'completed' && result.appointment) {
+          setBooking(result.appointment);
           setMode('confirmed');
           analytics.trackFunnelStage('payment_success', 10, { sessionId, bookingId: result.bookingId });
-          analytics.trackFunnelStage('booking_confirmed', 12, { bookingId: result.bookingId });
-          sessionStorage.removeItem('convelabs_booking_summary');
           return;
         }
 
-        if (result.status === 'expired' || result.status === 'cancelled') {
-          setVerifyError('Payment was not completed. Please try again.');
+        if (result.status === 'expired') {
+          setVerifyError('Payment session expired. Please try again.');
           setMode('error');
           return;
         }
 
-        // Still pending — retry
+        // Still pending or processing — retry
         if (attempts < maxAttempts) {
           setTimeout(poll, pollInterval);
         } else {
@@ -93,43 +100,23 @@ const BookNow: React.FC = () => {
       <div className="min-h-[100dvh] bg-background">
         <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-8 md:py-12">
 
-          {/* Default: Redirect to external GHS booking page (temporary) */}
+          {/* Booking flow */}
           {mode === 'booking' && (
-            (() => {
-              // Auto-redirect to external GHS booking page
-              window.open(GHS_BOOKING_PAGE, '_blank', 'noopener,noreferrer');
-              return (
-                <div className="flex flex-col items-center justify-center py-24 gap-4 max-w-md mx-auto text-center">
-                  <h2 className="text-2xl font-bold text-foreground">Redirecting to Booking</h2>
-                  <p className="text-muted-foreground">
-                    A new tab should have opened with our booking page. If it didn't, click below.
-                  </p>
-                  <a
-                    href={GHS_BOOKING_PAGE}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-conve-red hover:bg-conve-red-dark text-white font-semibold rounded-xl transition-colors"
-                  >
-                    Open Booking Page
-                  </a>
-                </div>
-              );
-            })()
+            <BookingFlow />
           )}
 
           {/* Cancelled: Return from Stripe */}
           {mode === 'cancelled' && (
             <div className="flex flex-col items-center justify-center py-24 gap-4 max-w-md mx-auto text-center">
+              <AlertCircle className="h-12 w-12 text-muted-foreground" />
               <h2 className="text-2xl font-bold text-foreground">Payment Cancelled</h2>
               <p className="text-muted-foreground">Your payment was not completed. You can try booking again.</p>
-              <a
-                href={GHS_BOOKING_PAGE}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-conve-red hover:bg-conve-red-dark text-white font-semibold rounded-xl transition-colors"
+              <Button
+                onClick={() => { setMode('booking'); window.history.replaceState({}, '', '/book-now'); }}
+                className="bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
               >
                 Book Again
-              </a>
+              </Button>
             </div>
           )}
 
@@ -149,7 +136,69 @@ const BookNow: React.FC = () => {
 
           {/* Confirmed */}
           {mode === 'confirmed' && booking && (
-            <BookingPaymentConfirmation booking={booking} />
+            <div className="flex flex-col items-center justify-center py-16 gap-6 max-w-lg mx-auto text-center">
+              <div className="h-16 w-16 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="h-10 w-10 text-green-600" />
+              </div>
+              <h2 className="text-3xl font-bold text-foreground">Booking Confirmed!</h2>
+              <p className="text-muted-foreground">
+                Your appointment has been scheduled. A confirmation email has been sent to{' '}
+                <span className="font-medium text-foreground">{booking.patient_email}</span>.
+              </p>
+
+              <div className="bg-muted/50 p-6 rounded-xl w-full text-left space-y-3 text-sm">
+                {booking.service_name && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Service</span>
+                    <span className="font-medium">{booking.service_name}</span>
+                  </div>
+                )}
+                {booking.appointment_date && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Date</span>
+                    <span className="font-medium">
+                      {new Date(booking.appointment_date).toLocaleDateString('en-US', {
+                        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                      })}
+                    </span>
+                  </div>
+                )}
+                {booking.appointment_time && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Time</span>
+                    <span className="font-medium">{booking.appointment_time}</span>
+                  </div>
+                )}
+                {booking.address && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Location</span>
+                    <span className="font-medium text-right max-w-[60%]">{booking.address}</span>
+                  </div>
+                )}
+                {booking.total_amount != null && (
+                  <div className="flex justify-between border-t pt-3 mt-3">
+                    <span className="font-medium">Total Paid</span>
+                    <span className="font-bold text-lg">${booking.total_amount.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                <Button
+                  onClick={() => window.location.href = '/dashboard'}
+                  className="bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
+                >
+                  Go to Dashboard
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => { setMode('booking'); window.history.replaceState({}, '', '/book-now'); }}
+                  className="rounded-xl"
+                >
+                  Book Another
+                </Button>
+              </div>
+            </div>
           )}
 
           {/* Error */}

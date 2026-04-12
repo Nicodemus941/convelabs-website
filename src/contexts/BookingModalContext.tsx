@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState } from 'react';
-import { GHS_BOOKING_PAGE } from '@/lib/constants/urls';
 
 interface BookingModalContextType {
   isOpen: boolean;
@@ -16,11 +15,11 @@ export const BookingModalProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const openModal = (src = 'direct') => {
     setSource(src);
-    // Temporary: redirect to external GHS booking page while availability sync is fixed
+    // Navigate to internal booking page
     const url = src && src !== 'direct'
-      ? `${GHS_BOOKING_PAGE}?utm_source=${encodeURIComponent(src)}`
-      : GHS_BOOKING_PAGE;
-    window.open(url, '_blank', 'noopener,noreferrer');
+      ? `/book-now?source=${encodeURIComponent(src)}`
+      : '/book-now';
+    window.location.href = url;
   };
 
   const closeModal = () => {

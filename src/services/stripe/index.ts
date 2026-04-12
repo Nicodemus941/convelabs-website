@@ -7,6 +7,7 @@ export * from './formatUtils';
 export * from './authentication';
 export * from './labTests';
 export * from './addOnCheckout';
+export * from './appointmentCheckout';
 
 // Export the functions explicitly to avoid interface name conflicts
 export const { createCheckoutSession } = checkoutSessions;

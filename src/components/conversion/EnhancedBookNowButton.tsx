@@ -85,11 +85,10 @@ export const EnhancedBookNowButton: React.FC<EnhancedBookNowButtonProps> = ({
       });
     }
     
-    // Temporary: redirect to external GHS booking page
     const url = source
-      ? `${GHS_BOOKING_PAGE}?utm_source=${encodeURIComponent(source)}`
+      ? `${GHS_BOOKING_PAGE}?source=${encodeURIComponent(source)}`
       : GHS_BOOKING_PAGE;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.location.href = url;
   };
   
   return (

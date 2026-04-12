@@ -13,7 +13,7 @@ interface DashboardWelcomeProps {
 
 const DashboardWelcome = ({ user, handleBookAppointment }: DashboardWelcomeProps) => {
   const handleBookClick = () => {
-    window.open(GHS_BOOKING_PAGE, '_blank', 'noopener,noreferrer');
+    window.location.href = GHS_BOOKING_PAGE;
   };
   
   return (
