@@ -43,9 +43,54 @@ Deno.serve(async (req) => {
     const session = await stripe.checkout.sessions.retrieve(session_id);
 
     if (session.payment_status === 'paid' || session.status === 'complete') {
-      // Payment is complete but webhook hasn't processed yet
+      // Payment confirmed — create appointment if webhook hasn't done it yet
+      const metadata = session.metadata || {};
+      const fullAddress = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean).join(', ');
+
+      const { data: newAppt, error: insertError } = await supabaseClient
+        .from('appointments')
+        .insert([{
+          appointment_date: metadata.appointment_date || new Date().toISOString(),
+          appointment_time: metadata.appointment_time || null,
+          patient_id: metadata.user_id || null,
+          service_type: metadata.service_type || 'mobile',
+          status: 'scheduled',
+          payment_status: 'completed',
+          total_amount: (session.amount_total || 0) / 100,
+          tip_amount: parseInt(metadata.tip_amount || '0') / 100,
+          service_price: parseInt(metadata.service_price || '0') / 100,
+          address: fullAddress || 'Pending',
+          zipcode: metadata.zip_code || '32801',
+          stripe_checkout_session_id: session_id,
+          stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+          notes: `Patient: ${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''} | Service: ${metadata.service_name || metadata.service_type || 'Blood Draw'} | Paid via Stripe`,
+        }])
+        .select()
+        .single();
+
+      if (insertError) {
+        // Might be duplicate — try fetching again
+        const { data: existing } = await supabaseClient
+          .from('appointments')
+          .select('*')
+          .eq('stripe_checkout_session_id', session_id)
+          .maybeSingle();
+
+        if (existing) {
+          return new Response(
+            JSON.stringify({ status: 'completed', appointment: existing, bookingId: existing.id }),
+            { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({ status: 'processing' }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       return new Response(
-        JSON.stringify({ status: 'processing' }),
+        JSON.stringify({ status: 'completed', appointment: newAppt, bookingId: newAppt.id }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
