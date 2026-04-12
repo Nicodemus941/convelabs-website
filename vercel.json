@@ -1,5 +1,15 @@
 {
   "rewrites": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "patients.convelabs.com" }],
+      "destination": "/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "staff.convelabs.com" }],
+      "destination": "/index.html"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
