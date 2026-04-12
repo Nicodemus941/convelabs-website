@@ -124,14 +124,37 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   const handleNext = () => {
     prevStepRef.current = currentStep;
+
+    // Smart skip logic based on visit type
+    if (currentStep === BookingStep.VisitType) {
+      const vt = methods.getValues('serviceDetails.visitType') || '';
+      // Provider partners skip service+date — go straight to Patient Info
+      if (vt.startsWith('partner-')) {
+        methods.setValue('serviceDetails.selectedService', vt);
+        setCurrentStep(BookingStep.PatientInfo);
+        return;
+      }
+      // Therapeutic and specialty-kit skip service selection
+      if (['therapeutic', 'specialty-kit', 'in-office'].includes(vt)) {
+        methods.setValue('serviceDetails.selectedService', vt);
+      }
+    }
+
     setCurrentStep(prev => prev + 1);
-    // Reset sub-step states
     setShowDatePicker(false);
     setShowLabOrder(false);
   };
 
   const handleBack = () => {
     prevStepRef.current = currentStep;
+    const vt = methods.getValues('serviceDetails.visitType') || '';
+
+    // If on Patient Info and was a provider partner, go back to Visit Type
+    if (currentStep === BookingStep.PatientInfo && vt.startsWith('partner-')) {
+      setCurrentStep(BookingStep.VisitType);
+      return;
+    }
+
     setCurrentStep(prev => prev - 1);
   };
 
@@ -289,8 +312,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
               {/* Step 2: Service & Date (combined) */}
               {currentStep === BookingStep.ServiceAndDate && (() => {
                 const vt = methods.getValues('serviceDetails.visitType') || '';
-                // Specialty kit and office visit skip service selection
-                const skipServiceSelection = ['specialty-kit', 'in-office'].includes(vt);
+                // These visit types skip service selection (we know what they're booking)
+                const skipServiceSelection = ['specialty-kit', 'in-office', 'therapeutic'].includes(vt);
 
                 if (skipServiceSelection && !showDatePicker) {
                   // Auto-set service to match visit type and go to date picker
