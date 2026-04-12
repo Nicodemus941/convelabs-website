@@ -73,6 +73,20 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             <span className="text-muted-foreground">Patient</span>
             <span>{getValues('patientDetails.firstName')} {getValues('patientDetails.lastName')}</span>
           </div>
+          {getValues('locationDetails.address') && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Address</span>
+              <span className="text-right max-w-[60%]">
+                {getValues('locationDetails.address')}{getValues('locationDetails.city') ? `, ${getValues('locationDetails.city')}` : ''}{getValues('locationDetails.state') ? `, ${getValues('locationDetails.state')}` : ''} {getValues('locationDetails.zipCode') || ''}
+              </span>
+            </div>
+          )}
+          {getValues('labOrder.labDestination') && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Lab Delivery</span>
+              <span className="font-medium capitalize">{getValues('labOrder.labDestination')?.replace('-', ' ')}</span>
+            </div>
+          )}
         </div>
 
         <Separator />
