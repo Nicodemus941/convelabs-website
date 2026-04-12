@@ -2,11 +2,10 @@
 import React, { useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { Menu, X, Loader2, User, LogOut, Settings, Phone, Calendar, Home, DollarSign, HelpCircle, Info, MapPin } from "lucide-react";
+import { X, Loader2, User, LogOut, Settings, Phone, Calendar, DollarSign, MapPin, Info, Stethoscope, Star, Crown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
-import { AUTH_URL } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
 interface MobileMenuProps {
@@ -41,11 +40,6 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }: MobileMenuProps) => {
     setIsMenuOpen(false);
   };
 
-  const handleCallNow = () => {
-    window.location.href = "tel:+19415279169";
-    setIsMenuOpen(false);
-  };
-
   const getUserInitials = () => {
     if (!user) return "";
     return `${user.firstName?.charAt(0) || ""}${user.lastName?.charAt(0) || ""}`;
@@ -74,12 +68,11 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }: MobileMenuProps) => {
   }, [isMenuOpen, setIsMenuOpen]);
 
   const navItems = [
-    { name: "Home", url: "/", icon: Home },
-    { name: "How It Works", url: "/#how-it-works", icon: HelpCircle },
-    { name: "Pricing", url: "/#pricing", icon: DollarSign },
-    { name: "Service Areas", url: "/#service-areas", icon: MapPin },
-    { name: "About", url: "/about", icon: Info },
+    { name: "Services & Pricing", url: "/pricing", icon: DollarSign },
+    { name: "Locations", url: "/#service-areas", icon: MapPin, isHash: true },
+    { name: "About Us", url: "/about", icon: Info },
     { name: "Contact", url: "/contact", icon: Phone },
+    { name: "For Doctors", url: "/b2b", icon: Stethoscope },
   ];
 
   return (
@@ -104,42 +97,50 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }: MobileMenuProps) => {
       {isMenuOpen && (
         <div className="mobile-nav-overlay fixed inset-0 bg-black/50 z-[9999] lg:hidden animate-fade-in">
           <div className="mobile-nav-panel fixed top-0 right-0 h-full w-[90%] max-w-[380px] bg-white shadow-2xl overflow-y-auto animate-slide-in-right">
-            
+
             {/* Header */}
-            <div className="flex justify-between items-center p-6 bg-gradient-to-r from-red-50 to-white border-b border-border">
-              <div className="text-2xl font-bold text-conve-red">ConveLabs</div>
+            <div className="flex justify-between items-center p-5 border-b border-border">
+              <div className="text-xl font-bold text-conve-red">ConveLabs</div>
               <button
                 onClick={() => setIsMenuOpen(false)}
-                className="w-10 h-10 bg-red-100 hover:bg-conve-red hover:text-white rounded-full flex items-center justify-center text-conve-red transition-all duration-200"
+                className="w-9 h-9 bg-muted hover:bg-conve-red hover:text-white rounded-full flex items-center justify-center transition-all"
                 aria-label="Close menu"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="p-6">
-              {/* User profile */}
+            <div className="p-5 space-y-5">
+
+              {/* Primary CTA — Book Appointment */}
+              <button
+                onClick={handleBookAppointment}
+                className="w-full py-4 bg-conve-red text-white font-semibold rounded-xl shadow-lg active:scale-[0.98] transition-all flex items-center justify-center text-lg"
+              >
+                <Calendar className="h-5 w-5 mr-2" />
+                Book Appointment
+              </button>
+
+              {/* User profile (if logged in) */}
               {user && (
-                <div className="mb-6 p-4 bg-muted rounded-xl">
-                  <div className="flex items-center space-x-3">
-                    <Avatar className="h-12 w-12 border-2 border-white shadow-sm">
-                      <AvatarImage src="" alt={user?.email} />
-                      <AvatarFallback className="bg-conve-red/10 text-conve-red font-medium text-sm">
-                        {getUserInitials() || <User className="h-5 w-5" />}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <div className="font-semibold text-foreground">{user.firstName} {user.lastName}</div>
-                      <div className="text-sm text-muted-foreground">{user.email}</div>
-                    </div>
+                <div className="p-3 bg-muted/50 rounded-xl flex items-center gap-3">
+                  <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+                    <AvatarImage src="" alt={user?.email} />
+                    <AvatarFallback className="bg-conve-red/10 text-conve-red font-medium text-sm">
+                      {getUserInitials() || <User className="h-4 w-4" />}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-sm truncate">{user.firstName} {user.lastName}</div>
+                    <div className="text-xs text-muted-foreground truncate">{user.email}</div>
                   </div>
                 </div>
               )}
 
               {/* Navigation */}
-              <div className="space-y-1 mb-6">
+              <div className="space-y-1">
                 {navItems.map((item) => (
-                  item.url.startsWith('/#') ? (
+                  item.isHash ? (
                     <a
                       key={item.name}
                       href={item.url}
@@ -165,66 +166,82 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }: MobileMenuProps) => {
                 ))}
               </div>
 
-              {/* CTA */}
-              <div className="space-y-3 p-5 bg-red-50 rounded-xl mb-6">
-                <button
-                  onClick={handleBookAppointment}
-                  className="w-full py-4 bg-conve-red text-white font-semibold rounded-xl shadow-luxury-red active:scale-[0.98] transition-all flex items-center justify-center"
-                >
-                  <Calendar className="h-5 w-5 mr-2" />
-                  Book Appointment
-                </button>
-                <button
-                  onClick={handleCallNow}
-                  className="w-full py-3 bg-white text-conve-red font-semibold border-2 border-conve-red rounded-xl active:scale-[0.98] transition-all flex items-center justify-center"
-                >
-                  <Phone className="h-4 w-4 mr-2" />
-                  Call: (941) 527-9169
-                </button>
-              </div>
-
-              {/* Trust badges */}
-              <div className="grid grid-cols-2 gap-2 mb-6">
-                {["✓ HIPAA Compliant", "✓ CLIA Certified", "✓ Same-Day Available", "✓ 500+ Patients"].map((badge) => (
-                  <div key={badge} className="p-2 bg-muted rounded-lg text-center text-xs font-semibold text-muted-foreground">
-                    {badge}
+              {/* Membership highlight */}
+              <Link
+                to="/pricing"
+                onClick={handleMenuItemClick}
+                className="flex items-center justify-between p-4 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl"
+              >
+                <div className="flex items-center gap-3">
+                  <Crown className="h-5 w-5 text-amber-600" />
+                  <div>
+                    <div className="font-semibold text-sm">Membership Plans</div>
+                    <div className="text-xs text-muted-foreground">From $29/month</div>
                   </div>
-                ))}
-              </div>
+                </div>
+                <span className="bg-green-100 text-green-800 text-xs font-bold px-2 py-1 rounded-full">
+                  Save 25%
+                </span>
+              </Link>
 
-              {/* User actions */}
+              {/* Phone */}
+              <a
+                href="tel:+19415279169"
+                className="flex items-center justify-center gap-2 p-3 border-2 border-conve-red text-conve-red font-semibold rounded-xl hover:bg-red-50 transition-all"
+              >
+                <Phone className="h-4 w-4" />
+                (941) 527-9169
+              </a>
+
+              {/* Auth section */}
               {isLoading ? (
-                <div className="p-4 flex items-center justify-center">
+                <div className="flex items-center justify-center py-3">
                   <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                  <span>Loading...</span>
+                  <span className="text-sm">Loading...</span>
                 </div>
               ) : user ? (
-                <div className="border-t border-border pt-4 space-y-1">
-                  <Link to="/dashboard" className="flex items-center p-3 rounded-lg text-foreground hover:bg-muted" onClick={handleMenuItemClick}>
-                    <Settings className="h-5 w-5 mr-3" />
-                    <span>Dashboard</span>
+                <div className="border-t pt-4 space-y-1">
+                  <Link to="/dashboard" className="flex items-center p-3 rounded-xl text-foreground hover:bg-muted" onClick={handleMenuItemClick}>
+                    <Settings className="h-5 w-5 mr-3 text-muted-foreground" />
+                    <span className="font-medium">Dashboard</span>
                   </Link>
                   {isAdmin && (
-                    <Link to="/dashboard/super_admin" className="flex items-center p-3 rounded-lg text-foreground hover:bg-muted" onClick={handleMenuItemClick}>
-                      <Settings className="h-5 w-5 mr-3" />
-                      <span>Admin</span>
+                    <Link to="/dashboard/super_admin" className="flex items-center p-3 rounded-xl text-foreground hover:bg-muted" onClick={handleMenuItemClick}>
+                      <Settings className="h-5 w-5 mr-3 text-muted-foreground" />
+                      <span className="font-medium">Admin</span>
                     </Link>
                   )}
-                  <button onClick={handleSignOut} className="flex items-center w-full p-3 rounded-lg text-foreground hover:bg-muted">
-                    <LogOut className="h-5 w-5 mr-3" />
-                    <span>Sign Out</span>
+                  <button onClick={handleSignOut} className="flex items-center w-full p-3 rounded-xl text-foreground hover:bg-muted">
+                    <LogOut className="h-5 w-5 mr-3 text-muted-foreground" />
+                    <span className="font-medium">Sign Out</span>
                   </button>
                 </div>
               ) : (
-                <div className="border-t border-border pt-4 space-y-3">
-                  <a href={AUTH_URL} className="block w-full py-3 text-center text-foreground hover:bg-muted rounded-lg font-medium" onClick={handleMenuItemClick}>
+                <div className="border-t pt-4 flex gap-3">
+                  <Link
+                    to="/login"
+                    className="flex-1 py-3 text-center text-foreground font-medium border rounded-xl hover:bg-muted transition-all"
+                    onClick={handleMenuItemClick}
+                  >
                     Login
-                  </a>
-                  <a href={AUTH_URL} className="block w-full py-3 text-center bg-conve-red text-white rounded-lg font-semibold" onClick={handleMenuItemClick}>
+                  </Link>
+                  <Link
+                    to="/signup"
+                    className="flex-1 py-3 text-center bg-conve-red text-white font-semibold rounded-xl hover:bg-conve-red-dark transition-all"
+                    onClick={handleMenuItemClick}
+                  >
                     Sign Up
-                  </a>
+                  </Link>
                 </div>
               )}
+
+              {/* Social proof */}
+              <div className="flex items-center justify-center gap-2 py-2 text-xs text-muted-foreground">
+                <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                <span>5.0 on Google</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span>164 reviews</span>
+              </div>
             </div>
           </div>
         </div>
