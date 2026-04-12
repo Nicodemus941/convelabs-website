@@ -23,8 +23,10 @@ export interface PriceBreakdown {
 
 const SERVICE_CATALOG: ServiceOption[] = [
   { id: 'mobile', name: 'Mobile Blood Draw (At Home)', description: 'Licensed phlebotomist comes to your location', basePrice: 150 },
-  { id: 'in-office', name: 'Doctor Office Blood Draw', description: 'Visit our partner office location', basePrice: 55 },
-  { id: 'senior', name: 'Senior Blood Draw (65+)', description: 'Discounted rate for patients 65 and older', basePrice: 100 },
+  { id: 'in-office', name: 'Office Visit (Standard)', description: 'Visit our partner office location', basePrice: 55 },
+  { id: 'specialty-kit', name: 'Specialty Collection Kit', description: 'Specialty kits shipped via UPS/FedEx', basePrice: 185 },
+  { id: 'senior', name: 'Senior Blood Draw (65+)', description: 'Discounted mobile visit for 65+', basePrice: 100 },
+  { id: 'therapeutic', name: 'Therapeutic Phlebotomy', description: 'Blood removal per doctor order', basePrice: 200 },
   { id: 'additional', name: 'Additional Patient (Same Location)', description: 'Add another patient at the same visit', basePrice: 75 },
 ];
 

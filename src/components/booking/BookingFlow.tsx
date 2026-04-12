@@ -55,6 +55,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const [availableServices, setAvailableServices] = useState([]);
   const [isServicesLoading, setIsServicesLoading] = useState(true);
   const [labOrderFile, setLabOrderFile] = useState<File | null>(null);
+  const [insuranceFile, setInsuranceFile] = useState<File | null>(null);
   // Sub-step within combined steps
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLabOrder, setShowLabOrder] = useState(false);
@@ -155,6 +156,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           .from('lab-orders')
           .upload(fileName, labOrderFile);
         if (!uploadError) labOrderFilePath = fileName;
+      }
+
+      // Upload insurance file if present
+      if (insuranceFile) {
+        const fileName = `insurance_${Date.now()}_${insuranceFile.name}`;
+        await supabase.storage.from('lab-orders').upload(fileName, insuranceFile);
       }
 
       const appointmentDate = data.date instanceof Date
@@ -327,6 +334,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   onBack={() => setShowLabOrder(false)}
                   onFileSelected={setLabOrderFile}
                   selectedFile={labOrderFile}
+                  onInsuranceFileSelected={setInsuranceFile}
+                  selectedInsuranceFile={insuranceFile}
                 />
               )}
 

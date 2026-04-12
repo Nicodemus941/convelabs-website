@@ -1,6 +1,6 @@
 import React from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Home, Building2, Heart, Check } from 'lucide-react';
+import { Home, Building2, Heart, Check, FlaskConical, Syringe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { BookingFormValues } from '@/types/appointmentTypes';
 
@@ -14,34 +14,61 @@ const VISIT_TYPES = [
     name: 'Mobile Blood Draw',
     subtitle: 'We come to you',
     price: 150,
-    description: 'A licensed phlebotomist visits your home, office, or hotel. Same-day appointments available.',
+    description: 'A licensed phlebotomist visits your home, office, or hotel. Lab order and insurance required.',
     icon: Home,
     color: 'bg-red-50 border-red-200 hover:border-red-400',
     selectedColor: 'bg-red-50 border-red-500 ring-2 ring-red-500/20',
     iconColor: 'text-red-600',
     popular: true,
+    requiresLabOrder: true,
+    requiresInsurance: true,
   },
   {
     id: 'in-office',
     name: 'Office Visit',
-    subtitle: 'Visit our partner location',
+    subtitle: 'Standard blood draw',
     price: 55,
-    description: 'Walk-in to one of our partner office locations in Central Florida. No travel fee.',
+    description: 'Walk-in to our partner office. We draw your labs — no shipping or delivery needed.',
     icon: Building2,
     color: 'bg-blue-50 border-blue-200 hover:border-blue-400',
     selectedColor: 'bg-blue-50 border-blue-500 ring-2 ring-blue-500/20',
     iconColor: 'text-blue-600',
   },
   {
+    id: 'specialty-kit',
+    name: 'Specialty Collection Kit',
+    subtitle: 'Office or mobile visit',
+    price: 185,
+    description: 'For specialty kits (DUTCH, Genova, etc.) that require shipping via UPS or FedEx.',
+    icon: FlaskConical,
+    color: 'bg-amber-50 border-amber-200 hover:border-amber-400',
+    selectedColor: 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20',
+    iconColor: 'text-amber-600',
+  },
+  {
     id: 'senior',
     name: 'Senior Blood Draw',
     subtitle: 'Patients 65+',
     price: 100,
-    description: 'Discounted mobile visit for patients 65 and older. Same premium service at a reduced rate.',
+    description: 'Discounted mobile visit for patients 65 and older. Lab order and insurance required.',
     icon: Heart,
     color: 'bg-purple-50 border-purple-200 hover:border-purple-400',
     selectedColor: 'bg-purple-50 border-purple-500 ring-2 ring-purple-500/20',
     iconColor: 'text-purple-600',
+    requiresLabOrder: true,
+    requiresInsurance: true,
+  },
+  {
+    id: 'therapeutic',
+    name: 'Therapeutic Phlebotomy',
+    subtitle: "Doctor's order required",
+    price: 200,
+    description: 'Blood removal for therapeutic purposes. Requires a doctor\'s order specifying volume. 1hr 15min appointment.',
+    icon: Syringe,
+    color: 'bg-teal-50 border-teal-200 hover:border-teal-400',
+    selectedColor: 'bg-teal-50 border-teal-500 ring-2 ring-teal-500/20',
+    iconColor: 'text-teal-600',
+    requiresLabOrder: true,
   },
 ];
 
@@ -60,7 +87,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
         <p className="text-muted-foreground mt-2">Choose your preferred visit type</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {VISIT_TYPES.map((type) => {
           const Icon = type.icon;
           const isSelected = selectedType === type.id;
@@ -69,7 +96,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
             <div
               key={type.id}
               onClick={() => handleSelect(type.id)}
-              className={`relative border-2 rounded-2xl p-6 cursor-pointer transition-all duration-200 ${
+              className={`relative border-2 rounded-2xl p-5 cursor-pointer transition-all duration-200 ${
                 isSelected ? type.selectedColor : type.color
               }`}
             >
@@ -85,19 +112,19 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
                 </div>
               )}
 
-              <div className={`h-12 w-12 rounded-xl ${isSelected ? 'bg-white' : 'bg-white/80'} flex items-center justify-center mb-4`}>
-                <Icon className={`h-6 w-6 ${type.iconColor}`} />
+              <div className={`h-11 w-11 rounded-xl bg-white/80 flex items-center justify-center mb-3`}>
+                <Icon className={`h-5 w-5 ${type.iconColor}`} />
               </div>
 
-              <h3 className="font-bold text-lg">{type.name}</h3>
-              <p className="text-sm text-muted-foreground mt-0.5">{type.subtitle}</p>
+              <h3 className="font-bold text-base">{type.name}</h3>
+              <p className="text-xs text-muted-foreground">{type.subtitle}</p>
 
-              <div className="mt-3">
-                <span className="text-3xl font-bold">${type.price}</span>
-                <span className="text-muted-foreground text-sm ml-1">/ visit</span>
+              <div className="mt-2">
+                <span className="text-2xl font-bold">${type.price}</span>
+                <span className="text-muted-foreground text-xs ml-1">/ visit</span>
               </div>
 
-              <p className="text-sm text-muted-foreground mt-3 leading-relaxed">
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
                 {type.description}
               </p>
             </div>

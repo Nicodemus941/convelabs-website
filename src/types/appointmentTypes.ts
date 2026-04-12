@@ -72,6 +72,8 @@ export interface BookingFormValues {
     skipped?: boolean;
     doctorFaxNumber?: string;
     hasFile?: boolean;
+    labDestination?: string;
+    hasInsuranceFile?: boolean;
   };
   termsAccepted?: boolean;
 }
@@ -123,6 +125,8 @@ export const bookingFormSchema = z.object({
     skipped: z.boolean().optional(),
     doctorFaxNumber: z.string().optional(),
     hasFile: z.boolean().optional(),
+    labDestination: z.string().optional(),
+    hasInsuranceFile: z.boolean().optional(),
   }).optional(),
   termsAccepted: z.boolean().optional()
 });
