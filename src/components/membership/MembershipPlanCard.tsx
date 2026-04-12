@@ -66,7 +66,7 @@ export const MembershipPlanCard = ({
   const isEssentialPlan = plan.name === 'Essential Care';
 
   const handleSubscribe = () => {
-    window.location.href = "https://convelabs.square.site/";
+    window.location.href = "/book-now";
   };
 
   return (

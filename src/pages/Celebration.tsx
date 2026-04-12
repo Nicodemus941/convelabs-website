@@ -10,11 +10,11 @@ import { ArrowRight, MapPin, Clock, Shield, Award, Users, Heart } from "lucide-r
 
 const Celebration: React.FC = () => {
   const handleMembershipRedirect = () => {
-    window.location.href = "https://app.greenhealthsystems.com/patient/convelabs/enrollment?source=celebration";
+    window.location.href = "/onboarding/plan-selection?source=celebration";
   };
 
   const handleBookingRedirect = () => {
-    window.location.href = "https://convelabs.square.site/";
+    window.location.href = "/book-now?source=celebration";
   };
 
   return (

@@ -46,7 +46,7 @@ const UpcomingAppointments = () => {
         <div className="text-center py-6">
           <p className="text-sm text-muted-foreground">No upcoming appointments.</p>
           <Button variant="outline" className="mt-4" asChild>
-            <a href="/book">Book An Appointment</a>
+            <a href="/book-now">Book An Appointment</a>
           </Button>
         </div>
       ) : (

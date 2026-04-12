@@ -9,7 +9,7 @@ const AppointmentBookingButton: React.FC = () => {
 
   const handleCreateAppointment = () => {
     // Navigate to the internal appointment booking page
-    navigate('/book');
+    navigate('/book-now');
   };
 
   return (

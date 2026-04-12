@@ -25,7 +25,6 @@ const Home = () => {
       <Helmet>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
-        <link rel="preconnect" href="https://app.greenhealthsystems.com" />
         <link rel="canonical" href="https://convelabs.com/" />
 
         <title>Mobile Blood Draw At Your Home | Same-Day Service Orlando | ConveLabs</title>

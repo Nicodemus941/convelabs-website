@@ -65,7 +65,7 @@ const HeroSection: React.FC = () => {
                 <Button 
                   size="lg" 
                   className="text-lg"
-                  onClick={() => navigate('/book')}
+                  onClick={() => navigate('/book-now')}
                 >
                   <Calendar className="mr-2 h-5 w-5" />
                   Book an Appointment

@@ -94,7 +94,7 @@ const LocationPage: React.FC = () => {
                   Book Now
                 </button>
                 <a
-                  href={`https://app.greenhealthsystems.com/patient/convelabs/enrollment?source=${location.slug}`}
+                  href={`/onboarding/plan-selection?source=${location.slug}`}
                   className="inline-flex items-center justify-center px-8 py-3 border border-gray-300 font-semibold rounded-md hover:border-conve-red hover:text-conve-red transition-colors"
                 >
                   Explore Membership
@@ -178,7 +178,7 @@ const LocationPage: React.FC = () => {
                   Book Now
                 </button>
                 <a
-                  href={`https://app.greenhealthsystems.com/patient/convelabs/enrollment?source=${location.slug}_cta`}
+                  href={`/onboarding/plan-selection?source=${location.slug}_cta`}
                   className="inline-flex items-center justify-center px-8 py-3 border border-gray-300 font-semibold rounded-md hover:border-conve-red hover:text-conve-red transition-colors"
                 >
                   Explore Membership

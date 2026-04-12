@@ -26,36 +26,8 @@ const PatientDashboard = () => {
   const isFoundingMember = userMembership?.founding_member || false;
   const nextBillingOverride = userMembership?.next_billing_override;
   
-  const handleBookAppointment = async () => {
-    try {
-      // Base appointment URL
-      const appointmentUrl = "https://appointments.convelabs.com/booking";
-      
-      // First try to refresh the session to get fresh tokens
-      await refreshSession();
-      
-      // Get the current session after refresh
-      if (session?.access_token && session?.refresh_token) {
-        // Create an auth payload with both tokens and user info
-        const encodedPayload = createAuthPayload(session);
-        
-        if (encodedPayload) {
-          // Redirect to the appointments site with the auth payload
-          // noredirect=true prevents automatic redirection back
-          window.location.href = `${appointmentUrl}?auth=${encodeURIComponent(encodedPayload)}&noredirect=true`;
-          console.log("Redirecting with refreshed auth tokens");
-          return;
-        }
-      }
-      
-      // Fallback if we couldn't get session tokens
-      console.warn("Could not get valid session tokens, redirecting without auth");
-      window.location.href = appointmentUrl;
-    } catch (err) {
-      console.error("Error handling appointment redirect:", err);
-      // Fallback to direct URL if anything fails
-      window.location.href = "https://appointments.convelabs.com/booking";
-    }
+  const handleBookAppointment = () => {
+    window.location.href = '/book-now';
   };
   
   // Get appointments when component mounts
