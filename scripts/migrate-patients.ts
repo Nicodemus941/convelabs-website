@@ -52,7 +52,8 @@ function parseName(fullName: string): { firstName: string; lastName: string } {
 
 async function migratePatients() {
   console.log('Reading CSV...');
-  const csvContent = readFileSync('/c/Users/nicod/Downloads/convelabs_patients.csv', 'utf-8');
+  const csvPath = process.env.CSV_PATH || 'C:\\Users\\nicod\\Downloads\\convelabs_patients.csv';
+  const csvContent = readFileSync(csvPath, 'utf-8');
   const records = parse(csvContent, { columns: true, skip_empty_lines: true });
 
   console.log(`Found ${records.length} patients to migrate`);
@@ -73,17 +74,7 @@ async function migratePatients() {
     const address = parseAddress(record.address || '{}');
 
     try {
-      // Check if user already exists
-      const { data: existingUsers } = await supabase.auth.admin.listUsers();
-      const exists = existingUsers?.users?.find(u => u.email === email);
-
-      if (exists) {
-        console.log(`  SKIP: ${email} already exists`);
-        skipped++;
-        continue;
-      }
-
-      // Create auth user with temp password
+      // Try to create — duplicates will error and be skipped
       const { data: authData, error: authError } = await supabase.auth.admin.createUser({
         email,
         password: generateTempPassword(),

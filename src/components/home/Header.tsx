@@ -49,12 +49,12 @@ const Header = () => {
 
         {/* Header CTA Buttons - Desktop Only */}
         <div className="hidden lg:flex items-center space-x-3">
-          <a
-            href={withSource(ENROLLMENT_URL, 'header_membership')}
+          <Link
+            to="/pricing"
             className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-conve-red transition-colors"
           >
             Membership
-          </a>
+          </Link>
           <button
             onClick={() => bookingModal?.openModal('header_cta')}
             className="px-5 py-2 text-sm font-semibold bg-conve-red text-white rounded-md hover:bg-red-700 transition-colors"
