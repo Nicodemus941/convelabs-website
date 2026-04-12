@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BookingFormValues } from '@/types/appointmentTypes';
+import AvailabilityMap from './AvailabilityMap';
 
 interface DateTimeSelectionStepProps {
   onNext: () => void;
@@ -89,6 +90,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         <CardDescription>Choose when you'd like our phlebotomist to visit</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <AvailabilityMap selectedDate={selectedDate} />
         <div className="grid md:grid-cols-2 gap-6">
           <div>
             <FormField

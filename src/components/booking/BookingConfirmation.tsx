@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import RecurringBookingSetup from './RecurringBookingSetup';
 
 interface BookingConfirmationProps {
   appointmentId: string | null;
@@ -133,6 +134,19 @@ const BookingConfirmation: React.FC<BookingConfirmationProps> = ({
             </div>
           </div>
           
+          {/* Recurring booking setup */}
+          {!isGuest && (
+            <RecurringBookingSetup
+              serviceType={formData.serviceDetails?.selectedService || 'mobile'}
+              preferredDay={formData.date?.getDay()}
+              preferredTime={formData.time}
+              preferredAddress={formData.locationDetails?.address}
+              preferredCity={formData.locationDetails?.city}
+              preferredState={formData.locationDetails?.state}
+              preferredZip={formData.locationDetails?.zipCode}
+            />
+          )}
+
           {isGuest && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
               <UserPlus className="h-6 w-6 text-blue-600 mx-auto mb-2" />
