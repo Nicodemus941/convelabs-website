@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Loader2, Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Loader2, Eye, EyeOff, AlertCircle, Mail, Sparkles } from "lucide-react";
 import { validateEmail, validatePassword, FormErrorMessage } from "@/components/auth/FormValidation";
+import { supabase } from "@/integrations/supabase/client";
 
 interface LoginFormProps {
   handleSuperAdminLogin: (email: string, password: string) => Promise<void>;
@@ -20,6 +21,8 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
   const [emailError, setEmailError] = useState<string | undefined>();
   const [passwordError, setPasswordError] = useState<string | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [isMigratedUser, setIsMigratedUser] = useState(false);
   const { login } = useAuth();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -75,14 +78,87 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
         toast.success("Logged in successfully");
         navigate(returnPath);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
-      // Error is handled by AuthContext and displayed via toast
+      // If login fails, check if this is a migrated user who needs to set password
+      if (error?.message?.includes('Invalid login credentials')) {
+        // Check if user exists but has no confirmed password (migrated)
+        setIsMigratedUser(true);
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleSendMagicLink = async () => {
+    setIsSubmitting(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      setMagicLinkSent(true);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send verification link');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Magic link sent confirmation
+  if (magicLinkSent) {
+    return (
+      <div className="text-center space-y-4 py-4">
+        <div className="h-14 w-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto">
+          <Mail className="h-7 w-7 text-blue-600" />
+        </div>
+        <h3 className="text-lg font-bold">Check Your Email</h3>
+        <p className="text-sm text-muted-foreground">
+          We sent a link to <span className="font-semibold text-foreground">{email}</span>.
+          Click the link to set your new password.
+        </p>
+        <p className="text-xs text-muted-foreground">The link expires in 10 minutes.</p>
+      </div>
+    );
+  }
+
+  // Migrated user welcome screen
+  if (isMigratedUser) {
+    return (
+      <div className="space-y-5 py-2">
+        <div className="text-center space-y-3">
+          <div className="h-14 w-14 bg-amber-100 rounded-full flex items-center justify-center mx-auto">
+            <Sparkles className="h-7 w-7 text-amber-600" />
+          </div>
+          <h3 className="text-lg font-bold">Welcome to the New ConveLabs!</h3>
+          <p className="text-sm text-muted-foreground">
+            We've upgraded our booking system. To secure your account, we need to verify your email and set a new password.
+          </p>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+          <p className="text-sm font-medium text-blue-900 mb-1">Your email: {email}</p>
+          <p className="text-xs text-blue-700">We'll send a link to set your new password.</p>
+        </div>
+        <Button
+          onClick={handleSendMagicLink}
+          disabled={isSubmitting}
+          className="w-full bg-conve-red hover:bg-conve-red-dark text-white"
+        >
+          {isSubmitting ? (
+            <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Sending...</>
+          ) : (
+            <><Mail className="mr-2 h-4 w-4" /> Send Verification Link</>
+          )}
+        </Button>
+        <button
+          onClick={() => { setIsMigratedUser(false); setPassword(''); }}
+          className="w-full text-sm text-muted-foreground hover:text-foreground"
+        >
+          Try a different email
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
