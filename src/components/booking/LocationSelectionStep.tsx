@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { Form, FormField, FormItem, FormControl, FormMessage } from '@/components/ui/form';
+import AddressAutocomplete from '@/components/ui/address-autocomplete';
 
 interface LocationSelectionStepProps {
   onNext: () => void;
@@ -72,15 +73,20 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
                   <FormItem className="space-y-2">
                     <label className="text-sm font-medium">Street Address</label>
                     <FormControl>
-                      <Input 
-                        {...field} 
-                        placeholder="123 Main St." 
+                      <AddressAutocomplete
+                        value={field.value}
+                        onChange={field.onChange}
+                        onPlaceSelected={(place) => {
+                          field.onChange(place.address);
+                          if (place.city) setValue('locationDetails.city', place.city);
+                          if (place.state) setValue('locationDetails.state', place.state);
+                          if (place.zipCode) setValue('locationDetails.zipCode', place.zipCode);
+                        }}
+                        placeholder="Start typing your address..."
                       />
                     </FormControl>
                     {fieldState.error && (
-                      <FormMessage>
-                        {fieldState.error.message}
-                      </FormMessage>
+                      <FormMessage>{fieldState.error.message}</FormMessage>
                     )}
                   </FormItem>
                 )}
