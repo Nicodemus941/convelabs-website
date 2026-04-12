@@ -22,10 +22,11 @@ export function useAppointments() {
       setIsLoading(true);
       setError(null);
       
-      // Use a simplified fetch approach to avoid the recursion error
+      // Admin/super_admin see all appointments; patients see only theirs
+      const isAdmin = user?.role === 'super_admin' || user?.role === 'office_manager' || user?.role === 'admin';
       const { data, error } = await appointmentService.fetchAppointmentsSimplified(
         currentTenant?.id,
-        user?.id
+        isAdmin ? undefined : user?.id
       );
 
       if (error) {
