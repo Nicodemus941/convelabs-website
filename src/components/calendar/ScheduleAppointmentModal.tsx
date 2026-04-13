@@ -139,6 +139,20 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const canGoToStep2 = patientName.trim() && serviceType;
   const canGoToStep3 = date && time;
 
+  // Compute surcharges for preview (same logic as handleSubmit)
+  const EXTENDED_CITIES_LIST = ['lake nona','celebration','kissimmee','sanford','eustis','clermont','montverde','deltona','geneva','tavares','mount dora','leesburg','groveland','mascotte','minneola','daytona beach','deland','debary','orange city'];
+  const previewSurcharges: { label: string; amount: number }[] = [];
+  if (city && EXTENDED_CITIES_LIST.some(c => city.toLowerCase().includes(c))) previewSurcharges.push({ label: 'Extended Area', amount: 75 });
+  if (date && [0, 6].includes(new Date(date + 'T12:00:00').getDay())) previewSurcharges.push({ label: 'Weekend', amount: 75 });
+  if (time && (() => { const [t, p] = time.split(' '); const h = parseInt(t); return (p === 'PM' && h !== 12 ? h + 12 : h) >= 17; })()) previewSurcharges.push({ label: 'After-Hours', amount: 50 });
+  if (date === new Date().toISOString().split('T')[0]) previewSurcharges.push({ label: 'Same-Day', amount: 100 });
+  const previewBasePrice = SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150;
+  const previewSurchargeTotal = previewSurcharges.reduce((s, x) => s + x.amount, 0);
+  const previewTotal = discountType === 'waive' ? 0
+    : discountType === 'percentage' && discountValue ? Math.round((previewBasePrice + previewSurchargeTotal) * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100
+    : discountType === 'fixed' && discountValue ? Math.max((previewBasePrice + previewSurchargeTotal) - (parseFloat(discountValue) || 0), 0)
+    : previewBasePrice + previewSurchargeTotal;
+
   const handleSubmit = async () => {
     console.log('handleSubmit triggered', { patientName, serviceType, date, time, discountType });
     setSubmitError('');
@@ -172,20 +186,41 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       }
       const appointmentDate = `${date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
-      // Calculate price with discount
+      // Calculate price with surcharges + discount
       const svc = SERVICE_TYPES.find(s => s.value === serviceType);
       const basePrice = svc?.price || 150;
-      let finalPrice = basePrice;
-      let discountNote = '';
+
+      // Auto-detect surcharges
+      const EXTENDED_CITIES = ['lake nona','celebration','kissimmee','sanford','eustis','clermont','montverde','deltona','geneva','tavares','mount dora','leesburg','groveland','mascotte','minneola','daytona beach','deland','debary','orange city'];
+      const isExtendedArea = EXTENDED_CITIES.some(c => city.toLowerCase().includes(c));
+      const appointmentDay = date ? new Date(date + 'T12:00:00').getDay() : 1;
+      const isWeekend = appointmentDay === 0 || appointmentDay === 6;
+      const isAfterHours = time && (() => {
+        const [tStr, period] = time.split(' ');
+        const [h] = tStr.split(':').map(Number);
+        const h24 = period === 'PM' && h !== 12 ? h + 12 : h;
+        return h24 >= 17;
+      })();
+      const isSameDay = date === new Date().toISOString().split('T')[0];
+
+      let surchargeTotal = 0;
+      const surchargeItems: string[] = [];
+      if (isExtendedArea) { surchargeTotal += 75; surchargeItems.push('Extended area +$75'); }
+      if (isWeekend) { surchargeTotal += 75; surchargeItems.push('Weekend +$75'); }
+      if (isAfterHours) { surchargeTotal += 50; surchargeItems.push('After-hours +$50'); }
+      if (isSameDay) { surchargeTotal += 100; surchargeItems.push('Same-day +$100'); }
+
+      let finalPrice = basePrice + surchargeTotal;
+      let discountNote = surchargeItems.join(', ');
 
       if (discountType === 'waive') { finalPrice = 0; discountNote = 'Fee waived'; }
       else if (discountType === 'percentage' && discountValue) {
         const pct = Math.min(parseFloat(discountValue) || 0, 100);
-        finalPrice = Math.round(basePrice * (1 - pct / 100) * 100) / 100;
-        discountNote = `${pct}% discount`;
+        finalPrice = Math.round(finalPrice * (1 - pct / 100) * 100) / 100;
+        discountNote += (discountNote ? ' | ' : '') + `${pct}% discount`;
       } else if (discountType === 'fixed' && discountValue) {
-        finalPrice = Math.max(basePrice - (parseFloat(discountValue) || 0), 0);
-        discountNote = `$${parseFloat(discountValue).toFixed(2)} off`;
+        finalPrice = Math.max(finalPrice - (parseFloat(discountValue) || 0), 0);
+        discountNote += (discountNote ? ' | ' : '') + `$${parseFloat(discountValue).toFixed(2)} off`;
       }
 
       const isWaived = finalPrice === 0;
@@ -212,7 +247,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         address: [address, city, zipcode].filter(Boolean).join(', ') || 'TBD',
         zipcode: zipcode || '32801',
         total_amount: finalPrice,
-        service_price: finalPrice,
+        service_price: basePrice,
+        surcharge_amount: surchargeTotal,
         duration_minutes: duration,
         booking_source: 'manual',
         is_vip: isVip,
@@ -618,7 +654,11 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <div className="flex justify-between"><span className="text-muted-foreground">Patient</span><span className="font-medium">{patientName}</span></div>
               {patientEmail && <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span>{patientEmail}</span></div>}
               {patientPhone && <div className="flex justify-between"><span className="text-muted-foreground">Phone</span><span>{patientPhone}</span></div>}
-              <div className="flex justify-between"><span className="text-muted-foreground">Service</span><span className="font-medium">{SERVICE_TYPES.find(s => s.value === serviceType)?.label} — ${SERVICE_TYPES.find(s => s.value === serviceType)?.price}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Service</span><span className="font-medium">{SERVICE_TYPES.find(s => s.value === serviceType)?.label} — ${previewBasePrice}</span></div>
+              {previewSurcharges.map((sc, i) => (
+                <div key={i} className="flex justify-between text-xs"><span className="text-amber-600">+ {sc.label}</span><span className="text-amber-600">+${sc.amount}</span></div>
+              ))}
+              <div className="flex justify-between border-t pt-1 mt-1"><span className="font-semibold">Total</span><span className="font-bold text-[#B91C1C]">${previewTotal.toFixed(2)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span className="font-medium">{new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Time</span><span className="font-medium">{time}</span></div>
               {address && <div className="flex justify-between"><span className="text-muted-foreground">Address</span><span>{[address, city, zipcode].filter(Boolean).join(', ')}</span></div>}

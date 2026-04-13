@@ -54,8 +54,32 @@ const InvoicesTab: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [generateModalOpen, setGenerateModalOpen] = useState(false);
-  const [genForm, setGenForm] = useState({ patientName: '', patientEmail: '', amount: '', description: '', memo: '' });
+  const [genForm, setGenForm] = useState({
+    recipientType: 'patient' as 'patient' | 'organization',
+    patientName: '', patientEmail: '', patientPhone: '',
+    orgName: '', orgEmail: '',
+    serviceType: 'mobile', customAmount: '', customDescription: '',
+    dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    memo: '',
+  });
+  const [patientSearchResults, setPatientSearchResults] = useState<any[]>([]);
+  const [orgSearchResults, setOrgSearchResults] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  const SERVICE_PRICES: Record<string, { label: string; price: number }> = {
+    mobile: { label: 'Mobile Blood Draw', price: 150 },
+    'in-office': { label: 'Office Visit', price: 55 },
+    senior: { label: 'Senior (65+)', price: 100 },
+    'specialty-kit': { label: 'Specialty Kit', price: 185 },
+    therapeutic: { label: 'Therapeutic Phlebotomy', price: 200 },
+    custom: { label: 'Custom Amount', price: 0 },
+  };
+
+  const invoiceAmount = genForm.serviceType === 'custom'
+    ? parseFloat(genForm.customAmount || '0')
+    : SERVICE_PRICES[genForm.serviceType]?.price || 150;
+  const invoiceRecipientName = genForm.recipientType === 'organization' ? genForm.orgName : genForm.patientName;
+  const invoiceRecipientEmail = genForm.recipientType === 'organization' ? genForm.orgEmail : genForm.patientEmail;
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
@@ -401,67 +425,165 @@ const InvoicesTab: React.FC = () => {
 
       {/* Generate Invoice Modal */}
       <Dialog open={generateModalOpen} onOpenChange={setGenerateModalOpen}>
-        <DialogContent className="max-w-md w-[95vw] sm:w-full">
+        <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-[#B91C1C]" /> Generate Invoice</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-[#B91C1C]" /> Generate & Send Invoice</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div><Label>Patient Name *</Label><Input value={genForm.patientName} onChange={e => setGenForm(p => ({ ...p, patientName: e.target.value }))} placeholder="Full name" /></div>
-            <div><Label>Patient Email *</Label><Input type="email" value={genForm.patientEmail} onChange={e => setGenForm(p => ({ ...p, patientEmail: e.target.value }))} placeholder="patient@email.com" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Amount ($) *</Label><Input type="number" min="0" step="0.01" value={genForm.amount} onChange={e => setGenForm(p => ({ ...p, amount: e.target.value }))} placeholder="150.00" /></div>
-              <div><Label>Description</Label><Input value={genForm.description} onChange={e => setGenForm(p => ({ ...p, description: e.target.value }))} placeholder="Blood Draw Service" /></div>
+            {/* Recipient Type */}
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setGenForm(p => ({ ...p, recipientType: 'patient' }))}
+                className={`p-3 rounded-lg border-2 text-sm font-medium text-left ${genForm.recipientType === 'patient' ? 'border-[#B91C1C] bg-[#B91C1C]/5 text-[#B91C1C]' : 'border-gray-200 text-gray-600'}`}>
+                <span className="block font-semibold">Patient</span>
+                <span className="text-[10px] opacity-70">Bill an individual</span>
+              </button>
+              <button type="button" onClick={() => setGenForm(p => ({ ...p, recipientType: 'organization' }))}
+                className={`p-3 rounded-lg border-2 text-sm font-medium text-left ${genForm.recipientType === 'organization' ? 'border-[#B91C1C] bg-[#B91C1C]/5 text-[#B91C1C]' : 'border-gray-200 text-gray-600'}`}>
+                <span className="block font-semibold">Organization</span>
+                <span className="text-[10px] opacity-70">Bill a practice/company</span>
+              </button>
             </div>
-            <div><Label>Memo (optional)</Label><Input value={genForm.memo} onChange={e => setGenForm(p => ({ ...p, memo: e.target.value }))} placeholder="Additional notes for invoice" /></div>
-            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!genForm.patientName || !genForm.patientEmail || !genForm.amount || isGenerating}
+
+            {/* Patient Search */}
+            {genForm.recipientType === 'patient' && (
+              <div className="space-y-3">
+                <div className="relative">
+                  <Label>Search Patient</Label>
+                  <Input value={genForm.patientName} placeholder="Type name or email..."
+                    onChange={async (e) => {
+                      const v = e.target.value;
+                      setGenForm(p => ({ ...p, patientName: v }));
+                      if (v.length >= 2) {
+                        const { data } = await supabase.from('tenant_patients').select('first_name, last_name, email, phone')
+                          .or(`first_name.ilike.%${v}%,last_name.ilike.%${v}%,email.ilike.%${v}%`).limit(5);
+                        setPatientSearchResults(data || []);
+                      } else setPatientSearchResults([]);
+                    }} />
+                  {patientSearchResults.length > 0 && (
+                    <div className="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                      {patientSearchResults.map((p, i) => (
+                        <button key={i} className="w-full text-left px-3 py-2 hover:bg-muted/50 border-b last:border-0 text-sm"
+                          onClick={() => {
+                            setGenForm(prev => ({ ...prev, patientName: `${p.first_name} ${p.last_name}`, patientEmail: p.email || '', patientPhone: p.phone || '' }));
+                            setPatientSearchResults([]);
+                          }}>
+                          <p className="font-medium">{p.first_name} {p.last_name}</p>
+                          <p className="text-xs text-muted-foreground">{p.email || 'No email'}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div><Label>Email *</Label><Input type="email" value={genForm.patientEmail} onChange={e => setGenForm(p => ({ ...p, patientEmail: e.target.value }))} /></div>
+              </div>
+            )}
+
+            {/* Organization Search */}
+            {genForm.recipientType === 'organization' && (
+              <div className="space-y-3">
+                <div className="relative">
+                  <Label>Search Organization</Label>
+                  <Input value={genForm.orgName} placeholder="Type org name..."
+                    onChange={async (e) => {
+                      const v = e.target.value;
+                      setGenForm(p => ({ ...p, orgName: v }));
+                      if (v.length >= 2) {
+                        const { data } = await supabase.from('organizations' as any).select('name, billing_email')
+                          .ilike('name', `%${v}%`).limit(5);
+                        setOrgSearchResults(data || []);
+                      } else setOrgSearchResults([]);
+                    }} />
+                  {orgSearchResults.length > 0 && (
+                    <div className="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                      {orgSearchResults.map((o: any, i: number) => (
+                        <button key={i} className="w-full text-left px-3 py-2 hover:bg-muted/50 border-b last:border-0 text-sm"
+                          onClick={() => {
+                            setGenForm(prev => ({ ...prev, orgName: o.name, orgEmail: o.billing_email || '' }));
+                            setOrgSearchResults([]);
+                          }}>
+                          <p className="font-medium">{o.name}</p>
+                          <p className="text-xs text-muted-foreground">{o.billing_email || 'No email'}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div><Label>Billing Email *</Label><Input type="email" value={genForm.orgEmail} onChange={e => setGenForm(p => ({ ...p, orgEmail: e.target.value }))} /></div>
+              </div>
+            )}
+
+            {/* Service Selection */}
+            <div>
+              <Label>Service</Label>
+              <Select value={genForm.serviceType} onValueChange={v => setGenForm(p => ({ ...p, serviceType: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(SERVICE_PRICES).map(([key, svc]) => (
+                    <SelectItem key={key} value={key}>{svc.label}{svc.price > 0 ? ` — $${svc.price}` : ''}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {genForm.serviceType === 'custom' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Amount ($) *</Label><Input type="number" min="0" step="0.01" value={genForm.customAmount} onChange={e => setGenForm(p => ({ ...p, customAmount: e.target.value }))} placeholder="0.00" /></div>
+                <div><Label>Description</Label><Input value={genForm.customDescription} onChange={e => setGenForm(p => ({ ...p, customDescription: e.target.value }))} placeholder="Service description" /></div>
+              </div>
+            )}
+
+            {/* Due Date */}
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Due Date</Label><Input type="date" value={genForm.dueDate} onChange={e => setGenForm(p => ({ ...p, dueDate: e.target.value }))} /></div>
+              <div><Label>Memo</Label><Input value={genForm.memo} onChange={e => setGenForm(p => ({ ...p, memo: e.target.value }))} placeholder="Optional notes" /></div>
+            </div>
+
+            {/* Summary */}
+            <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1">
+              <div className="flex justify-between"><span className="text-muted-foreground">Recipient</span><span className="font-medium">{invoiceRecipientName || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span>{invoiceRecipientEmail || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Service</span><span>{SERVICE_PRICES[genForm.serviceType]?.label || 'Custom'}</span></div>
+              <div className="flex justify-between border-t pt-1 mt-1"><span className="font-semibold">Total</span><span className="font-bold text-[#B91C1C] text-lg">${invoiceAmount.toFixed(2)}</span></div>
+            </div>
+
+            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!invoiceRecipientName || !invoiceRecipientEmail || invoiceAmount <= 0 || isGenerating}
               onClick={async () => {
                 setIsGenerating(true);
                 try {
-                  const amount = parseFloat(genForm.amount);
-                  // Create an appointment record to track the invoice
+                  const svcLabel = genForm.serviceType === 'custom' ? (genForm.customDescription || 'Custom Service') : SERVICE_PRICES[genForm.serviceType]?.label || 'Service';
                   const { data: appt, error: apptErr } = await supabase.from('appointments').insert([{
                     appointment_date: new Date().toISOString(),
-                    patient_name: genForm.patientName,
-                    patient_email: genForm.patientEmail,
-                    service_type: 'invoice',
-                    service_name: genForm.description || 'Invoice',
-                    status: 'scheduled',
-                    address: 'Invoice Only',
-                    zipcode: '32801',
-                    total_amount: amount,
-                    service_price: amount,
-                    booking_source: 'manual',
-                    invoice_status: 'sent',
+                    patient_name: invoiceRecipientName,
+                    patient_email: invoiceRecipientEmail,
+                    service_type: genForm.serviceType === 'custom' ? 'invoice' : genForm.serviceType,
+                    service_name: svcLabel,
+                    status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
+                    total_amount: invoiceAmount, service_price: invoiceAmount,
+                    booking_source: 'manual', invoice_status: 'sent',
                     invoice_sent_at: new Date().toISOString(),
-                    invoice_due_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+                    invoice_due_at: genForm.dueDate ? new Date(genForm.dueDate + 'T23:59:59').toISOString() : new Date(Date.now() + 7*24*60*60*1000).toISOString(),
                     payment_status: 'pending',
-                    notes: genForm.memo || null,
+                    notes: [genForm.memo, genForm.recipientType === 'organization' ? `Org: ${genForm.orgName}` : ''].filter(Boolean).join(' | ') || null,
                   }]).select().single();
                   if (apptErr) throw apptErr;
 
-                  // Send invoice via Stripe
                   await supabase.functions.invoke('send-appointment-invoice', {
                     body: {
-                      appointmentId: appt.id,
-                      patientName: genForm.patientName,
-                      patientEmail: genForm.patientEmail,
-                      serviceName: genForm.description || 'ConveLabs Service',
-                      servicePrice: amount,
-                      memo: genForm.memo,
+                      appointmentId: appt.id, patientName: invoiceRecipientName,
+                      patientEmail: invoiceRecipientEmail, serviceName: svcLabel,
+                      servicePrice: invoiceAmount, memo: genForm.memo,
+                      orgName: genForm.recipientType === 'organization' ? genForm.orgName : undefined,
                     },
                   });
 
-                  toast.success(`Invoice for $${amount.toFixed(2)} sent to ${genForm.patientEmail}`);
-                  setGenForm({ patientName: '', patientEmail: '', amount: '', description: '', memo: '' });
+                  toast.success(`Invoice for $${invoiceAmount.toFixed(2)} sent to ${invoiceRecipientEmail}`);
+                  setGenForm({ recipientType: 'patient', patientName: '', patientEmail: '', patientPhone: '', orgName: '', orgEmail: '', serviceType: 'mobile', customAmount: '', customDescription: '', dueDate: new Date(Date.now() + 7*24*60*60*1000).toISOString().split('T')[0], memo: '' });
                   setGenerateModalOpen(false);
                   fetchInvoices();
-                } catch (err: any) {
-                  toast.error(err.message || 'Failed to generate invoice');
-                } finally {
-                  setIsGenerating(false);
-                }
+                } catch (err: any) { toast.error(err.message || 'Failed to generate invoice'); }
+                finally { setIsGenerating(false); }
               }}>
-              {isGenerating ? 'Sending...' : `Send Invoice — $${parseFloat(genForm.amount || '0').toFixed(2)}`}
+              {isGenerating ? 'Sending...' : `Send Invoice — $${invoiceAmount.toFixed(2)}`}
             </Button>
           </div>
         </DialogContent>
