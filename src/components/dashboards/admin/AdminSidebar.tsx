@@ -45,7 +45,11 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
   },
 ];
 
-const AdminSidebar: React.FC = () => {
+interface AdminSidebarProps {
+  onNavClick?: () => void;
+}
+
+const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const location = useLocation();
   const { user } = useAuth();
   const userRole = user?.role || 'patient';
@@ -108,6 +112,7 @@ const AdminSidebar: React.FC = () => {
                   <Link
                     key={item.path}
                     to={item.path}
+                    onClick={onNavClick}
                     className={`flex items-center gap-3 px-5 py-2.5 text-sm transition-colors ${
                       active
                         ? 'bg-conve-red/20 text-white border-r-2 border-conve-red font-medium'

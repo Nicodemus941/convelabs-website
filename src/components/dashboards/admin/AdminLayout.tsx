@@ -1,19 +1,54 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import AdminSidebar from './AdminSidebar';
-import { useAuth } from '@/contexts/AuthContext';
+import { Menu, X } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
 }
 
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
-  const { user } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <div className="flex min-h-screen bg-background">
-      <AdminSidebar />
-      <main className="flex-1 overflow-auto">
-        <div className="p-6 max-w-7xl mx-auto">
+      {/* Mobile top bar */}
+      <div className="fixed top-0 left-0 right-0 z-50 md:hidden bg-gray-950 text-white flex items-center justify-between px-4 h-14">
+        <Link to="/" className="text-lg font-bold">
+          ConveLabs<span className="text-[#B91C1C]">.</span>
+        </Link>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-white hover:bg-gray-800"
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+        >
+          {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </Button>
+      </div>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar — hidden on mobile, slide-in when toggled */}
+      <div className={`
+        fixed md:static inset-y-0 left-0 z-40
+        transform transition-transform duration-200 ease-in-out
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        md:translate-x-0
+      `}>
+        <AdminSidebar onNavClick={() => setSidebarOpen(false)} />
+      </div>
+
+      {/* Main content */}
+      <main className="flex-1 overflow-auto pt-14 md:pt-0">
+        <div className="p-4 md:p-6 max-w-7xl mx-auto">
           {children}
         </div>
       </main>
