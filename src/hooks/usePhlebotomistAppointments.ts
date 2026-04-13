@@ -69,10 +69,13 @@ export function usePhlebotomistAppointments() {
 
       if (error) throw error;
 
-      // Build set of dates that have appointments
+      // Build set of dates that have appointments (extract yyyy-MM-dd from timestamp)
       const dates = new Set<string>();
       (appts || []).forEach((a: any) => {
-        if (a.appointment_date) dates.add(a.appointment_date);
+        if (a.appointment_date) {
+          const dateOnly = a.appointment_date.substring(0, 10); // "2026-04-13" from "2026-04-13 12:00:00+00"
+          dates.add(dateOnly);
+        }
       });
       setMonthDates(dates);
 
@@ -110,9 +113,12 @@ export function usePhlebotomistAppointments() {
             if (match) patientName = match[1].trim();
           }
 
+          // Normalize appointment_date to yyyy-MM-dd (may come as full timestamp)
+          const normalizedDate = appt.appointment_date ? appt.appointment_date.substring(0, 10) : appt.appointment_date;
+
           return {
             id: appt.id,
-            appointment_date: appt.appointment_date,
+            appointment_date: normalizedDate,
             appointment_time: appt.appointment_time,
             status: appt.status as AppointmentStatus,
             address: appt.address || 'Address pending',
