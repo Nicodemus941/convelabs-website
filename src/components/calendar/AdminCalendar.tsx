@@ -58,7 +58,14 @@ const AdminCalendar: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { fetchAppointments(); }, [fetchAppointments]);
+  const [timeBlocks, setTimeBlocks] = useState<any[]>([]);
+
+  const fetchTimeBlocks = useCallback(async () => {
+    const { data } = await supabase.from('time_blocks' as any).select('*').order('start_date');
+    setTimeBlocks(data || []);
+  }, []);
+
+  useEffect(() => { fetchAppointments(); fetchTimeBlocks(); }, [fetchAppointments, fetchTimeBlocks]);
 
   const getPatientName = (appt: any): string => {
     if (appt.notes?.startsWith('Patient: ')) {
@@ -103,7 +110,41 @@ const AdminCalendar: React.FC = () => {
     };
   });
 
+  // Add blocked dates as background events
+  const blockEvents = timeBlocks.map((block: any) => ({
+    id: `block-${block.id}`,
+    title: `BLOCKED: ${block.reason || 'Time Off'}`,
+    start: block.start_date,
+    end: block.end_date ? new Date(new Date(block.end_date + 'T00:00:00').getTime() + 86400000).toISOString().split('T')[0] : block.start_date,
+    allDay: true,
+    display: 'background',
+    backgroundColor: '#fecaca',
+    borderColor: '#ef4444',
+    classNames: ['fc-blocked-date'],
+    extendedProps: { isBlock: true, reason: block.reason },
+  }));
+
+  // Also add text overlay events for blocks so the reason is visible
+  const blockLabelEvents = timeBlocks.map((block: any) => ({
+    id: `block-label-${block.id}`,
+    title: `🚫 ${block.reason || 'Blocked'}`,
+    start: block.start_date,
+    end: block.end_date ? new Date(new Date(block.end_date + 'T00:00:00').getTime() + 86400000).toISOString().split('T')[0] : block.start_date,
+    allDay: true,
+    backgroundColor: '#ef4444',
+    borderColor: '#dc2626',
+    textColor: '#ffffff',
+    extendedProps: { isBlock: true },
+  }));
+
+  const allEvents = [...calendarEvents, ...blockEvents, ...blockLabelEvents];
+
   const handleEventClick = (info: any) => {
+    // Don't open detail modal for block events
+    if (info.event.extendedProps.isBlock) {
+      toast.info(info.event.title);
+      return;
+    }
     const appt = info.event.extendedProps.appointment;
     setSelectedAppointment(appt);
     setDetailModalOpen(true);
@@ -191,7 +232,7 @@ const AdminCalendar: React.FC = () => {
                 right: 'dayGridMonth,timeGridWeek,timeGridDay',
               }}
               timeZone="America/New_York"
-              events={calendarEvents}
+              events={allEvents}
               eventClick={handleEventClick}
               dateClick={handleDateClick}
               height="auto"

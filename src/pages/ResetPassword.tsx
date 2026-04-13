@@ -19,21 +19,31 @@ const ResetPassword = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Get user info when the component loads
     const getUserInfo = async () => {
       try {
-        console.log("Checking for session");
+        // Check if there's a hash fragment with tokens (from Supabase redirect)
+        const hash = window.location.hash;
+        if (hash && hash.includes('access_token')) {
+          console.log("Found token in URL hash, setting session...");
+          // Supabase client auto-detects hash params and creates session
+          // Wait a moment for it to process
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+
         const { data } = await supabase.auth.getSession();
-        console.log("Session data:", data);
-        
+
         if (data?.session?.user?.email) {
           setEmail(data.session.user.email);
-          console.log("Found user email:", data.session.user.email);
         } else {
-          console.log("No user session found, user might need to click the reset link again");
-          toast("Session expired", {
-            description: "Please click the reset link in your email again."
-          });
+          // Try refreshing
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          if (refreshData?.session?.user?.email) {
+            setEmail(refreshData.session.user.email);
+          } else {
+            toast("Session expired", {
+              description: "Please click the reset link in your email again."
+            });
+          }
         }
       } catch (error) {
         console.error("Error getting session:", error);
@@ -60,9 +70,16 @@ const ResetPassword = () => {
     setIsSubmitting(true);
     
     try {
-      console.log("Attempting to update password");
+      // Verify we have an active session before attempting update
+      const { data: session } = await supabase.auth.getSession();
+      if (!session?.session) {
+        setFormError("Your session has expired. Please click the reset link in your email again.");
+        setIsSubmitting(false);
+        return;
+      }
+
       const { error } = await supabase.auth.updateUser({ password });
-      
+
       if (error) {
         throw error;
       }
