@@ -20,6 +20,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
         { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
         { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },
+        { name: 'Patients', icon: Users, path: `${basePath}/patients` },
       ],
     },
     {
