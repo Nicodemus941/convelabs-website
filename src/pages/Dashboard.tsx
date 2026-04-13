@@ -23,6 +23,7 @@ import WebhookEventMonitor from "@/components/dashboards/admin/WebhookEventMonit
 import AdminCalendar from "@/components/calendar/AdminCalendar";
 import SMSMessagingTab from "@/components/dashboards/admin/SMSMessagingTab";
 import InvoicesTab from "@/components/dashboards/admin/InvoicesTab";
+import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingTab";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -87,7 +88,8 @@ const Dashboard = () => {
           {adminTab === "calendar" && <AdminCalendar />}
           {adminTab === "sms" && <SMSMessagingTab />}
           {adminTab === "invoices" && <InvoicesTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices"].includes(adminTab) && (
+          {adminTab === "specimens" && <SpecimenTrackingTab />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens"].includes(adminTab) && (
             <Navigate to="/dashboard/super_admin" replace />
           )}
         </AdminLayout>

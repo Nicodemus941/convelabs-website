@@ -323,7 +323,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         <CardDescription>Choose when you'd like our phlebotomist to visit</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <AvailabilityMap selectedDate={selectedDate} />
+        {/* Availability indicator removed — was showing "X phlebotomists in your area" */}
         <div className="grid md:grid-cols-2 gap-6">
           <div>
             <FormField
