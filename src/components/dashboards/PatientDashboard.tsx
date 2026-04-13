@@ -1,13 +1,11 @@
-
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppointments } from "@/hooks/useAppointments";
 import { supabase } from "@/integrations/supabase/client";
 import { Appointment } from "@/types/appointmentTypes";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Calendar, Clock, MapPin, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail } from "lucide-react";
+import { Calendar, Clock, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail, Phone } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import UpcomingAppointments from "@/components/appointments/UpcomingAppointments";
@@ -23,7 +21,6 @@ const PatientDashboard = () => {
 
   useEffect(() => { getAppointments(); }, [getAppointments]);
 
-  // Load notification preferences
   useEffect(() => {
     if (!user) return;
     supabase.from('email_preferences').select('notification_method').eq('user_id', user.id).maybeSingle()
@@ -43,7 +40,7 @@ const PatientDashboard = () => {
     }, { onConflict: 'user_id' });
     setNotifSaving(false);
     if (error) toast.error('Failed to save preference');
-    else toast.success(`Notifications set to ${method === 'both' ? 'SMS & Email' : method.toUpperCase()}`);
+    else toast.success(`Notifications: ${method === 'both' ? 'SMS & Email' : method.toUpperCase()}`);
   };
 
   useEffect(() => {
@@ -59,83 +56,84 @@ const PatientDashboard = () => {
   const completedCount = appointments?.filter(a => a.status === 'completed').length || 0;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pb-20 md:pb-6">
       {/* Welcome */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Welcome, {user?.firstName || 'Patient'}</h1>
-          <p className="text-muted-foreground">Manage your appointments and health records</p>
+          <h1 className="text-xl md:text-2xl font-bold">Welcome, {user?.firstName || 'Patient'}</h1>
+          <p className="text-muted-foreground text-sm">Manage your appointments and health records</p>
         </div>
-        <Button className="bg-conve-red hover:bg-conve-red-dark text-white" asChild>
+        <Button className="bg-[#B91C1C] hover:bg-[#991B1B] text-white hidden md:flex" asChild>
           <Link to="/book-now"><Plus className="h-4 w-4 mr-1" /> Book Appointment</Link>
         </Button>
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <Card className="shadow-sm">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Upcoming</p>
-                <p className="text-2xl font-bold">{upcomingCount}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Upcoming</p>
+                <p className="text-xl md:text-2xl font-bold">{upcomingCount}</p>
               </div>
-              <Calendar className="h-8 w-8 text-blue-500 opacity-50" />
+              <Calendar className="h-6 w-6 md:h-8 md:w-8 text-blue-500 opacity-50" />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="shadow-sm">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Completed</p>
-                <p className="text-2xl font-bold">{completedCount}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Completed</p>
+                <p className="text-xl md:text-2xl font-bold">{completedCount}</p>
               </div>
-              <FileText className="h-8 w-8 text-green-500 opacity-50" />
+              <FileText className="h-6 w-6 md:h-8 md:w-8 text-green-500 opacity-50" />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="shadow-sm">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Next Visit</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Next Visit</p>
                 <p className="text-sm font-bold">
                   {nextAppointment?.appointment_date
                     ? new Date(nextAppointment.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                     : 'None'}
                 </p>
               </div>
-              <Clock className="h-8 w-8 text-purple-500 opacity-50" />
+              <Clock className="h-6 w-6 md:h-8 md:w-8 text-purple-500 opacity-50" />
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="p-4">
+        <Card className="shadow-sm">
+          <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Membership</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Membership</p>
                 <p className="text-sm font-bold">Non-member</p>
               </div>
-              <Star className="h-8 w-8 text-amber-500 opacity-50" />
+              <Star className="h-6 w-6 md:h-8 md:w-8 text-amber-500 opacity-50" />
             </div>
-            <Button variant="link" size="sm" className="px-0 mt-1 text-xs text-conve-red" asChild>
+            <Button variant="link" size="sm" className="px-0 mt-1 text-[10px] md:text-xs text-[#B91C1C]" asChild>
               <Link to="/pricing">Upgrade & Save →</Link>
             </Button>
           </CardContent>
         </Card>
       </div>
 
+      {/* Desktop: 3-col layout. Mobile: single column with reordered sections */}
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
           {/* Upcoming Appointments */}
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-lg">Upcoming Appointments</CardTitle>
-                <Button variant="ghost" size="sm" asChild>
-                  <Link to="/book-now">Book New <ArrowRight className="ml-1 h-4 w-4" /></Link>
+                <CardTitle className="text-base md:text-lg">Upcoming Appointments</CardTitle>
+                <Button variant="ghost" size="sm" className="text-xs" asChild>
+                  <Link to="/book-now">Book New <ArrowRight className="ml-1 h-3 w-3" /></Link>
                 </Button>
               </div>
             </CardHeader>
@@ -144,10 +142,54 @@ const PatientDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Appointment History */}
-          <Card>
+          {/* Quick Actions — shown BEFORE past appointments on mobile */}
+          <div className="grid grid-cols-2 gap-3 lg:hidden">
+            <Button variant="outline" size="sm" className="justify-start gap-2 h-12" asChild>
+              <Link to="/book-now"><Calendar className="h-4 w-4 text-[#B91C1C]" /> Book Appointment</Link>
+            </Button>
+            <Button variant="outline" size="sm" className="justify-start gap-2 h-12" asChild>
+              <Link to="/pricing"><Star className="h-4 w-4 text-amber-500" /> Membership Plans</Link>
+            </Button>
+            <Button variant="outline" size="sm" className="justify-start gap-2 h-12" asChild>
+              <a href="tel:9415279169"><Phone className="h-4 w-4 text-blue-500" /> Call ConveLabs</a>
+            </Button>
+            <Button variant="outline" size="sm" className="justify-start gap-2 h-12" asChild>
+              <Link to="/guarantee"><FileText className="h-4 w-4 text-emerald-500" /> Our Guarantee</Link>
+            </Button>
+          </div>
+
+          {/* Referral — shown in flow on mobile */}
+          <div className="lg:hidden">
+            <ReferralCard />
+          </div>
+
+          {/* Notifications — compact on mobile */}
+          <Card className="shadow-sm lg:hidden">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-semibold flex items-center gap-1.5"><Bell className="h-4 w-4" /> Notification Preference</p>
+              </div>
+              <div className="flex gap-2">
+                {(['sms', 'email', 'both'] as const).map(method => (
+                  <Button
+                    key={method}
+                    variant={notifMethod === method ? 'default' : 'outline'}
+                    size="sm"
+                    className={`flex-1 text-xs ${notifMethod === method ? 'bg-[#B91C1C] hover:bg-[#991B1B]' : ''}`}
+                    onClick={() => handleNotifChange(method)}
+                    disabled={notifSaving}
+                  >
+                    {method === 'sms' ? 'SMS' : method === 'email' ? 'Email' : 'Both'}
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Past Appointments */}
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Past Appointments</CardTitle>
+              <CardTitle className="text-base md:text-lg">Past Appointments</CardTitle>
             </CardHeader>
             <CardContent>
               <AppointmentHistory />
@@ -155,10 +197,10 @@ const PatientDashboard = () => {
           </Card>
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-6">
+        {/* Desktop Sidebar — hidden on mobile (content shown inline above) */}
+        <div className="hidden lg:block space-y-6">
           {/* Profile Card */}
-          <Card>
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">My Profile</CardTitle>
             </CardHeader>
@@ -170,29 +212,24 @@ const PatientDashboard = () => {
               <div className="flex items-center gap-2">
                 <span className="text-muted-foreground text-xs">{user?.email}</span>
               </div>
-              {user?.phoneNumber && (
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground text-xs">{user.phoneNumber}</span>
-                </div>
-              )}
               <Button variant="outline" size="sm" className="w-full mt-3" asChild>
                 <Link to="/profile">Edit Profile</Link>
               </Button>
             </CardContent>
           </Card>
 
-          {/* Referral */}
+          {/* Referral — desktop sidebar */}
           <ReferralCard />
 
-          {/* Notification Preferences */}
-          <Card>
+          {/* Notification Preferences — desktop sidebar */}
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Bell className="h-4 w-4" /> Notifications
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <p className="text-xs text-muted-foreground mb-2">How would you like to receive appointment reminders?</p>
+              <p className="text-xs text-muted-foreground mb-2">How would you like to receive reminders?</p>
               {(['sms', 'email', 'both'] as const).map(method => (
                 <Button
                   key={method}
@@ -210,8 +247,8 @@ const PatientDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Quick Actions */}
-          <Card>
+          {/* Quick Actions — desktop sidebar */}
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
               <CardTitle className="text-lg">Quick Actions</CardTitle>
             </CardHeader>
@@ -228,6 +265,13 @@ const PatientDashboard = () => {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      {/* Floating Book Button — mobile only */}
+      <div className="fixed bottom-4 left-4 right-4 md:hidden z-40">
+        <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white shadow-lg rounded-xl h-12 text-base font-semibold gap-2" asChild>
+          <Link to="/book-now"><Plus className="h-5 w-5" /> Book Appointment</Link>
+        </Button>
       </div>
     </div>
   );
