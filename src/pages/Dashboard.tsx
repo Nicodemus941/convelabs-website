@@ -27,26 +27,35 @@ import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 const Dashboard = () => {
   const { "*": urlPath } = useParams<{ "*": string }>();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const navigate = useNavigate();
-  
+
   // Parse the URL path to extract role and adminTab - use location.pathname as fallback
   const actualPath = urlPath || location.pathname.replace('/dashboard/', '');
   const pathParts = actualPath?.split('/').filter(Boolean) || [];
   const role = pathParts[0];
   const adminTab = pathParts[1];
-  
-  console.log("Dashboard component rendering with:", { role, adminTab, urlPath, actualPath, pathParts, pathname: location.pathname, user });
-  
+
   // If no role parameter but user exists, redirect to role-specific dashboard
   useEffect(() => {
     if (!role && user) {
-      console.log("No role parameter found, redirecting to user role dashboard");
       navigate(`/dashboard/${user.role}`, { replace: true });
     }
   }, [role, user, navigate]);
-  
-  // If no user, redirect to login
+
+  // Wait for auth to finish loading before redirecting
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-10 h-10 border-4 border-[#B91C1C] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If no user after loading, redirect to login
   if (!user) {
     return <Navigate to="/login" replace />;
   }
