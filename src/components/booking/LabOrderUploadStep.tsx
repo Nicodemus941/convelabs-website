@@ -236,6 +236,22 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
           </div>
         )}
 
+        {/* Validation messages — show what's still needed */}
+        {!canProceed && (selectedFiles.length > 0 || mode === 'skip') && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+            {!hasInsurance && isInsuranceRequired && (
+              <p className="text-xs text-amber-700 flex items-center gap-1.5">
+                <Shield className="h-3.5 w-3.5" /> Please upload your insurance card to continue
+              </p>
+            )}
+            {!hasLabDest && needsLabDestination && (
+              <p className="text-xs text-amber-700 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" /> Please select a lab destination below
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Navigation */}
         <div className="flex justify-between pt-4">
           <Button type="button" variant="outline" onClick={onBack}>

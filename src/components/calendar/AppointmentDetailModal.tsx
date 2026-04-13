@@ -305,25 +305,38 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               </div>
             )}
             {/* Admin upload */}
-            <div className="border rounded-lg p-4">
-              <p className="text-sm font-medium mb-2">Upload Lab Order</p>
-              <input
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                className="text-xs"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const fileName = `laborder_${appt.id}_${Date.now()}_${file.name}`;
-                  const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
-                  if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
-                  const existingPath = appt.lab_order_file_path || '';
-                  const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
-                  await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
-                  toast.success('Lab order uploaded');
-                  onUpdate();
-                }}
-              />
+            <div className="border rounded-lg p-4 space-y-3">
+              <p className="text-sm font-medium">Upload Lab Order</p>
+              <div className="flex items-center gap-3">
+                <label className="flex-1 cursor-pointer">
+                  <div className="border-2 border-dashed border-gray-200 hover:border-[#B91C1C]/50 rounded-lg p-4 text-center transition-colors">
+                    <FileText className="h-6 w-6 mx-auto text-muted-foreground mb-1" />
+                    <p className="text-xs font-medium">Click to select file</p>
+                    <p className="text-[10px] text-muted-foreground">PDF, JPG, PNG</p>
+                  </div>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.heic"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      toast.info(`Uploading ${file.name}...`);
+                      const fileName = `laborder_${appt.id}_${Date.now()}_${file.name}`;
+                      const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
+                      if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
+                      const existingPath = appt.lab_order_file_path || '';
+                      const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
+                      const { error: updateErr } = await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
+                      if (updateErr) { toast.error('Failed to link file to appointment'); return; }
+                      toast.success(`Lab order "${file.name}" uploaded successfully`);
+                      onUpdate();
+                      // Reset the input so same file can be re-selected
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
             </div>
           </TabsContent>
 

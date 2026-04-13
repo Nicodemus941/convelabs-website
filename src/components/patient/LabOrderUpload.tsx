@@ -45,38 +45,34 @@ const LabOrderUpload: React.FC<LabOrderUploadProps> = ({
     try {
       setUploading(true);
 
-      // Generate unique filename
-      const fileExt = selectedFile.name.split('.').pop();
-      const fileName = `${appointmentId}_${Date.now()}.${fileExt}`;
-      const filePath = `lab-orders/${fileName}`;
+      // Generate unique filename (flat path in lab-orders bucket)
+      const fileName = `laborder_${appointmentId}_${Date.now()}_${selectedFile.name}`;
 
       // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('lab-orders')
-        .upload(filePath, selectedFile);
+        .upload(fileName, selectedFile);
 
       if (uploadError) throw uploadError;
 
-      // Save record to database
-      const { error: dbError } = await supabase
-        .from('appointment_lab_orders')
-        .insert({
-          appointment_id: appointmentId,
-          file_path: filePath,
-          original_filename: selectedFile.name,
-          file_size: selectedFile.size,
-          mime_type: selectedFile.type
-        });
+      // Update appointment record with file path
+      const { data: appt } = await supabase.from('appointments').select('lab_order_file_path').eq('id', appointmentId).single();
+      const existingPath = appt?.lab_order_file_path || '';
+      const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
 
-      if (dbError) throw dbError;
+      const { error: updateError } = await supabase.from('appointments')
+        .update({ lab_order_file_path: newPath })
+        .eq('id', appointmentId);
 
-      toast.success('Lab order uploaded successfully');
+      if (updateError) throw updateError;
+
+      toast.success('Lab order uploaded successfully! Your phlebotomist will be able to view it.');
       setSelectedFile(null);
       onUploadComplete();
 
     } catch (error: any) {
       console.error('Upload error:', error);
-      toast.error('Failed to upload lab order');
+      toast.error(error.message || 'Failed to upload lab order');
     } finally {
       setUploading(false);
     }
