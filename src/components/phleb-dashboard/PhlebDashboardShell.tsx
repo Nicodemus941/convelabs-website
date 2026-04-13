@@ -88,7 +88,7 @@ const PhlebDashboardShell: React.FC = () => {
         </div>
 
         {/* Mobile Header - hidden on desktop */}
-        <div className="md:hidden bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white px-4 py-5">
+        <div className="md:hidden bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white px-4 py-5" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)' }}>
           <div className="max-w-lg mx-auto">
             <div className="flex items-center justify-between mb-1">
               <div>

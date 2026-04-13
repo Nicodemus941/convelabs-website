@@ -14,7 +14,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   return (
     <div className="flex min-h-screen bg-background">
       {/* Mobile top bar */}
-      <div className="fixed top-0 left-0 right-0 z-50 md:hidden bg-gray-950 text-white flex items-center justify-between px-4 h-14">
+      <div className="fixed top-0 left-0 right-0 z-50 md:hidden bg-gray-950 text-white flex items-center justify-between px-4 min-h-[56px]" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
         <Link to="/" className="text-lg font-bold">
           ConveLabs<span className="text-[#B91C1C]">.</span>
         </Link>
@@ -47,7 +47,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       </div>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto pt-14 md:pt-0">
+      <main className="flex-1 overflow-auto md:pt-0" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 56px)' }}>
         <div className="p-4 md:p-6 max-w-7xl mx-auto">
           {children}
         </div>
