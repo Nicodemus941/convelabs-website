@@ -4,23 +4,24 @@ import { Helmet } from 'react-helmet-async';
 export const ServiceWorkerSetup: React.FC = () => {
   React.useEffect(() => {
     if ('serviceWorker' in navigator) {
-      // Force update: unregister old workers, register fresh
-      navigator.serviceWorker.getRegistrations().then(registrations => {
+      // AGGRESSIVE: Unregister ALL old service workers first, then register fresh
+      navigator.serviceWorker.getRegistrations().then(async (registrations) => {
         for (const reg of registrations) {
-          reg.update(); // Force check for new SW
-          if (reg.waiting) {
-            reg.waiting.postMessage('SKIP_WAITING');
-          }
+          // Force skip waiting on any waiting worker
+          if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
+          // Unregister old workers completely
+          await reg.unregister();
+          console.log('Unregistered old service worker');
         }
-      });
-      navigator.serviceWorker.register('/sw.js').then(reg => {
-        reg.addEventListener('updatefound', () => {
-          const newWorker = reg.installing;
+        // Now register the fresh one
+        const newReg = await navigator.serviceWorker.register('/sw.js');
+        console.log('Registered fresh service worker v8');
+        newReg.addEventListener('updatefound', () => {
+          const newWorker = newReg.installing;
           if (newWorker) {
             newWorker.addEventListener('statechange', () => {
               if (newWorker.state === 'activated') {
-                // New SW activated — reload to get fresh assets
-                console.log('New service worker activated, reloading...');
+                console.log('New service worker activated');
               }
             });
           }
