@@ -87,17 +87,11 @@ export const useAuthSession = () => {
       if (_event === 'PASSWORD_RECOVERY') {
         console.log("Password recovery event detected");
         if (!window.location.pathname.includes('/reset-password')) {
-          // Use router-friendly navigation that preserves session
-          window.history.pushState({}, '', '/reset-password');
-          window.dispatchEvent(new PopStateEvent('popstate'));
-          // Fallback: hard redirect after a brief delay
-          setTimeout(() => {
-            if (!window.location.pathname.includes('/reset-password')) {
-              window.location.replace('/reset-password');
-            }
-          }, 500);
+          // Hard redirect to reset page — preserves hash tokens in URL
+          window.location.href = '/reset-password' + window.location.hash;
+          return; // Don't process further — page is redirecting
         }
-        // Don't return — still process the session so ResetPassword can use it
+        // Already on reset page — don't interfere, let ResetPassword.tsx handle the session
       }
 
       const mappedSession = mapSessionData(supabaseSession);

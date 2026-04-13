@@ -114,6 +114,8 @@ Deno.serve(async (req) => {
       state: locationDetails?.state || '',
       zip_code: locationDetails?.zipCode || '',
       location_type: locationDetails?.locationType || '',
+      apt_unit: locationDetails?.aptUnit || '',
+      gate_code: locationDetails?.gateCode || '',
       instructions: (locationDetails?.instructions || '').substring(0, 500),
       same_day: String(serviceDetails?.sameDay || false),
       weekend: String(serviceDetails?.weekend || false),

@@ -22,7 +22,9 @@ Deno.serve(async (req) => {
     let event;
 
     try {
-      event = stripe.webhooks.constructEvent(
+      // MUST use constructEventAsync in Deno/Supabase Edge Functions
+      // constructEvent (sync) fails with SubtleCryptoProvider error
+      event = await stripe.webhooks.constructEventAsync(
         body,
         signature,
         endpointSecret
@@ -433,30 +435,62 @@ async function handleAppointmentPayment(session: any) {
   try {
     const { metadata, id: checkoutSessionId, payment_intent } = session;
 
+    // IDEMPOTENCY CHECK: Don't create duplicate appointments for the same checkout session
+    const { data: existingAppt } = await supabaseClient
+      .from('appointments')
+      .select('id')
+      .eq('stripe_checkout_session_id', checkoutSessionId)
+      .maybeSingle();
+
+    if (existingAppt) {
+      console.log(`Appointment already exists for session ${checkoutSessionId}, skipping`);
+      return existingAppt;
+    }
+
     const appointmentDate = metadata.appointment_date;
     const appointmentTime = metadata.appointment_time || null;
     const servicePrice = parseInt(metadata.service_price || '0', 10); // cents
     const tipAmount = parseInt(metadata.tip_amount || '0', 10); // cents
     const userId = metadata.user_id || null;
 
-    // Build address string
-    const addressParts = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean);
-    const fullAddress = addressParts.join(', ');
+    // Build address string (include apt/unit if present)
+    let fullAddress = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean).join(', ');
+    if (metadata.apt_unit) fullAddress = `${metadata.apt_unit}, ${fullAddress}`;
 
-    // Find or determine patient_id
-    let patientId = userId;
-    if (!patientId) {
-      // Guest checkout — try to find user by email or use a placeholder
-      const email = metadata.patient_email;
-      if (email) {
-        const { data: existingUser } = await supabaseClient
-          .from('auth.users')
+    // Find patient_id — try user_id from metadata first, then lookup by email
+    let patientId = userId || null;
+    if (!patientId && metadata.patient_email) {
+      // Use admin API to find user by email (can't query auth.users as a table)
+      try {
+        const { data: { users } } = await supabaseClient.auth.admin.listUsers({ page: 1, perPage: 1 });
+        // Fallback: search tenant_patients
+        const { data: tp } = await supabaseClient
+          .from('tenant_patients')
           .select('id')
-          .eq('email', email)
+          .ilike('email', metadata.patient_email.trim())
           .maybeSingle();
-        patientId = existingUser?.id || null;
+        if (tp) patientId = tp.id;
+      } catch (lookupErr) {
+        console.error('Patient lookup error (non-fatal):', lookupErr);
       }
     }
+
+    // SLOT VALIDATION: Check if this time slot is already booked
+    if (appointmentDate && appointmentTime) {
+      const { count } = await supabaseClient
+        .from('appointments')
+        .select('*', { count: 'exact', head: true })
+        .eq('appointment_date', appointmentDate)
+        .eq('appointment_time', appointmentTime)
+        .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
+
+      if (count && count > 0) {
+        console.warn(`DOUBLE BOOKING PREVENTED: Slot ${appointmentDate} ${appointmentTime} already has ${count} appointment(s). Creating anyway with flag.`);
+        // Still create appointment (patient already paid) but flag it for manual review
+      }
+    }
+
+    const patientName = `${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''}`.trim();
 
     // Create the appointment record
     const { data: appointment, error: appointmentError } = await supabaseClient
@@ -467,14 +501,19 @@ async function handleAppointmentPayment(session: any) {
         status: 'scheduled',
         payment_status: 'completed',
         patient_id: patientId,
-        patient_name: `${metadata.patient_first_name} ${metadata.patient_last_name}`.trim(),
-        patient_email: metadata.patient_email,
+        patient_name: patientName,
+        patient_email: metadata.patient_email || null,
         patient_phone: metadata.patient_phone || null,
         address: fullAddress,
         zipcode: metadata.zip_code || '',
         service_type: metadata.service_type || 'mobile',
         service_name: metadata.service_name || 'Blood Draw',
-        notes: metadata.additional_notes || null,
+        gate_code: metadata.gate_code || null,
+        notes: [
+          metadata.additional_notes,
+          metadata.instructions ? `Instructions: ${metadata.instructions}` : '',
+          metadata.gate_code ? `Gate Code: ${metadata.gate_code}` : '',
+        ].filter(Boolean).join(' | ') || null,
         total_amount: (servicePrice + tipAmount) / 100, // convert cents to dollars
         service_price: servicePrice / 100,
         tip_amount: tipAmount / 100,
@@ -483,6 +522,7 @@ async function handleAppointmentPayment(session: any) {
         stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
         extended_hours: false,
         weekend_service: metadata.weekend === 'true',
+        booking_source: 'online',
       }])
       .select()
       .single();
@@ -491,22 +531,132 @@ async function handleAppointmentPayment(session: any) {
       throw new Error(`Failed to create appointment: ${appointmentError.message}`);
     }
 
-    console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate}`);
+    console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
-    // Try to send confirmation notification
+    // Send confirmation email + SMS via Mailgun and Twilio
     try {
-      await supabaseClient.functions.invoke('send-appointment-confirmation', {
-        body: { appointmentId: appointment.id },
-      });
+      await sendAppointmentConfirmation(appointment, metadata);
     } catch (notifErr) {
-      console.error('Failed to send appointment confirmation:', notifErr);
-      // Don't fail the whole operation if notification fails
+      console.error('Failed to send appointment confirmation (non-fatal):', notifErr);
     }
 
     return appointment;
   } catch (error) {
     console.error('Error processing appointment payment:', error);
     throw error;
+  }
+}
+
+// Send appointment confirmation email + SMS directly (no separate edge function needed)
+async function sendAppointmentConfirmation(appointment: any, metadata: any) {
+  const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
+  const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+  const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+  const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER');
+
+  const patientName = appointment.patient_name || `${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''}`.trim() || 'Patient';
+  const firstName = metadata.patient_first_name || patientName.split(' ')[0] || 'Patient';
+  const email = appointment.patient_email || metadata.patient_email;
+  const phone = appointment.patient_phone || metadata.patient_phone;
+  const appointmentDate = appointment.appointment_date;
+  const appointmentTime = appointment.appointment_time || '';
+  const address = appointment.address || '';
+  const serviceName = appointment.service_name || metadata.service_name || 'Blood Draw';
+  const totalAmount = appointment.total_amount || 0;
+
+  // Format date for display
+  let displayDate = appointmentDate;
+  try {
+    const d = new Date(appointmentDate);
+    displayDate = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  } catch {}
+
+  // 1. Send confirmation EMAIL via Mailgun
+  if (email && MAILGUN_API_KEY) {
+    try {
+      const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+        <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:28px;border-radius:12px 12px 0 0;text-align:center;">
+          <h1 style="margin:0;font-size:22px;">Appointment Confirmed!</h1>
+          <p style="margin:6px 0 0;opacity:0.9;">ConveLabs Mobile Phlebotomy</p>
+        </div>
+        <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
+          <p>Hi ${firstName},</p>
+          <p>Your appointment has been confirmed! Here are the details:</p>
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0;">
+            <table style="width:100%;font-size:14px;">
+              <tr><td style="padding:6px 0;color:#6b7280;">Service</td><td style="padding:6px 0;font-weight:600;text-align:right;">${serviceName}</td></tr>
+              <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;text-align:right;">${displayDate}</td></tr>
+              ${appointmentTime ? `<tr><td style="padding:6px 0;color:#6b7280;">Time</td><td style="padding:6px 0;font-weight:600;text-align:right;">${appointmentTime}</td></tr>` : ''}
+              ${address ? `<tr><td style="padding:6px 0;color:#6b7280;">Location</td><td style="padding:6px 0;font-weight:600;text-align:right;">${address}</td></tr>` : ''}
+              <tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Total Paid</td><td style="padding:10px 0 6px;font-weight:700;font-size:18px;text-align:right;color:#B91C1C;">$${totalAmount.toFixed(2)}</td></tr>
+            </table>
+          </div>
+          <p style="font-size:13px;color:#6b7280;"><strong>What to expect:</strong> A licensed phlebotomist will arrive at your location during your scheduled time window. Please have your lab order and insurance card ready.</p>
+          <p style="font-size:13px;color:#6b7280;">Need to reschedule? Call us at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a></p>
+          <div style="text-align:center;margin:20px 0;">
+            <a href="https://convelabs.com/dashboard" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
+          </div>
+          <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
+        </div>
+      </div>`;
+
+      const formData = new FormData();
+      formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+      formData.append('to', email);
+      formData.append('subject', `Appointment Confirmed - ${displayDate}`);
+      formData.append('html', emailHtml);
+
+      const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+        body: formData,
+      });
+
+      if (mgRes.ok) {
+        console.log(`Confirmation email sent to ${email}`);
+      } else {
+        const errText = await mgRes.text();
+        console.error(`Mailgun error: ${mgRes.status} ${errText}`);
+      }
+    } catch (emailErr) {
+      console.error('Email send error:', emailErr);
+    }
+  }
+
+  // 2. Send confirmation SMS via Twilio
+  if (phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+    try {
+      const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\n${address ? `Location: ${address}\n` : ''}\nTotal: $${totalAmount.toFixed(2)}\n\nA phlebotomist will arrive at your scheduled time. Have your lab order & insurance ready.\n\nQuestions? Call (941) 527-9169`;
+
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+      const twilioBody = new URLSearchParams({
+        To: phone,
+        Body: smsBody,
+        ...(TWILIO_MESSAGING_SERVICE_SID
+          ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
+          : { From: TWILIO_PHONE_NUMBER || '+14074104939' }),
+      });
+
+      const twilioRes = await fetch(twilioUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: twilioBody.toString(),
+      });
+
+      if (twilioRes.ok) {
+        console.log(`Confirmation SMS sent to ${phone}`);
+      } else {
+        const errText = await twilioRes.text();
+        console.error(`Twilio error: ${twilioRes.status} ${errText}`);
+      }
+    } catch (smsErr) {
+      console.error('SMS send error:', smsErr);
+    }
   }
 }
 

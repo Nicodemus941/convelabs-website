@@ -32,22 +32,42 @@ const ResetPassword = () => {
             console.error('Code exchange error:', error);
           } else if (data?.session?.user?.email) {
             setEmail(data.session.user.email);
-            // Clean up URL
             window.history.replaceState({}, '', '/reset-password');
             return;
           }
         }
 
-        // Check for tokens in hash fragment (implicit flow)
+        // Check for tokens in hash fragment (implicit flow from Supabase verify endpoint)
         const hash = window.location.hash;
-        if (hash && (hash.includes('access_token') || hash.includes('type=recovery'))) {
-          console.log('Found tokens in URL hash, waiting for Supabase to process...');
-          // Give Supabase client time to auto-detect and process
-          await new Promise(r => setTimeout(r, 1500));
+        if (hash && hash.includes('access_token')) {
+          console.log('Found tokens in URL hash, extracting manually...');
+
+          // Parse tokens from hash directly
+          const hashParams = new URLSearchParams(hash.substring(1));
+          const accessToken = hashParams.get('access_token');
+          const refreshToken = hashParams.get('refresh_token');
+
+          if (accessToken && refreshToken) {
+            console.log('Setting session from hash tokens...');
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (error) {
+              console.error('setSession error:', error);
+            } else if (data?.session?.user?.email) {
+              console.log('Session set successfully for:', data.session.user.email);
+              setEmail(data.session.user.email);
+              // Clean up hash from URL
+              window.history.replaceState({}, '', '/reset-password');
+              return;
+            }
+          }
         }
 
-        // Poll for session
-        for (let i = 0; i < 10; i++) {
+        // Fallback: Poll for session (in case onAuthStateChange already processed it)
+        for (let i = 0; i < 6; i++) {
           const { data } = await supabase.auth.getSession();
           if (data?.session?.user?.email) {
             setEmail(data.session.user.email);

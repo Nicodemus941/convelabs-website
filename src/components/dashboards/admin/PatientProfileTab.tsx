@@ -145,6 +145,23 @@ const PatientProfileTab: React.FC = () => {
                 )}
               </div>
 
+              {/* Address from most recent appointment */}
+              {(() => {
+                const latestWithAddress = appointments.find(a => a.address && a.address !== 'Pending');
+                return latestWithAddress ? (
+                  <div className="space-y-2 md:col-span-3 border-t pt-4 mt-2">
+                    <p className="text-sm font-semibold flex items-center gap-1.5"><MapPin className="h-4 w-4" /> Address on File</p>
+                    <p className="text-sm">{latestWithAddress.address}</p>
+                    {latestWithAddress.gate_code && (
+                      <p className="text-xs text-muted-foreground">Gate Code: <span className="font-mono font-medium text-foreground">{latestWithAddress.gate_code}</span></p>
+                    )}
+                    {latestWithAddress.notes && latestWithAddress.notes.toLowerCase().includes('gate') && (
+                      <p className="text-xs text-amber-600">Note contains gate info — check appointment notes</p>
+                    )}
+                  </div>
+                ) : null;
+              })()}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-blue-50 rounded-lg p-3 text-center">
                   <p className="text-xl font-bold text-blue-700">{appointments.length}</p>
@@ -189,7 +206,9 @@ const PatientProfileTab: React.FC = () => {
                           <span className="text-sm font-medium">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}</span>
                           <span className="text-xs text-muted-foreground">{a.appointment_time || ''}</span>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1 capitalize">{(a.service_type || '').replace(/_|-/g, ' ')} · {a.address || 'TBD'}</p>
+                        <p className="text-xs text-muted-foreground mt-1 capitalize">{(a.service_name || a.service_type || '').replace(/_|-/g, ' ')}</p>
+                        {a.address && <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" /> {a.address}</p>}
+                        {a.gate_code && <p className="text-xs text-amber-600">Gate: {a.gate_code}</p>}
                       </div>
                       <span className="text-sm font-medium">${a.total_amount || 0}</span>
                     </CardContent>

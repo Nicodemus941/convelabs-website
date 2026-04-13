@@ -24,6 +24,11 @@ const SERVICE_TYPES = [
   { value: 'specialty-kit', label: 'Specialty Collection Kit', price: 185 },
   { value: 'specialty-kit-genova', label: 'Genova Diagnostics', price: 200 },
   { value: 'therapeutic', label: 'Therapeutic Phlebotomy', price: 200 },
+  { value: 'partner-nd-wellness', label: 'ND Wellness', price: 85 },
+  { value: 'partner-restoration-place', label: 'Restoration Place', price: 125 },
+  { value: 'partner-elite-medical-concierge', label: 'Elite Medical Concierge', price: 72.25 },
+  { value: 'partner-naturamed', label: 'NaturaMed', price: 85 },
+  { value: 'partner-aristotle-education', label: 'Aristotle Education', price: 185 },
 ];
 
 const TIME_SLOTS = [

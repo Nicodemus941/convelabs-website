@@ -153,11 +153,38 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
                 </div>
               </div>
               
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                <FormField
+                  control={control}
+                  name="locationDetails.aptUnit"
+                  render={({ field }) => (
+                    <FormItem className="space-y-2">
+                      <label className="text-sm font-medium">Apt / Unit # <span className="text-muted-foreground font-normal">(Optional)</span></label>
+                      <FormControl>
+                        <Input {...field} placeholder="Apt 201, Suite B, etc." />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={control}
+                  name="locationDetails.gateCode"
+                  render={({ field }) => (
+                    <FormItem className="space-y-2">
+                      <label className="text-sm font-medium">Gate Code <span className="text-muted-foreground font-normal">(Optional)</span></label>
+                      <FormControl>
+                        <Input {...field} placeholder="#1234, *5678, etc." />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <div className="space-y-2 mt-2">
-                <label className="text-sm font-medium">Special Instructions (Optional)</label>
-                <Textarea 
-                  {...control.register('locationDetails.instructions')} 
-                  placeholder="Building access instructions, apartment number, etc."
+                <label className="text-sm font-medium">Special Instructions <span className="text-muted-foreground font-normal">(Optional)</span></label>
+                <Textarea
+                  {...control.register('locationDetails.instructions')}
+                  placeholder="Parking instructions, building access notes, landmarks, etc."
                   className="resize-none"
                   rows={3}
                 />

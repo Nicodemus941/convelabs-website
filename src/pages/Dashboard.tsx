@@ -26,6 +26,7 @@ import InvoicesTab from "@/components/dashboards/admin/InvoicesTab";
 import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingTab";
 import NotesTab from "@/components/dashboards/admin/NotesTab";
 import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
+import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -91,7 +92,8 @@ const Dashboard = () => {
           {adminTab === "specimens" && <SpecimenTrackingTab />}
           {adminTab === "notes" && <NotesTab />}
           {adminTab === "patients" && <PatientProfileTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients"].includes(adminTab) && (
+          {adminTab === "organizations" && <OrganizationsTab />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations"].includes(adminTab) && (
             <Navigate to="/dashboard/super_admin" replace />
           )}
         </AdminLayout>

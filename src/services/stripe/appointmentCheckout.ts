@@ -20,6 +20,8 @@ export interface AppointmentCheckoutParams {
     zipCode: string;
     locationType?: string;
     instructions?: string;
+    aptUnit?: string;
+    gateCode?: string;
   };
   serviceDetails?: {
     sameDay?: boolean;

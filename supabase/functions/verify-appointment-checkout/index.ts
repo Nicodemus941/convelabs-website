@@ -46,6 +46,7 @@ Deno.serve(async (req) => {
       // Payment confirmed — create appointment if webhook hasn't done it yet
       const metadata = session.metadata || {};
       const fullAddress = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean).join(', ');
+      const patientName = `${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''}`.trim();
 
       const { data: newAppt, error: insertError } = await supabaseClient
         .from('appointments')
@@ -53,7 +54,11 @@ Deno.serve(async (req) => {
           appointment_date: metadata.appointment_date || new Date().toISOString(),
           appointment_time: metadata.appointment_time || null,
           patient_id: metadata.user_id || null,
+          patient_name: patientName || null,
+          patient_email: metadata.patient_email || null,
+          patient_phone: metadata.patient_phone || null,
           service_type: metadata.service_type || 'mobile',
+          service_name: metadata.service_name || 'Blood Draw',
           status: 'scheduled',
           payment_status: 'completed',
           total_amount: (session.amount_total || 0) / 100,
@@ -63,7 +68,9 @@ Deno.serve(async (req) => {
           zipcode: metadata.zip_code || '32801',
           stripe_checkout_session_id: session_id,
           stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
-          notes: `Patient: ${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''} | Service: ${metadata.service_name || metadata.service_type || 'Blood Draw'} | Paid via Stripe`,
+          booking_source: 'online',
+          notes: metadata.additional_notes || null,
+          weekend_service: metadata.weekend === 'true',
         }])
         .select()
         .single();

@@ -53,6 +53,8 @@ export interface BookingFormValues {
     isHomeAddress: boolean;
     instructions: string;
     locationType?: string;
+    aptUnit?: string;
+    gateCode?: string;
   };
   patientDetails: {
     firstName: string;
@@ -105,7 +107,9 @@ export const bookingFormSchema = z.object({
     zipCode: z.string(),
     isHomeAddress: z.boolean().optional(),
     instructions: z.string().optional(),
-    locationType: z.string().optional()
+    locationType: z.string().optional(),
+    aptUnit: z.string().optional(),
+    gateCode: z.string().optional(),
   }),
   patientDetails: z.object({
     firstName: z.string().min(1, "First name is required"),

@@ -162,6 +162,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const DURATION_MAP: Record<string, number> = {
     'mobile': 60, 'in-office': 60, 'senior': 60, 'routine': 60, 'fasting': 60, 'stat': 60,
     'therapeutic': 75, 'specialty-kit': 75, 'specialty-kit-genova': 80,
+    'partner-nd-wellness': 65, 'partner-naturamed': 60, 'partner-restoration-place': 60,
+    'partner-elite-medical-concierge': 60, 'partner-aristotle-education': 75,
   };
 
   // Convert hour:min to a slot key like "9:00 AM"

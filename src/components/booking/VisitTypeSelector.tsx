@@ -12,6 +12,7 @@ const PROVIDER_PARTNERS = [
   { id: 'restoration-place', name: 'Restoration Place', price: 125 },
   { id: 'elite-medical-concierge', name: 'Elite Medical Concierge', price: 72.25 },
   { id: 'naturamed', name: 'NaturaMed', price: 85 },
+  { id: 'nd-wellness', name: 'ND Wellness', price: 85 },
   { id: 'aristotle-education', name: 'Aristotle Education', price: 185 },
 ];
 
