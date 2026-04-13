@@ -64,7 +64,7 @@ const PricingTransparency = () => {
             {[
               "Licensed phlebotomist at your door",
               "All standard lab tests available",
-              "Results sent to your doctor",
+              "Specimen delivery confirmation sent to you",
               "HIPAA-compliant specimen handling",
               "No hidden fees or extra charges",
             ].map((item, i) => (

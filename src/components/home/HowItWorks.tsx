@@ -144,7 +144,7 @@ const HowItWorks = () => {
                 Ready for Convenient Blood Testing at Home?
               </h3>
               <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
-                Join thousands of professionals who have experienced the benefits of mobile phlebotomy 
+                Join 500+ patients across Central Florida who have experienced the benefits of mobile phlebotomy
                 with ConveLabs premium at-home lab services and blood collection solutions.
               </p>
               <Button onClick={handleBookNowClick} className="luxury-button text-base md:text-lg py-4 px-6 md:py-6 md:px-12 font-semibold tracking-wide">

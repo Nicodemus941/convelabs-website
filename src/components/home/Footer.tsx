@@ -114,20 +114,7 @@ const Footer = () => {
           </div>
         </div>
         
-        {/* Nationwide Network Section */}
-        <div className="border-t border-gray-800 mt-8 pt-8 text-center">
-          <a 
-            href="https://greenhealthsystems.com" 
-            rel="noopener" 
-            target="_blank"
-            className="inline-block text-gray-400 hover:text-white transition-colors"
-          >
-            <span className="block text-sm font-semibold">Nationwide Mobile Phlebotomy Network</span>
-            <span className="block text-xs mt-1">Powered by Green Health Systems</span>
-          </a>
-        </div>
-
-        <div className="border-t border-gray-800 mt-6 pt-6 flex flex-col md:flex-row justify-between items-center">
+        <div className="border-t border-gray-800 mt-8 pt-6 flex flex-col md:flex-row justify-between items-center">
           <p className="text-gray-400">© {new Date().getFullYear()} ConveLabs. All rights reserved.</p>
           <div className="flex space-x-4 mt-4 md:mt-0">
             <a href="https://twitter.com/convelabs" className="text-gray-400 hover:text-white" aria-label="Twitter" target="_blank" rel="noopener noreferrer">

@@ -37,7 +37,8 @@ export const useSignup = () => {
             lastName,
             full_name: `${firstName} ${lastName}`.trim(),
             role
-          }
+          },
+          emailRedirectTo: `${window.location.origin}/login?redirect=/dashboard/${role}`,
         }
       });
       
@@ -56,6 +57,20 @@ export const useSignup = () => {
       }
       
       console.log("Signup successful, user data:", data.user);
+
+      // Check if email confirmation is required (user exists but no session)
+      if (data.user && !data.session) {
+        console.log("Email confirmation required");
+        toast({
+          title: "Check your email",
+          description: "We've sent you a confirmation link. Please check your inbox to complete registration.",
+        });
+        return {
+          success: true,
+          data: { requiresConfirmation: true },
+        };
+      }
+
       toast({
         title: "Account created",
         description: "Your account has been created successfully",

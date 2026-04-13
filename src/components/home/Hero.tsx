@@ -82,7 +82,7 @@ const Hero = () => {
               variants={itemVariants}
               className="text-lg sm:text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto mb-4"
             >
-              Skip the lab. A licensed phlebotomist comes to your home, office, or hotel. Specimen delivery confirmation sent directly to you.
+              Skip the lab. A licensed phlebotomist comes to you — same-day appointments, HIPAA compliant, and backed by our satisfaction guarantee.
             </motion.p>
 
             {/* Price anchor */}
