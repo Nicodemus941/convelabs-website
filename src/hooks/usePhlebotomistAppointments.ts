@@ -173,6 +173,7 @@ export function usePhlebotomistAppointments() {
             booking_source: appt.booking_source || 'online',
             gate_code: appt.gate_code || null,
             lab_order_file_path: labOrderPath,
+            insurance_card_path: appt.insurance_card_path || null,
             patient_id: appt.patient_id,
             patient_name: patientName,
             patient_phone: patientPhone,

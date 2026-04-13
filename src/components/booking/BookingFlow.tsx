@@ -180,13 +180,23 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         else labOrderPaths.push(fileName);
       }
 
-      // Upload insurance file and track path
+      // Upload insurance file and track path + save to patient profile
       let insurancePath: string | null = null;
       if (insuranceFile) {
         const fileName = `insurance_${Date.now()}_${insuranceFile.name}`;
         const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, insuranceFile);
         if (uploadErr) console.error('Insurance upload error:', uploadErr);
-        else insurancePath = fileName;
+        else {
+          insurancePath = fileName;
+          // Save insurance card path to patient's profile for future bookings
+          const patientEmail = data.patientDetails.email;
+          if (patientEmail) {
+            supabase.from('tenant_patients')
+              .update({ insurance_card_path: fileName })
+              .ilike('email', patientEmail)
+              .then(({ error }) => { if (error) console.error('Insurance path save error:', error); });
+          }
+        }
       }
 
       const appointmentDate = data.date instanceof Date

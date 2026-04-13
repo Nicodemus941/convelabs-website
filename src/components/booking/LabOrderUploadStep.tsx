@@ -42,6 +42,21 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   const isInsuranceRequired = REQUIRED_INSURANCE_TYPES.includes(visitType);
   const needsLabDestination = REQUIRES_LAB_DESTINATION.includes(visitType);
   const isTherapeutic = visitType === 'therapeutic';
+  const [hasInsuranceOnFile, setHasInsuranceOnFile] = useState(false);
+
+  // Check if patient already has insurance card on file
+  React.useEffect(() => {
+    const email = getValues('patientDetails.email');
+    if (email && isInsuranceRequired) {
+      supabase.from('tenant_patients').select('insurance_card_path, insurance_provider')
+        .ilike('email', email).maybeSingle()
+        .then(({ data }) => {
+          if (data?.insurance_card_path || data?.insurance_provider) {
+            setHasInsuranceOnFile(true);
+          }
+        });
+    }
+  }, []);
 
   const [mode, setMode] = useState<'upload' | 'fax' | 'skip'>(
     getValues('labOrder.skipped') ? 'skip' : 'upload'
@@ -144,7 +159,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   };
 
   const hasLabOrder = selectedFiles.length > 0 || (mode === 'fax' && faxNumber.length >= 10) || mode === 'skip';
-  const hasInsurance = !isInsuranceRequired || selectedInsuranceFile !== null;
+  const hasInsurance = !isInsuranceRequired || selectedInsuranceFile !== null || hasInsuranceOnFile;
   const hasLabDest = !needsLabDestination || (labDestination && labDestination.length > 0);
   const canProceed = hasLabOrder && hasInsurance && hasLabDest;
 
@@ -228,12 +243,21 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-muted-foreground" />
               <label className="text-sm font-medium">
-                Insurance Card <span className="text-red-500">*</span>
+                Insurance Card {!hasInsuranceOnFile && <span className="text-red-500">*</span>}
               </label>
+              {hasInsuranceOnFile && (
+                <span className="text-xs bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded-full font-medium">On file</span>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Upload a photo of your insurance card (front and back recommended).
-            </p>
+            {hasInsuranceOnFile ? (
+              <p className="text-xs text-green-600">
+                Your insurance is already on file from a previous visit. You can upload a new card to update it, or skip this step.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Upload a photo of your insurance card (front and back recommended).
+              </p>
+            )}
 
             {!selectedInsuranceFile ? (
               <div

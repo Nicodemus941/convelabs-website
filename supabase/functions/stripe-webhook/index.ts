@@ -532,6 +532,11 @@ async function handleAppointmentPayment(session: any) {
           const match = notes.match(/Lab orders?:\s*([^|]+)/);
           return match ? match[1].trim() : null;
         })(),
+        insurance_card_path: (() => {
+          const notes = metadata.additional_notes || '';
+          const match = notes.match(/Insurance:\s*([^|]+)/);
+          return match ? match[1].trim() : null;
+        })(),
         notes: [
           // Strip the file paths from notes (they're stored in their own columns)
           (metadata.additional_notes || '').replace(/Lab orders?:\s*[^|]+\|?\s*/g, '').replace(/Insurance:\s*[^|]+\|?\s*/g, '').trim(),

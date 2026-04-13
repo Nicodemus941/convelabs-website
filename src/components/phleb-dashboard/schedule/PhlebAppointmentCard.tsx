@@ -270,6 +270,21 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 </div>
               )}
 
+              {/* Insurance Card */}
+              {appointment.insurance_card_path && (
+                <div className="px-4 py-3 border-b">
+                  <p className="text-sm font-semibold text-gray-800 mb-2">Insurance Card</p>
+                  <Button size="sm" variant="outline" className="gap-1.5 text-xs"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const { data } = await supabase.storage.from('lab-orders').createSignedUrl(appointment.insurance_card_path, 3600);
+                      if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                    }}>
+                    <Shield className="h-3.5 w-3.5" /> View Insurance Card
+                  </Button>
+                </div>
+              )}
+
               {/* Notes */}
               {appointment.notes && (
                 <div className="px-4 py-3 border-b">
