@@ -24,7 +24,7 @@ const PatientProfileTab: React.FC = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '' });
+  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ amount: '', description: '', memo: '' });
 
@@ -122,7 +122,7 @@ const PatientProfileTab: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2 pl-10 sm:pl-0">
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '' });
+              setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '', insuranceGroup: p.insurance_group_number || '' });
               setEditModalOpen(true);
             }}>
               <Edit3 className="h-3.5 w-3.5" /> Edit Info
@@ -361,10 +361,21 @@ const PatientProfileTab: React.FC = () => {
                 <div><Label>Phone</Label><Input value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} /></div>
                 <div><Label>Date of Birth</Label><Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} /></div>
               </div>
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-sm font-semibold">Insurance</p>
+                <div><Label>Provider</Label><Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="e.g. Blue Cross" /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>Member ID</Label><Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} /></div>
+                  <div><Label>Group #</Label><Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} /></div>
+                </div>
+              </div>
               <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={async () => {
                 const { error } = await supabase.from('tenant_patients').update({
                   first_name: editForm.firstName, last_name: editForm.lastName,
                   email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
+                  insurance_provider: editForm.insuranceProvider || null,
+                  insurance_member_id: editForm.insuranceMemberId || null,
+                  insurance_group_number: editForm.insuranceGroup || null,
                 }).eq('id', p.id);
                 if (error) { toast.error(error.message); return; }
                 toast.success('Patient info updated');
