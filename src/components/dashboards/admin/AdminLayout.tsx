@@ -38,7 +38,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
 
       {/* Sidebar — hidden on mobile, slide-in when toggled */}
       <div className={`
-        fixed md:static inset-y-0 left-0 z-40
+        fixed md:sticky md:top-0 inset-y-0 left-0 z-40
+        h-[100dvh] overflow-y-auto overflow-x-hidden
         transform transition-transform duration-200 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
         md:translate-x-0

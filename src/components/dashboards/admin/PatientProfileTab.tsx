@@ -9,8 +9,10 @@ import { format } from 'date-fns';
 import {
   User, Phone, Mail, Calendar, Clock, MapPin, Shield, FileText,
   Search, ArrowLeft, Package, ClipboardList, DollarSign, Stethoscope,
-  ChevronRight,
+  ChevronRight, Edit3, CalendarPlus, Receipt, MessageSquare, MoreHorizontal,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 
 const PatientProfileTab: React.FC = () => {
@@ -21,6 +23,10 @@ const PatientProfileTab: React.FC = () => {
   const [specimens, setSpecimens] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '' });
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [invoiceForm, setInvoiceForm] = useState({ amount: '', description: '', memo: '' });
 
   const [allPatients, setAllPatients] = useState<any[]>([]);
 
@@ -103,14 +109,40 @@ const PatientProfileTab: React.FC = () => {
 
     return (
       <div className="space-y-6">
-        {/* Back + Header */}
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold">{p.first_name} {p.last_name}</h1>
-            <p className="text-sm text-muted-foreground">Patient Profile</p>
+        {/* Back + Header + Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold">{p.first_name} {p.last_name}</h1>
+              <p className="text-sm text-muted-foreground">Patient Chart</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 pl-10 sm:pl-0">
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
+              setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '' });
+              setEditModalOpen(true);
+            }}>
+              <Edit3 className="h-3.5 w-3.5" /> Edit Info
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
+              window.location.href = `/dashboard/super_admin/calendar`;
+            }}>
+              <CalendarPlus className="h-3.5 w-3.5" /> Schedule
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
+              setInvoiceForm({ amount: '', description: '', memo: '' });
+              setInvoiceModalOpen(true);
+            }}>
+              <Receipt className="h-3.5 w-3.5" /> Generate Invoice
+            </Button>
+            {p.phone && (
+              <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => window.open(`sms:${p.phone}`)}>
+                <MessageSquare className="h-3.5 w-3.5" /> Message
+              </Button>
+            )}
           </div>
         </div>
 
@@ -314,6 +346,77 @@ const PatientProfileTab: React.FC = () => {
             </Card>
           </TabsContent>
         </Tabs>
+
+        {/* Edit Patient Modal */}
+        <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+          <DialogContent className="max-w-md w-[95vw] sm:w-full">
+            <DialogHeader><DialogTitle>Edit Patient Information</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>First Name</Label><Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} /></div>
+                <div><Label>Last Name</Label><Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} /></div>
+              </div>
+              <div><Label>Email</Label><Input type="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Phone</Label><Input value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} /></div>
+                <div><Label>Date of Birth</Label><Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} /></div>
+              </div>
+              <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={async () => {
+                const { error } = await supabase.from('tenant_patients').update({
+                  first_name: editForm.firstName, last_name: editForm.lastName,
+                  email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
+                }).eq('id', p.id);
+                if (error) { toast.error(error.message); return; }
+                toast.success('Patient info updated');
+                setSelectedPatient({ ...p, ...editForm, first_name: editForm.firstName, last_name: editForm.lastName });
+                setEditModalOpen(false);
+                // Refresh patient list
+                const { data } = await supabase.from('tenant_patients').select('*').order('first_name').limit(500);
+                setAllPatients(data || []);
+              }}>Save Changes</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Generate Invoice for Patient Modal */}
+        <Dialog open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen}>
+          <DialogContent className="max-w-md w-[95vw] sm:w-full">
+            <DialogHeader><DialogTitle>Generate Invoice for {p.first_name}</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Amount ($) *</Label><Input type="number" min="0" step="0.01" value={invoiceForm.amount} onChange={e => setInvoiceForm(pr => ({ ...pr, amount: e.target.value }))} placeholder="150.00" /></div>
+                <div><Label>Service</Label><Input value={invoiceForm.description} onChange={e => setInvoiceForm(pr => ({ ...pr, description: e.target.value }))} placeholder="Blood Draw" /></div>
+              </div>
+              <div><Label>Memo</Label><Input value={invoiceForm.memo} onChange={e => setInvoiceForm(pr => ({ ...pr, memo: e.target.value }))} placeholder="Optional notes" /></div>
+              <p className="text-xs text-muted-foreground">Invoice will be sent to <strong>{p.email || 'no email on file'}</strong></p>
+              <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!invoiceForm.amount || !p.email}
+                onClick={async () => {
+                  try {
+                    const amount = parseFloat(invoiceForm.amount);
+                    const { data: appt, error } = await supabase.from('appointments').insert([{
+                      appointment_date: new Date().toISOString(), patient_id: p.id,
+                      patient_name: `${p.first_name} ${p.last_name}`, patient_email: p.email,
+                      service_type: 'invoice', service_name: invoiceForm.description || 'Invoice',
+                      status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
+                      total_amount: amount, service_price: amount, booking_source: 'manual',
+                      invoice_status: 'sent', invoice_sent_at: new Date().toISOString(),
+                      invoice_due_at: new Date(Date.now() + 7*24*60*60*1000).toISOString(),
+                      payment_status: 'pending', notes: invoiceForm.memo || null,
+                    }]).select().single();
+                    if (error) throw error;
+                    await supabase.functions.invoke('send-appointment-invoice', {
+                      body: { appointmentId: appt.id, patientName: `${p.first_name} ${p.last_name}`, patientEmail: p.email, serviceName: invoiceForm.description || 'ConveLabs Service', servicePrice: amount, memo: invoiceForm.memo },
+                    });
+                    toast.success(`Invoice for $${amount.toFixed(2)} sent to ${p.email}`);
+                    setInvoiceModalOpen(false);
+                    loadPatientData(p); // Refresh appointments
+                  } catch (err: any) { toast.error(err.message || 'Failed'); }
+                }}>
+                Send Invoice — ${parseFloat(invoiceForm.amount || '0').toFixed(2)}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

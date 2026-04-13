@@ -10,8 +10,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   FileText, Search, RefreshCw, DollarSign, Clock, AlertTriangle,
-  CheckCircle2, XCircle, Send, Download, Filter, Eye,
+  CheckCircle2, XCircle, Send, Download, Filter, Eye, Plus,
 } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 
 interface Invoice {
@@ -50,6 +53,9 @@ const InvoicesTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [generateModalOpen, setGenerateModalOpen] = useState(false);
+  const [genForm, setGenForm] = useState({ patientName: '', patientEmail: '', amount: '', description: '', memo: '' });
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
@@ -64,13 +70,15 @@ const InvoicesTab: React.FC = () => {
       if (error) throw error;
 
       const mapped: Invoice[] = (data || []).map((a: any) => {
-        // Parse patient name from notes
-        let patientName = 'Unknown';
-        let patientEmail = '';
-        if (a.notes) {
+        // Use direct columns first, fall back to notes parsing
+        let patientName = a.patient_name || 'Unknown';
+        let patientEmail = a.patient_email || '';
+        if (patientName === 'Unknown' && a.notes) {
           const nameMatch = a.notes.match(/Patient:\s*([^|]+)/);
-          const emailMatch = a.notes.match(/Email:\s*([^|]+)/);
           if (nameMatch) patientName = nameMatch[1].trim();
+        }
+        if (!patientEmail && a.notes) {
+          const emailMatch = a.notes.match(/Email:\s*([^|\s]+)/);
           if (emailMatch) patientEmail = emailMatch[1].trim();
         }
 
@@ -212,12 +220,15 @@ const InvoicesTab: React.FC = () => {
           </h1>
           <p className="text-sm text-muted-foreground">{invoices.length} invoices total</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={exportCSV} className="gap-1">
             <Download className="h-4 w-4" /> Export
           </Button>
           <Button variant="outline" size="sm" onClick={fetchInvoices} className="gap-1">
             <RefreshCw className="h-4 w-4" /> Refresh
+          </Button>
+          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setGenerateModalOpen(true)}>
+            <Plus className="h-4 w-4" /> Generate Invoice
           </Button>
         </div>
       </div>
@@ -387,6 +398,74 @@ const InvoicesTab: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Generate Invoice Modal */}
+      <Dialog open={generateModalOpen} onOpenChange={setGenerateModalOpen}>
+        <DialogContent className="max-w-md w-[95vw] sm:w-full">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-[#B91C1C]" /> Generate Invoice</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div><Label>Patient Name *</Label><Input value={genForm.patientName} onChange={e => setGenForm(p => ({ ...p, patientName: e.target.value }))} placeholder="Full name" /></div>
+            <div><Label>Patient Email *</Label><Input type="email" value={genForm.patientEmail} onChange={e => setGenForm(p => ({ ...p, patientEmail: e.target.value }))} placeholder="patient@email.com" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><Label>Amount ($) *</Label><Input type="number" min="0" step="0.01" value={genForm.amount} onChange={e => setGenForm(p => ({ ...p, amount: e.target.value }))} placeholder="150.00" /></div>
+              <div><Label>Description</Label><Input value={genForm.description} onChange={e => setGenForm(p => ({ ...p, description: e.target.value }))} placeholder="Blood Draw Service" /></div>
+            </div>
+            <div><Label>Memo (optional)</Label><Input value={genForm.memo} onChange={e => setGenForm(p => ({ ...p, memo: e.target.value }))} placeholder="Additional notes for invoice" /></div>
+            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!genForm.patientName || !genForm.patientEmail || !genForm.amount || isGenerating}
+              onClick={async () => {
+                setIsGenerating(true);
+                try {
+                  const amount = parseFloat(genForm.amount);
+                  // Create an appointment record to track the invoice
+                  const { data: appt, error: apptErr } = await supabase.from('appointments').insert([{
+                    appointment_date: new Date().toISOString(),
+                    patient_name: genForm.patientName,
+                    patient_email: genForm.patientEmail,
+                    service_type: 'invoice',
+                    service_name: genForm.description || 'Invoice',
+                    status: 'scheduled',
+                    address: 'Invoice Only',
+                    zipcode: '32801',
+                    total_amount: amount,
+                    service_price: amount,
+                    booking_source: 'manual',
+                    invoice_status: 'sent',
+                    invoice_sent_at: new Date().toISOString(),
+                    invoice_due_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+                    payment_status: 'pending',
+                    notes: genForm.memo || null,
+                  }]).select().single();
+                  if (apptErr) throw apptErr;
+
+                  // Send invoice via Stripe
+                  await supabase.functions.invoke('send-appointment-invoice', {
+                    body: {
+                      appointmentId: appt.id,
+                      patientName: genForm.patientName,
+                      patientEmail: genForm.patientEmail,
+                      serviceName: genForm.description || 'ConveLabs Service',
+                      servicePrice: amount,
+                      memo: genForm.memo,
+                    },
+                  });
+
+                  toast.success(`Invoice for $${amount.toFixed(2)} sent to ${genForm.patientEmail}`);
+                  setGenForm({ patientName: '', patientEmail: '', amount: '', description: '', memo: '' });
+                  setGenerateModalOpen(false);
+                  fetchInvoices();
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to generate invoice');
+                } finally {
+                  setIsGenerating(false);
+                }
+              }}>
+              {isGenerating ? 'Sending...' : `Send Invoice — $${parseFloat(genForm.amount || '0').toFixed(2)}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
