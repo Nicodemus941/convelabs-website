@@ -122,6 +122,25 @@
     /></noscript>
     
     <div id="root"></div>
+    <!-- Force cache bust: v8 -->
+    <script>
+      (function(){
+        // Purge all old caches
+        if ('caches' in window) {
+          caches.keys().then(function(names) {
+            names.forEach(function(name) {
+              if (name !== 'convelabs-v8') caches.delete(name);
+            });
+          });
+        }
+        // Force SW update
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            regs.forEach(function(reg) { reg.update(); });
+          });
+        }
+      })();
+    </script>
     <!-- IMPORTANT: DO NOT REMOVE THIS SCRIPT TAG OR THIS VERY COMMENT! -->
     <script src="https://cdn.gpteng.co/gptengineer.js" type="module"></script>
     <script type="module" src="/src/main.tsx"></script>

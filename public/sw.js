@@ -1,4 +1,9 @@
-const CACHE_NAME = 'convelabs-v7';
+const CACHE_NAME = 'convelabs-v8';
+
+// Force update: delete ALL old caches immediately on install
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
+});
 const STATIC_ASSETS = [
   '/',
   '/favicon.ico',
