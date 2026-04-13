@@ -85,7 +85,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   };
 
   return (
-    <aside className="w-60 bg-gray-950 text-white min-h-screen flex flex-col">
+    <aside className="w-64 md:w-60 bg-gray-950 text-white min-h-screen flex flex-col pt-14 md:pt-0">
       {/* Logo */}
       <div className="p-5 border-b border-gray-800">
         <Link to="/" className="text-xl font-bold text-white">

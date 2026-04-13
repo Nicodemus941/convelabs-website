@@ -1,4 +1,4 @@
-const CACHE_NAME = 'convelabs-v3';
+const CACHE_NAME = 'convelabs-v4';
 const STATIC_ASSETS = [
   '/',
   '/favicon.ico',
