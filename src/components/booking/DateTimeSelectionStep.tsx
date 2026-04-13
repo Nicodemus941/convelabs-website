@@ -206,8 +206,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
             startMin = dt.getUTCMinutes();
           }
 
-          // Get duration for this appointment type
-          const duration = appt.duration_minutes || DURATION_MAP[appt.service_type || 'mobile'] || 60;
+          // Get duration for this appointment type — prefer DURATION_MAP over DB default of 30
+          const mappedDuration = DURATION_MAP[appt.service_type || 'mobile'] || 60;
+          const duration = (appt.duration_minutes && appt.duration_minutes > 30) ? appt.duration_minutes : mappedDuration;
           // Add travel buffer: 15min default, 30min if appointment is in an extended area
           const EXTENDED_ZIPS = ['32746', '34715', '34787', '32708', '32779', '32833', '34786', '32836', '32803', '32789'];
           const isExtended = appt.zipcode && EXTENDED_ZIPS.some((z: string) => appt.zipcode?.startsWith(z.substring(0, 3)));
