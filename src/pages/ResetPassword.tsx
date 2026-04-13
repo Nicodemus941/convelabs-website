@@ -19,38 +19,41 @@ const ResetPassword = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const getUserInfo = async () => {
-      try {
-        // Check if there's a hash fragment with tokens (from Supabase redirect)
-        const hash = window.location.hash;
-        if (hash && hash.includes('access_token')) {
-          console.log("Found token in URL hash, setting session...");
-          // Supabase client auto-detects hash params and creates session
-          // Wait a moment for it to process
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
+    let attempts = 0;
+    const maxAttempts = 10;
 
+    const checkSession = async () => {
+      try {
         const { data } = await supabase.auth.getSession();
 
         if (data?.session?.user?.email) {
           setEmail(data.session.user.email);
-        } else {
-          // Try refreshing
-          const { data: refreshData } = await supabase.auth.refreshSession();
-          if (refreshData?.session?.user?.email) {
-            setEmail(refreshData.session.user.email);
-          } else {
-            toast("Session expired", {
-              description: "Please click the reset link in your email again."
-            });
-          }
+          return true;
         }
-      } catch (error) {
-        console.error("Error getting session:", error);
+        return false;
+      } catch {
+        return false;
       }
     };
 
-    getUserInfo();
+    // Poll for session — Supabase client needs time to process the hash/token
+    const pollSession = async () => {
+      const found = await checkSession();
+      if (found) return;
+
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(pollSession, 500);
+      } else {
+        // After 5 seconds of polling, show message
+        toast("Session expired", {
+          description: "Please click the reset link in your email again."
+        });
+      }
+    };
+
+    // Start polling after a brief delay
+    setTimeout(pollSession, 500);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

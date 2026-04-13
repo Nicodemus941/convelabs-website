@@ -26,6 +26,8 @@ Deno.serve(async (req) => {
       },
     });
 
+    console.log('Generate link result:', JSON.stringify({ data: data?.properties, error }));
+
     if (error) {
       console.error('Generate link error:', error);
       // If user doesn't exist in auth, check tenant_patients
@@ -46,15 +48,15 @@ Deno.serve(async (req) => {
       throw error;
     }
 
-    // The action_link goes through Supabase's verification endpoint
-    // Extract the token and build a link that goes directly to our reset page
     const actionLink = data?.properties?.action_link;
-    const token = data?.properties?.hashed_token;
 
     if (!actionLink) throw new Error('Failed to generate reset link');
 
-    // Use the Supabase verification link — it handles token exchange and redirects
+    // The action_link goes through Supabase's verification endpoint
+    // which exchanges the token and redirects to our app with a session
     const resetLink = actionLink;
+
+    console.log('Action link generated (first 100 chars):', actionLink.substring(0, 100));
 
     // Get patient name
     const { data: tp } = await supabase
