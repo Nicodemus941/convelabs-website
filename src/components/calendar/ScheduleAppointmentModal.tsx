@@ -139,6 +139,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const canGoToStep3 = date && time;
 
   const handleSubmit = async () => {
+    console.log('handleSubmit triggered', { patientName, serviceType, date, time, discountType });
     setIsSubmitting(true);
     try {
       // Use selected patient ID or find by email/name
@@ -156,7 +157,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       // patient_id is now optional — admin can schedule without a matching patient record
       if (!patientId) {
-        console.log('No patient_id found — scheduling without patient link (admin override)');
+        console.log('No patient_id found — scheduling without patient link');
       }
 
       // Parse time
@@ -175,14 +176,14 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       let finalPrice = basePrice;
       let discountNote = '';
 
-      if (discountType === 'waive') { finalPrice = 0; discountNote = ' | Fee waived'; }
+      if (discountType === 'waive') { finalPrice = 0; discountNote = 'Fee waived'; }
       else if (discountType === 'percentage' && discountValue) {
         const pct = Math.min(parseFloat(discountValue) || 0, 100);
         finalPrice = Math.round(basePrice * (1 - pct / 100) * 100) / 100;
-        discountNote = ` | ${pct}% discount`;
+        discountNote = `${pct}% discount`;
       } else if (discountType === 'fixed' && discountValue) {
         finalPrice = Math.max(basePrice - (parseFloat(discountValue) || 0), 0);
-        discountNote = ` | $${parseFloat(discountValue).toFixed(2)} off`;
+        discountNote = `$${parseFloat(discountValue).toFixed(2)} off`;
       }
 
       const isWaived = finalPrice === 0;
@@ -196,11 +197,10 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       };
       const duration = durationMap[serviceType] || 60;
 
-      // Create appointment
-      const { data: newAppt, error } = await supabase.from('appointments').insert([{
+      // Build appointment payload
+      const appointmentPayload: any = {
         appointment_date: appointmentDate,
         appointment_time: time,
-        patient_id: patientId,
         patient_name: patientName,
         patient_email: patientEmail || null,
         patient_phone: patientPhone || null,
@@ -219,16 +219,35 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         invoice_due_at: isWaived ? null : invoiceDueAt,
         payment_status: isWaived ? 'completed' : 'pending',
         gate_code: gateCode || null,
-        phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164', // Auto-assign to Nico
+        phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
         notes: [notes, gateCode ? `Gate: ${gateCode}` : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
-      }]).select().single();
+      };
+
+      // Only include patient_id if we found one (column is nullable)
+      if (patientId) {
+        appointmentPayload.patient_id = patientId;
+      }
+
+      console.log('Creating appointment:', JSON.stringify(appointmentPayload, null, 2));
+
+      // Create appointment
+      const { data: newAppt, error } = await supabase.from('appointments').insert([appointmentPayload]).select().single();
 
       if (error) {
         console.error('Appointment creation error:', error);
-        toast.error(error.message || 'Failed to create appointment');
+        toast.error(`Failed: ${error.message || 'Unknown database error'}`, { duration: 6000 });
         setIsSubmitting(false);
         return;
       }
+
+      if (!newAppt) {
+        console.error('No appointment returned after insert');
+        toast.error('Appointment was not created — please try again', { duration: 6000 });
+        setIsSubmitting(false);
+        return;
+      }
+
+      console.log('Appointment created:', newAppt.id);
 
       // Send Stripe invoice (non-blocking)
       if (newAppt && !isWaived && billingEmail) {
