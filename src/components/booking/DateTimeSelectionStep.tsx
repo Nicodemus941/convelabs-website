@@ -210,25 +210,36 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           const duration = appt.duration_minutes || DURATION_MAP[appt.service_type || 'mobile'] || 60;
           // Add travel buffer: 15min default, 30min if appointment is in an extended area
           const EXTENDED_ZIPS = ['32746', '34715', '34787', '32708', '32779', '32833', '34786', '32836', '32803', '32789'];
-          const isExtended = appt.zipcode && EXTENDED_ZIPS.some(z => appt.zipcode?.startsWith(z.substring(0, 3)));
+          const isExtended = appt.zipcode && EXTENDED_ZIPS.some((z: string) => appt.zipcode?.startsWith(z.substring(0, 3)));
           const travelBuffer = isExtended ? 30 : 15;
           const totalBlockedMinutes = duration + travelBuffer;
 
-          // Block all 30-min slots that this appointment covers
-          const slotsToBlock = Math.ceil(totalBlockedMinutes / 30);
-          let currentMin = startMin < 30 ? 0 : 30;
-          let currentHour = startHour;
+          // Block FORWARD: all slots this appointment occupies + travel buffer
+          const forwardSlots = Math.ceil(totalBlockedMinutes / 30);
+          let fwdMin = startMin < 30 ? 0 : 30;
+          let fwdHour = startHour;
 
-          for (let i = 0; i < slotsToBlock; i++) {
-            const key = toSlotKey(currentHour, currentMin);
+          for (let i = 0; i < forwardSlots; i++) {
+            const key = toSlotKey(fwdHour, fwdMin);
             slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
+            fwdMin += 30;
+            if (fwdMin >= 60) { fwdMin = 0; fwdHour += 1; }
+          }
 
-            // Advance 30 minutes
-            currentMin += 30;
-            if (currentMin >= 60) {
-              currentMin = 0;
-              currentHour += 1;
-            }
+          // Block BACKWARD: slots before the appointment that would overlap
+          // A new booking at an earlier slot with min 60min duration would conflict
+          const minNewDuration = 60; // minimum service duration
+          const backwardSlots = Math.ceil(minNewDuration / 30) - 1; // how many slots before would overlap
+          let bwdMin = (startMin < 30 ? 0 : 30);
+          let bwdHour = startHour;
+
+          for (let i = 0; i < backwardSlots; i++) {
+            // Go back 30 minutes
+            bwdMin -= 30;
+            if (bwdMin < 0) { bwdMin = 30; bwdHour -= 1; }
+            if (bwdHour < 6) break; // don't block before operating hours
+            const key = toSlotKey(bwdHour, bwdMin);
+            slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
           }
         });
 
