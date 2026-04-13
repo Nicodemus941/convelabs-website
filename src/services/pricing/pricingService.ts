@@ -31,6 +31,7 @@ export type MembershipTier = 'none' | 'member' | 'vip' | 'concierge';
 
 // Per-service pricing by membership tier
 const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
+  'dev-testing':        { none: 1,   member: 1,   vip: 1,   concierge: 1 },
   'mobile':             { none: 150, member: 130, vip: 115, concierge: 99 },
   'in-office':          { none: 55,  member: 49,  vip: 45,  concierge: 39 },
   'senior':             { none: 100, member: 85,  vip: 75,  concierge: 65 },
@@ -92,6 +93,7 @@ export function isExtendedArea(city: string): boolean {
 
 // Service catalog (non-member prices as base)
 const SERVICE_CATALOG: ServiceOption[] = [
+  { id: 'dev-testing', name: 'Development Testing', description: 'Testing service ($1)', basePrice: 1 },
   { id: 'mobile', name: 'Mobile Blood Draw (At Home)', description: 'Licensed phlebotomist comes to your location', basePrice: 150 },
   { id: 'in-office', name: 'Office Visit (Standard)', description: 'Visit our partner office location', basePrice: 55 },
   { id: 'specialty-kit', name: 'Specialty Collection Kit', description: 'Specialty kits shipped via UPS/FedEx', basePrice: 185 },

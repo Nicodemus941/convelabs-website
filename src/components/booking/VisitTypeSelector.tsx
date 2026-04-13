@@ -18,6 +18,20 @@ const PROVIDER_PARTNERS = [
 
 const VISIT_TYPES = [
   {
+    id: 'dev-testing',
+    name: 'Development Testing',
+    subtitle: 'For testing only',
+    price: 1,
+    description: 'Development and QA testing service. Do not use for real appointments.',
+    icon: FlaskConical,
+    gradient: 'from-gray-500/10 to-gray-600/5',
+    borderColor: 'border-gray-200 hover:border-gray-400',
+    selectedBorder: 'border-gray-500 ring-2 ring-gray-500/20',
+    iconBg: 'bg-gray-500/10',
+    iconColor: 'text-gray-600',
+    priceColor: 'text-gray-700',
+  },
+  {
     id: 'mobile',
     name: 'Mobile Blood Draw',
     subtitle: 'We come to you',

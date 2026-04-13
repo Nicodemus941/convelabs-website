@@ -11,6 +11,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import RescheduleAppointmentModal from './RescheduleAppointmentModal';
 
 interface AppointmentDetailModalProps {
   appointment: any | null;
@@ -33,6 +34,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 }) => {
   const [patientData, setPatientData] = useState<any>(null);
   const [showInsurance, setShowInsurance] = useState(false);
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
 
   const appt = appointment;
 
@@ -84,6 +86,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0">
         {/* Header */}
@@ -269,10 +272,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
           <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={handleMessage}>
             <MessageSquare className="h-3.5 w-3.5" /> Message
           </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => toast.info('Edit coming soon')}>
-            <Edit3 className="h-3.5 w-3.5" /> Edit
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => toast.info('Reschedule coming soon')}>
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setRescheduleOpen(true)}>
             <CalendarClock className="h-3.5 w-3.5" /> Reschedule
           </Button>
           {appt.status !== 'cancelled' && appt.status !== 'completed' && (
@@ -283,6 +283,15 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Reschedule Modal */}
+    <RescheduleAppointmentModal
+      appointment={appt}
+      open={rescheduleOpen}
+      onClose={() => setRescheduleOpen(false)}
+      onRescheduled={() => { onUpdate(); onClose(); }}
+    />
+    </>
   );
 };
 
