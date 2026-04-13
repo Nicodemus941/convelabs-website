@@ -12,8 +12,9 @@ import { calculateTotal, getServiceById, isExtendedArea } from '@/services/prici
 import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
-import { Shield, Gift, Tag } from 'lucide-react';
+import { Shield, Gift, Tag, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface CheckoutStepProps {
   onBack: () => void;
@@ -28,6 +29,21 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [referralCode, setReferralCode] = useState('');
   const [referralDiscount, setReferralDiscount] = useState(0);
   const [referralApplied, setReferralApplied] = useState(false);
+  const [addOns, setAddOns] = useState<any[]>([]);
+  const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
+
+  // Fetch add-ons for this service type
+  React.useEffect(() => {
+    supabase.from('add_on_prices' as any).select('*').eq('active', true).then(({ data }) => {
+      const relevant = (data || []).filter((a: any) => {
+        if (!a.service_types || a.service_types.length === 0) return true; // available for all
+        return a.service_types.includes(serviceId);
+      });
+      setAddOns(relevant);
+    });
+  }, [serviceId]);
+
+  const addOnTotal = addOns.filter(a => selectedAddOns.has(a.id)).reduce((s, a) => s + (a.price || 0), 0);
 
   // Check URL for referral code
   React.useEffect(() => {
@@ -159,6 +175,34 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         </div>
 
+        {/* Add-ons */}
+        {addOns.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="font-medium text-sm flex items-center gap-1.5"><Plus className="h-4 w-4" /> Add-Ons</h3>
+            {addOns.map((addon: any) => (
+              <div key={addon.id} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/30 transition">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    checked={selectedAddOns.has(addon.id)}
+                    onCheckedChange={(checked) => {
+                      setSelectedAddOns(prev => {
+                        const next = new Set(prev);
+                        checked ? next.add(addon.id) : next.delete(addon.id);
+                        return next;
+                      });
+                    }}
+                  />
+                  <div>
+                    <p className="text-sm font-medium">{addon.name}</p>
+                    {addon.description && <p className="text-xs text-muted-foreground">{addon.description}</p>}
+                  </div>
+                </div>
+                <span className="text-sm font-medium">+${Number(addon.price).toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Tip selector */}
         <TipSelector value={tipAmount} onChange={setTipAmount} />
 
@@ -171,10 +215,20 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
         <Separator />
 
+        {/* Add-on line items */}
+        {addOnTotal > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Add-ons</span>
+            <span>+${addOnTotal.toFixed(2)}</span>
+          </div>
+        )}
+
+        <Separator />
+
         {/* Total */}
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
-          <span>${breakdown.total.toFixed(2)}</span>
+          <span>${(breakdown.total + addOnTotal).toFixed(2)}</span>
         </div>
 
         {/* Referral Code */}

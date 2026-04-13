@@ -4,8 +4,10 @@ import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ChevronLeft, Upload, FileText, X, Phone, SkipForward, Shield } from 'lucide-react';
+import { ChevronLeft, Upload, FileText, X, Phone, SkipForward, Shield, Loader2, CheckCircle } from 'lucide-react';
 import { BookingFormValues } from '@/types/appointmentTypes';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import LabDestinationSelector from './LabDestinationSelector';
 
 interface LabOrderUploadStepProps {
@@ -62,11 +64,42 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     maxSize: 10 * 1024 * 1024,
   });
 
-  // Insurance dropzone
-  const onDropInsurance = useCallback((acceptedFiles: File[]) => {
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [ocrResult, setOcrResult] = useState<any>(null);
+
+  // Insurance dropzone + auto OCR
+  const onDropInsurance = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0 && onInsuranceFileSelected) {
-      onInsuranceFileSelected(acceptedFiles[0]);
+      const file = acceptedFiles[0];
+      onInsuranceFileSelected(file);
       setValue('labOrder.hasInsuranceFile', true);
+
+      // Auto-trigger OCR if it's an image
+      if (file.type.startsWith('image/')) {
+        setOcrProcessing(true);
+        try {
+          // Convert file to base64
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve) => {
+            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+            reader.readAsDataURL(file);
+          });
+
+          const { data, error } = await supabase.functions.invoke('extract-insurance-ocr', {
+            body: { imageBase64: base64 },
+          });
+
+          if (!error && data?.success && data?.data) {
+            setOcrResult(data.data);
+            toast.success('Insurance info extracted from card!');
+          }
+        } catch (err) {
+          console.error('OCR error:', err);
+          // Non-blocking — OCR failure doesn't prevent booking
+        } finally {
+          setOcrProcessing(false);
+        }
+      }
     }
   }, [onInsuranceFileSelected, setValue]);
 
@@ -224,6 +257,27 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleRemoveInsurance}>
                   <X className="h-4 w-4" />
                 </Button>
+              </div>
+            )}
+
+            {/* OCR Processing / Results */}
+            {ocrProcessing && (
+              <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                <p className="text-xs text-blue-700">Reading insurance card...</p>
+              </div>
+            )}
+            {ocrResult && !ocrProcessing && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-1">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  <p className="text-xs font-medium text-green-800">Insurance Info Extracted</p>
+                </div>
+                {ocrResult.provider && <p className="text-xs"><span className="text-muted-foreground">Provider:</span> <strong>{ocrResult.provider}</strong></p>}
+                {ocrResult.memberId && <p className="text-xs"><span className="text-muted-foreground">Member ID:</span> <strong>{ocrResult.memberId}</strong></p>}
+                {ocrResult.groupNumber && <p className="text-xs"><span className="text-muted-foreground">Group:</span> <strong>{ocrResult.groupNumber}</strong></p>}
+                {ocrResult.planType && <p className="text-xs"><span className="text-muted-foreground">Plan:</span> {ocrResult.planType}</p>}
+                <p className="text-[10px] text-muted-foreground mt-2">This info will be saved to your profile after booking.</p>
               </div>
             )}
           </div>
