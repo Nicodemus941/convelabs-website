@@ -84,16 +84,6 @@ export const VisitorOptimizationProvider = ({ children }: VisitorOptimizationPro
     // Disabled blur-based exit intent (too aggressive — only use mouse leave)
     const handleBlur = () => {
       // No-op: removed auto-popup on tab blur
-      if (false && // disabled
-          !hasShownExitIntent &&
-          window.scrollY > 500 &&
-          !localStorage.getItem('convelabs_exit_intent_shown')
-        ) {
-          setShowSmartExitModal(true);
-          setHasShownExitIntent(true);
-          localStorage.setItem('convelabs_exit_intent_shown', 'true');
-        }
-      }, 3000); // Show after 3 seconds of inactivity
     };
 
     document.addEventListener('mouseleave', handleMouseLeave);
