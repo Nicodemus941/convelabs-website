@@ -1,17 +1,30 @@
 {
   "name": "ConveLabs - Mobile Phlebotomy",
   "short_name": "ConveLabs",
-  "description": "Book at-home blood draws and lab services",
+  "description": "Luxury mobile phlebotomy & at-home blood draw services in Central Florida",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#dc2626",
+  "theme_color": "#B91C1C",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/favicon.ico",
-      "sizes": "64x64",
-      "type": "image/x-icon"
+      "src": "/lovable-uploads/589e1867-be3c-487b-92c4-c16d4a91b85f.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/lovable-uploads/589e1867-be3c-487b-92c4-c16d4a91b85f.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/lovable-uploads/589e1867-be3c-487b-92c4-c16d4a91b85f.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "categories": ["health", "medical"],
