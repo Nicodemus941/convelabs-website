@@ -462,27 +462,78 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             {/* Pricing & Invoicing */}
             <div className="border-t pt-3">
               <Label className="text-sm font-semibold">Pricing & Invoice</Label>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {(['none', 'percentage', 'fixed', 'waive'] as const).map(t => (
-                  <Button key={t} type="button" size="sm" variant={discountType === t ? 'default' : 'outline'}
-                    className={`text-xs ${discountType === t ? (t === 'waive' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#B91C1C] hover:bg-[#991B1B]') : ''}`}
-                    onClick={() => { setDiscountType(t); setDiscountValue(''); }}>
-                    {t === 'none' ? 'Full Price + Invoice' : t === 'percentage' ? '% Discount' : t === 'fixed' ? '$ Discount' : 'Waive Fee (No Invoice)'}
-                  </Button>
-                ))}
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <button type="button" onClick={() => { setDiscountType('none'); setDiscountValue(''); }}
+                  className={`p-2.5 rounded-lg border-2 text-xs font-medium transition-all text-left ${
+                    discountType === 'none' ? 'border-[#B91C1C] bg-[#B91C1C]/10 text-[#B91C1C]' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  <span className="block font-semibold">Full Price</span>
+                  <span className="block text-[10px] opacity-70 mt-0.5">Invoice sent to patient</span>
+                </button>
+                <button type="button" onClick={() => { setDiscountType('waive'); setDiscountValue(''); }}
+                  className={`p-2.5 rounded-lg border-2 text-xs font-medium transition-all text-left ${
+                    discountType === 'waive' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  <span className="block font-semibold">Waive Fee</span>
+                  <span className="block text-[10px] opacity-70 mt-0.5">No invoice, marked as paid</span>
+                </button>
+                <button type="button" onClick={() => { setDiscountType('percentage'); setDiscountValue(''); }}
+                  className={`p-2.5 rounded-lg border-2 text-xs font-medium transition-all text-left ${
+                    discountType === 'percentage' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  <span className="block font-semibold">% Discount</span>
+                  <span className="block text-[10px] opacity-70 mt-0.5">Percentage off base price</span>
+                </button>
+                <button type="button" onClick={() => { setDiscountType('fixed'); setDiscountValue(''); }}
+                  className={`p-2.5 rounded-lg border-2 text-xs font-medium transition-all text-left ${
+                    discountType === 'fixed' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  <span className="block font-semibold">$ Discount</span>
+                  <span className="block text-[10px] opacity-70 mt-0.5">Fixed dollar amount off</span>
+                </button>
               </div>
+
+              {/* Discount amount input */}
               {(discountType === 'percentage' || discountType === 'fixed') && (
-                <Input type="number" min="0" className="mt-2" value={discountValue} onChange={e => setDiscountValue(e.target.value)}
-                  placeholder={discountType === 'percentage' ? 'Enter %' : 'Enter $ amount'} />
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <Label className="text-xs font-medium">
+                    {discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount ($)'}
+                  </Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    {discountType === 'percentage' && <span className="text-sm text-muted-foreground">%</span>}
+                    {discountType === 'fixed' && <span className="text-sm text-muted-foreground">$</span>}
+                    <Input
+                      type="number"
+                      min="0"
+                      max={discountType === 'percentage' ? '100' : undefined}
+                      value={discountValue}
+                      onChange={e => setDiscountValue(e.target.value)}
+                      placeholder={discountType === 'percentage' ? 'e.g. 25' : 'e.g. 50'}
+                      className="flex-1"
+                      autoFocus
+                    />
+                  </div>
+                  {discountValue && (
+                    <p className="text-xs text-emerald-600 mt-1 font-medium">
+                      Final price: ${(() => {
+                        const base = SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150;
+                        if (discountType === 'percentage') return Math.round(base * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100;
+                        return Math.max(base - (parseFloat(discountValue) || 0), 0);
+                      })().toFixed(2)}
+                    </p>
+                  )}
+                </div>
               )}
+
+              {/* Status messages */}
               {discountType === 'waive' && (
-                <p className="text-xs text-emerald-600 mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
-                  Fee waived — no invoice will be created or sent to the patient. Appointment will be marked as paid.
-                </p>
+                <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
+                  <p className="text-xs text-emerald-700 font-medium">Fee waived — no invoice, appointment marked as paid.</p>
+                </div>
               )}
               {discountType === 'none' && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  A Stripe invoice for ${SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150} will be emailed to {patientEmail || 'the patient'}.
+                  Stripe invoice for <span className="font-semibold">${SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150}</span> → {patientEmail || 'patient email'}
                 </p>
               )}
             </div>
