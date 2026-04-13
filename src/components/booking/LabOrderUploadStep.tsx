@@ -171,16 +171,10 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
             </div>
           )}
 
-          {mode === 'fax' && (
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">We'll contact your doctor to retrieve your lab order.</p>
-              <Input type="tel" placeholder="Doctor's fax: (555) 123-4567" value={faxNumber} onChange={(e) => setFaxNumber(e.target.value)} />
-            </div>
-          )}
-
           {mode === 'skip' && (
-            <div className="bg-muted/50 rounded-lg p-3 text-center">
-              <p className="text-xs text-muted-foreground">No lab order provided. You can upload it later or bring it to your appointment.</p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-center">
+              <p className="text-xs text-amber-800 font-medium">No lab order provided.</p>
+              <p className="text-xs text-amber-600 mt-1">It is the patient's responsibility to provide a valid lab order from their healthcare provider. Without it, we may be unable to perform the collection.</p>
             </div>
           )}
 
@@ -188,9 +182,6 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
           <div className="flex flex-wrap gap-2 text-xs">
             {mode !== 'upload' && (
               <Button variant="link" size="sm" className="px-0 h-auto text-xs" onClick={() => setMode('upload')}>Upload a lab order</Button>
-            )}
-            {mode !== 'fax' && (
-              <Button variant="link" size="sm" className="px-0 h-auto text-xs" onClick={handleFaxMode}>Get from doctor</Button>
             )}
             {!isLabOrderRequired && mode !== 'skip' && (
               <Button variant="link" size="sm" className="px-0 h-auto text-xs" onClick={handleSkip}>Skip for now</Button>
