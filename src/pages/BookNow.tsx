@@ -208,6 +208,52 @@ const BookNow: React.FC = () => {
                   Book Another
                 </Button>
               </div>
+
+              {/* Post-Booking Upsells */}
+              <div className="w-full space-y-3 mt-6 pt-6 border-t">
+                {/* Membership Upsell */}
+                <div className="bg-gradient-to-r from-[#B91C1C]/5 to-[#991B1B]/5 border border-[#B91C1C]/20 rounded-xl p-4 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-sm">Save on Every Visit</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {booking.total_amount && booking.total_amount >= 150
+                          ? `You paid $${booking.total_amount.toFixed(0)} today. Members pay $130. Save $20 every visit.`
+                          : 'ConveLabs members save up to 25% on every blood draw.'}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" className="text-xs border-[#B91C1C]/30 text-[#B91C1C] flex-shrink-0" onClick={() => window.location.href = '/pricing'}>
+                      View Plans
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Referral */}
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-sm text-emerald-800">Refer a Friend, Both Get $25 Off</p>
+                      <p className="text-xs text-emerald-600 mt-1">Share ConveLabs with someone who needs convenient lab work.</p>
+                    </div>
+                    <Button size="sm" variant="outline" className="text-xs border-emerald-300 text-emerald-700 flex-shrink-0" onClick={() => window.location.href = '/dashboard'}>
+                      Get Code
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Rebooking */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-sm text-blue-800">Need Regular Blood Work?</p>
+                      <p className="text-xs text-blue-600 mt-1">Schedule your next visit now and never miss a check-up.</p>
+                    </div>
+                    <Button size="sm" variant="outline" className="text-xs border-blue-300 text-blue-700 flex-shrink-0" onClick={() => { setMode('booking'); window.history.replaceState({}, '', '/book-now'); }}>
+                      Book Next
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

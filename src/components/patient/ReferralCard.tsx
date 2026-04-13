@@ -30,7 +30,19 @@ const ReferralCard: React.FC = () => {
     load();
   }, [user]);
 
-  if (loading || !code) return null;
+  if (loading) return null;
+
+  if (!code) {
+    return (
+      <Card className="shadow-sm">
+        <CardContent className="p-4 text-center">
+          <Gift className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+          <p className="text-sm font-medium text-gray-600">Refer & Earn $25</p>
+          <p className="text-xs text-muted-foreground mt-1">Complete your first appointment to unlock your personal referral code and start earning credits.</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   const referralLink = `https://convelabs.com/book-now?ref=${code}`;
 
