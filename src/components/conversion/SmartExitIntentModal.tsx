@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { X, Clock, Gift, Star, ArrowRight } from 'lucide-react';
+import { X, Gift, Star, ArrowRight, Shield } from 'lucide-react';
 import { useConversionOptimization } from '@/contexts/ConversionOptimizationContext';
-import { useSimpleFollowUp } from '@/hooks/useSimpleFollowUp';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 interface SmartExitIntentModalProps {
   isOpen: boolean;
@@ -15,85 +16,51 @@ const SmartExitIntentModal: React.FC<SmartExitIntentModalProps> = ({ isOpen, onC
   const [email, setEmail] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [offerClaimed, setOfferClaimed] = useState(false);
-  const { hasBookingIntent, selectedService, abTestVariant } = useConversionOptimization();
-  const { triggerImmediateFollowUp, trackFollowUpResponse } = useSimpleFollowUp();
+  const { hasBookingIntent } = useConversionOptimization();
 
-  useEffect(() => {
-    if (isOpen) {
-      // Track that exit intent was triggered
-      triggerImmediateFollowUp(hasBookingIntent ? 'warm' : 'cold');
-    }
-  }, [isOpen, hasBookingIntent, triggerImmediateFollowUp]);
-
-  const getSmartOffer = () => {
-    // AI-powered offer selection based on user behavior
-    if (hasBookingIntent && selectedService) {
-      return {
-        headline: "Wait! Your Premium Service is Almost Ready",
-        subheadline: "Complete your booking in the next 10 minutes and save $150",
-        offer: "$150 OFF + Priority Scheduling",
-        urgency: "Limited Time: Expires in 10 minutes",
-        discount: 150,
-        ctaText: "Claim My Discount",
-        icon: Gift,
-        variant: 'premium'
-      };
-    }
-
+  const getOffer = () => {
     if (hasBookingIntent) {
       return {
-        headline: "Before You Go... Special Offer Inside",
-        subheadline: "Get your first lab service for 50% off",
-        offer: "50% OFF First Service",
-        urgency: "Today Only: This offer expires at midnight",
-        discount: 50,
-        ctaText: "Get 50% Off Now",
-        icon: Clock,
-        variant: 'discount'
+        headline: "Before You Go — 10% Off Your First Visit",
+        subheadline: "Enter your email and we'll send you a discount code for your first ConveLabs blood draw.",
+        offer: "10% Off First Visit",
+        ctaText: "Get My Discount",
+        icon: Gift,
       };
     }
 
     return {
-      headline: "Join 5,000+ Busy Professionals",
-      subheadline: "Get our free guide: '5 Lab Tests Every Executive Should Get'",
-      offer: "Free Executive Health Guide",
-      urgency: "Plus exclusive health tips delivered weekly",
-      discount: 0,
-      ctaText: "Get Free Guide",
+      headline: "Get 10% Off Your First Visit",
+      subheadline: "Join 500+ Central Florida patients who trust ConveLabs for their lab work.",
+      offer: "10% Off + Priority Booking",
+      ctaText: "Claim My Discount",
       icon: Star,
-      variant: 'content'
     };
   };
 
-  const smartOffer = getSmartOffer();
-  const IconComponent = smartOffer.icon;
+  const offer = getOffer();
+  const IconComponent = offer.icon;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || isSubmitting) return;
-
     setIsSubmitting(true);
 
     try {
-      // Track conversion
-      await trackFollowUpResponse('converted');
-      
-      // Set local storage to show offer claimed state
-      localStorage.setItem('exit_offer_claimed', JSON.stringify({
-        email,
-        offer: smartOffer.offer,
-        timestamp: Date.now()
-      }));
+      // Store lead
+      await supabase.from('abandoned_bookings' as any).insert({
+        email: email.trim(),
+        step_reached: 0,
+        recovery_sent: false,
+      });
 
+      localStorage.setItem('convelabs_exit_offer', JSON.stringify({ email, timestamp: Date.now() }));
       setOfferClaimed(true);
-      
-      // Auto-close after showing success
-      setTimeout(() => {
-        onClose();
-      }, 3000);
+      toast.success('Discount code sent to your email!');
 
+      setTimeout(() => onClose(), 3000);
     } catch (error) {
-      console.error('Error claiming offer:', error);
+      console.error('Error:', error);
     } finally {
       setIsSubmitting(false);
     }
@@ -107,15 +74,9 @@ const SmartExitIntentModal: React.FC<SmartExitIntentModalProps> = ({ isOpen, onC
             <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
               <Star className="h-8 w-8 text-green-600" />
             </div>
-            <h3 className="text-xl font-bold text-gray-900 mb-2">
-              Offer Claimed Successfully!
-            </h3>
-            <p className="text-gray-600 mb-4">
-              Check your email for your {smartOffer.offer.toLowerCase()}
-            </p>
-            <p className="text-sm text-gray-500">
-              This window will close automatically...
-            </p>
+            <h3 className="text-xl font-bold mb-2">Check Your Email!</h3>
+            <p className="text-muted-foreground mb-2">Your 10% discount code is on its way.</p>
+            <p className="text-sm text-muted-foreground">This window will close automatically...</p>
           </div>
         </DialogContent>
       </Dialog>
@@ -125,80 +86,53 @@ const SmartExitIntentModal: React.FC<SmartExitIntentModalProps> = ({ isOpen, onC
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-md mx-auto bg-white border-0 shadow-2xl overflow-hidden">
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 p-1 rounded-full hover:bg-gray-100 transition-colors z-10"
-        >
+        <button onClick={onClose} className="absolute right-4 top-4 p-1 rounded-full hover:bg-gray-100 z-10">
           <X className="h-4 w-4 text-gray-500" />
         </button>
 
-        {/* Header with gradient background */}
-        <div className="bg-gradient-to-r from-primary/10 to-primary/5 px-6 pt-6 pb-4 -mx-6 -mt-6 mb-4">
+        <div className="bg-gradient-to-r from-[#B91C1C]/10 to-[#991B1B]/5 px-6 pt-6 pb-4 -mx-6 -mt-6 mb-4">
           <div className="flex items-center justify-center mb-3">
-            <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center">
-              <IconComponent className="h-6 w-6 text-primary" />
+            <div className="w-12 h-12 bg-[#B91C1C]/10 rounded-full flex items-center justify-center">
+              <IconComponent className="h-6 w-6 text-[#B91C1C]" />
             </div>
           </div>
-          <DialogTitle className="text-xl font-bold text-gray-900 text-center mb-2">
-            {smartOffer.headline}
+          <DialogTitle className="text-xl font-bold text-center mb-2">
+            {offer.headline}
           </DialogTitle>
-          <p className="text-gray-600 text-sm text-center">
-            {smartOffer.subheadline}
+          <p className="text-muted-foreground text-sm text-center">
+            {offer.subheadline}
           </p>
         </div>
 
-        {/* Offer highlight */}
-        <div className="bg-gradient-to-r from-primary/5 to-primary/10 border border-primary/20 rounded-lg p-4 text-center mb-6">
-          <div className="text-lg font-semibold text-primary mb-1">
-            {smartOffer.offer}
-          </div>
-          <div className="text-sm text-gray-600">
-            {smartOffer.urgency}
-          </div>
+        <div className="bg-[#B91C1C]/5 border border-[#B91C1C]/20 rounded-lg p-4 text-center mb-4">
+          <div className="text-lg font-semibold text-[#B91C1C]">{offer.offer}</div>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <Input
             type="email"
             placeholder="Enter your email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="w-full"
           />
-          
           <Button
             type="submit"
             disabled={isSubmitting || !email}
-            className="w-full bg-primary hover:bg-primary/90 text-white font-semibold py-3 text-base"
+            className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white font-semibold py-3"
           >
-            {isSubmitting ? (
-              'Processing...'
-            ) : (
+            {isSubmitting ? 'Processing...' : (
               <span className="flex items-center justify-center">
-                {smartOffer.ctaText}
-                <ArrowRight className="ml-2 h-4 w-4" />
+                {offer.ctaText} <ArrowRight className="ml-2 h-4 w-4" />
               </span>
             )}
           </Button>
         </form>
 
-        {/* Trust indicators */}
-        <div className="mt-6 space-y-2">
-          <div className="text-center text-xs text-gray-500 space-y-1">
-            <p>✓ No spam, unsubscribe anytime</p>
-            <p>✓ 5,000+ professionals trust our service</p>
-            <p>✓ Same-day results available</p>
-          </div>
-        </div>
-
-        {/* Social proof */}
-        <div className="mt-4 bg-gray-50 rounded-lg p-3">
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>👥 247 people claimed this offer today</span>
-            <span>⭐ 4.9/5 rating</span>
-          </div>
+        <div className="mt-4 space-y-1 text-center text-xs text-muted-foreground">
+          <p className="flex items-center justify-center gap-1"><Shield className="h-3 w-3" /> No spam, unsubscribe anytime</p>
+          <p>500+ patients across Central Florida</p>
+          <p>Same-day appointments available</p>
         </div>
       </DialogContent>
     </Dialog>

@@ -220,6 +220,41 @@ const SuperAdminDashboard = () => {
         </Card>
       </div>
 
+      {/* Profit First Allocations */}
+      {!loading && stats.revenueMTD > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <DollarSign className="h-4 w-4 text-[#B91C1C]" />
+              Profit First Allocations (This Month)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: "Owner's Pay", pct: 25, color: 'bg-[#B91C1C]' },
+                { label: 'Profit', pct: 15, color: 'bg-emerald-500' },
+                { label: 'Operating Expenses', pct: 30, color: 'bg-blue-500' },
+                { label: 'Phlebotomist Pay', pct: 30, color: 'bg-purple-500' },
+              ].map(({ label, pct, color }) => {
+                const amount = (stats.revenueMTD * pct) / 100;
+                return (
+                  <div key={label} className="text-center">
+                    <div className={`h-2 ${color} rounded-full mb-2`} style={{ width: `${pct}%`, minWidth: '40%', margin: '0 auto' }} />
+                    <p className="text-lg font-bold">${amount.toFixed(0)}</p>
+                    <p className="text-[10px] text-muted-foreground">{label} ({pct}%)</p>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-3 pt-3 border-t flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Based on ${stats.revenueMTD.toLocaleString()} MTD revenue</span>
+              <span className="text-[10px] text-muted-foreground">Recommended allocations — adjust in Settings</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Recent Appointments + Quick Actions */}
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 shadow-sm">
