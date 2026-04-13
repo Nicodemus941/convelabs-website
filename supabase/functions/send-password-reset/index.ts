@@ -46,8 +46,8 @@ Deno.serve(async (req) => {
 
     const actionLink = data?.properties?.action_link;
     const hashedToken = data?.properties?.hashed_token;
-    console.log('Action link:', actionLink ? 'YES' : 'NO', 'Token:', hashedToken ? 'YES' : 'NO');
-    console.log('Full properties:', JSON.stringify(data?.properties));
+    const emailOtp = data?.properties?.email_otp;
+    console.log('Action link:', actionLink ? 'YES' : 'NO', 'Token:', hashedToken ? 'YES' : 'NO', 'OTP:', emailOtp ? 'YES' : 'NO');
 
     if (!actionLink) {
       console.error('No action_link in response');
@@ -57,9 +57,9 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Use the action_link directly — it goes through Supabase's verify endpoint
-    // which exchanges the token and redirects to our app
-    const resetLink = actionLink;
+    // Build a direct link that goes to our app with the token as a query param
+    // This avoids the Supabase verify redirect and the hash token lock contention
+    const resetLink = `https://convelabs.com/reset-password?token=${encodeURIComponent(hashedToken || '')}&email=${encodeURIComponent(email.trim())}&type=recovery`;
 
     // Step 2: Get patient name
     const { data: tp } = await supabase
