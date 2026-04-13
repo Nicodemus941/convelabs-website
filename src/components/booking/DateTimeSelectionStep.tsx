@@ -87,6 +87,12 @@ function isHoliday(date: Date): boolean {
   );
 }
 
+// Check if a date falls within any admin-created time block
+function isBlockedByAdmin(date: Date, blockedRanges: { start: string; end: string }[]): boolean {
+  const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return blockedRanges.some(r => dateStr >= r.start && dateStr <= r.end);
+}
+
 interface DateTimeSelectionStepProps {
   onNext: () => void;
   onBack: () => void;
@@ -142,6 +148,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [loadingSlots, setLoadingSlots] = useState(false);
+
+  const [blockedDates, setBlockedDates] = useState<{ start: string; end: string }[]>([]);
+
+  // Fetch admin-blocked dates on mount
+  useEffect(() => {
+    supabase.from('time_blocks' as any).select('start_date, end_date').then(({ data }) => {
+      if (data) setBlockedDates(data.map((d: any) => ({ start: d.start_date, end: d.end_date })));
+    });
+  }, []);
 
   // Duration map by service type (in minutes)
   const DURATION_MAP: Record<string, number> = {
@@ -342,7 +357,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let prev = subDays(field.value, 1);
-                            while (prev >= today && (isHoliday(prev) || prev.getDay() === 0)) prev = subDays(prev, 1);
+                            while (prev >= today && (isHoliday(prev) || prev.getDay() === 0 || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
                             if (prev >= today) field.onChange(prev);
                           }
                         }}
@@ -378,7 +393,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         disabled={(date) =>
                           date < today ||
                           date > new Date(today.getFullYear(), today.getMonth() + 2, 0) ||
-                          isHoliday(date)
+                          isHoliday(date) ||
+                          isBlockedByAdmin(date, blockedDates)
                         }
                         initialFocus
                         className="p-3 pointer-events-auto"
@@ -394,7 +410,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let next = addDays(field.value, 1);
-                            while (isHoliday(next) || next.getDay() === 0) next = addDays(next, 1);
+                            while (isHoliday(next) || next.getDay() === 0 || isBlockedByAdmin(next, blockedDates)) next = addDays(next, 1);
                             const maxDate = new Date(today.getFullYear(), today.getMonth() + 2, 0);
                             if (next <= maxDate) field.onChange(next);
                           }
