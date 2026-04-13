@@ -83,8 +83,8 @@ const SMSMessagingTab: React.FC = () => {
       const q = searchQuery.toLowerCase();
       setFilteredPatients(
         patients.filter(p =>
-          p.name.toLowerCase().includes(q) ||
-          p.phone.includes(q) ||
+          (p.name && p.name.toLowerCase().includes(q)) ||
+          (p.phone && p.phone.includes(q)) ||
           (p.email && p.email.toLowerCase().includes(q))
         )
       );

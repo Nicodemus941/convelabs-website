@@ -97,38 +97,32 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const handleSubmit = async () => {
     setIsSubmitting(true);
     try {
-      // Find patient by email or use first available user
+      // Find patient by email in tenant_patients
       let patientId: string | null = null;
 
       if (patientEmail) {
-        const { data: users } = await supabase.auth.admin.listUsers({ page: 1, perPage: 50 });
-        const found = users?.users?.find(u => u.email === patientEmail.toLowerCase());
-        patientId = found?.id || null;
+        const { data: tp } = await supabase
+          .from('tenant_patients')
+          .select('id')
+          .ilike('email', patientEmail.trim())
+          .maybeSingle();
+        if (tp) patientId = tp.id;
       }
 
-      // If no patient found, search by name in user metadata
-      if (!patientId) {
-        for (let page = 1; page <= 10; page++) {
-          const { data } = await supabase.auth.admin.listUsers({ page, perPage: 50 });
-          if (!data?.users?.length) break;
-          const found = data.users.find(u => {
-            const name = `${u.user_metadata?.firstName || ''} ${u.user_metadata?.lastName || ''}`.trim().toLowerCase();
-            return name.includes(patientName.toLowerCase()) || patientName.toLowerCase().includes(name);
-          });
-          if (found) { patientId = found.id; break; }
-        }
+      // Search by name if email didn't match
+      if (!patientId && patientName) {
+        const { data: tp } = await supabase
+          .from('tenant_patients')
+          .select('id')
+          .ilike('first_name', `%${patientName.split(' ')[0]}%`)
+          .maybeSingle();
+        if (tp) patientId = tp.id;
       }
 
-      // Fallback: use first user
+      // Fallback: use current user's ID
       if (!patientId) {
-        const { data } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1 });
-        patientId = data?.users?.[0]?.id || null;
-      }
-
-      if (!patientId) {
-        toast.error('Could not find or create patient');
-        setIsSubmitting(false);
-        return;
+        const { data: session } = await supabase.auth.getSession();
+        patientId = session?.session?.user?.id || null;
       }
 
       // Parse time to build full datetime
