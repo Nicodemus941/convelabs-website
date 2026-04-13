@@ -285,27 +285,30 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <WorkflowButton label="On the Way" icon={Truck} targetStatus="en_route" enabledWhen={['scheduled', 'confirmed']} />
                   <WorkflowButton label="Arrive" icon={MapPin} targetStatus="arrived" enabledWhen={['en_route']} />
                   <WorkflowButton label="Begin Job" icon={Play} targetStatus="in_progress" enabledWhen={['arrived']} />
+                  {/* Specimen Delivery — only for services that require it (not in-office/partner) */}
+                  {!['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) && (
+                    <Button
+                      size="sm"
+                      className={`h-16 flex flex-col gap-1 ${
+                        appointment.status === 'in_progress'
+                          ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
+                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                      }`}
+                      disabled={appointment.status !== 'in_progress'}
+                      onClick={(e) => { e.stopPropagation(); setShowSpecimenDelivery(true); }}
+                    >
+                      <Package className="h-4 w-4" />
+                      <span className="text-xs">Specimen Delivered</span>
+                    </Button>
+                  )}
                   <Button
                     size="sm"
-                    className={`h-16 flex flex-col gap-1 ${
-                      appointment.status === 'in_progress'
+                    className={`${['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) ? 'col-span-2' : 'col-span-2'} h-12 flex flex-row gap-2 ${
+                      (appointment.status === 'specimen_delivered' || (appointment.status === 'in_progress' && ['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type)))
                         ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
-                    disabled={appointment.status !== 'in_progress'}
-                    onClick={(e) => { e.stopPropagation(); setShowSpecimenDelivery(true); }}
-                  >
-                    <Package className="h-4 w-4" />
-                    <span className="text-xs">Specimen Delivered</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    className={`col-span-2 h-12 flex flex-row gap-2 ${
-                      appointment.status === 'specimen_delivered'
-                        ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
-                    disabled={appointment.status !== 'specimen_delivered'}
+                    disabled={!(appointment.status === 'specimen_delivered' || (appointment.status === 'in_progress' && ['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type)))}
                     onClick={(e) => { e.stopPropagation(); onStatusUpdate(appointment.id, 'completed'); }}
                   >
                     <CheckCircle2 className="h-4 w-4" />

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Clock, MapPin, User, FileText, CalendarClock, Phone } from 'lucide-react';
+import PatientRescheduleModal from './PatientRescheduleModal';
 
 interface AppointmentTrackerProps {
   appointment: {
@@ -20,6 +21,7 @@ interface AppointmentTrackerProps {
 }
 
 const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment, onRescheduleRequest }) => {
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const canReschedule = ['scheduled', 'confirmed'].includes(appointment.status)
     && (appointment.reschedule_count || 0) < 2;
   const getStatusColor = (status: string) => {
@@ -112,16 +114,15 @@ const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment, on
         {['scheduled', 'confirmed'].includes(appointment.status) && (
           <div className="flex gap-2 pt-2 border-t">
             {canReschedule ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 text-xs"
-                onClick={() => onRescheduleRequest?.(appointment.id) || window.location.assign('tel:+19415279169')}
-              >
+              <Button variant="outline" size="sm" className="flex-1 text-xs"
+                onClick={() => setRescheduleOpen(true)}>
                 <CalendarClock className="h-3.5 w-3.5 mr-1" /> Reschedule
               </Button>
             ) : (appointment.reschedule_count || 0) >= 2 ? (
-              <p className="text-xs text-muted-foreground">Reschedule limit reached. Call to make changes.</p>
+              <Button variant="outline" size="sm" className="flex-1 text-xs"
+                onClick={() => setRescheduleOpen(true)}>
+                <CalendarClock className="h-3.5 w-3.5 mr-1" /> Reschedule
+              </Button>
             ) : null}
             <Button variant="outline" size="sm" className="text-xs" asChild>
               <a href="tel:+19415279169"><Phone className="h-3.5 w-3.5 mr-1" /> Call Us</a>
@@ -129,6 +130,13 @@ const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment, on
           </div>
         )}
       </CardContent>
+
+      <PatientRescheduleModal
+        appointment={appointment}
+        open={rescheduleOpen}
+        onClose={() => setRescheduleOpen(false)}
+        onRescheduled={() => { setRescheduleOpen(false); window.location.reload(); }}
+      />
     </Card>
   );
 };
