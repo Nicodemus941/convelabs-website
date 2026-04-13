@@ -363,6 +363,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
   // SAME-DAY LEAD TIME: 90 minutes minimum before appointment
   const SAME_DAY_LEAD_MINUTES = 90;
+  // SAME-DAY CUTOFF: No same-day bookings after 3 PM (15:00)
+  const SAME_DAY_CUTOFF_HOUR = 15; // 3 PM
+  const isSameDayCutoff = isSameDay && today.getHours() >= SAME_DAY_CUTOFF_HOUR;
 
   // Convert a time string like "2:30 PM" to minutes since midnight
   const timeToMinutes = (t: string): number => {
@@ -469,12 +472,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             setCalendarOpen(false);
                           }
                         }}
-                        disabled={(date) =>
-                          date < today ||
-                          date > new Date(today.getFullYear(), today.getMonth() + 2, 0) ||
-                          isHoliday(date) ||
-                          isBlockedByAdmin(date, blockedDates)
-                        }
+                        disabled={(date) => {
+                          const isPast = date < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                          const isTooFar = date > new Date(today.getFullYear(), today.getMonth() + 2, 0);
+                          const isTodayPastCutoff = date.getFullYear() === today.getFullYear()
+                            && date.getMonth() === today.getMonth()
+                            && date.getDate() === today.getDate()
+                            && today.getHours() >= SAME_DAY_CUTOFF_HOUR;
+                          return isPast || isTooFar || isHoliday(date) || isBlockedByAdmin(date, blockedDates) || isTodayPastCutoff;
+                        }}
                         initialFocus
                         className="p-3 pointer-events-auto"
                       />
@@ -527,7 +533,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     </div>
                   )}
 
-                  {isStat ? (
+                  {isSameDayCutoff ? (
+                    <div className="py-4 space-y-2">
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                        <p className="font-medium text-red-900">Same-Day Booking Cutoff Reached</p>
+                        <p className="text-sm text-red-700 mt-1">
+                          Same-day appointments cannot be booked after 3:00 PM. Please select tomorrow or a future date.
+                        </p>
+                      </div>
+                    </div>
+                  ) : isStat ? (
                     <div className="py-4 space-y-2">
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
                         <p className="font-medium text-amber-900">STAT / Same-Day Appointment</p>
@@ -597,7 +612,13 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             }}
                             disabled={isUnavailable}
                           >
-                            {window.time}
+                            <span>{window.time}</span>
+                            {isAfterHours && !isUnavailable && (
+                              <span className="block text-[9px] opacity-70 mt-0.5">+$50</span>
+                            )}
+                            {isSameDay && !isAfterHours && !isUnavailable && (
+                              <span className="block text-[9px] opacity-70 mt-0.5">+$100</span>
+                            )}
                           </button>
                         );
                       })}

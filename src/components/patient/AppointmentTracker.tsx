@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Clock, MapPin, User, FileText } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Clock, MapPin, User, FileText, CalendarClock, Phone } from 'lucide-react';
 
 interface AppointmentTrackerProps {
   appointment: {
@@ -13,10 +14,14 @@ interface AppointmentTrackerProps {
     phlebotomist_name?: string;
     eta_minutes?: number;
     service_type: string;
+    reschedule_count?: number;
   };
+  onRescheduleRequest?: (appointmentId: string) => void;
 }
 
-const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment }) => {
+const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment, onRescheduleRequest }) => {
+  const canReschedule = ['scheduled', 'confirmed'].includes(appointment.status)
+    && (appointment.reschedule_count || 0) < 2;
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'scheduled': return 'bg-blue-500';
@@ -100,6 +105,27 @@ const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment }) 
             <p className="text-sm text-green-800">
               Your appointment is complete! Your specimens are on their way to the lab. We will notify you once they have been successfully delivered along with your lab-generated ID. Thank you for choosing ConveLabs!
             </p>
+          </div>
+        )}
+
+        {/* Reschedule / Contact actions */}
+        {['scheduled', 'confirmed'].includes(appointment.status) && (
+          <div className="flex gap-2 pt-2 border-t">
+            {canReschedule ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 text-xs"
+                onClick={() => onRescheduleRequest?.(appointment.id) || window.location.assign('tel:+19415279169')}
+              >
+                <CalendarClock className="h-3.5 w-3.5 mr-1" /> Reschedule
+              </Button>
+            ) : (appointment.reschedule_count || 0) >= 2 ? (
+              <p className="text-xs text-muted-foreground">Reschedule limit reached. Call to make changes.</p>
+            ) : null}
+            <Button variant="outline" size="sm" className="text-xs" asChild>
+              <a href="tel:+19415279169"><Phone className="h-3.5 w-3.5 mr-1" /> Call Us</a>
+            </Button>
           </div>
         )}
       </CardContent>

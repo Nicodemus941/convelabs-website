@@ -53,6 +53,8 @@ const StaffManagementTab = () => {
 
   const [timeOffData, setTimeOffData] = useState({
     staffId: '', startDate: '', endDate: '', reason: '',
+    startTime: '', endTime: '', // For half-day blocking
+    recurring: false, recurringDay: '', // For recurring blocks
   });
   const [timeBlocks, setTimeBlocks] = useState<any[]>([]);
 
@@ -80,12 +82,45 @@ const StaffManagementTab = () => {
         staff_id: ['all', 'owner', 'admin'].includes(timeOffData.staffId) ? null : timeOffData.staffId || null,
         start_date: timeOffData.startDate,
         end_date: timeOffData.endDate,
+        start_time: timeOffData.startTime || null,
+        end_time: timeOffData.endTime || null,
+        recurring: timeOffData.recurring || false,
+        recurring_day: timeOffData.recurringDay || null,
         reason: fullReason,
         block_type: timeOffData.staffId === 'all' ? 'office_closure' : 'time_off',
       });
       if (error) throw error;
-      toast.success('Time block saved');
-      setTimeOffData({ staffId: '', startDate: '', endDate: '', reason: '' });
+
+      // Check for affected appointments in the blocked date range
+      const { data: affected } = await supabase
+        .from('appointments')
+        .select('id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, notes')
+        .gte('appointment_date', timeOffData.startDate + 'T00:00:00')
+        .lte('appointment_date', timeOffData.endDate + 'T23:59:59')
+        .in('status', ['scheduled', 'confirmed']);
+
+      if (affected && affected.length > 0) {
+        const names = affected.map(a => a.patient_name || a.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim() || 'Unknown').join(', ');
+        toast.warning(`⚠️ ${affected.length} appointment(s) affected: ${names}. These patients should be rescheduled.`, { duration: 8000 });
+
+        // Send SMS to affected patients (non-blocking)
+        for (const appt of affected) {
+          const phone = appt.patient_phone || appt.notes?.match(/Phone:\s*([^|]+)/)?.[1]?.trim();
+          const name = appt.patient_name || appt.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim() || 'Patient';
+          if (phone) {
+            supabase.functions.invoke('send-sms-notification', {
+              body: {
+                to: phone,
+                message: `ConveLabs: Hi ${name.split(' ')[0]}, we need to reschedule your appointment due to ${timeOffData.reason || 'a schedule change'}. We'll reach out shortly with a new time, or call us at (941) 527-9169.`,
+              },
+            }).catch(() => {});
+          }
+        }
+      } else {
+        toast.success('Time block saved');
+      }
+
+      setTimeOffData({ staffId: '', startDate: '', endDate: '', reason: '', startTime: '', endTime: '', recurring: false, recurringDay: '' });
       fetchTimeBlocks();
     } catch (err: any) {
       toast.error(err.message || 'Failed to save time block');
@@ -299,10 +334,74 @@ const StaffManagementTab = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div><Label>Start</Label><Input type="date" value={timeOffData.startDate} onChange={e => setTimeOffData(p => ({ ...p, startDate: e.target.value }))} /></div>
-                <div><Label>End</Label><Input type="date" value={timeOffData.endDate} onChange={e => setTimeOffData(p => ({ ...p, endDate: e.target.value }))} /></div>
-                <div><Label>Reason</Label><Input value={timeOffData.reason} onChange={e => setTimeOffData(p => ({ ...p, reason: e.target.value }))} placeholder="PTO, Sick..." /></div>
+                <div><Label>Start Date</Label><Input type="date" value={timeOffData.startDate} onChange={e => setTimeOffData(p => ({ ...p, startDate: e.target.value }))} /></div>
+                <div><Label>End Date</Label><Input type="date" value={timeOffData.endDate} onChange={e => setTimeOffData(p => ({ ...p, endDate: e.target.value }))} /></div>
+                <div><Label>Reason</Label><Input value={timeOffData.reason} onChange={e => setTimeOffData(p => ({ ...p, reason: e.target.value }))} placeholder="PTO, Sick, Training..." /></div>
               </div>
+
+              {/* Half-day / Time range (optional) */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <Label>Start Time <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                  <Select value={timeOffData.startTime} onValueChange={v => setTimeOffData(p => ({ ...p, startTime: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Full day" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Full Day</SelectItem>
+                      <SelectItem value="6:00 AM">6:00 AM</SelectItem>
+                      <SelectItem value="7:00 AM">7:00 AM</SelectItem>
+                      <SelectItem value="8:00 AM">8:00 AM</SelectItem>
+                      <SelectItem value="9:00 AM">9:00 AM</SelectItem>
+                      <SelectItem value="10:00 AM">10:00 AM</SelectItem>
+                      <SelectItem value="11:00 AM">11:00 AM</SelectItem>
+                      <SelectItem value="12:00 PM">12:00 PM</SelectItem>
+                      <SelectItem value="1:00 PM">1:00 PM</SelectItem>
+                      <SelectItem value="2:00 PM">2:00 PM</SelectItem>
+                      <SelectItem value="3:00 PM">3:00 PM</SelectItem>
+                      <SelectItem value="4:00 PM">4:00 PM</SelectItem>
+                      <SelectItem value="5:00 PM">5:00 PM</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label>End Time <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                  <Select value={timeOffData.endTime} onValueChange={v => setTimeOffData(p => ({ ...p, endTime: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Full day" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">Full Day</SelectItem>
+                      <SelectItem value="12:00 PM">12:00 PM (Morning off)</SelectItem>
+                      <SelectItem value="1:00 PM">1:00 PM</SelectItem>
+                      <SelectItem value="2:00 PM">2:00 PM</SelectItem>
+                      <SelectItem value="3:00 PM">3:00 PM</SelectItem>
+                      <SelectItem value="4:00 PM">4:00 PM</SelectItem>
+                      <SelectItem value="5:00 PM">5:00 PM</SelectItem>
+                      <SelectItem value="6:00 PM">6:00 PM</SelectItem>
+                      <SelectItem value="8:00 PM">8:00 PM (Full PM off)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-2 flex items-end gap-4">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="recurring-block" checked={timeOffData.recurring}
+                      onChange={e => setTimeOffData(p => ({ ...p, recurring: e.target.checked }))}
+                      className="rounded border-gray-300" />
+                    <label htmlFor="recurring-block" className="text-sm font-medium">Recurring weekly</label>
+                  </div>
+                  {timeOffData.recurring && (
+                    <Select value={timeOffData.recurringDay} onValueChange={v => setTimeOffData(p => ({ ...p, recurringDay: v }))}>
+                      <SelectTrigger className="w-40"><SelectValue placeholder="Which day?" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="monday">Every Monday</SelectItem>
+                        <SelectItem value="tuesday">Every Tuesday</SelectItem>
+                        <SelectItem value="wednesday">Every Wednesday</SelectItem>
+                        <SelectItem value="thursday">Every Thursday</SelectItem>
+                        <SelectItem value="friday">Every Friday</SelectItem>
+                        <SelectItem value="saturday">Every Saturday</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              </div>
+
               <Button size="sm" onClick={handleBlockTime} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
                 <CalendarOff className="h-4 w-4 mr-1" /> Block Time
               </Button>
@@ -318,8 +417,15 @@ const StaffManagementTab = () => {
                           <p className="font-medium text-red-800">
                             {new Date(block.start_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             {block.start_date !== block.end_date && ` — ${new Date(block.end_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+                            {block.start_time && block.end_time && ` (${block.start_time} - ${block.end_time})`}
+                            {block.start_time && !block.end_time && ` (from ${block.start_time})`}
+                            {!block.start_time && block.end_time && ` (until ${block.end_time})`}
                           </p>
-                          <p className="text-xs text-red-600">{block.reason || 'Blocked'}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs text-red-600">{block.reason || 'Blocked'}</p>
+                            {block.recurring && <span className="text-[10px] bg-red-200 text-red-800 px-1.5 py-0.5 rounded-full">🔁 {block.recurring_day}</span>}
+                            {block.block_type === 'office_closure' && <span className="text-[10px] bg-red-300 text-red-900 px-1.5 py-0.5 rounded-full">Office Closed</span>}
+                          </div>
                         </div>
                         <Button variant="ghost" size="sm" className="text-red-500 h-7" onClick={() => handleDeleteBlock(block.id)}>
                           <Trash2 className="h-3 w-3" />
