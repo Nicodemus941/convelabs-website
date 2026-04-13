@@ -464,9 +464,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         );
                       })}
                     </div>
-                    {loadingSlots && (
-                      <p className="text-xs text-muted-foreground mt-1">Checking availability...</p>
-                    )}
+                  )}
+                  {loadingSlots && (
+                    <p className="text-xs text-muted-foreground mt-1">Checking availability...</p>
                   )}
                   <FormDescription>
                     {isStat
