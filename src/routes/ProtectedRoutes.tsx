@@ -3,7 +3,7 @@ import { Route } from 'react-router-dom';
 import ProtectedRoute from '../components/auth/ProtectedRoute';
 import RoleProtectedRoute from '../components/auth/RoleProtectedRoute';
 
-const UserProfile = lazy(() => import('../pages/UserProfile'));
+const UserProfile = lazy(() => import('../pages/PatientProfile'));
 const Dashboard = lazy(() => import('../pages/Dashboard'));
 const Appointments = lazy(() => import('../pages/Appointments'));
 
