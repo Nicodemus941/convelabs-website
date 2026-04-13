@@ -351,6 +351,51 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const isStat = STAT_SERVICES.includes(selectedService || '');
   const isRoutine = ROUTINE_SERVICES.includes(selectedService || '');
 
+  // Get Current Date
+  const today = new Date();
+
+  // Same-day detection: compare selected date to today (Eastern Time)
+  const isSameDay = selectedDate
+    ? selectedDate.getFullYear() === today.getFullYear()
+      && selectedDate.getMonth() === today.getMonth()
+      && selectedDate.getDate() === today.getDate()
+    : false;
+
+  // SAME-DAY LEAD TIME: 90 minutes minimum before appointment
+  const SAME_DAY_LEAD_MINUTES = 90;
+
+  // Convert a time string like "2:30 PM" to minutes since midnight
+  const timeToMinutes = (t: string): number => {
+    const [timePart, period] = t.split(' ');
+    const [h, m] = timePart.split(':').map(Number);
+    let hour24 = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
+    return hour24 * 60 + (m || 0);
+  };
+
+  // Current time in minutes since midnight (local)
+  const nowMinutes = today.getHours() * 60 + today.getMinutes();
+
+  // Auto-set sameDay flag + weekend flag when date changes
+  useEffect(() => {
+    if (!selectedDate) return;
+    const isToday = selectedDate.getFullYear() === today.getFullYear()
+      && selectedDate.getMonth() === today.getMonth()
+      && selectedDate.getDate() === today.getDate();
+    const isWknd = selectedDate.getDay() === 0 || selectedDate.getDay() === 6;
+
+    methods.setValue('serviceDetails.sameDay', isToday);
+    methods.setValue('serviceDetails.weekend', isWknd);
+
+    // If switching to today, clear time if it's now past the lead time
+    if (isToday && selectedTime) {
+      const slotMins = timeToMinutes(selectedTime);
+      const currentMins = new Date().getHours() * 60 + new Date().getMinutes();
+      if (slotMins < currentMins + SAME_DAY_LEAD_MINUTES) {
+        methods.setValue('time', '');
+      }
+    }
+  }, [selectedDate]);
+
   // Choose windows based on service type + after-hours toggle
   const baseWindows = isWeekend
     ? weekendWindows
@@ -361,9 +406,6 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const activeWindows = (!isWeekend && showAfterHours)
     ? [...baseWindows, ...afterHoursWindows]
     : baseWindows;
-  
-  // Get Current Date
-  const today = new Date();
   
   // Check if both date and time are selected (STAT auto-selects "Next Available")
   const canContinue = selectedDate && (selectedTime || isStat);
@@ -474,6 +516,17 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Appointment Time</FormLabel>
+
+                  {/* Same-day booking notice */}
+                  {isSameDay && !isStat && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
+                      <p className="text-sm font-medium text-amber-900">Same-Day Booking</p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        A $100 same-day surcharge applies. Slots within 90 minutes of the current time are unavailable to allow travel time.
+                      </p>
+                    </div>
+                  )}
+
                   {isStat ? (
                     <div className="py-4 space-y-2">
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
@@ -496,8 +549,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         const isSelected = field.value === window.time;
                         const isBooked = bookedSlots.has(window.time);
                         const isHeldByOther = !isSelected && heldSlots.has(window.time);
-                        const isUnavailable = isBooked || isHeldByOther;
                         const isAfterHours = afterHoursWindows.some(w => w.time === window.time);
+
+                        // Same-day: disable past slots + enforce 90-min lead time
+                        const slotMinutes = timeToMinutes(window.time);
+                        const isPastOrTooSoon = isSameDay && slotMinutes < nowMinutes + SAME_DAY_LEAD_MINUTES;
+                        const isUnavailable = isBooked || isHeldByOther || isPastOrTooSoon;
 
                         return (
                           <button
@@ -593,6 +650,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       ? "We are closed on Sundays"
                       : isWeekend
                       ? "Limited Saturday hours (6 AM - 9:30 AM)"
+                      : isSameDay
+                      ? "Same-day booking (+$100 surcharge) · 90-min lead time"
                       : isRoutine
                       ? "Routine draw hours: 9 AM - 5:00 PM"
                       : showAfterHours

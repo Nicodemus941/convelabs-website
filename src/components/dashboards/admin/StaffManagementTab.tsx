@@ -67,12 +67,21 @@ const StaffManagementTab = () => {
       return;
     }
     try {
+      // Determine label for who this block is for
+      const staffLabel = timeOffData.staffId === 'all' ? 'Office Closure'
+        : timeOffData.staffId === 'owner' ? 'Owner'
+        : timeOffData.staffId === 'admin' ? 'Admin'
+        : staff.find(s => s.id === timeOffData.staffId)?.name || '';
+      const fullReason = staffLabel
+        ? `${staffLabel}: ${timeOffData.reason || 'Time off'}`
+        : timeOffData.reason || 'Time off';
+
       const { error } = await supabase.from('time_blocks' as any).insert({
-        staff_id: timeOffData.staffId || null,
+        staff_id: ['all', 'owner', 'admin'].includes(timeOffData.staffId) ? null : timeOffData.staffId || null,
         start_date: timeOffData.startDate,
         end_date: timeOffData.endDate,
-        reason: timeOffData.reason || 'Time off',
-        block_type: 'time_off',
+        reason: fullReason,
+        block_type: timeOffData.staffId === 'all' ? 'office_closure' : 'time_off',
       });
       if (error) throw error;
       toast.success('Time block saved');
@@ -279,10 +288,15 @@ const StaffManagementTab = () => {
             <CardContent className="space-y-4">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
-                  <Label>Staff Member</Label>
+                  <Label>Who is this for?</Label>
                   <Select value={timeOffData.staffId} onValueChange={v => setTimeOffData(p => ({ ...p, staffId: v }))}>
-                    <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
-                    <SelectContent>{staff.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                    <SelectTrigger><SelectValue placeholder="Select staff or office..." /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Staff / Office Closure</SelectItem>
+                      <SelectItem value="owner">Owner (Nicodemme)</SelectItem>
+                      <SelectItem value="admin">Admin (Naquala)</SelectItem>
+                      {staff.map(s => <SelectItem key={s.id} value={s.id}>{s.name} ({s.role})</SelectItem>)}
+                    </SelectContent>
                   </Select>
                 </div>
                 <div><Label>Start</Label><Input type="date" value={timeOffData.startDate} onChange={e => setTimeOffData(p => ({ ...p, startDate: e.target.value }))} /></div>
