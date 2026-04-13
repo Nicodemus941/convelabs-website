@@ -20,6 +20,7 @@ interface OnTheWayDialogProps {
   appointmentId: string;
   patientName: string;
   patientPhone: string | null;
+  patientEmail?: string | null;
   onStatusUpdated: () => void;
 }
 
@@ -29,6 +30,7 @@ const OnTheWayDialog: React.FC<OnTheWayDialogProps> = ({
   appointmentId,
   patientName,
   patientPhone,
+  patientEmail,
   onStatusUpdated,
 }) => {
   const [etaMinutes, setEtaMinutes] = useState('15');
@@ -53,24 +55,38 @@ const OnTheWayDialog: React.FC<OnTheWayDialogProps> = ({
       }
       smsMessage += ` We're looking forward to serving you. See you soon!`;
 
-      // Send SMS
+      // Send SMS if phone exists
+      let smsSent = false;
       if (patientPhone) {
         const { error: smsError } = await supabase.functions.invoke('send-sms-notification', {
           body: {
             appointmentId,
             notificationType: 'on_the_way_custom',
-            phoneNumber: patientPhone,
+            phoneNumber: patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`,
             customMessage: smsMessage,
           },
         });
-        if (smsError) {
-          console.error('SMS error:', smsError);
-          toast.error('Status updated but SMS failed');
-        } else {
-          toast.success(`On the way notification sent to ${patientName}`);
-        }
+        if (!smsError) smsSent = true;
+        else console.error('SMS error:', smsError);
+      }
+
+      // Always send email too (or as fallback if no phone)
+      if (patientEmail) {
+        await supabase.functions.invoke('send-email', {
+          body: {
+            to: patientEmail,
+            subject: `Your ConveLabs Phlebotomist is On the Way! ETA: ${etaMinutes} minutes`,
+            html: `<div style="font-family:Arial;max-width:600px;margin:0 auto;"><div style="background:#B91C1C;color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;"><h2 style="margin:0;">Your Phlebotomist is On the Way!</h2></div><div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;"><p>Hi ${patientName},</p><p>${smsMessage}</p><p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810<br>(941) 527-9169</p></div></div>`,
+          },
+        }).catch(err => console.error('Email error:', err));
+      }
+
+      if (smsSent) {
+        toast.success(`On the way notification sent to ${patientName} (SMS + Email)`);
+      } else if (patientEmail) {
+        toast.success(`On the way email sent to ${patientName} (no phone on file)`);
       } else {
-        toast.success('Status updated (no phone on file)');
+        toast.success('Status updated (no contact info on file)');
       }
 
       onStatusUpdated();

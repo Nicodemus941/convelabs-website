@@ -278,6 +278,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         appointmentId={appointment.id}
         patientName={appointment.patient_name}
         patientPhone={appointment.patient_phone}
+        patientEmail={appointment.patient_email}
         onStatusUpdated={() => onStatusUpdate(appointment.id, 'en_route')}
       />
 
