@@ -69,43 +69,63 @@ const AdminCalendar: React.FC = () => {
   useEffect(() => { fetchAppointments(); fetchTimeBlocks(); }, [fetchAppointments, fetchTimeBlocks]);
 
   const getPatientName = (appt: any): string => {
-    // Check direct patient_name column first
     if (appt.patient_name) return appt.patient_name;
-    // Fallback: parse from notes
-    if (appt.notes?.startsWith('Patient: ')) {
-      return appt.notes.split(' | ')[0].replace('Patient: ', '');
-    }
-    return appt.patient_email || appt.service_name || 'Appointment';
+    if (appt.notes?.match(/Patient:\s*([^|]+)/)) return appt.notes.match(/Patient:\s*([^|]+)/)[1].trim();
+    // Don't show raw email — show service name or generic label
+    return appt.service_name || 'Appointment';
   };
 
+  // Parse appointment_time to 24h hours/minutes
+  const parseTime = (timeStr: string): { h: number; m: number } => {
+    if (!timeStr) return { h: 0, m: 0 };
+    const t = String(timeStr);
+    if (t.includes('AM') || t.includes('PM')) {
+      const [tp, period] = t.split(' ');
+      const [hr, mn] = tp.split(':').map(Number);
+      return { h: period === 'PM' && hr !== 12 ? hr + 12 : (period === 'AM' && hr === 12 ? 0 : hr), m: mn || 0 };
+    }
+    const parts = t.split(':').map(Number);
+    return { h: parts[0] || 0, m: parts[1] || 0 };
+  };
+
+  // Format time for display (24h → 12h)
+  const formatTime12h = (h: number, m: number): string => {
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+  };
+
+  // Filter: hide cancelled from month view, show all in week/day
+  const [currentView, setCurrentView] = useState('dayGridMonth');
+  const visibleAppointments = currentView === 'dayGridMonth'
+    ? appointments.filter(a => a.status !== 'cancelled')
+    : appointments;
+
   // Convert appointments to FullCalendar events
-  // Use appointment_time (local time) to build correct start time
-  const calendarEvents = appointments.map(appt => {
+  const calendarEvents = visibleAppointments.map(appt => {
     const name = getPatientName(appt);
     const dateOnly = appt.appointment_date?.substring(0, 10) || '';
+    const { h, m } = parseTime(appt.appointment_time);
+    const startStr = dateOnly && appt.appointment_time
+      ? `${dateOnly}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`
+      : appt.appointment_date;
 
-    // Parse appointment_time (e.g., "8:00 AM" or "08:00:00") to build local datetime
-    let startStr = appt.appointment_date; // fallback
-    if (dateOnly && appt.appointment_time) {
-      const timeStr = String(appt.appointment_time);
-      let h = 0, m = 0;
-      if (timeStr.includes('AM') || timeStr.includes('PM')) {
-        const [tp, period] = timeStr.split(' ');
-        const [hr, mn] = tp.split(':').map(Number);
-        h = period === 'PM' && hr !== 12 ? hr + 12 : (period === 'AM' && hr === 12 ? 0 : hr);
-        m = mn || 0;
-      } else {
-        const parts = timeStr.split(':').map(Number);
-        h = parts[0] || 0;
-        m = parts[1] || 0;
-      }
-      startStr = `${dateOnly}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`;
-    }
+    // Calculate end time based on duration
+    const durationMin = appt.duration_minutes || 60;
+    const endH = h + Math.floor((m + durationMin) / 60);
+    const endM = (m + durationMin) % 60;
+    const endStr = dateOnly && appt.appointment_time
+      ? `${dateOnly}T${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}:00`
+      : undefined;
+
+    // Build rich title: "10:00a Patient Name" for month view
+    const timeLabel = formatTime12h(h, m).replace(':00', '').replace(' AM', 'a').replace(' PM', 'p').toLowerCase();
 
     return {
       id: appt.id,
       title: name,
       start: startStr,
+      end: endStr,
       allDay: !appt.appointment_time,
       className: `fc-event-${appt.status}`,
       backgroundColor: STATUS_COLORS[appt.status] || '#1e293b',
@@ -235,7 +255,7 @@ const AdminCalendar: React.FC = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Card>
           <CardContent className="p-3 flex items-center gap-3">
             <Calendar className="h-8 w-8 text-blue-500 opacity-60" />
@@ -298,20 +318,31 @@ const AdminCalendar: React.FC = () => {
               editable={true}
               eventDrop={handleEventDrop}
               eventDurationEditable={false}
+              datesSet={(info) => setCurrentView(info.view.type)}
               height="auto"
-              dayMaxEvents={4}
+              dayMaxEvents={3}
+              dayMaxEventRows={3}
+              moreLinkClick="popover"
               eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
               moreLinkText={(n) => `+${n} more`}
               nowIndicator={true}
               eventDisplay="block"
               slotMinTime="06:00:00"
               slotMaxTime="21:00:00"
+              slotDuration="00:30:00"
               allDaySlot={false}
               weekends={true}
               businessHours={{
                 daysOfWeek: [1, 2, 3, 4, 5],
                 startTime: '06:00',
                 endTime: '17:30',
+              }}
+              eventDidMount={(info) => {
+                // Add tooltip with full details
+                const appt = info.event.extendedProps.appointment;
+                if (appt && !info.event.extendedProps.isBlock) {
+                  info.el.title = `${info.event.title}\n${appt.appointment_time || ''}\n${appt.address || ''}\n${appt.service_name || appt.service_type || ''}`;
+                }
               }}
             />
           )}

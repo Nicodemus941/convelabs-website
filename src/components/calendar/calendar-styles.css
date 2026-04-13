@@ -114,6 +114,67 @@
   color: #dc2626;
 }
 
+/* More popover — clean styling */
+.fc .fc-popover {
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  border: 1px solid hsl(var(--border));
+  overflow: hidden;
+  z-index: 50;
+  max-width: 280px;
+}
+
+.fc .fc-popover-header {
+  background: #1e293b;
+  color: white;
+  padding: 0.625rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.fc .fc-popover-body {
+  padding: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+  background: white;
+}
+
+.fc .fc-popover-body .fc-daygrid-event {
+  margin-bottom: 3px;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+/* Responsive calendar on mobile */
+@media (max-width: 640px) {
+  .fc .fc-toolbar {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .fc .fc-toolbar-title {
+    font-size: 1rem;
+  }
+  .fc .fc-button {
+    font-size: 0.6875rem;
+    padding: 0.25rem 0.5rem;
+  }
+  .fc .fc-daygrid-day {
+    min-height: 60px;
+  }
+  .fc .fc-daygrid-event {
+    font-size: 0.5625rem;
+    padding: 0.125rem 0.25rem;
+  }
+  .fc .fc-col-header-cell {
+    font-size: 0.625rem;
+  }
+  .fc .fc-daygrid-day-number {
+    font-size: 0.6875rem;
+    padding: 0.25rem;
+  }
+}
+
 /* Status colors — ConveLabs brand: dark bg, white text for readability */
 .fc-event-scheduled {
   background-color: #1e293b !important;
