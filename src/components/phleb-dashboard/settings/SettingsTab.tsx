@@ -18,10 +18,21 @@ const SettingsTab: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [smsNotifications, setSmsNotifications] = useState(true);
 
-  // Load staff profile phone
+  // Load staff profile phone + notification prefs
   useEffect(() => {
     const load = async () => {
       if (!user) return;
+
+      // Load notification preference
+      const { data: prefs } = await supabase
+        .from('email_preferences')
+        .select('notification_method')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (prefs) {
+        setSmsNotifications(prefs.notification_method !== 'email'); // sms or both = true
+      }
+
       // Try staff_profiles first
       const { data: staffData } = await supabase
         .from('staff_profiles')
@@ -149,7 +160,18 @@ const SettingsTab: React.FC = () => {
               <p className="text-xs text-muted-foreground">Receive texts for new assignments</p>
             </div>
             <button
-              onClick={() => setSmsNotifications(!smsNotifications)}
+              onClick={async () => {
+                const newVal = !smsNotifications;
+                setSmsNotifications(newVal);
+                if (user) {
+                  await supabase.from('email_preferences').upsert({
+                    user_id: user.id,
+                    notification_method: newVal ? 'both' : 'email',
+                    updated_at: new Date().toISOString(),
+                  }, { onConflict: 'user_id' });
+                  toast.success(newVal ? 'SMS notifications enabled' : 'SMS notifications disabled');
+                }
+              }}
               className={`w-11 h-6 rounded-full transition-colors ${smsNotifications ? 'bg-[#B91C1C]' : 'bg-gray-300'}`}
             >
               <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${smsNotifications ? 'translate-x-5' : 'translate-x-0.5'}`} />

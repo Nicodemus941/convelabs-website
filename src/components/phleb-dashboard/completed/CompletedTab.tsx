@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { CheckCircle2, DollarSign, TrendingUp, Calendar, ChevronLeft, ChevronRight, User } from 'lucide-react';
 import { PhlebAppointment } from '@/hooks/usePhlebotomistAppointments';
+import EarningsChart from './EarningsChart';
 
 interface CompletedTabProps {
   appointments: PhlebAppointment[];
@@ -81,6 +82,13 @@ const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Earnings Chart */}
+      <Card className="shadow-sm">
+        <CardContent className="p-4">
+          <EarningsChart appointments={appointments} />
+        </CardContent>
+      </Card>
 
       {/* Month Navigation */}
       <div className="flex items-center justify-between">

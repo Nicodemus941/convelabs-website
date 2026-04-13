@@ -37,9 +37,23 @@ const WeekStrip: React.FC<WeekStripProps> = ({
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <span className="text-sm font-medium text-gray-700">
-          {format(weekDays[0], 'MMM d')} - {format(weekDays[6], 'MMM d, yyyy')}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-700">
+            {format(weekDays[0], 'MMM d')} - {format(weekDays[6], 'MMM d, yyyy')}
+          </span>
+          {!weekDays.some(d => isToday(d)) && (
+            <button
+              onClick={() => {
+                const todayWeekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+                onWeekChange(todayWeekStart);
+                onDateSelect(new Date());
+              }}
+              className="text-[10px] font-medium text-[#B91C1C] bg-red-50 px-2 py-0.5 rounded-full hover:bg-red-100"
+            >
+              Today
+            </button>
+          )}
+        </div>
         <button
           onClick={() => onWeekChange(addWeeks(weekStart, 1))}
           className="p-1 rounded-full hover:bg-gray-100 text-gray-500"

@@ -68,28 +68,57 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
     setIsLoading(false);
   }, [appointments]);
 
-  // Load messages for active conversation from sms_notifications or sms_messages
+  // Load messages for a specific patient conversation filtered by phone
   const loadMessages = useCallback(async (conv: Conversation) => {
     try {
-      // Try loading from sms_messages table first
-      const { data, error } = await supabase
+      const allMsgs: Message[] = [];
+      const normalizedPhone = conv.patient_phone.replace(/\D/g, '');
+      const phoneVariants = [conv.patient_phone, `+1${normalizedPhone}`, normalizedPhone];
+
+      // Load from sms_notifications (outbound messages sent to this patient)
+      const { data: notifs } = await supabase
+        .from('sms_notifications' as any)
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (notifs) {
+        (notifs as any[]).forEach((m: any) => {
+          const msgPhone = (m.phone_number || '').replace(/\D/g, '');
+          if (phoneVariants.some(p => p.replace(/\D/g, '') === msgPhone)) {
+            allMsgs.push({
+              id: m.id,
+              direction: 'outbound',
+              body: m.message_content || '',
+              created_at: m.created_at,
+            });
+          }
+        });
+      }
+
+      // Load from sms_messages (conversation-based messages)
+      const { data: convMsgs } = await supabase
         .from('sms_messages' as any)
         .select('*')
         .order('created_at', { ascending: true });
 
-      if (!error && data) {
-        setMessages(
-          (data as any[]).map((m: any) => ({
+      if (convMsgs) {
+        (convMsgs as any[]).forEach((m: any) => {
+          allMsgs.push({
             id: m.id,
-            direction: m.direction,
-            body: m.body,
+            direction: m.direction || 'outbound',
+            body: m.body || '',
             created_at: m.created_at,
-          }))
-        );
-      } else {
-        // Fallback: no messages yet
-        setMessages([]);
+          });
+        });
       }
+
+      // Sort by date, dedupe by ID
+      const seen = new Set<string>();
+      const unique = allMsgs
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        .filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+
+      setMessages(unique);
     } catch {
       setMessages([]);
     }
