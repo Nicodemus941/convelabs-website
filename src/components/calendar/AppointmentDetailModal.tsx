@@ -230,12 +230,31 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
                 <div className="flex items-center gap-2 font-semibold text-sm">
                   <UserPlus className="h-4 w-4" /> Assigned Staff
                 </div>
-                <Button variant="outline" size="sm" className="text-xs h-7 gap-1">
-                  <UserPlus className="h-3 w-3" /> Assign
-                </Button>
+                <select
+                  className="text-xs border rounded-md px-2 py-1 bg-white"
+                  defaultValue={appt.phlebotomist_id || '91c76708-8c5b-4068-92c6-323805a3b164'}
+                  onChange={async (e) => {
+                    const newId = e.target.value;
+                    const { error } = await supabase.from('appointments').update({ phlebotomist_id: newId }).eq('id', appt.id);
+                    if (error) toast.error('Failed to assign staff');
+                    else {
+                      toast.success('Staff assigned');
+                      // Notify new phlebotomist
+                      const { data: staff } = await supabase.from('staff_profiles').select('phone').eq('user_id', newId).maybeSingle();
+                      if (staff?.phone) {
+                        supabase.functions.invoke('send-sms-notification', {
+                          body: { to: staff.phone, message: `New assignment: ${patientName} on ${formattedDate} at ${timeStr}. Location: ${appt.address || 'TBD'}` },
+                        }).catch(() => {});
+                      }
+                      onUpdate();
+                    }
+                  }}
+                >
+                  <option value="91c76708-8c5b-4068-92c6-323805a3b164">Nico (Phlebotomist)</option>
+                </select>
               </div>
               <div className="pl-6 text-sm">
-                <p className="font-medium">Nicodemme "Nico" Jean-Baptiste</p>
+                <p className="font-medium">{appt.phlebotomist_id === '91c76708-8c5b-4068-92c6-323805a3b164' ? 'Nicodemme "Nico" Jean-Baptiste' : 'Assigned Phlebotomist'}</p>
                 <p className="text-xs text-muted-foreground">Owner / Phlebotomist</p>
               </div>
             </div>
@@ -265,11 +284,46 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="laborders" className="mt-0">
-            <div className="border rounded-lg p-8 text-center">
-              <FileText className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-              <p className="font-medium text-gray-600">Lab Orders</p>
-              <p className="text-sm text-muted-foreground mt-1">Lab order uploads and status will appear here.</p>
+          <TabsContent value="laborders" className="mt-0 space-y-3">
+            {appt.lab_order_file_path ? (
+              <div className="border rounded-lg p-4 space-y-3">
+                <p className="font-semibold text-sm flex items-center gap-2"><FileText className="h-4 w-4" /> Lab Order on File</p>
+                {appt.lab_order_file_path.split(',').map((path: string, i: number) => (
+                  <Button key={i} variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start" onClick={async () => {
+                    const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path.trim(), 3600);
+                    if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                    else toast.error('Could not load file');
+                  }}>
+                    <FileText className="h-3.5 w-3.5" /> {path.trim().split('/').pop() || `Lab Order ${i + 1}`}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <div className="border rounded-lg p-6 text-center">
+                <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">No lab order uploaded for this appointment</p>
+              </div>
+            )}
+            {/* Admin upload */}
+            <div className="border rounded-lg p-4">
+              <p className="text-sm font-medium mb-2">Upload Lab Order</p>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="text-xs"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const fileName = `laborder_${appt.id}_${Date.now()}_${file.name}`;
+                  const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
+                  if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
+                  const existingPath = appt.lab_order_file_path || '';
+                  const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
+                  await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
+                  toast.success('Lab order uploaded');
+                  onUpdate();
+                }}
+              />
             </div>
           </TabsContent>
 

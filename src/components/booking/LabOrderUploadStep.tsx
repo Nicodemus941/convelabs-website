@@ -90,14 +90,14 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
 
   const handleFaxMode = () => {
     setMode('fax');
-    onFileSelected(null);
+    onFilesSelected([]);
     setValue('labOrder.hasFile', false);
     setValue('labOrder.skipped', false);
   };
 
   const handleSkip = () => {
     setMode('skip');
-    onFileSelected(null);
+    onFilesSelected([]);
     setValue('labOrder.skipped', true);
     setValue('labOrder.hasFile', false);
     setValue('labOrder.doctorFaxNumber', '');

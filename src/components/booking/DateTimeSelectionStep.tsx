@@ -605,6 +605,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                                   appointment_date: dateStr,
                                   appointment_time: window.time,
                                   held_by: `session_${Date.now()}`,
+                                  expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
                                 }).select('id').single();
 
                                 if (hold) setHoldId((hold as any).id);

@@ -37,12 +37,20 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Handle the event
+    // Handle the event — log to webhook_logs
     console.log(`Processing event type: ${event.type}`);
+    const webhookLogId = crypto.randomUUID();
+    await supabaseClient.from('webhook_logs').insert({
+      id: webhookLogId,
+      event_type: event.type,
+      stripe_session_id: event.data?.object?.id || null,
+      status: 'processing',
+      payload_summary: { type: event.type, metadata_type: event.data?.object?.metadata?.type || null },
+    }).catch(() => {});
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
-      
+
       // Get customer and checkout IDs
       const customerId = session.customer;
       const checkoutId = session.id;
@@ -120,6 +128,9 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Log success
+    await supabaseClient.from('webhook_logs').update({ status: 'success' }).eq('id', webhookLogId).catch(() => {});
+
     return new Response(JSON.stringify({ received: true }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
@@ -127,6 +138,13 @@ Deno.serve(async (req) => {
 
   } catch (err) {
     console.error(`Error processing webhook: ${err.message}`);
+    // Log failure
+    await supabaseClient.from('webhook_logs').insert({
+      event_type: 'webhook_error',
+      status: 'failed',
+      error_message: err.message,
+    }).catch(() => {});
+
     return new Response(JSON.stringify({ error: `Webhook error: ${err.message}` }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' }

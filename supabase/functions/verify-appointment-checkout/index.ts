@@ -43,7 +43,24 @@ Deno.serve(async (req) => {
     const session = await stripe.checkout.sessions.retrieve(session_id);
 
     if (session.payment_status === 'paid' || session.status === 'complete') {
-      // Payment confirmed — create appointment if webhook hasn't done it yet
+      // Give webhook 3 seconds to process first (race condition guard)
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Re-check if webhook created the appointment during the wait
+      const { data: lateAppointment } = await supabaseClient
+        .from('appointments')
+        .select('*')
+        .eq('stripe_checkout_session_id', session_id)
+        .maybeSingle();
+
+      if (lateAppointment) {
+        return new Response(
+          JSON.stringify({ status: 'completed', appointment: lateAppointment, bookingId: lateAppointment.id }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Payment confirmed — create appointment (webhook didn't handle it)
       const metadata = session.metadata || {};
       const fullAddress = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean).join(', ');
       const patientName = `${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''}`.trim();
