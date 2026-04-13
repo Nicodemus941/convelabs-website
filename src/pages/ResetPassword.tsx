@@ -134,11 +134,32 @@ const ResetPassword = () => {
     setIsSubmitting(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({ password });
+      // Get the access token directly (avoid lock contention with the client)
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
 
-      if (error) {
-        console.error('Password update failed:', error);
-        setFormError(error.message || "Failed to update password. Please request a new reset link.");
+      if (!accessToken) {
+        setFormError("Session expired. Please request a new reset link.");
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Call Supabase Auth REST API directly to avoid client lock issues
+      const res = await fetch(`https://yluyonhrxxtyuiyrdixl.supabase.co/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsdXlvbmhyeHh0eXVpeXJkaXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc1MDExODgsImV4cCI6MjA2MzA3NzE4OH0.ZKP-k5fizUtKZsekV9RFL1wYcVfIHEeQWArs-4l5Q-Y',
+        },
+        body: JSON.stringify({ password }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        console.error('Password update failed:', result);
+        setFormError(result.msg || result.message || "Failed to update password.");
         setIsSubmitting(false);
         return;
       }
@@ -146,12 +167,13 @@ const ResetPassword = () => {
       setIsSuccess(true);
       toast.success("Password updated successfully!");
 
-      setTimeout(async () => {
-        await supabase.auth.signOut();
+      setTimeout(() => {
+        supabase.auth.signOut().catch(() => {});
         window.location.href = '/login';
       }, 2000);
 
     } catch (err: any) {
+      console.error('Password reset error:', err);
       setFormError(err.message || "An unexpected error occurred");
     } finally {
       setIsSubmitting(false);
