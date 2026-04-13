@@ -36,7 +36,20 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
   const handleNavigate = () => {
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(appointment.address)}`, '_blank');
+    const addr = encodeURIComponent(appointment.address);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+
+    if (isIOS) {
+      // Apple Maps deep link — opens native Maps app on iOS
+      window.location.href = `maps://maps.apple.com/?daddr=${addr}`;
+    } else if (isStandalone) {
+      // Android PWA — use intent to open Google Maps app
+      window.location.href = `geo:0,0?q=${addr}`;
+    } else {
+      // Regular browser — Google Maps in new tab
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${addr}`, '_blank');
+    }
   };
 
   const handleMessage = () => {
