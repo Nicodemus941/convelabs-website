@@ -44,28 +44,56 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
   const [composePhone, setComposePhone] = useState('');
   const [composeName, setComposeName] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [allPatients, setAllPatients] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Build conversations from appointments with phone numbers
+  // Build conversations from appointments + fetch all patients with phones
   useEffect(() => {
-    const patientMap = new Map<string, Conversation>();
+    const load = async () => {
+      const patientMap = new Map<string, Conversation>();
 
-    appointments.forEach(appt => {
-      if (appt.patient_phone && appt.patient_id && !patientMap.has(appt.patient_id)) {
-        patientMap.set(appt.patient_id, {
-          id: appt.patient_id,
-          patient_id: appt.patient_id,
-          patient_phone: appt.patient_phone,
-          patient_name: appt.patient_name,
-          last_message: `${appt.service_type?.replace(/_/g, ' ')} - ${appt.appointment_date}`,
-          last_message_at: appt.appointment_date,
-          unread: false,
-        });
-      }
-    });
+      // From appointments
+      appointments.forEach(appt => {
+        if (appt.patient_phone && appt.patient_id && !patientMap.has(appt.patient_id)) {
+          patientMap.set(appt.patient_id, {
+            id: appt.patient_id,
+            patient_id: appt.patient_id,
+            patient_phone: appt.patient_phone,
+            patient_name: appt.patient_name,
+            last_message: `${appt.service_type?.replace(/_/g, ' ')} - ${appt.appointment_date}`,
+            last_message_at: appt.appointment_date,
+            unread: false,
+          });
+        }
+      });
 
-    setConversations(Array.from(patientMap.values()));
-    setIsLoading(false);
+      // Also fetch all patients with phone numbers from tenant_patients
+      const { data: patients } = await supabase
+        .from('tenant_patients')
+        .select('id, first_name, last_name, phone, email')
+        .not('phone', 'is', null)
+        .order('first_name', { ascending: true });
+
+      (patients || []).forEach((p: any) => {
+        if (p.phone && p.phone.trim() && !patientMap.has(p.id)) {
+          patientMap.set(p.id, {
+            id: p.id,
+            patient_id: p.id,
+            patient_phone: p.phone,
+            patient_name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown',
+            last_message: p.email || 'Patient',
+            last_message_at: new Date().toISOString(),
+            unread: false,
+          });
+        }
+      });
+
+      const all = Array.from(patientMap.values());
+      setConversations(all);
+      setAllPatients(all);
+      setIsLoading(false);
+    };
+    load();
   }, [appointments]);
 
   // Load messages for a specific patient conversation filtered by phone
