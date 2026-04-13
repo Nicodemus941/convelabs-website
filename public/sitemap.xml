@@ -7,23 +7,23 @@
         xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <!-- Main pages -->
   <url>
-    <loc>https://www.convelabs.com/</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/1e5ca102-3390-413a-ae06-f4140d34e270.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/1e5ca102-3390-413a-ae06-f4140d34e270.png</image:loc>
       <image:title>ConveLabs Home</image:title>
       <image:caption>Mobile phlebotomy and lab testing services</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/pricing</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/pricing</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
       <image:title>ConveLabs Pricing</image:title>
       <image:caption>Membership and pricing options</image:caption>
     </image:image>
@@ -32,111 +32,111 @@
   <!-- Location pages (all 18 service areas) -->
   <!-- Premium Locations -->
   <url>
-    <loc>https://www.convelabs.com/locations/orlando</loc>
+    <loc>https://convelabs.com/locations/orlando</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.95</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/winter-park</loc>
+    <loc>https://convelabs.com/locations/winter-park</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/windermere</loc>
+    <loc>https://convelabs.com/locations/windermere</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/doctor-phillips</loc>
+    <loc>https://convelabs.com/locations/doctor-phillips</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/isleworth</loc>
+    <loc>https://convelabs.com/locations/isleworth</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/bay-hill</loc>
+    <loc>https://convelabs.com/locations/bay-hill</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/golden-oak</loc>
+    <loc>https://convelabs.com/locations/golden-oak</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
   <!-- Mid-Tier Locations -->
   <url>
-    <loc>https://www.convelabs.com/locations/lake-nona</loc>
+    <loc>https://convelabs.com/locations/lake-nona</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/celebration</loc>
+    <loc>https://convelabs.com/locations/celebration</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/heathrow-golf</loc>
+    <loc>https://convelabs.com/locations/heathrow-golf</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/lake-mary</loc>
+    <loc>https://convelabs.com/locations/lake-mary</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/reunion</loc>
+    <loc>https://convelabs.com/locations/reunion</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.85</priority>
   </url>
   <!-- Extended Service Areas -->
   <url>
-    <loc>https://www.convelabs.com/locations/altamonte-springs</loc>
+    <loc>https://convelabs.com/locations/altamonte-springs</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/kissimmee</loc>
+    <loc>https://convelabs.com/locations/kissimmee</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/sanford</loc>
+    <loc>https://convelabs.com/locations/sanford</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/clermont</loc>
+    <loc>https://convelabs.com/locations/clermont</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/maitland</loc>
+    <loc>https://convelabs.com/locations/maitland</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/locations/oviedo</loc>
+    <loc>https://convelabs.com/locations/oviedo</loc>
     <lastmod>2026-04-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -144,144 +144,144 @@
 
   <!-- Blog pages -->
   <url>
-    <loc>https://www.convelabs.com/blog</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
       <image:title>ConveLabs Blog</image:title>
       <image:caption>Health insights and lab testing information</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/benefits-at-home-lab-testing-central-florida</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/benefits-at-home-lab-testing-central-florida</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
       <image:title>Benefits of At-Home Lab Testing in Central Florida</image:title>
       <image:caption>Learn about at-home lab testing advantages in Central Florida</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/understanding-blood-test-results-florida-guide</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/understanding-blood-test-results-florida-guide</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
       <image:title>Understanding Blood Test Results: Florida Guide</image:title>
       <image:caption>Guide to understanding your blood test results in Florida</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/concierge-doctors-tampa-healthcare-delivery</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/concierge-doctors-tampa-healthcare-delivery</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
       <image:title>Concierge Doctors in Tampa Healthcare Delivery</image:title>
       <image:caption>How concierge medicine is changing healthcare in Tampa</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/mobile-phlebotomy-services-expanding-central-florida</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/mobile-phlebotomy-services-expanding-central-florida</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
       <image:title>Mobile Phlebotomy Services in Central Florida</image:title>
       <image:caption>The growth of mobile phlebotomy across Central Florida</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/diabetes-management-lab-testing-orlando</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/diabetes-management-lab-testing-orlando</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
       <image:title>Diabetes Management Lab Testing in Orlando</image:title>
       <image:caption>Lab testing options for diabetes management in Orlando</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/at-home-blood-work-winter-park-florida-guide</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/at-home-blood-work-winter-park-florida-guide</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
       <image:title>At-Home Blood Work in Winter Park Florida Guide</image:title>
       <image:caption>Complete guide to at-home blood work in Winter Park</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/mobile-phlebotomy-benefits-windermere-residents</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/mobile-phlebotomy-benefits-windermere-residents</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
       <image:title>Mobile Phlebotomy Benefits for Windermere Residents</image:title>
       <image:caption>How Windermere residents benefit from mobile phlebotomy</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/at-home-blood-work-doctor-phillips-florida</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/at-home-blood-work-doctor-phillips-florida</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
       <image:title>At-Home Blood Work in Doctor Phillips Florida</image:title>
       <image:caption>At-home blood work services in Doctor Phillips area</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/top-wellness-tests-central-florida-residents</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/top-wellness-tests-central-florida-residents</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
       <image:title>Top Wellness Tests for Central Florida Residents</image:title>
       <image:caption>Most popular wellness lab tests for Central Florida residents</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/executive-health-programs-orlando-business-leaders</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/executive-health-programs-orlando-business-leaders</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
       <image:title>Executive Health Programs for Orlando Business Leaders</image:title>
       <image:caption>Health programs designed for Orlando's business executives</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/lab-results-fitness-performance-orlando-athletes</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/lab-results-fitness-performance-orlando-athletes</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/d13be6f2-91f9-45fb-a673-28ad589efbb5.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/d13be6f2-91f9-45fb-a673-28ad589efbb5.png</image:loc>
       <image:title>Lab Results and Fitness Performance for Orlando Athletes</image:title>
       <image:caption>How lab testing can improve athletic performance for Orlando athletes</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/hormone-testing-at-home-central-florida-trend</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/blog/hormone-testing-at-home-central-florida-trend</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
       <image:title>Hormone Testing At Home: Central Florida Trend</image:title>
       <image:caption>The growing trend of at-home hormone testing in Central Florida</image:caption>
     </image:image>
@@ -289,45 +289,45 @@
 
   <!-- Membership pages -->
   <url>
-    <loc>https://www.convelabs.com/membership/individual</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/membership/individual</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
       <image:title>Individual Membership</image:title>
       <image:caption>Individual lab testing membership details</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/membership/plus-one</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/membership/plus-one</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
       <image:title>Plus One Membership</image:title>
       <image:caption>Membership plan for two people</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/membership/family</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/membership/family</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
       <image:title>Family Membership</image:title>
       <image:caption>Family plan for lab testing services</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/membership/concierge-doctor</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/membership/concierge-doctor</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
       <image:title>Concierge Doctor Membership</image:title>
       <image:caption>Specialized membership for concierge physicians</image:caption>
     </image:image>
@@ -335,45 +335,45 @@
 
   <!-- Service pages -->
   <url>
-    <loc>https://www.convelabs.com/services/at-home</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/services/at-home</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/f817e3c0-58b4-4c8f-98eb-f2bea6d93978.png</image:loc>
       <image:title>At-Home Lab Testing Services</image:title>
       <image:caption>Lab testing services in the comfort of your home</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/services/in-office</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/services/in-office</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/a7e712e3-3baf-4cee-a0a8-7829332978a7.png</image:loc>
       <image:title>In-Office Lab Testing</image:title>
       <image:caption>Professional lab testing in our office locations</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/services/result-tracking</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/services/result-tracking</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
       <image:title>Result Tracking Services</image:title>
       <image:caption>Track and monitor your lab test results over time</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/services/concierge-doctor</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/services/concierge-doctor</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png</image:loc>
       <image:title>Concierge Doctor Services</image:title>
       <image:caption>Specialized services for concierge physicians and their patients</image:caption>
     </image:image>
@@ -381,34 +381,34 @@
 
   <!-- Informational pages -->
   <url>
-    <loc>https://www.convelabs.com/about</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/about</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/1e5ca102-3390-413a-ae06-f4140d34e270.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/1e5ca102-3390-413a-ae06-f4140d34e270.png</image:loc>
       <image:title>About ConveLabs</image:title>
       <image:caption>Our mission, team and company history</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/faq</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/faq</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/55acb2eb-56d2-45b5-9598-ba5b7436c7be.png</image:loc>
       <image:title>Frequently Asked Questions</image:title>
       <image:caption>Common questions about mobile lab testing services</image:caption>
     </image:image>
   </url>
   <url>
-    <loc>https://www.convelabs.com/contact</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/contact</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <image:image>
-      <image:loc>https://www.convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
+      <image:loc>https://convelabs.com/lovable-uploads/29c57320-c7e0-4b75-a08e-348d550f1eec.png</image:loc>
       <image:title>Contact ConveLabs</image:title>
       <image:caption>Get in touch with our team</image:caption>
     </image:image>
@@ -416,20 +416,20 @@
 
   <!-- Legal pages -->
   <url>
-    <loc>https://www.convelabs.com/privacy</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/privacy</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.4</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/terms</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/terms</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.4</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/hipaa</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/hipaa</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>yearly</changefreq>
     <priority>0.4</priority>
   </url>
@@ -437,39 +437,39 @@
   <!-- Authentication and user pages -->
   <!-- Nationwide Network -->
   <url>
-    <loc>https://www.convelabs.com/nationwide-mobile-phlebotomy-network</loc>
+    <loc>https://convelabs.com/nationwide-mobile-phlebotomy-network</loc>
     <lastmod>2026-03-04</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/mobile-phlebotomy-expanding-nationwide</loc>
+    <loc>https://convelabs.com/blog/mobile-phlebotomy-expanding-nationwide</loc>
     <lastmod>2026-03-01</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/finding-mobile-phlebotomist-outside-florida</loc>
+    <loc>https://convelabs.com/blog/finding-mobile-phlebotomist-outside-florida</loc>
     <lastmod>2026-02-25</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/blog/growth-at-home-blood-draw-services-united-states</loc>
+    <loc>https://convelabs.com/blog/growth-at-home-blood-draw-services-united-states</loc>
     <lastmod>2026-02-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
 
   <url>
-    <loc>https://www.convelabs.com/login</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/login</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
   <url>
-    <loc>https://www.convelabs.com/signup</loc>
-    <lastmod>2025-05-22</lastmod>
+    <loc>https://convelabs.com/signup</loc>
+    <lastmod>2026-04-13</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
