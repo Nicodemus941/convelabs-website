@@ -58,6 +58,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [orgBilling, setOrgBilling] = useState(false);
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
+  const [overrideSlot, setOverrideSlot] = useState(false);
+  const [customTime, setCustomTime] = useState('');
 
   const resetForm = () => {
     setStep(1);
@@ -78,6 +80,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setOrgBilling(false);
     setOrgName('');
     setOrgEmail('');
+    setOverrideSlot(false);
+    setCustomTime('');
     setShowCreatePatient(false);
   };
 
@@ -87,7 +91,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   };
 
   const canGoToStep2 = patientName.trim() && serviceType;
-  const canGoToStep3 = date && time;
+  const effectiveTime = time === '__custom' ? customTime : time;
+  const canGoToStep3 = date && (time !== '__custom' ? !!time : !!customTime);
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -127,11 +132,21 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       }
 
       // Parse time to build full datetime
-      const [timeStr, period] = time.split(' ');
-      let [hours, minutes] = timeStr.split(':').map(Number);
-      if (period === 'PM' && hours !== 12) hours += 12;
-      if (period === 'AM' && hours === 12) hours = 0;
+      const useTime = time === '__custom' ? customTime : time;
+      let hours = 0, minutes = 0;
+      if (useTime.includes('AM') || useTime.includes('PM')) {
+        const [timeStr, period] = useTime.split(' ');
+        [hours, minutes] = timeStr.split(':').map(Number);
+        if (period === 'PM' && hours !== 12) hours += 12;
+        if (period === 'AM' && hours === 12) hours = 0;
+      } else {
+        // 24h format from custom time input (e.g. "14:30")
+        const parts = useTime.split(':').map(Number);
+        hours = parts[0] || 0;
+        minutes = parts[1] || 0;
+      }
       const appointmentDate = `${date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+      const displayTime = useTime.includes('AM') || useTime.includes('PM') ? useTime : `${hours > 12 ? hours - 12 : hours}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
 
       // Calculate service price with discount
       const servicePriceMap: Record<string, number> = {
@@ -160,7 +175,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       const { data: newAppt, error } = await supabase.from('appointments').insert([{
         appointment_date: appointmentDate,
-        appointment_time: time,
+        appointment_time: displayTime,
         patient_id: patientId,
         service_type: serviceType,
         status: 'scheduled',
@@ -191,7 +206,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             serviceName: SERVICE_TYPES.find(s => s.value === serviceType)?.label || serviceType,
             servicePrice: finalPrice,
             appointmentDate: date,
-            appointmentTime: time,
+            appointmentTime: displayTime,
             address: address || 'TBD',
             isVip,
             memo: invoiceMemo || (orgBilling ? `Patient: ${patientName}` : ''),
@@ -298,16 +313,43 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               </div>
               <div>
                 <Label>Time *</Label>
-                <Select value={time} onValueChange={setTime}>
+                <Select value={time} onValueChange={(val) => { setTime(val); setCustomTime(''); }}>
                   <SelectTrigger><SelectValue placeholder="Select time" /></SelectTrigger>
                   <SelectContent>
                     {TIME_SLOTS.map(t => (
                       <SelectItem key={t} value={t}>{t}</SelectItem>
                     ))}
+                    <SelectItem value="__custom">Custom Time...</SelectItem>
                   </SelectContent>
                 </Select>
+                {time === '__custom' && (
+                  <Input
+                    type="time"
+                    className="mt-2"
+                    value={customTime}
+                    onChange={e => setCustomTime(e.target.value)}
+                    placeholder="HH:MM"
+                  />
+                )}
               </div>
             </div>
+
+            {/* Slot Override */}
+            <div className="flex items-start gap-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <Checkbox
+                id="override-slot"
+                checked={overrideSlot}
+                onCheckedChange={(checked) => setOverrideSlot(checked === true)}
+                className="mt-0.5"
+              />
+              <label htmlFor="override-slot" className="text-sm cursor-pointer">
+                <span className="font-medium text-orange-800">Override Availability</span>
+                <p className="text-xs text-orange-600 mt-0.5">
+                  Bypass slot blocking rules and schedule at this time even if the system shows it as unavailable. Use for urgent or priority bookings.
+                </p>
+              </label>
+            </div>
+
             <div>
               <Label>Address</Label>
               <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" />
@@ -403,7 +445,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               {patientPhone && <div className="flex justify-between"><span className="text-muted-foreground">Phone</span><span>{patientPhone}</span></div>}
               <div className="flex justify-between"><span className="text-muted-foreground">Service</span><span className="font-medium">{SERVICE_TYPES.find(s => s.value === serviceType)?.label}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span className="font-medium">{new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Time</span><span className="font-medium">{time}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Time</span><span className="font-medium">{time === '__custom' ? customTime : time}</span></div>
+              {overrideSlot && <div className="flex justify-between"><span className="text-muted-foreground">Override</span><span className="font-medium text-orange-700">Availability Override Active</span></div>}
               {address && <div className="flex justify-between"><span className="text-muted-foreground">Address</span><span>{address}{city ? `, ${city}` : ''} {zipcode}</span></div>}
               {isVip && <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium text-amber-700 flex items-center gap-1"><Crown className="h-3.5 w-3.5" /> VIP Patient</span></div>}
               {discountType !== 'none' && (

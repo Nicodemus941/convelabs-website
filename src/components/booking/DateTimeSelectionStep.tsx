@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { format } from 'date-fns';
+import { format, addDays, subDays } from 'date-fns';
 import { CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useFormContext } from 'react-hook-form';
 import { 
@@ -213,10 +213,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           const EXTENDED_ZIPS = ['32746', '34715', '34787', '32708', '32779', '32833', '34786', '32836', '32803', '32789'];
           const isExtended = appt.zipcode && EXTENDED_ZIPS.some((z: string) => appt.zipcode?.startsWith(z.substring(0, 3)));
           const travelBuffer = isExtended ? 30 : 15;
-          const totalBlockedMinutes = duration + travelBuffer;
 
-          // Block FORWARD: all slots this appointment occupies + travel buffer
-          const forwardSlots = Math.ceil(totalBlockedMinutes / 30);
+          // Block FORWARD: only the slots the service duration occupies
+          // Travel buffer (15min) fits within the next slot's 30-min arrival window
+          // Exception: extended area (30min travel) needs an extra blocked slot
+          const forwardBlockedMinutes = travelBuffer >= 30 ? duration + travelBuffer : duration;
+          const forwardSlots = Math.ceil(forwardBlockedMinutes / 30);
           let fwdMin = startMin < 30 ? 0 : 30;
           let fwdHour = startHour;
 
@@ -227,10 +229,11 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
             if (fwdMin >= 60) { fwdMin = 0; fwdHour += 1; }
           }
 
-          // Block BACKWARD: any earlier slot where a new 60min+travel booking would overlap this appointment
-          // Example: 9:00 AM appointment → block 8:00 AM (60min booking runs to 9:00) and 8:30 AM (runs to 9:30)
-          const newBookingDuration = 60 + travelBuffer; // min service (60) + travel buffer
-          const backwardSlots = Math.ceil(newBookingDuration / 30) - 1;
+          // Block BACKWARD: earlier slots where a new 60-min booking would overlap this appointment
+          // 8:30 AM booking (60min) runs to 9:30, overlaps 9:00 → block 8:30
+          // 8:00 AM booking (60min) runs to 9:00, ends at start → OK, not blocked
+          const newBookingDuration = 60; // standard service duration
+          const backwardSlots = Math.ceil(newBookingDuration / 30) - 1; // 60/30 - 1 = 1 slot back
           let bwdMin = (startMin < 30 ? 0 : 30);
           let bwdHour = startHour;
 
@@ -303,22 +306,39 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               render={({ field }) => (
                 <FormItem className="flex flex-col">
                   <FormLabel>Appointment Date</FormLabel>
-                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant={"outline"}
-                          className={`w-full pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
-                        >
-                          {field.value ? (
-                            format(field.value, "MMMM d, yyyy")
-                          ) : (
-                            <span>Select a date</span>
-                          )}
-                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
+                  <FormControl>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-10 w-10 flex-shrink-0"
+                        onClick={() => {
+                          if (field.value) {
+                            let prev = subDays(field.value, 1);
+                            while (prev >= today && (isHoliday(prev) || prev.getDay() === 0)) prev = subDays(prev, 1);
+                            if (prev >= today) field.onChange(prev);
+                          }
+                        }}
+                        disabled={!field.value || subDays(field.value, 1) < today}
+                      >
+                        <ChevronLeft className="h-5 w-5" />
+                      </Button>
+
+                      <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant={"outline"}
+                            className={`flex-1 pl-3 text-left font-normal ${!field.value && "text-muted-foreground"}`}
+                          >
+                            {field.value ? (
+                              format(field.value, "MMMM d, yyyy")
+                            ) : (
+                              <span>Select a date</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
                     <PopoverContent className="w-auto p-0 z-50" align="start">
                       <Calendar
                         mode="single"
@@ -338,7 +358,27 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         className="p-3 pointer-events-auto"
                       />
                     </PopoverContent>
-                  </Popover>
+                      </Popover>
+
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-10 w-10 flex-shrink-0"
+                        onClick={() => {
+                          if (field.value) {
+                            let next = addDays(field.value, 1);
+                            while (isHoliday(next) || next.getDay() === 0) next = addDays(next, 1);
+                            const maxDate = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+                            if (next <= maxDate) field.onChange(next);
+                          }
+                        }}
+                        disabled={!field.value}
+                      >
+                        <ChevronRight className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  </FormControl>
                   <FormDescription>
                     Available up to 2 months in advance
                   </FormDescription>
