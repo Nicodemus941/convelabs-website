@@ -22,19 +22,35 @@ const PatientProfileTab: React.FC = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Search patients
+  const [allPatients, setAllPatients] = useState<any[]>([]);
+
+  // Load all patients on mount
   useEffect(() => {
-    if (searchQuery.length < 2) { setPatients([]); return; }
-    const timer = setTimeout(async () => {
+    const loadAll = async () => {
       const { data } = await supabase
         .from('tenant_patients')
         .select('*')
-        .or(`first_name.ilike.%${searchQuery}%,last_name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%`)
-        .limit(10);
+        .order('first_name', { ascending: true })
+        .limit(500);
+      setAllPatients(data || []);
       setPatients(data || []);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+    };
+    loadAll();
+  }, []);
+
+  // Filter patients as user types
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setPatients(allPatients);
+      return;
+    }
+    const q = searchQuery.toLowerCase();
+    setPatients(allPatients.filter(p =>
+      `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
+      (p.email && p.email.toLowerCase().includes(q)) ||
+      (p.phone && p.phone.includes(q))
+    ));
+  }, [searchQuery, allPatients]);
 
   const loadPatientData = useCallback(async (patient: any) => {
     setSelectedPatient(patient);
@@ -293,15 +309,17 @@ const PatientProfileTab: React.FC = () => {
         <p className="text-sm text-muted-foreground">Search for a patient to view their complete history</p>
       </div>
 
-      <div className="relative max-w-lg">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-        <Input
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Search by name, email, or phone..."
-          className="pl-10 h-12 text-base"
-          autoFocus
-        />
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-lg">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search by name, email, or phone..."
+            className="pl-10 h-11"
+          />
+        </div>
+        <p className="text-sm text-muted-foreground">{patients.length} patient{patients.length !== 1 ? 's' : ''}</p>
       </div>
 
       {patients.length > 0 && (
@@ -326,15 +344,13 @@ const PatientProfileTab: React.FC = () => {
         </div>
       )}
 
-      {searchQuery.length >= 2 && patients.length === 0 && (
+      {patients.length === 0 && searchQuery && (
         <p className="text-muted-foreground text-center py-8">No patients found matching "{searchQuery}"</p>
       )}
 
-      {searchQuery.length < 2 && (
-        <div className="text-center py-12">
-          <User className="h-16 w-16 text-gray-200 mx-auto mb-4" />
-          <p className="text-lg font-medium text-gray-400">Search for a patient</p>
-          <p className="text-sm text-muted-foreground">Type at least 2 characters to search</p>
+      {patients.length === 0 && !searchQuery && (
+        <div className="flex justify-center py-12">
+          <div className="w-8 h-8 border-4 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
         </div>
       )}
     </div>
