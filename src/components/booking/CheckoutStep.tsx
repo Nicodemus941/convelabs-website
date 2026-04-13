@@ -31,6 +31,31 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [referralApplied, setReferralApplied] = useState(false);
   const [addOns, setAddOns] = useState<any[]>([]);
   const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
+  const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  const [memberLabel, setMemberLabel] = useState('');
+
+  // Auto-detect membership by patient email
+  React.useEffect(() => {
+    const email = getValues('patientDetails.email');
+    if (!email) return;
+    supabase.from('user_memberships' as any)
+      .select('*, membership_plans(*)')
+      .eq('status', 'active')
+      .then(async ({ data: memberships }) => {
+        if (!memberships?.length) return;
+        // Find membership matching this email via auth.users
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const match = memberships.find((m: any) => m.user_id === user.id);
+          if (match) {
+            const plan = (match as any).membership_plans;
+            if (plan?.name?.toLowerCase().includes('concierge')) { setMemberTier('concierge'); setMemberLabel('Concierge'); }
+            else if (plan?.name?.toLowerCase().includes('vip')) { setMemberTier('vip'); setMemberLabel('VIP'); }
+            else { setMemberTier('member'); setMemberLabel('Member'); }
+          }
+        }
+      }).catch(() => {});
+  }, []);
 
   // Fetch add-ons for this service type
   React.useEffect(() => {
@@ -78,7 +103,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     sameDay: serviceDetails?.sameDay,
     weekend: serviceDetails?.weekend,
     extendedArea,
-  }, tipAmount, additionalPatients.length);
+  }, tipAmount, additionalPatients.length, memberTier);
 
   const selectedDate = watch('date');
 
@@ -156,6 +181,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         </div>
 
         <Separator />
+
+        {/* Member discount badge */}
+        {memberTier !== 'none' && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2">
+            <span className="text-emerald-700 text-sm font-medium">🎉 {memberLabel} pricing applied!</span>
+            <span className="text-xs text-emerald-600">Your membership discount has been automatically applied.</span>
+          </div>
+        )}
 
         {/* Price breakdown */}
         <div className="space-y-3">

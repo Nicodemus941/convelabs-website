@@ -77,14 +77,14 @@ Deno.serve(async (req) => {
                   <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
                     <p>Hi ${patientName},</p>
                     <p>We hope your ConveLabs experience was exceptional. Your feedback helps us continue providing luxury concierge lab services.</p>
-                    <p style="text-align:center;font-size:32px;letter-spacing:8px;margin:20px 0;">
-                      <a href="https://convelabs.com/rate?r=1&a=${seq.appointment_id}" style="text-decoration:none;">1</a>
-                      <a href="https://convelabs.com/rate?r=2&a=${seq.appointment_id}" style="text-decoration:none;">2</a>
-                      <a href="https://convelabs.com/rate?r=3&a=${seq.appointment_id}" style="text-decoration:none;">3</a>
-                      <a href="https://convelabs.com/rate?r=4&a=${seq.appointment_id}" style="text-decoration:none;">4</a>
-                      <a href="https://convelabs.com/rate?r=5&a=${seq.appointment_id}" style="text-decoration:none;">5</a>
-                    </p>
-                    <p style="text-align:center;font-size:11px;color:#9ca3af;">1 = Poor &nbsp;&nbsp; 5 = Excellent</p>
+                    <div style="text-align:center;margin:24px 0;">
+                      <p style="font-size:14px;color:#666;margin-bottom:12px;">Had a great experience?</p>
+                      <a href="https://g.page/r/CQYNAuLgDPeiEAI/review" style="display:inline-block;background:#B91C1C;color:white;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Leave a Google Review ⭐</a>
+                    </div>
+                    <div style="text-align:center;margin-top:16px;">
+                      <p style="font-size:13px;color:#666;">Have feedback or concerns?</p>
+                      <a href="https://convelabs.com/contact" style="color:#B91C1C;font-weight:600;text-decoration:none;">Contact us directly →</a>
+                    </div>
                     <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
                   </div>
                 </div>
