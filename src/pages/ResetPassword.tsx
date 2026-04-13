@@ -17,6 +17,7 @@ const ResetPassword = () => {
   const [email, setEmail] = useState<string | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -40,6 +41,7 @@ const ResetPassword = () => {
             if (!error && data?.session?.user?.email) {
               console.log('Session verified for:', data.session.user.email);
               setEmail(data.session.user.email);
+              setAccessToken(data.session.access_token);
               setSessionReady(true);
             } else if (error) {
               console.error('Token verification failed:', error.message);
@@ -51,6 +53,7 @@ const ResetPassword = () => {
               });
               if (!e2 && d2?.session?.user?.email) {
                 setEmail(d2.session.user.email);
+                setAccessToken(d2.session.access_token);
                 setSessionReady(true);
               } else {
                 setFormError("Your reset link has expired or is invalid. Please request a new one.");
@@ -65,12 +68,15 @@ const ResetPassword = () => {
         // METHOD 2: Hash tokens (legacy flow — Supabase redirect)
         if (hash && hash.includes('access_token')) {
           console.log('Using hash token flow...');
-          // Wait for Supabase client to auto-process the hash
+          const hashParams = new URLSearchParams(hash.substring(1));
+          const at = hashParams.get('access_token');
+          if (at) setAccessToken(at);
           for (let i = 0; i < 12; i++) {
             await new Promise(r => setTimeout(r, 500));
             const { data } = await supabase.auth.getSession();
             if (data?.session?.user?.email && mounted) {
               setEmail(data.session.user.email);
+              setAccessToken(data.session.access_token);
               setSessionReady(true);
               window.history.replaceState({}, '', '/reset-password');
               setLoading(false);
@@ -85,6 +91,7 @@ const ResetPassword = () => {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (!error && data?.session?.user?.email && mounted) {
             setEmail(data.session.user.email);
+            setAccessToken(data.session.access_token);
             setSessionReady(true);
             window.history.replaceState({}, '', '/reset-password');
             setLoading(false);
@@ -96,6 +103,7 @@ const ResetPassword = () => {
         const { data } = await supabase.auth.getSession();
         if (data?.session?.user?.email && mounted) {
           setEmail(data.session.user.email);
+          setAccessToken(data.session.access_token);
           setSessionReady(true);
           setLoading(false);
           return;
@@ -134,32 +142,35 @@ const ResetPassword = () => {
     setIsSubmitting(true);
 
     try {
-      // Get the access token directly (avoid lock contention with the client)
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      if (!accessToken) {
-        setFormError("Session expired. Please request a new reset link.");
-        setIsSubmitting(false);
-        return;
+      // Use the stored access token from verifyOtp (avoids lock contention)
+      const token = accessToken;
+      if (!token) {
+        // Fallback: try to get from session
+        const { data: sd } = await supabase.auth.getSession();
+        if (!sd?.session?.access_token) {
+          setFormError("Session expired. Please request a new reset link.");
+          setIsSubmitting(false);
+          return;
+        }
       }
+
+      const finalToken = token || (await supabase.auth.getSession()).data?.session?.access_token;
 
       // Call Supabase Auth REST API directly to avoid client lock issues
       const res = await fetch(`https://yluyonhrxxtyuiyrdixl.supabase.co/auth/v1/user`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': `Bearer ${finalToken}`,
           'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsdXlvbmhyeHh0eXVpeXJkaXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc1MDExODgsImV4cCI6MjA2MzA3NzE4OH0.ZKP-k5fizUtKZsekV9RFL1wYcVfIHEeQWArs-4l5Q-Y',
         },
         body: JSON.stringify({ password }),
       });
 
-      const result = await res.json();
-
       if (!res.ok) {
-        console.error('Password update failed:', result);
-        setFormError(result.msg || result.message || "Failed to update password.");
+        const result = await res.json().catch(() => ({}));
+        console.error('Password update failed:', res.status, result);
+        setFormError(result.msg || result.message || result.error_description || `Failed to update password (${res.status}). Please request a new reset link.`);
         setIsSubmitting(false);
         return;
       }
