@@ -7,6 +7,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import Header from "@/components/home/Header";
 import Footer from "@/components/home/Footer";
 import { useBookingModalSafe } from "@/contexts/BookingModalContext";
+import { supabase } from "@/integrations/supabase/client";
+import { Loader2 } from "lucide-react";
 
 const PAY_PER_VISIT = [
   { service: "Office Visit (Standard)", price: "$55" },
@@ -94,6 +96,43 @@ const FAQS = [
 
 const Pricing = () => {
   const bookingModal = useBookingModalSafe();
+  const [subscribing, setSubscribing] = React.useState<string | null>(null);
+
+  const handleSubscribe = async (planName: string) => {
+    setSubscribing(planName);
+    try {
+      // Check if user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        // Not logged in — redirect to signup
+        window.location.href = '/signup';
+        return;
+      }
+
+      // Create Stripe checkout for membership
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+        body: {
+          planId: planName.toLowerCase(),
+          billingFrequency: 'annual',
+          userId: user.id,
+          metadata: { plan_name: planName, source: 'pricing_page' },
+        },
+      });
+
+      if (error) throw error;
+      if (data?.url) {
+        window.location.href = data.url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (err) {
+      console.error('Subscribe error:', err);
+      // Fallback to signup page
+      window.location.href = '/signup';
+    } finally {
+      setSubscribing(null);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -169,8 +208,10 @@ const Pricing = () => {
                       </div>
                     ))}
                   </div>
-                  <Button className={`w-full mt-6 rounded-xl ${tier.badge ? 'bg-conve-red hover:bg-conve-red-dark text-white' : ''}`} variant={tier.badge ? 'default' : 'outline'} onClick={() => window.location.href = '/signup'}>
-                    Get {tier.name} <ArrowRight className="ml-2 h-4 w-4" />
+                  <Button className={`w-full mt-6 rounded-xl ${tier.badge ? 'bg-conve-red hover:bg-conve-red-dark text-white' : ''}`} variant={tier.badge ? 'default' : 'outline'}
+                    disabled={subscribing === tier.name}
+                    onClick={() => handleSubscribe(tier.name)}>
+                    {subscribing === tier.name ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processing...</> : <>Get {tier.name} <ArrowRight className="ml-2 h-4 w-4" /></>}
                   </Button>
                 </CardContent>
               </Card>
