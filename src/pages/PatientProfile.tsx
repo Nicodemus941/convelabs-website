@@ -12,7 +12,10 @@ import { toast } from 'sonner';
 import {
   User, Mail, Phone, MapPin, Shield, Save, Loader2, Calendar,
   FileText, Download, ArrowLeft, UserPlus, Package, Receipt,
+  Plus, Trash2, Users, X,
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import Header from '@/components/home/Header';
@@ -24,6 +27,9 @@ const PatientProfile = () => {
   const [patient, setPatient] = useState<any>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [specimens, setSpecimens] = useState<any[]>([]);
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const [addFamilyOpen, setAddFamilyOpen] = useState(false);
+  const [familyForm, setFamilyForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse' });
 
   // Form state
   const [form, setForm] = useState({
@@ -70,6 +76,13 @@ const PatientProfile = () => {
         .or(`patient_id.eq.${user.id}`)
         .order('delivered_at', { ascending: false });
       setSpecimens((specs as any[]) || []);
+
+      // Load family members
+      if (tp?.id) {
+        const { data: fam } = await supabase.from('family_members' as any)
+          .select('*').eq('patient_id', tp.id).order('created_at');
+        setFamilyMembers((fam as any[]) || []);
+      }
 
       setLoading(false);
     };
@@ -133,11 +146,12 @@ const PatientProfile = () => {
         </div>
 
         <Tabs defaultValue="info">
-          <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full mb-6">
+          <TabsList className="grid grid-cols-3 sm:grid-cols-5 w-full mb-6">
             <TabsTrigger value="info">My Info</TabsTrigger>
-            <TabsTrigger value="appointments">Appointments</TabsTrigger>
+            <TabsTrigger value="appointments">Visits</TabsTrigger>
+            <TabsTrigger value="family">Family</TabsTrigger>
             <TabsTrigger value="specimens">Specimens</TabsTrigger>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
+            <TabsTrigger value="documents">Docs</TabsTrigger>
           </TabsList>
 
           {/* MY INFO TAB */}
@@ -242,14 +256,10 @@ const PatientProfile = () => {
                           {a.payment_status === 'completed' && (
                             <Button variant="ghost" size="sm" className="text-xs text-[#B91C1C] h-7 px-2"
                               onClick={() => {
-                                // Generate simple receipt
-                                const receipt = `ConveLabs Receipt\n\nDate: ${a.appointment_date?.substring(0,10)}\nService: ${a.service_name || a.service_type}\nAmount: $${a.total_amount}\nStatus: Paid\nPatient: ${form.firstName} ${form.lastName}\n\nConveLabs - (941) 527-9169`;
-                                const blob = new Blob([receipt], { type: 'text/plain' });
-                                const url = URL.createObjectURL(blob);
-                                const link = document.createElement('a');
-                                link.href = url;
-                                link.download = `convelabs-receipt-${a.appointment_date?.substring(0,10)}.txt`;
-                                link.click();
+                                // Generate printable HTML receipt
+                                const receiptHtml = `<!DOCTYPE html><html><head><title>ConveLabs Receipt</title><style>body{font-family:Arial,sans-serif;max-width:500px;margin:40px auto;padding:20px;color:#333}h1{color:#B91C1C;font-size:24px;margin:0}h2{font-size:14px;color:#666;margin:4px 0 30px}.divider{border-top:2px solid #B91C1C;margin:20px 0}.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eee;font-size:14px}.row .label{color:#666}.row .value{font-weight:600}.total{font-size:18px;color:#B91C1C}.footer{text-align:center;margin-top:30px;font-size:11px;color:#999}@media print{body{margin:0}}</style></head><body><h1>ConveLabs<span style="color:#B91C1C">.</span></h1><h2>Payment Receipt</h2><div class="divider"></div><div class="row"><span class="label">Date</span><span class="value">${a.appointment_date?.substring(0,10)}</span></div><div class="row"><span class="label">Service</span><span class="value">${a.service_name || a.service_type || 'Blood Draw'}</span></div><div class="row"><span class="label">Patient</span><span class="value">${form.firstName} ${form.lastName}</span></div>${a.address && a.address !== 'TBD' ? `<div class="row"><span class="label">Location</span><span class="value">${a.address}</span></div>` : ''}${a.tip_amount > 0 ? `<div class="row"><span class="label">Service Fee</span><span class="value">$${(a.total_amount - a.tip_amount).toFixed(2)}</span></div><div class="row"><span class="label">Gratuity</span><span class="value">$${Number(a.tip_amount).toFixed(2)}</span></div>` : ''}<div class="divider"></div><div class="row"><span class="label" style="font-weight:700">Total Paid</span><span class="value total">$${Number(a.total_amount).toFixed(2)}</span></div><div class="row"><span class="label">Payment Status</span><span class="value" style="color:green">Paid</span></div><div class="footer"><p>ConveLabs Mobile Phlebotomy</p><p>1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p><p>(941) 527-9169 | convelabs.com</p></div><script>window.print()</script></body></html>`;
+                                const win = window.open('', '_blank');
+                                if (win) { win.document.write(receiptHtml); win.document.close(); }
                               }}>
                               <Download className="h-3 w-3 mr-1" /> Receipt
                             </Button>
@@ -271,6 +281,104 @@ const PatientProfile = () => {
                 </Button>
               </div>
             )}
+          </TabsContent>
+
+          {/* FAMILY MEMBERS TAB */}
+          <TabsContent value="family" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold flex items-center gap-2"><Users className="h-4 w-4" /> Family Members</h3>
+              <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setAddFamilyOpen(true)}>
+                <Plus className="h-4 w-4" /> Add Member
+              </Button>
+            </div>
+
+            {familyMembers.length > 0 ? familyMembers.map((fm: any) => (
+              <Card key={fm.id} className="shadow-sm">
+                <CardContent className="p-3 sm:p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-sm">{fm.first_name} {fm.last_name}</p>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1 flex-wrap">
+                        <Badge variant="outline" className="text-[10px] capitalize">{fm.relationship}</Badge>
+                        {fm.phone && <span className="flex items-center gap-1"><Phone className="h-3 w-3" /> {fm.phone}</span>}
+                        {fm.email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {fm.email}</span>}
+                        {fm.date_of_birth && <span>DOB: {fm.date_of_birth}</span>}
+                      </div>
+                      {fm.insurance_provider && (
+                        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                          <Shield className="h-3 w-3" /> {fm.insurance_provider}{fm.insurance_member_id ? ` (${fm.insurance_member_id})` : ''}
+                        </p>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-600 h-8 w-8 p-0"
+                      onClick={async () => {
+                        if (!confirm(`Remove ${fm.first_name} from family?`)) return;
+                        await supabase.from('family_members' as any).delete().eq('id', fm.id);
+                        setFamilyMembers(prev => prev.filter(f => f.id !== fm.id));
+                        toast.success('Family member removed');
+                      }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )) : (
+              <div className="text-center py-12">
+                <Users className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-muted-foreground">No family members added yet</p>
+                <p className="text-xs text-muted-foreground mt-1">Add family members to book appointments for them at the same visit.</p>
+              </div>
+            )}
+
+            {/* Add Family Member Modal */}
+            <Dialog open={addFamilyOpen} onOpenChange={setAddFamilyOpen}>
+              <DialogContent className="max-w-md w-[95vw] sm:w-full">
+                <DialogHeader><DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-[#B91C1C]" /> Add Family Member</DialogTitle></DialogHeader>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>First Name *</Label><Input value={familyForm.firstName} onChange={e => setFamilyForm(p => ({ ...p, firstName: e.target.value }))} /></div>
+                    <div><Label>Last Name *</Label><Input value={familyForm.lastName} onChange={e => setFamilyForm(p => ({ ...p, lastName: e.target.value }))} /></div>
+                  </div>
+                  <div>
+                    <Label>Relationship *</Label>
+                    <Select value={familyForm.relationship} onValueChange={v => setFamilyForm(p => ({ ...p, relationship: v }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="spouse">Spouse</SelectItem>
+                        <SelectItem value="child">Child</SelectItem>
+                        <SelectItem value="parent">Parent</SelectItem>
+                        <SelectItem value="sibling">Sibling</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Email</Label><Input type="email" value={familyForm.email} onChange={e => setFamilyForm(p => ({ ...p, email: e.target.value }))} /></div>
+                    <div><Label>Phone</Label><Input value={familyForm.phone} onChange={e => setFamilyForm(p => ({ ...p, phone: e.target.value }))} /></div>
+                  </div>
+                  <div><Label>Date of Birth</Label><Input type="date" value={familyForm.dob} onChange={e => setFamilyForm(p => ({ ...p, dob: e.target.value }))} /></div>
+                  <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!familyForm.firstName || !familyForm.lastName}
+                    onClick={async () => {
+                      const { data, error } = await supabase.from('family_members' as any).insert({
+                        patient_id: patient?.id,
+                        first_name: familyForm.firstName,
+                        last_name: familyForm.lastName,
+                        email: familyForm.email || null,
+                        phone: familyForm.phone || null,
+                        date_of_birth: familyForm.dob || null,
+                        relationship: familyForm.relationship,
+                      }).select().single();
+                      if (error) { toast.error(error.message); return; }
+                      setFamilyMembers(prev => [...prev, data]);
+                      setFamilyForm({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse' });
+                      setAddFamilyOpen(false);
+                      toast.success(`${familyForm.firstName} added to family`);
+                    }}>
+                    Add Family Member
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           {/* SPECIMENS TAB */}
