@@ -6,7 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import {
-  MessageSquare, ArrowLeft, Send, Loader2, User, Phone,
+  MessageSquare, ArrowLeft, Send, Loader2, User, Phone, Plus, Search,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { PhlebAppointment } from '@/hooks/usePhlebotomistAppointments';
@@ -40,6 +40,10 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showCompose, setShowCompose] = useState(false);
+  const [composePhone, setComposePhone] = useState('');
+  const [composeName, setComposeName] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Build conversations from appointments with phone numbers
@@ -209,12 +213,102 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
     );
   }
 
+  // Handle compose send
+  const handleComposeSend = async () => {
+    if (!newMessage.trim() || !composePhone.trim()) return;
+    setIsSending(true);
+    try {
+      const phone = composePhone.startsWith('+') ? composePhone : `+1${composePhone.replace(/\D/g, '')}`;
+      const { error } = await supabase.functions.invoke('send-sms-notification', {
+        body: { phoneNumber: phone, notificationType: 'custom', customMessage: newMessage.trim() },
+      });
+      if (error) throw error;
+      toast.success(`Message sent to ${composeName || composePhone}`);
+      setNewMessage('');
+      setShowCompose(false);
+      setComposePhone('');
+      setComposeName('');
+    } catch (err) {
+      console.error('Compose send error:', err);
+      toast.error('Failed to send message');
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const filteredConversations = searchQuery.trim()
+    ? conversations.filter(c =>
+        c.patient_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.patient_phone.includes(searchQuery)
+      )
+    : conversations;
+
+  // Compose new message
+  if (showCompose) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => setShowCompose(false)}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <h2 className="text-lg font-bold">New Message</h2>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-sm font-medium">Recipient Name</label>
+            <Input value={composeName} onChange={e => setComposeName(e.target.value)} placeholder="Patient name" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Phone Number *</label>
+            <Input value={composePhone} onChange={e => setComposePhone(e.target.value)} placeholder="+1 (555) 000-0000" type="tel" />
+          </div>
+          <div>
+            <label className="text-sm font-medium">Message *</label>
+            <Input
+              value={newMessage}
+              onChange={e => setNewMessage(e.target.value)}
+              placeholder="Type your message..."
+              onKeyDown={e => e.key === 'Enter' && handleComposeSend()}
+            />
+          </div>
+          <Button
+            className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-2"
+            onClick={handleComposeSend}
+            disabled={isSending || !newMessage.trim() || !composePhone.trim()}
+          >
+            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-4 w-4" /> Send Message</>}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   // Conversation List
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 mb-1">
-        <MessageSquare className="h-5 w-5 text-[#B91C1C]" />
-        <h2 className="text-lg font-bold">Messages</h2>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-5 w-5 text-[#B91C1C]" />
+          <h2 className="text-lg font-bold">Messages</h2>
+        </div>
+        <Button
+          size="sm"
+          className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1"
+          onClick={() => setShowCompose(true)}
+        >
+          <Plus className="h-4 w-4" /> New
+        </Button>
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Input
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search patients..."
+          className="pl-9"
+        />
       </div>
 
       {isLoading && (
@@ -223,15 +317,17 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         </div>
       )}
 
-      {!isLoading && conversations.length === 0 && (
+      {!isLoading && filteredConversations.length === 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-dashed p-8 text-center">
           <MessageSquare className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-          <h3 className="font-semibold text-gray-800 mb-1">No conversations</h3>
-          <p className="text-sm text-muted-foreground">Patient conversations will appear here when you have appointments with phone numbers on file.</p>
+          <h3 className="font-semibold text-gray-800 mb-1">{searchQuery ? 'No results' : 'No conversations'}</h3>
+          <p className="text-sm text-muted-foreground">
+            {searchQuery ? 'Try a different search.' : 'Tap "New" to send a message to a patient.'}
+          </p>
         </div>
       )}
 
-      {conversations.map((conv) => (
+      {filteredConversations.map((conv) => (
         <Card
           key={conv.id}
           className="shadow-sm cursor-pointer hover:shadow-md transition-shadow"
