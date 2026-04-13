@@ -89,6 +89,15 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Send confirmation notifications (non-blocking)
+      try {
+        await supabaseClient.functions.invoke('send-appointment-confirmation', {
+          body: { appointmentId: newAppt.id },
+        });
+      } catch (notifErr) {
+        console.error('Notification error (non-blocking):', notifErr);
+      }
+
       return new Response(
         JSON.stringify({ status: 'completed', appointment: newAppt, bookingId: newAppt.id }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
