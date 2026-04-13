@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useAppointments } from "@/hooks/useAppointments";
 import { supabase } from "@/integrations/supabase/client";
-import { Appointment } from "@/types/appointmentTypes";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar, Clock, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail, Phone, LogOut } from "lucide-react";
@@ -14,46 +12,52 @@ import ReferralCard from "@/components/patient/ReferralCard";
 
 const PatientDashboard = () => {
   const { user, logout } = useAuth();
-  const { getAppointments, appointments } = useAppointments();
-  const [nextAppointment, setNextAppointment] = useState<Appointment | null>(null);
+  const [stats, setStats] = useState({ upcoming: 0, completed: 0, nextDate: '' });
   const [notifMethod, setNotifMethod] = useState<'sms' | 'email' | 'both'>('both');
   const [notifSaving, setNotifSaving] = useState(false);
 
-  useEffect(() => { getAppointments(); }, [getAppointments]);
-
+  // Lightweight stats fetch — no heavy hook, no infinite loop
   useEffect(() => {
     if (!user) return;
+    const loadStats = async () => {
+      let all: any[] = [];
+      const { data: byId } = await supabase.from('appointments').select('status, appointment_date')
+        .eq('patient_id', user.id);
+      if (byId) all = [...byId];
+      if (user.email) {
+        const { data: byEmail } = await supabase.from('appointments').select('status, appointment_date')
+          .ilike('patient_email', user.email);
+        if (byEmail) {
+          const ids = new Set(all.map(a => a.id));
+          all = [...all, ...(byEmail.filter(a => !ids.has(a.id)))];
+        }
+      }
+      const upcoming = all.filter(a => ['scheduled', 'confirmed'].includes(a.status));
+      const completed = all.filter(a => a.status === 'completed');
+      const next = upcoming.sort((a, b) => new Date(a.appointment_date || 0).getTime() - new Date(b.appointment_date || 0).getTime())[0];
+      const nextDate = next?.appointment_date ? new Date(next.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'None';
+      setStats({ upcoming: upcoming.length, completed: completed.length, nextDate });
+    };
+    loadStats();
+
     supabase.from('email_preferences').select('notification_method').eq('user_id', user.id).maybeSingle()
-      .then(({ data }) => {
-        if (data?.notification_method) setNotifMethod(data.notification_method as any);
-      });
-  }, [user]);
+      .then(({ data }) => { if (data?.notification_method) setNotifMethod(data.notification_method as any); });
+  }, [user?.id]);
 
   const handleNotifChange = async (method: 'sms' | 'email' | 'both') => {
     if (!user) return;
     setNotifSaving(true);
     setNotifMethod(method);
     const { error } = await supabase.from('email_preferences').upsert({
-      user_id: user.id,
-      notification_method: method,
-      updated_at: new Date().toISOString(),
+      user_id: user.id, notification_method: method, updated_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
     setNotifSaving(false);
     if (error) toast.error('Failed to save preference');
     else toast.success(`Notifications: ${method === 'both' ? 'SMS & Email' : method.toUpperCase()}`);
   };
 
-  useEffect(() => {
-    if (appointments?.length) {
-      const upcoming = appointments
-        .filter(appt => ['scheduled', 'confirmed'].includes(appt.status))
-        .sort((a, b) => new Date(a.date || a.appointment_date || 0).getTime() - new Date(b.date || b.appointment_date || 0).getTime());
-      setNextAppointment(upcoming[0] || null);
-    }
-  }, [appointments]);
-
-  const upcomingCount = appointments?.filter(a => ['scheduled', 'confirmed'].includes(a.status)).length || 0;
-  const completedCount = appointments?.filter(a => a.status === 'completed').length || 0;
+  const upcomingCount = stats.upcoming;
+  const completedCount = stats.completed;
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pb-20 md:pb-6">
@@ -98,8 +102,8 @@ const PatientDashboard = () => {
               <div>
                 <p className="text-[10px] md:text-xs text-muted-foreground">Next Visit</p>
                 <p className="text-sm font-bold">
-                  {nextAppointment?.appointment_date
-                    ? new Date(nextAppointment.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                  {stats.nextDate !== 'None'
+                    ? stats.nextDate
                     : 'None'}
                 </p>
               </div>
