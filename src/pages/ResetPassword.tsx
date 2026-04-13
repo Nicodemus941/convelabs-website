@@ -16,6 +16,7 @@ const ResetPassword = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [recoveryTokens, setRecoveryTokens] = useState<{ access: string; refresh: string } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -49,6 +50,9 @@ const ResetPassword = () => {
 
           if (accessToken && refreshToken) {
             console.log('Setting session from hash tokens...');
+            // Store tokens as fallback in case setSession doesn't persist
+            setRecoveryTokens({ access: accessToken, refresh: refreshToken });
+
             const { data, error } = await supabase.auth.setSession({
               access_token: accessToken,
               refresh_token: refreshToken,
@@ -56,13 +60,19 @@ const ResetPassword = () => {
 
             if (error) {
               console.error('setSession error:', error);
+              // Even if setSession fails, we still have the tokens stored
+              // and can retry on submit
             } else if (data?.session?.user?.email) {
               console.log('Session set successfully for:', data.session.user.email);
               setEmail(data.session.user.email);
-              // Clean up hash from URL
               window.history.replaceState({}, '', '/reset-password');
               return;
             }
+
+            // Even without a confirmed session, we have tokens — let user try
+            setEmail('your account');
+            window.history.replaceState({}, '', '/reset-password');
+            return;
           }
         }
 
@@ -106,21 +116,39 @@ const ResetPassword = () => {
     }
     
     setIsSubmitting(true);
-    
-    try {
-      // Verify we have an active session before attempting update
-      const { data: session } = await supabase.auth.getSession();
-      if (!session?.session) {
-        setFormError("Your session has expired. Please click the reset link in your email again.");
-        setIsSubmitting(false);
-        return;
-      }
 
-      const { error } = await supabase.auth.updateUser({ password });
+    try {
+      // Try to update password directly
+      console.log('Attempting password update...');
+      let { data: updateData, error } = await supabase.auth.updateUser({ password });
+
+      // If session expired, retry by re-setting session from stored tokens
+      if (error && recoveryTokens) {
+        console.log('First attempt failed, re-setting session from stored tokens...');
+        const { error: sessionErr } = await supabase.auth.setSession({
+          access_token: recoveryTokens.access,
+          refresh_token: recoveryTokens.refresh,
+        });
+
+        if (!sessionErr) {
+          // Retry password update
+          const retry = await supabase.auth.updateUser({ password });
+          updateData = retry.data;
+          error = retry.error;
+        }
+      }
 
       if (error) {
+        console.error('updateUser error:', error);
+        if (error.message?.includes('session') || error.message?.includes('token') || error.message?.includes('JWT') || (error as any).status === 401) {
+          setFormError("Your session has expired. Please click the reset link in your email again.");
+          setIsSubmitting(false);
+          return;
+        }
         throw error;
       }
+
+      console.log('Password updated successfully:', updateData?.user?.email);
       
       setIsSuccess(true);
       toast("Password updated", {
