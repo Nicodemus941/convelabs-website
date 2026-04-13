@@ -93,7 +93,7 @@ const AdminCalendar: React.FC = () => {
 
     return {
       id: appt.id,
-      title: `${appt.appointment_time ? appt.appointment_time.replace(':00:00', '').replace(/^0/, '') : ''} ${name}`.trim(),
+      title: name,
       start: startStr,
       allDay: !appt.appointment_time,
       className: `fc-event-${appt.status}`,
