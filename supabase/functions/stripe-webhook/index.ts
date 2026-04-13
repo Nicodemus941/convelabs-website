@@ -533,6 +533,15 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // Release any slot holds for this date/time
+    if (appointmentDate && appointmentTime) {
+      await supabaseClient
+        .from('slot_holds')
+        .update({ released: true })
+        .eq('appointment_date', appointmentDate)
+        .eq('appointment_time', appointmentTime);
+    }
+
     // Send confirmation email + SMS via Mailgun and Twilio
     try {
       await sendAppointmentConfirmation(appointment, metadata);

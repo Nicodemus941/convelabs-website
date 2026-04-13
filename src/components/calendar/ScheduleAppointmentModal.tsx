@@ -34,7 +34,12 @@ const SERVICE_TYPES = [
 const TIME_SLOTS = [
   '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
   '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-  '12:00 PM', '12:30 PM', '1:00 PM',
+  '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM',
+  '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM',
+];
+
+const AFTER_HOURS_SLOTS = [
+  '5:30 PM', '6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM',
 ];
 
 interface PatientResult {
@@ -379,6 +384,10 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                   <SelectContent>
                     {TIME_SLOTS.map(t => (
                       <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                    <div className="px-2 py-1.5 text-[10px] font-semibold text-amber-600 uppercase tracking-wide">After Hours (+$50)</div>
+                    {AFTER_HOURS_SLOTS.map(t => (
+                      <SelectItem key={t} value={t}>{t} ⏰</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

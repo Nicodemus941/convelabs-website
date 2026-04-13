@@ -99,7 +99,7 @@ interface DateTimeSelectionStepProps {
   considerDistance?: boolean;
 }
 
-// All windows (fasting + general — 6:00 AM - 1:30 PM)
+// All windows (fasting + general — 6:00 AM - 5:00 PM)
 const allDayWindows = [
   { time: "6:00 AM", label: "6:00 - 6:30 AM" },
   { time: "6:30 AM", label: "6:30 - 7:00 AM" },
@@ -116,9 +116,17 @@ const allDayWindows = [
   { time: "12:00 PM", label: "12:00 - 12:30 PM" },
   { time: "12:30 PM", label: "12:30 - 1:00 PM" },
   { time: "1:00 PM", label: "1:00 - 1:30 PM" },
+  { time: "1:30 PM", label: "1:30 - 2:00 PM" },
+  { time: "2:00 PM", label: "2:00 - 2:30 PM" },
+  { time: "2:30 PM", label: "2:30 - 3:00 PM" },
+  { time: "3:00 PM", label: "3:00 - 3:30 PM" },
+  { time: "3:30 PM", label: "3:30 - 4:00 PM" },
+  { time: "4:00 PM", label: "4:00 - 4:30 PM" },
+  { time: "4:30 PM", label: "4:30 - 5:00 PM" },
+  { time: "5:00 PM", label: "5:00 - 5:30 PM" },
 ];
 
-// Routine blood draws — 9:00 AM - 1:30 PM only
+// Routine blood draws — 9:00 AM - 5:00 PM
 const routineWindows = allDayWindows.filter(w => {
   const hour = parseInt(w.time);
   const isPM = w.time.includes('PM');
@@ -136,6 +144,15 @@ const weekendWindows = [
   { time: "9:00 AM", label: "9:00 - 9:30 AM" },
 ];
 
+// After-hours windows (5:30 PM - 8:00 PM) — only shown when user requests it
+const afterHoursWindows = [
+  { time: "5:30 PM", label: "5:30 - 6:00 PM" },
+  { time: "6:00 PM", label: "6:00 - 6:30 PM" },
+  { time: "6:30 PM", label: "6:30 - 7:00 PM" },
+  { time: "7:00 PM", label: "7:00 - 7:30 PM" },
+  { time: "7:30 PM", label: "7:30 - 8:00 PM" },
+];
+
 // Services that use routine hours (9am-1:30pm)
 const ROUTINE_SERVICES = ['routine-blood-draw'];
 // Services that skip time selection (STAT/same-day)
@@ -150,6 +167,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const [loadingSlots, setLoadingSlots] = useState(false);
 
   const [blockedDates, setBlockedDates] = useState<{ start: string; end: string }[]>([]);
+  const [showAfterHours, setShowAfterHours] = useState(false);
+  const [holdId, setHoldId] = useState<string | null>(null);
+  const [heldSlots, setHeldSlots] = useState<Set<string>>(new Set());
 
   // Fetch admin-blocked dates on mount
   useEffect(() => {
@@ -201,8 +221,19 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
         console.log('Booked appointments for', dateStr, ':', data?.length || 0, data);
 
-        if (!data || data.length === 0) {
-          console.log('No appointments found — all slots available');
+        // Also check for active slot holds from other users
+        const { data: holds } = await supabase
+          .from('slot_holds' as any)
+          .select('appointment_time')
+          .eq('appointment_date', dateStr)
+          .eq('released', false)
+          .gt('expires_at', new Date().toISOString());
+
+        const activeHolds = new Set((holds || []).map((h: any) => h.appointment_time));
+        setHeldSlots(activeHolds);
+
+        if ((!data || data.length === 0) && activeHolds.size === 0) {
+          console.log('No appointments or holds found — all slots available');
           setBookedSlots(new Set());
           setLoadingSlots(false);
           return;
@@ -320,12 +351,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const isStat = STAT_SERVICES.includes(selectedService || '');
   const isRoutine = ROUTINE_SERVICES.includes(selectedService || '');
 
-  // Choose windows based on service type
-  const activeWindows = isWeekend
+  // Choose windows based on service type + after-hours toggle
+  const baseWindows = isWeekend
     ? weekendWindows
     : isRoutine
     ? routineWindows
     : allDayWindows;
+
+  const activeWindows = (!isWeekend && showAfterHours)
+    ? [...baseWindows, ...afterHoursWindows]
+    : baseWindows;
   
   // Get Current Date
   const today = new Date();
@@ -460,22 +495,50 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       {activeWindows.map((window) => {
                         const isSelected = field.value === window.time;
                         const isBooked = bookedSlots.has(window.time);
+                        const isHeldByOther = !isSelected && heldSlots.has(window.time);
+                        const isUnavailable = isBooked || isHeldByOther;
+                        const isAfterHours = afterHoursWindows.some(w => w.time === window.time);
 
                         return (
                           <button
                             key={window.time}
                             type="button"
                             className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all ${
-                              isBooked
+                              isUnavailable
                                 ? 'bg-gray-50 text-gray-300 line-through cursor-not-allowed border-gray-100'
                                 : isSelected
                                 ? 'bg-[#B91C1C] text-white border-[#B91C1C] shadow-md scale-[1.02]'
+                                : isAfterHours
+                                ? 'bg-amber-50 text-amber-800 border-amber-200 hover:border-amber-400 hover:shadow-sm'
                                 : 'bg-white text-gray-700 border-gray-200 hover:border-[#B91C1C]/50 hover:shadow-sm'
                             }`}
-                            onClick={() => {
-                              if (!isBooked) field.onChange(window.time);
+                            onClick={async () => {
+                              if (isUnavailable) return;
+
+                              // Release previous hold if exists
+                              if (holdId) {
+                                await supabase.from('slot_holds' as any).update({ released: true }).eq('id', holdId);
+                              }
+
+                              field.onChange(window.time);
+
+                              // Create a new slot hold (15 min expiry)
+                              if (selectedDate) {
+                                const year = selectedDate.getFullYear();
+                                const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+                                const day = String(selectedDate.getDate()).padStart(2, '0');
+                                const dateStr = `${year}-${month}-${day}`;
+
+                                const { data: hold } = await supabase.from('slot_holds' as any).insert({
+                                  appointment_date: dateStr,
+                                  appointment_time: window.time,
+                                  held_by: `session_${Date.now()}`,
+                                }).select('id').single();
+
+                                if (hold) setHoldId((hold as any).id);
+                              }
                             }}
-                            disabled={isBooked}
+                            disabled={isUnavailable}
                           >
                             {window.time}
                           </button>
@@ -486,6 +549,43 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   {loadingSlots && (
                     <p className="text-xs text-muted-foreground mt-1">Checking availability...</p>
                   )}
+
+                  {/* After-hours toggle — weekdays only, not for STAT or weekend */}
+                  {!isWeekend && !isSunday && !isStat && (
+                    <div className="mt-3">
+                      {!showAfterHours ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowAfterHours(true)}
+                          className="text-sm text-[#B91C1C] hover:text-[#991B1B] font-medium hover:underline"
+                        >
+                          Need an after-hours appointment? →
+                        </button>
+                      ) : (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-amber-900">After-Hours Slots Available</p>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowAfterHours(false);
+                                // Clear selection if an after-hours slot was selected
+                                const currentTime = field.value;
+                                if (currentTime && afterHoursWindows.some(w => w.time === currentTime)) {
+                                  field.onChange('');
+                                }
+                              }}
+                              className="text-xs text-amber-600 hover:text-amber-800 underline"
+                            >
+                              Hide
+                            </button>
+                          </div>
+                          <p className="text-xs text-amber-700">After-hours appointments (5:30 PM - 8:00 PM) include an additional $50 surcharge. Subject to availability.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <FormDescription>
                     {isStat
                       ? "Next available within operating hours (+$100)"
@@ -494,8 +594,10 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       : isWeekend
                       ? "Limited Saturday hours (6 AM - 9:30 AM)"
                       : isRoutine
-                      ? "Routine draw hours: 9 AM - 1:30 PM"
-                      : "Available: Mon-Fri 6 AM - 1:30 PM"}
+                      ? "Routine draw hours: 9 AM - 5:00 PM"
+                      : showAfterHours
+                      ? "Showing all hours including after-hours (6 AM - 8 PM)"
+                      : "Available: Mon-Fri 6 AM - 5:30 PM"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
