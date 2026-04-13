@@ -1,4 +1,4 @@
-const CACHE_NAME = 'convelabs-v4';
+const CACHE_NAME = 'convelabs-v5';
 const STATIC_ASSETS = [
   '/',
   '/favicon.ico',
@@ -37,8 +37,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for static assets
-  if (url.pathname.match(/\.(js|css|png|jpg|jpeg|svg|ico|woff2?)$/)) {
+  // Network-first for JS/CSS (Vite uses hashed filenames, so stale cache = broken app)
+  if (url.pathname.match(/\.(js|css)$/)) {
+    event.respondWith(
+      fetch(event.request).then((response) => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return response;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Cache-first for images/fonts only (truly static)
+  if (url.pathname.match(/\.(png|jpg|jpeg|svg|ico|woff2?)$/)) {
     event.respondWith(
       caches.match(event.request).then((cached) =>
         cached || fetch(event.request).then((response) => {
