@@ -17,25 +17,25 @@ const ForgotPassword = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
+
     try {
-      // Make sure we're using the most current Supabase JS client method
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      // Use custom edge function that sends via Mailgun (bypasses Supabase email limits)
+      const { data, error } = await supabase.functions.invoke('send-password-reset', {
+        body: { email: email.trim() },
       });
-      
-      if (error) {
-        throw error;
-      }
-      
+
+      if (error) throw error;
+
       setIsSuccess(true);
       toast("Recovery email sent", {
         description: "Check your inbox for the password reset link"
       });
     } catch (error: any) {
       console.error("Error sending password reset email:", error);
-      toast("Error", {
-        description: error.message || "Failed to send recovery email"
+      // Still show success (don't reveal if email exists)
+      setIsSuccess(true);
+      toast("Recovery email sent", {
+        description: "If this email is in our system, a reset link has been sent"
       });
     } finally {
       setIsSubmitting(false);

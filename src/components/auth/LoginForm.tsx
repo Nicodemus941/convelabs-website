@@ -109,13 +109,15 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
   const handleSendMagicLink = async () => {
     setIsSubmitting(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
+      // Use custom edge function (Mailgun) instead of Supabase built-in email
+      const { error } = await supabase.functions.invoke('send-password-reset', {
+        body: { email: email.trim() },
       });
       if (error) throw error;
       setMagicLinkSent(true);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to send verification link');
+      // Still show success for security
+      setMagicLinkSent(true);
     } finally {
       setIsSubmitting(false);
     }
