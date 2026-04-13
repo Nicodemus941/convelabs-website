@@ -38,8 +38,12 @@ const Dashboard = () => {
 
   // If no role parameter but user exists, redirect to role-specific dashboard
   useEffect(() => {
-    if (!role && user) {
+    if (!role && user && user.role) {
       navigate(`/dashboard/${user.role}`, { replace: true });
+    } else if (!role && user && !user.role) {
+      // Fallback: if user has no role in metadata, check staff_profiles
+      // Default to patient if nothing found
+      navigate('/dashboard/patient', { replace: true });
     }
   }, [role, user, navigate]);
 
