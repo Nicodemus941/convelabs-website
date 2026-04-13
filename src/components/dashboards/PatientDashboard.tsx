@@ -3,18 +3,58 @@ import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail, Phone, LogOut } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calendar, Clock, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail, Phone, LogOut, Check, Crown, Loader2, Shield } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import UpcomingAppointments from "@/components/appointments/UpcomingAppointments";
 import AppointmentHistory from "@/components/appointments/AppointmentHistory";
 import ReferralCard from "@/components/patient/ReferralCard";
 
+const PLANS = [
+  { name: 'Member', price: 99, color: 'border-blue-200', badge: '', mobile: '$130', save: '$20', features: ['Mobile visits: $130 (save $20)', 'Weekend appointments', 'Patient portal'] },
+  { name: 'VIP', price: 199, color: 'border-[#B91C1C]', badge: 'Most Popular', mobile: '$115', save: '$35', features: ['Mobile visits: $115 (save $35)', 'Priority same-day', 'Family add-ons $45', 'Extended hours'] },
+  { name: 'Concierge', price: 399, color: 'border-amber-400', badge: 'Best Value', mobile: '$99', save: '$51', features: ['Mobile visits: $99 (save $51)', 'Dedicated phlebotomist', 'Same-day guaranteed', 'NDA available', 'Concierge support'] },
+];
+
 const PatientDashboard = () => {
   const { user, logout } = useAuth();
+  const [searchParams] = useSearchParams();
   const [stats, setStats] = useState({ upcoming: 0, completed: 0, nextDate: '' });
   const [notifMethod, setNotifMethod] = useState<'sms' | 'email' | 'both'>('both');
   const [notifSaving, setNotifSaving] = useState(false);
+  const [membershipModalOpen, setMembershipModalOpen] = useState(false);
+  const [subscribing, setSubscribing] = useState<string | null>(null);
+
+  // Check for membership success redirect
+  useEffect(() => {
+    if (searchParams.get('membership') === 'success') {
+      toast.success('Welcome to ConveLabs Membership! 🎉 Your discounts are now active.');
+      window.history.replaceState({}, '', '/dashboard/patient');
+    }
+  }, []);
+
+  const handleSubscribe = async (planName: string) => {
+    if (!user) return;
+    setSubscribing(planName);
+    try {
+      const prices: Record<string, number> = { Member: 99, VIP: 199, Concierge: 399 };
+      const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
+        body: {
+          serviceType: 'membership', serviceName: `ConveLabs ${planName} Membership (Annual)`,
+          amount: (prices[planName] || 99) * 100, tipAmount: 0,
+          appointmentDate: new Date().toISOString().split('T')[0], appointmentTime: '',
+          patientDetails: { firstName: user.firstName || '', lastName: user.lastName || '', email: user.email || '' },
+          locationDetails: { address: '', city: '', state: 'FL', zipCode: '' },
+          serviceDetails: { additionalNotes: `Membership: ${planName} Annual` },
+        },
+      });
+      if (error) throw error;
+      if (data?.url) window.location.href = data.url;
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to start checkout');
+    } finally { setSubscribing(null); }
+  };
 
   // Lightweight stats fetch — no heavy hook, no infinite loop
   useEffect(() => {
@@ -120,8 +160,8 @@ const PatientDashboard = () => {
               </div>
               <Star className="h-6 w-6 md:h-8 md:w-8 text-amber-500 opacity-50" />
             </div>
-            <Button variant="link" size="sm" className="px-0 mt-1 text-[10px] md:text-xs text-[#B91C1C]" asChild>
-              <Link to="/pricing">Upgrade & Save →</Link>
+            <Button variant="link" size="sm" className="px-0 mt-1 text-[10px] md:text-xs text-[#B91C1C]" onClick={() => setMembershipModalOpen(true)}>
+              Upgrade & Save →
             </Button>
           </CardContent>
         </Card>
@@ -287,6 +327,59 @@ const PatientDashboard = () => {
           </Card>
         </div>
       </div>
+
+      {/* Membership Modal */}
+      <Dialog open={membershipModalOpen} onOpenChange={setMembershipModalOpen}>
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="text-center">
+              <Crown className="h-8 w-8 text-amber-500 mx-auto mb-2" />
+              <span className="text-xl font-bold">Upgrade Your Experience</span>
+              <p className="text-sm font-normal text-muted-foreground mt-1">Save on every visit with a ConveLabs membership</p>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            {PLANS.map(plan => (
+              <div key={plan.name} className={`border-2 ${plan.color} rounded-xl p-4 relative ${plan.badge ? 'ring-1 ring-[#B91C1C]/20' : ''}`}>
+                {plan.badge && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#B91C1C] text-white text-[10px] font-bold px-3 py-0.5 rounded-full">{plan.badge}</div>
+                )}
+                <h3 className="font-bold text-lg">{plan.name}</h3>
+                <div className="flex items-baseline gap-1 mt-1">
+                  <span className="text-2xl font-bold">${plan.price}</span>
+                  <span className="text-xs text-muted-foreground">/year</span>
+                </div>
+                <div className="bg-green-50 text-green-700 text-xs font-semibold px-2 py-1 rounded-full inline-block mt-2">
+                  Mobile from {plan.mobile}
+                </div>
+                <ul className="mt-3 space-y-1.5">
+                  {plan.features.map(f => (
+                    <li key={f} className="flex items-start gap-1.5 text-xs">
+                      <Check className="h-3.5 w-3.5 text-green-600 mt-0.5 flex-shrink-0" />
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  className={`w-full mt-4 rounded-xl text-sm ${plan.badge ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white' : ''}`}
+                  variant={plan.badge ? 'default' : 'outline'}
+                  disabled={subscribing === plan.name}
+                  onClick={() => handleSubscribe(plan.name)}
+                >
+                  {subscribing === plan.name ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+                  {subscribing === plan.name ? 'Processing...' : `Get ${plan.name}`}
+                </Button>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-center text-[10px] text-muted-foreground mt-4">
+            <Shield className="h-3 w-3 inline mr-1" />
+            Secure payment via Stripe. Cancel anytime. Discounts apply immediately.
+          </p>
+        </DialogContent>
+      </Dialog>
 
       {/* Floating Book Button — mobile only */}
       <div className="fixed bottom-4 left-4 right-4 md:hidden z-40">

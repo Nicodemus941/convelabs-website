@@ -132,8 +132,12 @@ Deno.serve(async (req) => {
       payment_intent_data: {
         metadata,
       },
-      success_url: `${origin}/book-now?status=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/book-now?status=cancel`,
+      success_url: metadata.service_type === 'membership'
+        ? `${origin}/dashboard/patient?membership=success`
+        : `${origin}/book-now?status=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: metadata.service_type === 'membership'
+        ? `${origin}/pricing?status=cancel`
+        : `${origin}/book-now?status=cancel`,
     });
 
     return new Response(

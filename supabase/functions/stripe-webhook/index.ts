@@ -453,6 +453,63 @@ async function handleAppointmentPayment(session: any) {
   try {
     const { metadata, id: checkoutSessionId, payment_intent } = session;
 
+    // MEMBERSHIP PAYMENT: Create membership record instead of appointment
+    if (metadata.service_type === 'membership') {
+      console.log('Processing membership payment:', metadata.service_name);
+      const email = metadata.patient_email || session.customer_details?.email;
+
+      // Find user by email
+      let userId = metadata.user_id || null;
+      if (!userId && email) {
+        const { data: tp } = await supabaseClient.from('tenant_patients').select('user_id').ilike('email', email).maybeSingle();
+        if (tp?.user_id) userId = tp.user_id;
+      }
+
+      // Determine tier from service name
+      const svcName = (metadata.service_name || '').toLowerCase();
+      let tier = 'member';
+      if (svcName.includes('concierge')) tier = 'concierge';
+      else if (svcName.includes('vip')) tier = 'vip';
+
+      // Find or create plan in membership_plans
+      const planName = tier.charAt(0).toUpperCase() + tier.slice(1);
+      const prices: Record<string, number> = { member: 9900, vip: 19900, concierge: 39900 };
+      let { data: plan } = await supabaseClient.from('membership_plans').select('id').ilike('name', `%${tier}%`).maybeSingle();
+      if (!plan) {
+        const { data: newPlan } = await supabaseClient.from('membership_plans').insert({
+          name: planName, annual_price: prices[tier], monthly_price: Math.round(prices[tier] / 12), credits_per_year: 0,
+        }).select('id').single();
+        plan = newPlan;
+      }
+
+      if (userId && plan) {
+        // Create or update membership
+        const nextRenewal = new Date();
+        nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
+
+        await supabaseClient.from('user_memberships').upsert({
+          user_id: userId,
+          plan_id: plan.id,
+          status: 'active',
+          stripe_customer_id: session.customer || null,
+          billing_frequency: 'annual',
+          next_renewal: nextRenewal.toISOString(),
+          is_primary_member: true,
+        }, { onConflict: 'user_id' });
+
+        console.log(`Membership activated: ${planName} for user ${userId}`);
+
+        // Update patient metadata
+        if (email) {
+          await supabaseClient.from('tenant_patients').update({ membership_status: tier }).ilike('email', email);
+        }
+      }
+
+      // Log to webhook_logs
+      await supabaseClient.from('webhook_logs').update({ status: 'success' }).eq('stripe_session_id', checkoutSessionId).catch(() => {});
+      return { id: 'membership', success: true };
+    }
+
     // IDEMPOTENCY CHECK: Don't create duplicate appointments for the same checkout session
     const { data: existingAppt } = await supabaseClient
       .from('appointments')
