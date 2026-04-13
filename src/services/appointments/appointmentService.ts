@@ -37,15 +37,12 @@ export async function fetchAppointments(
  */
 export async function fetchAppointmentsSimplified(
   tenantId?: string,
-  userId?: string
+  userId?: string,
+  userEmail?: string
 ) {
   try {
     // For patients: match by patient_id OR patient_email (IDs can mismatch)
     if (userId) {
-      // Get user's email for fallback matching
-      const { data: { user: authUser } } = await supabase.auth.getUser();
-      const email = authUser?.email;
-
       let data: any[] = [];
 
       // Try by patient_id first
@@ -54,9 +51,9 @@ export async function fetchAppointmentsSimplified(
       if (byId) data = [...byId];
 
       // Also get by email (catches mismatched patient_ids)
-      if (email) {
+      if (userEmail) {
         const { data: byEmail } = await supabase.from('appointments').select('*')
-          .ilike('patient_email', email).order('appointment_date', { ascending: false }).limit(50);
+          .ilike('patient_email', userEmail).order('appointment_date', { ascending: false }).limit(50);
         if (byEmail) {
           const existingIds = new Set(data.map(a => a.id));
           data = [...data, ...byEmail.filter(a => !existingIds.has(a.id))];

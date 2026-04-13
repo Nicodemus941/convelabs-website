@@ -27,7 +27,8 @@ export function useAppointments() {
       const isAdmin = user?.role === 'super_admin' || user?.role === 'office_manager' || user?.role === 'admin';
       const { data, error } = await appointmentService.fetchAppointmentsSimplified(
         currentTenant?.id,
-        isAdmin ? undefined : user?.id
+        isAdmin ? undefined : user?.id,
+        isAdmin ? undefined : user?.email
       );
 
       if (error) {

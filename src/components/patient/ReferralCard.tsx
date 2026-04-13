@@ -16,11 +16,18 @@ const ReferralCard: React.FC = () => {
   useEffect(() => {
     if (!user) return;
     const load = async () => {
-      const { data } = await supabase
-        .from('referral_codes' as any)
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
+      // Try by auth user ID first
+      let { data } = await supabase.from('referral_codes' as any).select('*').eq('user_id', user.id).maybeSingle();
+
+      // Fallback: find via tenant_patients
+      if (!data && user.email) {
+        const { data: tp } = await supabase.from('tenant_patients').select('id').ilike('email', user.email).maybeSingle();
+        if (tp) {
+          const { data: byTp } = await supabase.from('referral_codes' as any).select('*').eq('user_id', tp.id).maybeSingle();
+          if (byTp) data = byTp;
+        }
+      }
+
       if (data) {
         setCode((data as any).code);
         setUses((data as any).uses || 0);

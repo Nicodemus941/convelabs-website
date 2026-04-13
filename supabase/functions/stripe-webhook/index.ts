@@ -571,6 +571,77 @@ async function handleAppointmentPayment(session: any) {
         .eq('appointment_time', appointmentTime);
     }
 
+    // Process referral code if present (record redemption + credit referrer)
+    try {
+      const notes = metadata.additional_notes || '';
+      const referralMatch = notes.match(/Referral:\s*(\w+)/);
+      if (referralMatch) {
+        const referralCode = referralMatch[1];
+        console.log(`Processing referral code: ${referralCode}`);
+
+        // Find the referral code
+        const { data: codeData } = await supabaseClient
+          .from('referral_codes')
+          .select('id, user_id, discount_amount, referrer_credit, uses')
+          .eq('code', referralCode)
+          .eq('active', true)
+          .maybeSingle();
+
+        if (codeData) {
+          // Record the redemption
+          await supabaseClient.from('referral_redemptions').insert({
+            referral_code_id: codeData.id,
+            referred_email: metadata.patient_email,
+            appointment_id: appointment.id,
+            discount_applied: codeData.discount_amount || 25,
+            referrer_credited: true,
+          });
+
+          // Increment uses count on the referral code
+          await supabaseClient.from('referral_codes')
+            .update({ uses: (codeData.uses || 0) + 1 })
+            .eq('id', codeData.id);
+
+          console.log(`Referral ${referralCode}: redemption recorded, referrer credited, uses=${(codeData.uses || 0) + 1}`);
+
+          // Notify the referrer that their friend booked
+          if (codeData.user_id) {
+            const { data: referrer } = await supabaseClient
+              .from('tenant_patients')
+              .select('phone, first_name, email')
+              .eq('id', codeData.user_id)
+              .maybeSingle();
+
+            if (referrer?.phone) {
+              const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+              const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+              const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+              if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+                const credit = codeData.referrer_credit || 25;
+                const smsBody = `ConveLabs: Great news ${referrer.first_name || ''}! Your referral code ${referralCode} was just used. You earned a $${credit} credit toward your next visit. Thank you for spreading the word!`;
+                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                await fetch(twilioUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: new URLSearchParams({
+                    To: referrer.phone.startsWith('+') ? referrer.phone : `+1${referrer.phone.replace(/\D/g, '')}`,
+                    Body: smsBody,
+                    ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
+                  }).toString(),
+                });
+                console.log(`Referrer notified via SMS: ${referrer.phone}`);
+              }
+            }
+          }
+        }
+      }
+    } catch (refErr) {
+      console.error('Referral processing error (non-fatal):', refErr);
+    }
+
     // Send confirmation email + SMS via Mailgun and Twilio
     try {
       await sendAppointmentConfirmation(appointment, metadata);
