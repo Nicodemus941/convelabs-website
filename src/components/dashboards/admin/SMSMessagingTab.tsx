@@ -46,13 +46,16 @@ const SMSMessagingTab: React.FC = () => {
       const { data: patientData, error } = await supabase
         .from('tenant_patients')
         .select('id, first_name, last_name, phone, email')
-        .not('phone', 'is', null)
         .order('first_name', { ascending: true });
+
+      if (error) {
+        console.error('Failed to load patients:', error);
+      }
+      console.log('Patients loaded:', patientData?.length || 0);
 
       if (error) throw error;
 
       const contactList: PatientContact[] = (patientData || [])
-        .filter((p: any) => p.phone && p.phone.trim())
         .map((p: any) => ({
           id: p.id,
           name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown',
