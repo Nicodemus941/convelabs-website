@@ -19,13 +19,20 @@ export const mapAppointmentData = (appointment: any, patientData?: any): Appoint
     address: appointment.address,
     notes: appointment.notes,
     patient_id: appointment.patient_id,
-    patient_name: appointment.patient_name || (patientData ? `${patientData.first_name} ${patientData.last_name}` : 'Unknown'),
-    patient_email: appointment.patient_email || patientData?.email,
-    patient_phone: appointment.patient_phone || patientData?.phone,
+    patient_name: appointment.patient_name || (patientData ? `${patientData.first_name} ${patientData.last_name}` : parseFromNotes(appointment.notes, 'Patient') || 'Unknown'),
+    patient_email: appointment.patient_email || patientData?.email || parseFromNotes(appointment.notes, 'Email'),
+    patient_phone: appointment.patient_phone || patientData?.phone || parseFromNotes(appointment.notes, 'Phone'),
     phlebotomist_id: appointment.phlebotomist_id,
-    serviceName: appointment.service_name,
+    appointment_time: appointment.appointment_time || '',
+    service_type: appointment.service_type || '',
+    serviceName: appointment.service_name || appointment.service_type || '',
     service_id: appointment.service_id,
-    service_name: appointment.service_name,
+    service_name: appointment.service_name || appointment.service_type || '',
+    total_amount: appointment.total_amount || 0,
+    tip_amount: appointment.tip_amount || 0,
+    payment_status: appointment.payment_status || '',
+    invoice_status: appointment.invoice_status || '',
+    booking_source: appointment.booking_source || '',
     zipcode: appointment.zipcode,
     latitude: appointment.latitude,
     longitude: appointment.longitude,
@@ -56,6 +63,14 @@ function getTimeFromAppointmentDate(dateString?: string | Date): string {
     console.error("Error extracting time from date:", error);
     return '';
   }
+}
+
+// Parse a field from the notes string (e.g., "Patient: John Smith | Email: john@email.com")
+function parseFromNotes(notes: string | null | undefined, field: string): string | null {
+  if (!notes) return null;
+  const regex = new RegExp(`${field}:\\s*([^|]+)`);
+  const match = notes.match(regex);
+  return match ? match[1].trim() : null;
 }
 
 // Helper function to ensure we have a Date object

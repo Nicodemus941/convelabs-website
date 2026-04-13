@@ -68,7 +68,7 @@ const EnhancedAppointmentsTab = () => {
   const [activeTab, setActiveTab] = useState("upcoming");
   const [showFilters, setShowFilters] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [dateRange, setDateRange] = useState<string>("today");
+  const [dateRange, setDateRange] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [serviceFilter, setServiceFilter] = useState<string>("all");
@@ -527,20 +527,20 @@ const EnhancedAppointmentsTab = () => {
                             <TableCell>
                               <div className="space-y-1">
                                 <p className="font-medium">
-                                  {appointment.appointment_date 
-                                    ? format(new Date(appointment.appointment_date), "MMM d, yyyy")
+                                  {appointment.appointment_date
+                                    ? format(new Date(String(appointment.appointment_date).substring(0, 10) + 'T12:00:00'), "MMM d, yyyy")
                                     : "Unknown"
                                   }
                                 </p>
                                 <p className="text-sm text-muted-foreground">
-                                  {appointment.appointment_time || "Time TBD"}
+                                  {(appointment as any).appointment_time || appointment.time || "Time TBD"}
                                 </p>
                               </div>
                             </TableCell>
-                            
+
                             <TableCell>
-                              <Badge variant="outline">
-                                {appointment.service_type || "Basic Lab Draw"}
+                              <Badge variant="outline" className="capitalize">
+                                {((appointment as any).service_type || appointment.service_name || "Blood Draw").replace(/_|-/g, ' ')}
                               </Badge>
                             </TableCell>
                             
@@ -561,7 +561,7 @@ const EnhancedAppointmentsTab = () => {
                             
                             <TableCell>
                               <span className="font-medium">
-                                ${((appointment.total_amount || 0) / 100).toFixed(2)}
+                                ${((appointment as any).total_amount || 0).toFixed(2)}
                               </span>
                             </TableCell>
                             
