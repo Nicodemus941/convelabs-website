@@ -88,7 +88,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   return (
     <>
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0 w-[95vw] sm:w-full">
         {/* Header */}
         <div className="px-6 pt-6 pb-4">
           <div className="flex items-start justify-between">

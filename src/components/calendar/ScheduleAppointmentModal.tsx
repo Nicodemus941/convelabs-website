@@ -280,19 +280,36 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         });
       }
 
-      // Send SMS notifications to phlebotomist + owner (non-blocking)
+      // Send ALL notifications (non-blocking)
       if (newAppt) {
         const svcLabel = svc?.label || serviceType;
         const fullAddress = [address, city, zipcode].filter(Boolean).join(', ') || 'TBD';
 
+        // 1. Patient confirmation (email + SMS)
+        supabase.functions.invoke('send-appointment-confirmation', {
+          body: {
+            appointmentId: newAppt.id,
+            patientName,
+            patientEmail: patientEmail || null,
+            patientPhone: patientPhone || null,
+            serviceName: svcLabel,
+            appointmentDate: date,
+            appointmentTime: time,
+            address: fullAddress,
+            totalAmount: finalPrice,
+            isWaived,
+          },
+        }).catch(err => console.error('Patient confirmation error:', err));
+
+        // 2. Owner SMS
         supabase.functions.invoke('send-sms-notification', {
           body: {
-            to: '9415279169', // Owner phone
+            to: '9415279169',
             message: `💰 New Booking (Admin)\n\nPatient: ${patientName}\nService: ${svcLabel}\nRevenue: $${finalPrice.toFixed(2)}\nDate: ${date} at ${time}\nSource: manual`,
           },
         }).catch(() => {});
 
-        // Notify phlebotomist
+        // 3. Phlebotomist SMS
         supabase.from('staff_profiles').select('phone').eq('user_id', '91c76708-8c5b-4068-92c6-323805a3b164').maybeSingle()
           .then(({ data: staff }) => {
             if (staff?.phone) {
@@ -322,7 +339,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full p-4 sm:p-6">
         <DialogHeader>
           <DialogTitle>Schedule New Appointment</DialogTitle>
         </DialogHeader>

@@ -11,9 +11,24 @@ serve(async (req) => {
   }
 
   try {
-    const { appointmentId, notificationType, phoneNumber, eta, labName, trackingId, customMessage } = await req.json()
+    const body = await req.json()
 
-    console.log('SMS notification request:', { appointmentId, notificationType, phoneNumber })
+    // Support BOTH calling conventions:
+    // 1. New simple format: { to, message }
+    // 2. Legacy format: { phoneNumber, notificationType, customMessage, ... }
+    const phoneNumber = body.to || body.phoneNumber
+    const appointmentId = body.appointmentId
+    const notificationType = body.notificationType
+    const eta = body.eta
+    const labName = body.labName
+    const trackingId = body.trackingId
+    const customMessage = body.message || body.customMessage
+
+    console.log('SMS notification request:', { phoneNumber, notificationType, hasCustomMessage: !!customMessage })
+
+    if (!phoneNumber) {
+      throw new Error('Phone number is required (pass as "to" or "phoneNumber")')
+    }
 
     const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')
     const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')
@@ -24,29 +39,38 @@ serve(async (req) => {
       throw new Error('Missing Twilio configuration')
     }
 
+    // If a direct message was provided, use it. Otherwise build from notificationType.
     let message = ''
-    switch (notificationType) {
-      case 'on_the_way_custom':
-        // Custom message from the phlebotomist dashboard (includes ETA + urine sample info)
-        message = customMessage || `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${eta} minutes. Please have a designated sterile, well-lit area where we can perform the collection. We're looking forward to serving you. See you soon!`
-        break
-      case 'on_the_way':
-        message = `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${eta} minutes. Please have a designated sterile, well-lit area where we can perform the collection. We're looking forward to serving you. See you soon!`
-        break
-      case 'sample_delivered':
-        message = `Your specimens have been successfully delivered to ${labName || 'the lab'}. Your lab-generated tracking ID is: ${trackingId || 'pending'}. You will receive your results directly from your lab's patient portal. Thank you for choosing ConveLabs!`
-        break
-      case 'completed':
-        message = `Your ConveLabs appointment is complete! Your specimens are on their way to the lab. We will send you a confirmation once they have been successfully delivered along with your lab-generated ID. Thank you for choosing ConveLabs!`
-        break
-      default:
-        message = customMessage || 'ConveLabs appointment update'
+    if (customMessage) {
+      message = customMessage
+    } else {
+      switch (notificationType) {
+        case 'on_the_way_custom':
+          message = customMessage || `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${eta} minutes. Please have a designated sterile, well-lit area where we can perform the collection. We're looking forward to serving you. See you soon!`
+          break
+        case 'on_the_way':
+          message = `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${eta} minutes. Please have a designated sterile, well-lit area where we can perform the collection. We're looking forward to serving you. See you soon!`
+          break
+        case 'sample_delivered':
+          message = `Your specimens have been successfully delivered to ${labName || 'the lab'}. Your lab-generated tracking ID is: ${trackingId || 'pending'}. You will receive your results directly from your lab's patient portal. Thank you for choosing ConveLabs!`
+          break
+        case 'completed':
+          message = `Your ConveLabs appointment is complete! Your specimens are on their way to the lab. We will send you a confirmation once they have been successfully delivered along with your lab-generated ID. Thank you for choosing ConveLabs!`
+          break
+        default:
+          message = 'ConveLabs appointment update'
+      }
     }
+
+    // Normalize phone number — ensure it starts with +1
+    let normalizedPhone = phoneNumber.replace(/\D/g, '')
+    if (normalizedPhone.length === 10) normalizedPhone = `+1${normalizedPhone}`
+    else if (!normalizedPhone.startsWith('+')) normalizedPhone = `+${normalizedPhone}`
 
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
 
     const formData = new URLSearchParams()
-    formData.append('To', phoneNumber)
+    formData.append('To', normalizedPhone)
     // Use Messaging Service if available, otherwise use phone number
     if (TWILIO_MESSAGING_SERVICE_SID) {
       formData.append('MessagingServiceSid', TWILIO_MESSAGING_SERVICE_SID)
