@@ -40,31 +40,30 @@ export async function fetchAppointmentsSimplified(
   userId?: string
 ) {
   try {
-    // Use edge function instead of RPC
-    const { data, error } = await supabase.functions.invoke('get-appointments-safe', {
-      body: { 
-        tenantId: tenantId || null, 
-        userId: userId || null 
-      }
-    });
-    
+    // Direct Supabase query (replaced broken edge function call)
+    let query = supabase
+      .from('appointments')
+      .select('*')
+      .order('appointment_date', { ascending: false })
+      .limit(50);
+
+    if (userId) {
+      query = query.eq('patient_id', userId);
+    }
+
+    const { data, error } = await query;
+
     if (error) {
-      console.error("Error in fetchAppointmentsSimplified Edge Function:", error);
-      
-      // Check if this is a recursion error
-      if (error.message?.includes('recursion') || error.code === '42P17') {
-        throw new Error("Database policy error: Unable to fetch appointments due to recursion in user policies. Please contact support.");
-      }
-      
+      console.error("Error in fetchAppointmentsSimplified:", error);
       throw error;
     }
-    
-    return { data: data.data, error: null };
+
+    return { data, error: null };
   } catch (error) {
     console.error("Exception in fetchAppointmentsSimplified:", error);
-    return { 
-      data: null, 
-      error: error instanceof Error ? error : new Error("Unknown error occurred") 
+    return {
+      data: null,
+      error: error instanceof Error ? error : new Error("Unknown error occurred")
     };
   }
 }
