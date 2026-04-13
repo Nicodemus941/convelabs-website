@@ -182,7 +182,14 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           console.error('Slot fetch error:', fetchError);
         }
 
-        console.log('Booked appointments found:', data?.length || 0, data);
+        console.log('Booked appointments for', dateStr, ':', data?.length || 0, data);
+
+        if (!data || data.length === 0) {
+          console.log('No appointments found — all slots available');
+          setBookedSlots(new Set());
+          setLoadingSlots(false);
+          return;
+        }
 
         const { count: staffCount } = await supabase
           .from('staff_profiles')
@@ -262,6 +269,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const booked = new Set<string>();
         slotCounts.forEach((count, key) => {
           if (count >= maxPerSlot) booked.add(key);
+        });
+
+        console.log('Slot blocking results:', {
+          maxPerSlot,
+          slotCounts: Object.fromEntries(slotCounts),
+          blockedSlots: Array.from(booked),
         });
 
         setBookedSlots(booked);
@@ -425,31 +438,35 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   ) : isSunday ? (
                     <p className="text-sm text-muted-foreground py-4">No appointments available on Sundays.</p>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                       {activeWindows.map((window) => {
                         const isSelected = field.value === window.time;
                         const isBooked = bookedSlots.has(window.time);
 
                         return (
-                          <Button
+                          <button
                             key={window.time}
                             type="button"
-                            variant={isSelected ? "default" : "outline"}
-                            className={`w-full text-xs sm:text-sm px-2 py-3 h-auto min-h-[44px] whitespace-nowrap ${
-                              isBooked ? 'opacity-40 line-through cursor-not-allowed' : ''
+                            className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all ${
+                              isBooked
+                                ? 'bg-gray-50 text-gray-300 line-through cursor-not-allowed border-gray-100'
+                                : isSelected
+                                ? 'bg-[#B91C1C] text-white border-[#B91C1C] shadow-md scale-[1.02]'
+                                : 'bg-white text-gray-700 border-gray-200 hover:border-[#B91C1C]/50 hover:shadow-sm'
                             }`}
                             onClick={() => {
                               if (!isBooked) field.onChange(window.time);
                             }}
                             disabled={isBooked}
                           >
-                            <Clock className="mr-1 h-3 w-3 flex-shrink-0" />
-                            {window.label}
-                            {isBooked && <span className="ml-1 text-[9px]">(booked)</span>}
-                          </Button>
+                            {window.time}
+                          </button>
                         );
                       })}
                     </div>
+                    {loadingSlots && (
+                      <p className="text-xs text-muted-foreground mt-1">Checking availability...</p>
+                    )}
                   )}
                   <FormDescription>
                     {isStat
