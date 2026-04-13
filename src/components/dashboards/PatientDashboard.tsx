@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Appointment } from "@/types/appointmentTypes";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail, Phone } from "lucide-react";
+import { Calendar, Clock, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail, Phone, LogOut } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import UpcomingAppointments from "@/components/appointments/UpcomingAppointments";
@@ -13,7 +13,7 @@ import AppointmentHistory from "@/components/appointments/AppointmentHistory";
 import ReferralCard from "@/components/patient/ReferralCard";
 
 const PatientDashboard = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { getAppointments, appointments } = useAppointments();
   const [nextAppointment, setNextAppointment] = useState<Appointment | null>(null);
   const [notifMethod, setNotifMethod] = useState<'sms' | 'email' | 'both'>('both');
@@ -153,8 +153,15 @@ const PatientDashboard = () => {
             <Button variant="outline" size="sm" className="justify-start gap-2 h-12" asChild>
               <a href="tel:9415279169"><Phone className="h-4 w-4 text-blue-500" /> Call ConveLabs</a>
             </Button>
-            <Button variant="outline" size="sm" className="justify-start gap-2 h-12" asChild>
-              <Link to="/guarantee"><FileText className="h-4 w-4 text-emerald-500" /> Our Guarantee</Link>
+            <Button
+              variant="outline"
+              size="sm"
+              className="justify-start gap-2 h-12 border-red-200 text-[#B91C1C]"
+              onClick={async () => {
+                try { await logout(); } catch { window.location.href = '/login'; }
+              }}
+            >
+              <LogOut className="h-4 w-4" /> Sign Out
             </Button>
           </div>
 
@@ -261,6 +268,16 @@ const PatientDashboard = () => {
               </Button>
               <Button variant="outline" size="sm" className="w-full justify-start" asChild>
                 <Link to="/profile"><User className="h-4 w-4 mr-2" /> Update Profile</Link>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start border-red-200 text-[#B91C1C] hover:bg-red-50"
+                onClick={async () => {
+                  try { await logout(); } catch { window.location.href = '/login'; }
+                }}
+              >
+                <LogOut className="h-4 w-4 mr-2" /> Sign Out
               </Button>
             </CardContent>
           </Card>

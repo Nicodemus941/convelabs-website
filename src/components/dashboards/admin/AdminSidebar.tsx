@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
-  CalendarDays, MessageSquare
+  CalendarDays, MessageSquare, LogOut
 } from 'lucide-react';
 
 type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
@@ -51,7 +52,7 @@ interface AdminSidebarProps {
 
 const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const userRole = user?.role || 'patient';
   const [hasNewMessages, setHasNewMessages] = useState(false);
 
@@ -139,13 +140,27 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
       </nav>
 
       {/* Footer */}
-      <div className="p-4 border-t border-gray-800">
+      <div className="p-4 border-t border-gray-800 space-y-3">
         <Link
           to="/"
-          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          onClick={onNavClick}
+          className="text-xs text-gray-500 hover:text-gray-300 transition-colors block"
         >
           ← Back to Website
         </Link>
+        <button
+          onClick={async () => {
+            try {
+              await logout();
+            } catch {
+              window.location.href = '/login';
+            }
+          }}
+          className="flex items-center gap-2 text-xs text-red-400 hover:text-red-300 transition-colors w-full"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign Out
+        </button>
       </div>
     </aside>
   );
