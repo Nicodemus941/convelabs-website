@@ -38,25 +38,55 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
   const appt = appointment;
 
-  // Load patient data from tenant_patients
+  // Load patient data from tenant_patients (try by id, then by email)
   useEffect(() => {
-    if (!appt?.patient_id) return;
-    supabase.from('tenant_patients').select('*').eq('id', appt.patient_id).maybeSingle()
-      .then(({ data }) => setPatientData(data));
-  }, [appt?.patient_id]);
+    if (!appt) return;
+    const lookup = async () => {
+      // Try by patient_id first
+      if (appt.patient_id) {
+        const { data } = await supabase.from('tenant_patients').select('*').eq('id', appt.patient_id).maybeSingle();
+        if (data) { setPatientData(data); return; }
+        // patient_id might be auth.users.id — try user_id column
+        const { data: byUserId } = await supabase.from('tenant_patients').select('*').eq('user_id', appt.patient_id).maybeSingle();
+        if (byUserId) { setPatientData(byUserId); return; }
+      }
+      // Fallback: lookup by email from appointment record or notes
+      const email = appt.patient_email || appt.notes?.match(/Email:\s*([^|\s]+)/)?.[1]?.trim();
+      if (email) {
+        const { data } = await supabase.from('tenant_patients').select('*').ilike('email', email).maybeSingle();
+        if (data) { setPatientData(data); return; }
+      }
+      setPatientData(null);
+    };
+    lookup();
+  }, [appt?.id, appt?.patient_id]);
 
   if (!appt) return null;
 
-  const patientName = patientData
-    ? `${patientData.first_name || ''} ${patientData.last_name || ''}`.trim()
-    : appt.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim() || 'Unknown Patient';
+  // Priority: 1) appointment columns, 2) tenant_patients data, 3) notes parsing
+  const patientName = appt.patient_name
+    || (patientData ? `${patientData.first_name || ''} ${patientData.last_name || ''}`.trim() : '')
+    || appt.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim()
+    || 'Unknown Patient';
 
-  const patientEmail = patientData?.email || appt.notes?.match(/Email:\s*([^|]+)/)?.[1]?.trim() || '';
-  const patientPhone = patientData?.phone || appt.notes?.match(/Phone:\s*([^|]+)/)?.[1]?.trim() || '';
+  const patientEmail = appt.patient_email
+    || patientData?.email
+    || appt.notes?.match(/Email:\s*([^|\s]+)/)?.[1]?.trim()
+    || '';
+
+  const patientPhone = appt.patient_phone
+    || patientData?.phone
+    || appt.notes?.match(/Phone:\s*([^|\s]+)/)?.[1]?.trim()
+    || '';
+
   const patientDOB = patientData?.date_of_birth || '';
   const insuranceProvider = patientData?.insurance_provider || '';
   const insuranceMemberId = patientData?.insurance_member_id || '';
   const insuranceGroup = patientData?.insurance_group_number || '';
+
+  const serviceName = appt.service_name
+    || appt.notes?.match(/Service:\s*([^|]+)/)?.[1]?.trim()
+    || '';
 
   const dateStr = appt.appointment_date?.substring(0, 10) || '';
   const formattedDate = dateStr ? format(new Date(dateStr + 'T12:00:00'), 'MMMM do, yyyy') : '';
@@ -181,9 +211,16 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               <div className="flex items-center gap-2 font-semibold text-sm">
                 <Stethoscope className="h-4 w-4" /> Service Information
               </div>
-              <div className="pl-6 text-sm">
-                <p>Service Type: <span className="font-medium capitalize">{serviceType}</span></p>
-                {appt.total_amount > 0 && <p>Amount: <span className="font-medium">${appt.total_amount}</span></p>}
+              <div className="pl-6 text-sm space-y-1">
+                {serviceName && <p>Service: <span className="font-medium">{serviceName}</span></p>}
+                <p>Type: <span className="font-medium capitalize">{serviceType}</span></p>
+                {appt.total_amount > 0 ? (
+                  <p>Amount: <span className="font-medium">${appt.total_amount}</span>{appt.tip_amount > 0 && ` (incl. $${appt.tip_amount} tip)`}</p>
+                ) : appt.payment_status === 'completed' ? (
+                  <p>Amount: <span className="font-medium text-emerald-600">Fee Waived</span></p>
+                ) : null}
+                {appt.gate_code && <p>Gate Code: <span className="font-mono font-medium">{appt.gate_code}</span></p>}
+                {appt.booking_source && <p>Source: <span className="font-medium capitalize">{appt.booking_source}</span></p>}
               </div>
             </div>
 
