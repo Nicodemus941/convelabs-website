@@ -255,6 +255,32 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         });
       }
 
+      // Send SMS notifications to phlebotomist + owner (non-blocking)
+      if (newAppt) {
+        const svcLabel = svc?.label || serviceType;
+        const fullAddress = [address, city, zipcode].filter(Boolean).join(', ') || 'TBD';
+
+        supabase.functions.invoke('send-sms-notification', {
+          body: {
+            to: '9415279169', // Owner phone
+            message: `💰 New Booking (Admin)\n\nPatient: ${patientName}\nService: ${svcLabel}\nRevenue: $${finalPrice.toFixed(2)}\nDate: ${date} at ${time}\nSource: manual`,
+          },
+        }).catch(() => {});
+
+        // Notify phlebotomist
+        supabase.from('staff_profiles').select('phone').eq('user_id', '91c76708-8c5b-4068-92c6-323805a3b164').maybeSingle()
+          .then(({ data: staff }) => {
+            if (staff?.phone) {
+              supabase.functions.invoke('send-sms-notification', {
+                body: {
+                  to: staff.phone,
+                  message: `New Booking!\n\nPatient: ${patientName}\nService: ${svcLabel}\nDate: ${date} at ${time}\nLocation: ${fullAddress}\nAmount: $${finalPrice.toFixed(2)}`,
+                },
+              }).catch(() => {});
+            }
+          });
+      }
+
       const statusMsg = isWaived ? ' (Fee waived)' : isVip ? ' (VIP)' : ' Invoice sent to patient.';
       toast.success(`Appointment scheduled!${statusMsg}`);
       handleClose();

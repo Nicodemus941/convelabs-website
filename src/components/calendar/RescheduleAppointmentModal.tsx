@@ -76,6 +76,10 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
       return;
     }
 
+    // Check reschedule limit (max 2 for patient-initiated, unlimited for admin)
+    const currentCount = appt.reschedule_count || 0;
+    const MAX_RESCHEDULES = 2;
+
     setIsSubmitting(true);
     try {
       // Parse time to 24h for appointment_date timestamp
@@ -88,15 +92,44 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
       }
       const appointmentDate = `${newDate}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
+      // Check if new time is after-hours (17:30+) and calculate surcharge
+      const isAfterHours = hours >= 17 && minutes >= 30 || hours >= 18;
+      const wasAfterHours = (() => {
+        const t = String(appt.appointment_time || '');
+        if (t.includes('PM')) {
+          const [tp] = t.split(' ');
+          const [h] = tp.split(':').map(Number);
+          const h24 = h === 12 ? 12 : h + 12;
+          return h24 >= 17;
+        }
+        const [h] = t.split(':').map(Number);
+        return h >= 17;
+      })();
+
+      // Build update payload
+      const updatePayload: any = {
+        appointment_date: appointmentDate,
+        appointment_time: newTime,
+        rescheduled_at: new Date().toISOString(),
+        reschedule_count: currentCount + 1,
+        status: 'scheduled',
+      };
+
+      // If moving to/from after-hours, adjust the surcharge
+      if (isAfterHours && !wasAfterHours) {
+        // Adding $50 after-hours surcharge
+        updatePayload.total_amount = (appt.total_amount || 0) + 50;
+        updatePayload.surcharge_amount = (appt.surcharge_amount || 0) + 50;
+      } else if (!isAfterHours && wasAfterHours) {
+        // Removing after-hours surcharge
+        updatePayload.total_amount = Math.max((appt.total_amount || 0) - 50, 0);
+        updatePayload.surcharge_amount = Math.max((appt.surcharge_amount || 0) - 50, 0);
+      }
+
       // Update the appointment
       const { error } = await supabase
         .from('appointments')
-        .update({
-          appointment_date: appointmentDate,
-          appointment_time: newTime,
-          rescheduled_at: new Date().toISOString(),
-          status: 'scheduled', // Reset to scheduled after reschedule
-        })
+        .update(updatePayload)
         .eq('id', appt.id);
 
       if (error) throw error;
@@ -185,6 +218,12 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
               Currently: {oldDate ? new Date(oldDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '—'} at {oldTime}
             </p>
             {appt.service_name && <p className="text-muted-foreground text-xs">{appt.service_name}</p>}
+            {(appt.reschedule_count || 0) > 0 && (
+              <p className={`text-xs font-medium ${(appt.reschedule_count || 0) >= 2 ? 'text-red-600' : 'text-amber-600'}`}>
+                Rescheduled {appt.reschedule_count} time{appt.reschedule_count !== 1 ? 's' : ''} previously
+                {(appt.reschedule_count || 0) >= 2 && ' (patient limit reached — admin override)'}
+              </p>
+            )}
           </div>
 
           {/* New date/time */}

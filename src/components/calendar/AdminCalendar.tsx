@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Calendar, Clock, Plus, RefreshCw, Users } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import AppointmentDetailModal from './AppointmentDetailModal';
 import ScheduleAppointmentModal from './ScheduleAppointmentModal';
 import './calendar-styles.css';
@@ -158,6 +159,62 @@ const AdminCalendar: React.FC = () => {
     setScheduleModalOpen(true);
   };
 
+  // Drag-and-drop reschedule
+  const handleEventDrop = async (info: any) => {
+    const appt = info.event.extendedProps.appointment;
+    if (!appt || info.event.extendedProps.isBlock) {
+      info.revert();
+      return;
+    }
+
+    // Don't allow dragging completed or cancelled
+    if (['completed', 'cancelled', 'specimen_delivered'].includes(appt.status)) {
+      toast.error('Cannot reschedule a completed or cancelled appointment');
+      info.revert();
+      return;
+    }
+
+    const newStart = info.event.start;
+    if (!newStart) { info.revert(); return; }
+
+    const newDateStr = `${newStart.getFullYear()}-${String(newStart.getMonth() + 1).padStart(2, '0')}-${String(newStart.getDate()).padStart(2, '0')}`;
+    const h = newStart.getHours();
+    const m = newStart.getMinutes();
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+    const newTimeStr = `${h12}:${String(m).padStart(2, '0')} ${period}`;
+    const newDateTimestamp = `${newDateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
+
+    try {
+      const { error } = await supabase
+        .from('appointments')
+        .update({
+          appointment_date: newDateTimestamp,
+          appointment_time: newTimeStr,
+          rescheduled_at: new Date().toISOString(),
+        })
+        .eq('id', appt.id);
+
+      if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_log' as any).insert({
+        patient_id: appt.patient_id || null,
+        activity_type: 'reschedule',
+        description: `Appointment drag-rescheduled to ${newDateStr} at ${newTimeStr}`,
+        performed_by: 'admin',
+        appointment_id: appt.id,
+      }).catch(() => {});
+
+      toast.success(`${getPatientName(appt)} moved to ${newDateStr} at ${newTimeStr}`);
+      fetchAppointments();
+    } catch (err: any) {
+      console.error('Drag reschedule failed:', err);
+      toast.error('Failed to reschedule: ' + (err.message || 'Unknown error'));
+      info.revert();
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -238,6 +295,9 @@ const AdminCalendar: React.FC = () => {
               events={allEvents}
               eventClick={handleEventClick}
               dateClick={handleDateClick}
+              editable={true}
+              eventDrop={handleEventDrop}
+              eventDurationEditable={false}
               height="auto"
               dayMaxEvents={4}
               eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
@@ -245,13 +305,13 @@ const AdminCalendar: React.FC = () => {
               nowIndicator={true}
               eventDisplay="block"
               slotMinTime="06:00:00"
-              slotMaxTime="15:00:00"
+              slotMaxTime="21:00:00"
               allDaySlot={false}
               weekends={true}
               businessHours={{
                 daysOfWeek: [1, 2, 3, 4, 5],
                 startTime: '06:00',
-                endTime: '13:30',
+                endTime: '17:30',
               }}
             />
           )}

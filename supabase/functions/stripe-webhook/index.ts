@@ -667,6 +667,76 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
       console.error('SMS send error:', smsErr);
     }
   }
+
+  // 3. Notify PHLEBOTOMIST of new booking via SMS
+  try {
+    // Fetch assigned phlebotomist's phone from staff_profiles
+    const phlebId = appointment.phlebotomist_id;
+    let phlebPhone: string | null = null;
+    let phlebName = 'Phlebotomist';
+
+    if (phlebId) {
+      const { data: staff } = await supabaseClient
+        .from('staff_profiles')
+        .select('first_name, last_name, phone')
+        .eq('user_id', phlebId)
+        .maybeSingle();
+      if (staff?.phone) phlebPhone = staff.phone;
+      if (staff?.first_name) phlebName = `${staff.first_name} ${staff.last_name || ''}`.trim();
+    }
+
+    // Fallback: notify owner phone directly (Nico)
+    const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+
+    if (phlebPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+      const phlebSms = `New Booking!\n\nPatient: ${patientName}\nService: ${serviceName}\nDate: ${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\nLocation: ${address || 'TBD'}\nAmount: $${totalAmount.toFixed(2)}\n\nView in your dashboard: https://convelabs.com/dashboard`;
+
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+      const twilioBody = new URLSearchParams({
+        To: phlebPhone.startsWith('+') ? phlebPhone : `+1${phlebPhone.replace(/\D/g, '')}`,
+        Body: phlebSms,
+        ...(TWILIO_MESSAGING_SERVICE_SID
+          ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
+          : { From: TWILIO_PHONE_NUMBER || '+14074104939' }),
+      });
+
+      await fetch(twilioUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: twilioBody.toString(),
+      });
+      console.log(`Phlebotomist notification sent to ${phlebPhone}`);
+    }
+
+    // 4. Notify OWNER of revenue via SMS
+    if (OWNER_PHONE && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+      const ownerSms = `💰 New Booking!\n\nPatient: ${patientName}\nService: ${serviceName}\nRevenue: $${totalAmount.toFixed(2)}${appointment.tip_amount ? ` (incl. $${appointment.tip_amount.toFixed(2)} tip)` : ''}\nDate: ${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\nSource: ${appointment.booking_source || 'online'}`;
+
+      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+      const twilioBody = new URLSearchParams({
+        To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
+        Body: ownerSms,
+        ...(TWILIO_MESSAGING_SERVICE_SID
+          ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
+          : { From: TWILIO_PHONE_NUMBER || '+14074104939' }),
+      });
+
+      await fetch(twilioUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: twilioBody.toString(),
+      });
+      console.log(`Owner revenue notification sent to ${OWNER_PHONE}`);
+    }
+  } catch (notifErr) {
+    console.error('Staff/owner notification error (non-fatal):', notifErr);
+  }
 }
 
 // New function to handle upgrades
