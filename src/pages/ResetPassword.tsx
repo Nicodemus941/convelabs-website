@@ -19,41 +19,56 @@ const ResetPassword = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    let attempts = 0;
-    const maxAttempts = 10;
-
-    const checkSession = async () => {
+    const initSession = async () => {
       try {
-        const { data } = await supabase.auth.getSession();
+        // Check for code in URL params (PKCE flow)
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
 
-        if (data?.session?.user?.email) {
-          setEmail(data.session.user.email);
-          return true;
+        if (code) {
+          console.log('Found auth code in URL, exchanging for session...');
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) {
+            console.error('Code exchange error:', error);
+          } else if (data?.session?.user?.email) {
+            setEmail(data.session.user.email);
+            // Clean up URL
+            window.history.replaceState({}, '', '/reset-password');
+            return;
+          }
         }
-        return false;
-      } catch {
-        return false;
-      }
-    };
 
-    // Poll for session — Supabase client needs time to process the hash/token
-    const pollSession = async () => {
-      const found = await checkSession();
-      if (found) return;
+        // Check for tokens in hash fragment (implicit flow)
+        const hash = window.location.hash;
+        if (hash && (hash.includes('access_token') || hash.includes('type=recovery'))) {
+          console.log('Found tokens in URL hash, waiting for Supabase to process...');
+          // Give Supabase client time to auto-detect and process
+          await new Promise(r => setTimeout(r, 1500));
+        }
 
-      attempts++;
-      if (attempts < maxAttempts) {
-        setTimeout(pollSession, 500);
-      } else {
-        // After 5 seconds of polling, show message
+        // Poll for session
+        for (let i = 0; i < 10; i++) {
+          const { data } = await supabase.auth.getSession();
+          if (data?.session?.user?.email) {
+            setEmail(data.session.user.email);
+            return;
+          }
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // No session found
         toast("Session expired", {
           description: "Please click the reset link in your email again."
+        });
+      } catch (error) {
+        console.error("Session init error:", error);
+        toast("Something went wrong", {
+          description: "Please try the reset link again."
         });
       }
     };
 
-    // Start polling after a brief delay
-    setTimeout(pollSession, 500);
+    initSession();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

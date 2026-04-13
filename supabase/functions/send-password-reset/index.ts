@@ -45,15 +45,21 @@ Deno.serve(async (req) => {
     }
 
     const actionLink = data?.properties?.action_link;
-    console.log('Action link generated:', actionLink ? 'YES (length: ' + actionLink.length + ')' : 'NO');
+    const hashedToken = data?.properties?.hashed_token;
+    console.log('Action link:', actionLink ? 'YES' : 'NO', 'Token:', hashedToken ? 'YES' : 'NO');
+    console.log('Full properties:', JSON.stringify(data?.properties));
 
     if (!actionLink) {
-      console.error('No action_link in response. Data:', JSON.stringify(data));
+      console.error('No action_link in response');
       return new Response(JSON.stringify({
         success: true,
         message: 'If this email is in our system, a reset link has been sent.',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+
+    // Use the action_link directly — it goes through Supabase's verify endpoint
+    // which exchanges the token and redirects to our app
+    const resetLink = actionLink;
 
     // Step 2: Get patient name
     const { data: tp } = await supabase
