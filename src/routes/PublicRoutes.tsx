@@ -14,6 +14,7 @@ const PrivacyPolicy = lazy(() => import('../pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('../pages/TermsOfService'));
 const ForgotPassword = lazy(() => import('../pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('../pages/ResetPassword'));
+const Guarantee = lazy(() => import('../pages/Guarantee'));
 const PhlebotomistSignup = lazy(() => import('../pages/PhlebotomistSignup'));
 const Blog = lazy(() => import('../pages/Blog'));
 const BlogPost = lazy(() => import('../pages/BlogPost'));
@@ -60,6 +61,7 @@ export const routes = [
   <Route key="signup" path="/signup" element={<Signup />} />,
   <Route key="forgot-password" path="/forgot-password" element={<ForgotPassword />} />,
   <Route key="reset-password" path="/reset-password" element={<ResetPassword />} />,
+  <Route key="guarantee" path="/guarantee" element={<Guarantee />} />,
   <Route key="privacy-policy" path="/privacy-policy" element={<PrivacyPolicy />} />,
   <Route key="terms-of-service" path="/terms-of-service" element={<TermsOfService />} />,
   <Route key="phlebotomist-signup" path="/phlebotomist-signup" element={<PhlebotomistSignup />} />,

@@ -143,6 +143,10 @@ const Hero = () => {
                 <CheckCircle className="h-4 w-4 text-conve-red" />
                 <span>500+ Patients Served</span>
               </div>
+              <div className="flex items-center gap-1.5">
+                <Shield className="h-4 w-4 text-conve-red" />
+                <span>Satisfaction Guaranteed</span>
+              </div>
             </motion.div>
           </motion.div>
         </div>

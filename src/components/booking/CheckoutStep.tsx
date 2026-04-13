@@ -12,6 +12,8 @@ import { calculateTotal, getServiceById, isExtendedArea } from '@/services/prici
 import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
+import { Shield, Gift, Tag } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
 interface CheckoutStepProps {
   onBack: () => void;
@@ -23,6 +25,30 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
   const [tipAmount, setTipAmount] = useState(0);
+  const [referralCode, setReferralCode] = useState('');
+  const [referralDiscount, setReferralDiscount] = useState(0);
+  const [referralApplied, setReferralApplied] = useState(false);
+
+  // Check URL for referral code
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (ref) { setReferralCode(ref); applyReferral(ref); }
+  }, []);
+
+  const applyReferral = async (code: string) => {
+    if (!code.trim()) return;
+    const { data } = await supabase.from('referral_codes' as any).select('*').eq('code', code.trim().toUpperCase()).eq('active', true).maybeSingle();
+    if (data) {
+      setReferralDiscount((data as any).discount_amount || 25);
+      setReferralApplied(true);
+      toast.success(`Referral code applied! $${(data as any).discount_amount || 25} off`);
+    } else {
+      toast.error('Invalid referral code');
+      setReferralApplied(false);
+      setReferralDiscount(0);
+    }
+  };
 
   const serviceId = getValues('serviceDetails.visitType') || getValues('serviceDetails.selectedService');
   const serviceDetails = getValues('serviceDetails');
@@ -149,6 +175,34 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
           <span>${breakdown.total.toFixed(2)}</span>
+        </div>
+
+        {/* Referral Code */}
+        {!referralApplied ? (
+          <div className="flex gap-2">
+            <Input
+              value={referralCode}
+              onChange={e => setReferralCode(e.target.value)}
+              placeholder="Referral code (optional)"
+              className="flex-1 text-sm"
+            />
+            <Button type="button" variant="outline" size="sm" onClick={() => applyReferral(referralCode)} disabled={!referralCode.trim()}>
+              <Tag className="h-3.5 w-3.5 mr-1" /> Apply
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+            <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+              <Gift className="h-4 w-4" /> Referral: -{`$${referralDiscount}`} applied
+            </span>
+            <button onClick={() => { setReferralApplied(false); setReferralDiscount(0); setReferralCode(''); }} className="text-xs text-muted-foreground hover:text-red-500">Remove</button>
+          </div>
+        )}
+
+        {/* Guarantee Badge */}
+        <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+          <Shield className="h-4 w-4 text-[#B91C1C]" />
+          <span className="text-xs text-muted-foreground">Protected by the <a href="/guarantee" target="_blank" className="text-[#B91C1C] font-medium hover:underline">ConveLabs Guarantee</a></span>
         </div>
 
         {/* Terms */}

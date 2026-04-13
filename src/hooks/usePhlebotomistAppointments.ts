@@ -165,6 +165,23 @@ export function usePhlebotomistAppointments() {
       setAppointments(prev =>
         prev.map(a => a.id === appointmentId ? { ...a, status: newStatus } : a)
       );
+
+      // Trigger post-visit sequence when appointment is completed
+      if (newStatus === 'completed') {
+        const appt = appointments.find(a => a.id === appointmentId);
+        if (appt) {
+          supabase.functions.invoke('trigger-post-visit-sequence', {
+            body: {
+              appointmentId,
+              patientId: appt.patient_id,
+              patientEmail: appt.patient_email,
+              patientPhone: appt.patient_phone,
+              patientName: appt.patient_name,
+            },
+          }).catch(err => console.error('Post-visit trigger error (non-blocking):', err));
+        }
+      }
+
       return true;
     } catch (err) {
       console.error('Error updating status:', err);

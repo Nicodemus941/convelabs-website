@@ -12,6 +12,7 @@ import { Link } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import UpcomingAppointments from "@/components/appointments/UpcomingAppointments";
 import AppointmentHistory from "@/components/appointments/AppointmentHistory";
+import ReferralCard from "@/components/patient/ReferralCard";
 
 const PatientDashboard = () => {
   const { user } = useAuth();
@@ -179,6 +180,9 @@ const PatientDashboard = () => {
               </Button>
             </CardContent>
           </Card>
+
+          {/* Referral */}
+          <ReferralCard />
 
           {/* Notification Preferences */}
           <Card>
