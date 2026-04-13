@@ -69,12 +69,10 @@ const Dashboard = () => {
   // Convert string parameter to UserRole type, fallback to user role if param not provided
   const userRole = (role || user.role) as UserRole;
   
-  // Check if this is an admin tab route
-  if (userRole === "super_admin" && adminTab) {
-    console.log("Rendering admin tab:", adminTab, "Available tabs:", ["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing"]);
-    // Handle admin tabs
+  // Check if this is an admin tab route (super_admin OR office_manager)
+  if ((userRole === "super_admin" || userRole === "office_manager") && adminTab) {
     return (
-      <RoleProtectedRoute allowedRoles={["super_admin", "admin"]}>
+      <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "admin"]}>
         <AdminLayout>
           {adminTab === "users" && <UserManagementTab />}
           {adminTab === "staff" && <StaffManagementTab />}

@@ -12,41 +12,43 @@ import {
 type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
 type SidebarSection = { label: string; items: SidebarItem[] };
 
-const SIDEBAR_SECTIONS: SidebarSection[] = [
-  {
-    label: 'MAIN',
-    items: [
-      { name: 'Dashboard', icon: LayoutDashboard, path: '/dashboard/super_admin' },
-      { name: 'Calendar', icon: Calendar, path: '/dashboard/super_admin/calendar' },
-      { name: 'Appointments', icon: CalendarDays, path: '/dashboard/super_admin/appointments' },
-    ],
-  },
-  {
-    label: 'MANAGEMENT',
-    items: [
-      { name: 'Users', icon: Users, path: '/dashboard/super_admin/users' },
-      { name: 'Staff', icon: Briefcase, path: '/dashboard/super_admin/staff' },
-      { name: 'Services', icon: Package, path: '/dashboard/super_admin/services' },
-      { name: 'SMS Messages', icon: MessageSquare, path: '/dashboard/super_admin/sms', badge: true },
-      { name: 'Invoices', icon: Receipt, path: '/dashboard/super_admin/invoices' },
-      { name: 'Specimens', icon: FlaskConical, path: '/dashboard/super_admin/specimens' },
-    ],
-  },
-  {
-    label: 'MARKETING',
-    items: [
-      { name: 'Campaigns', icon: Mail, path: '/dashboard/super_admin/marketing' },
-    ],
-  },
-  {
-    label: 'SYSTEM',
-    items: [
-      { name: 'Documentation', icon: FileText, path: '/dashboard/super_admin/documentation', roles: ['super_admin'] },
-      { name: 'Webhooks', icon: Webhook, path: '/dashboard/super_admin/webhooks', roles: ['super_admin'] },
-      { name: 'Settings', icon: Settings, path: '/dashboard/super_admin/settings', roles: ['super_admin'] },
-    ],
-  },
-];
+function getSidebarSections(basePath: string): SidebarSection[] {
+  return [
+    {
+      label: 'MAIN',
+      items: [
+        { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
+        { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
+        { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },
+      ],
+    },
+    {
+      label: 'MANAGEMENT',
+      items: [
+        { name: 'Users', icon: Users, path: `${basePath}/users` },
+        { name: 'Staff', icon: Briefcase, path: `${basePath}/staff` },
+        { name: 'Services', icon: Package, path: `${basePath}/services` },
+        { name: 'SMS Messages', icon: MessageSquare, path: `${basePath}/sms`, badge: true },
+        { name: 'Invoices', icon: Receipt, path: `${basePath}/invoices` },
+        { name: 'Specimens', icon: FlaskConical, path: `${basePath}/specimens` },
+      ],
+    },
+    {
+      label: 'MARKETING',
+      items: [
+        { name: 'Campaigns', icon: Mail, path: `${basePath}/marketing` },
+      ],
+    },
+    {
+      label: 'SYSTEM',
+      items: [
+        { name: 'Documentation', icon: FileText, path: `${basePath}/documentation`, roles: ['super_admin'] },
+        { name: 'Webhooks', icon: Webhook, path: `${basePath}/webhooks`, roles: ['super_admin'] },
+        { name: 'Settings', icon: Settings, path: `${basePath}/settings`, roles: ['super_admin'] },
+      ],
+    },
+  ];
+}
 
 interface AdminSidebarProps {
   onNavClick?: () => void;
@@ -56,6 +58,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const userRole = user?.role || 'patient';
+  const basePath = `/dashboard/${userRole}`;
+  const SIDEBAR_SECTIONS = getSidebarSections(basePath);
   const [hasNewMessages, setHasNewMessages] = useState(false);
 
   // Subscribe to new SMS messages for notification indicator
@@ -81,8 +85,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   }, [location.pathname]);
 
   const isActive = (path: string) => {
-    if (path === '/dashboard/super_admin') {
-      return location.pathname === path;
+    if (path === basePath) {
+      return location.pathname === path || location.pathname === basePath;
     }
     return location.pathname === path;
   };
