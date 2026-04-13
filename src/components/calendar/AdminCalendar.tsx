@@ -68,12 +68,34 @@ const AdminCalendar: React.FC = () => {
   };
 
   // Convert appointments to FullCalendar events
+  // Use appointment_time (local time) to build correct start time
   const calendarEvents = appointments.map(appt => {
     const name = getPatientName(appt);
+    const dateOnly = appt.appointment_date?.substring(0, 10) || '';
+
+    // Parse appointment_time (e.g., "8:00 AM" or "08:00:00") to build local datetime
+    let startStr = appt.appointment_date; // fallback
+    if (dateOnly && appt.appointment_time) {
+      const timeStr = String(appt.appointment_time);
+      let h = 0, m = 0;
+      if (timeStr.includes('AM') || timeStr.includes('PM')) {
+        const [tp, period] = timeStr.split(' ');
+        const [hr, mn] = tp.split(':').map(Number);
+        h = period === 'PM' && hr !== 12 ? hr + 12 : (period === 'AM' && hr === 12 ? 0 : hr);
+        m = mn || 0;
+      } else {
+        const parts = timeStr.split(':').map(Number);
+        h = parts[0] || 0;
+        m = parts[1] || 0;
+      }
+      startStr = `${dateOnly}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`;
+    }
+
     return {
       id: appt.id,
-      title: name,
-      start: appt.appointment_date,
+      title: `${appt.appointment_time ? appt.appointment_time.replace(':00:00', '').replace(/^0/, '') : ''} ${name}`.trim(),
+      start: startStr,
+      allDay: !appt.appointment_time,
       className: `fc-event-${appt.status}`,
       backgroundColor: STATUS_COLORS[appt.status] || '#1e293b',
       borderColor: 'transparent',
@@ -168,11 +190,13 @@ const AdminCalendar: React.FC = () => {
                 center: 'title',
                 right: 'dayGridMonth,timeGridWeek,timeGridDay',
               }}
+              timeZone="America/New_York"
               events={calendarEvents}
               eventClick={handleEventClick}
               dateClick={handleDateClick}
               height="auto"
               dayMaxEvents={4}
+              eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
               moreLinkText={(n) => `+${n} more`}
               nowIndicator={true}
               eventDisplay="block"
