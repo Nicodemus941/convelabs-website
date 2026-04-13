@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
-  CalendarDays, MessageSquare, LogOut
+  CalendarDays, MessageSquare, LogOut, Receipt
 } from 'lucide-react';
 
 type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
@@ -28,6 +28,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       { name: 'Staff', icon: Briefcase, path: '/dashboard/super_admin/staff' },
       { name: 'Services', icon: Package, path: '/dashboard/super_admin/services' },
       { name: 'SMS Messages', icon: MessageSquare, path: '/dashboard/super_admin/sms', badge: true },
+      { name: 'Invoices', icon: Receipt, path: '/dashboard/super_admin/invoices' },
     ],
   },
   {
