@@ -9,6 +9,7 @@ import { ChevronLeft, Loader2, CreditCard } from 'lucide-react';
 import { FormField, FormItem, FormControl, FormLabel, FormMessage } from '@/components/ui/form';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
+import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
 
@@ -39,11 +40,27 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
   const selectedDate = watch('date');
 
-  const handleCheckout = () => {
+  const handleCheckout = async () => {
     if (!termsAccepted) {
       toast.error('Please accept the terms and conditions');
       return;
     }
+
+    // Store T&C agreement with timestamp
+    try {
+      const patientEmail = getValues('patientDetails.email') || '';
+      const patientName = `${getValues('patientDetails.firstName') || ''} ${getValues('patientDetails.lastName') || ''}`.trim();
+
+      await supabase.from('terms_agreements' as any).insert({
+        patient_email: patientEmail,
+        patient_name: patientName,
+        terms_version: '2026-04-13',
+        user_agent: navigator.userAgent,
+      });
+    } catch (e) {
+      console.error('Failed to store T&C agreement:', e);
+    }
+
     onCheckout(tipAmount);
   };
 
@@ -149,9 +166,9 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
               <div className="space-y-1 leading-none">
                 <FormLabel>
                   I agree to the{' '}
-                  <a href="/terms-of-service" className="text-primary hover:underline">terms and conditions</a>
+                  <a href="/terms-of-service" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">terms and conditions</a>
                   {' '}and{' '}
-                  <a href="/privacy-policy" className="text-primary hover:underline">privacy policy</a>
+                  <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">privacy policy</a>
                 </FormLabel>
                 <FormMessage />
               </div>
