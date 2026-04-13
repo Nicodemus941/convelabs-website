@@ -32,6 +32,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Appointment } from "@/types/appointmentTypes";
+import { supabase } from "@/integrations/supabase/client";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import LoadingState from "@/components/ui/loading-state";
 import {
   Select,
@@ -73,6 +76,10 @@ const EnhancedAppointmentsTab = () => {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [serviceFilter, setServiceFilter] = useState<string>("all");
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkSmsOpen, setBulkSmsOpen] = useState(false);
+  const [bulkSmsMessage, setBulkSmsMessage] = useState('');
+  const [bulkProcessing, setBulkProcessing] = useState(false);
   
   const { 
     appointments, 
@@ -179,6 +186,52 @@ const EnhancedAppointmentsTab = () => {
 
     return matchesStatus && matchesDateRange && matchesService && matchesSearch;
   });
+
+  // Bulk selection helpers
+  const toggleSelect = (id: string) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredAppointments.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredAppointments.map(a => a.id)));
+  };
+  const selectedAppts = filteredAppointments.filter(a => selectedIds.has(a.id));
+
+  const handleBulkSms = async () => {
+    if (!bulkSmsMessage.trim()) { toast.error('Message is required'); return; }
+    setBulkProcessing(true);
+    let sent = 0;
+    for (const appt of selectedAppts) {
+      const phone = appt.patient_phone;
+      if (phone) {
+        await supabase.functions.invoke('send-sms-notification', { body: { to: phone, message: bulkSmsMessage } }).catch(() => {});
+        sent++;
+      }
+    }
+    toast.success(`SMS sent to ${sent}/${selectedAppts.length} patients`);
+    setBulkProcessing(false);
+    setBulkSmsOpen(false);
+    setBulkSmsMessage('');
+  };
+
+  const handleBulkCancel = async () => {
+    if (!confirm(`Cancel ${selectedIds.size} appointment(s)? This cannot be undone.`)) return;
+    setBulkProcessing(true);
+    const { error } = await supabase.from('appointments').update({ status: 'cancelled', cancelled_at: new Date().toISOString() }).in('id', Array.from(selectedIds));
+    if (error) toast.error('Failed: ' + error.message);
+    else { toast.success(`${selectedIds.size} appointments cancelled`); setSelectedIds(new Set()); fetchAppointments(); }
+    setBulkProcessing(false);
+  };
+
+  const handleBulkMarkPaid = async () => {
+    setBulkProcessing(true);
+    const { error } = await supabase.from('appointments').update({ payment_status: 'completed', invoice_status: 'paid' }).in('id', Array.from(selectedIds));
+    if (error) toast.error('Failed: ' + error.message);
+    else { toast.success(`${selectedIds.size} appointments marked as paid`); setSelectedIds(new Set()); fetchAppointments(); }
+    setBulkProcessing(false);
+  };
 
   // Statistics calculations
   const stats = {
@@ -487,11 +540,31 @@ const EnhancedAppointmentsTab = () => {
                     Showing {filteredAppointments.length} of {appointments.length} appointments
                   </div>
                   
+                  {/* Bulk Action Bar */}
+                  {selectedIds.size > 0 && (
+                    <div className="bg-[#B91C1C]/5 border border-[#B91C1C]/20 rounded-lg p-3 flex flex-wrap items-center gap-3">
+                      <span className="text-sm font-medium text-[#B91C1C]">{selectedIds.size} selected</span>
+                      <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => setBulkSmsOpen(true)}>
+                        <Mail className="h-3 w-3" /> Send SMS
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-xs gap-1" onClick={handleBulkMarkPaid} disabled={bulkProcessing}>
+                        <DollarSign className="h-3 w-3" /> Mark Paid
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-xs gap-1 text-red-600 hover:text-red-700" onClick={handleBulkCancel} disabled={bulkProcessing}>
+                        <AlertTriangle className="h-3 w-3" /> Cancel All
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-xs" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+                    </div>
+                  )}
+
                   {/* Enhanced Table */}
                   <div className="rounded-md border overflow-x-auto">
                     <Table className="min-w-[700px]">
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox checked={selectedIds.size === filteredAppointments.length && filteredAppointments.length > 0} onCheckedChange={toggleSelectAll} />
+                          </TableHead>
                           <TableHead>Patient Info</TableHead>
                           <TableHead>Date & Time</TableHead>
                           <TableHead>Service</TableHead>
@@ -503,7 +576,10 @@ const EnhancedAppointmentsTab = () => {
                       </TableHeader>
                       <TableBody>
                         {filteredAppointments.map((appointment) => (
-                          <TableRow key={appointment.id} className="hover:bg-muted/50">
+                          <TableRow key={appointment.id} className={`hover:bg-muted/50 ${selectedIds.has(appointment.id) ? 'bg-[#B91C1C]/5' : ''}`}>
+                            <TableCell>
+                              <Checkbox checked={selectedIds.has(appointment.id)} onCheckedChange={() => toggleSelect(appointment.id)} />
+                            </TableCell>
                             <TableCell>
                               <div className="space-y-1">
                                 <p className="font-medium">{appointment.patient_name || "Unknown"}</p>
@@ -673,6 +749,32 @@ const EnhancedAppointmentsTab = () => {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Bulk SMS Modal */}
+      <Dialog open={bulkSmsOpen} onOpenChange={setBulkSmsOpen}>
+        <DialogContent className="max-w-md w-[95vw]">
+          <DialogHeader>
+            <DialogTitle>Send SMS to {selectedIds.size} Patient{selectedIds.size !== 1 ? 's' : ''}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1 max-h-32 overflow-y-auto">
+              {selectedAppts.map(a => (
+                <p key={a.id}>{a.patient_name || 'Unknown'} — {a.patient_phone || 'no phone'}</p>
+              ))}
+            </div>
+            <Textarea
+              value={bulkSmsMessage}
+              onChange={e => setBulkSmsMessage(e.target.value)}
+              placeholder="Type your message..."
+              rows={4}
+            />
+            <p className="text-xs text-muted-foreground">{selectedAppts.filter(a => a.patient_phone).length}/{selectedIds.size} have phone numbers</p>
+            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!bulkSmsMessage.trim() || bulkProcessing} onClick={handleBulkSms}>
+              {bulkProcessing ? 'Sending...' : `Send to ${selectedAppts.filter(a => a.patient_phone).length} patients`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
