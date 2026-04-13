@@ -51,14 +51,9 @@ export const useAuthSession = () => {
     // Get initial session
     const getInitialSession = async () => {
       try {
-        console.log("Getting initial auth session...");
         setIsLoading(true);
-        
         const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error('Error getting session:', error);
-        }
+        if (error) console.error('Session error:', error);
         
         const mappedSession = mapSessionData(supabaseSession);
         setSession(mappedSession);
@@ -81,17 +76,11 @@ export const useAuthSession = () => {
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
-      console.log("Auth state changed:", _event);
+      // Skip redundant INITIAL_SESSION events after first init
+      if (_event === 'INITIAL_SESSION' && authInitialized) return;
 
       // Handle password recovery — let ResetPassword.tsx handle everything
-      if (_event === 'PASSWORD_RECOVERY') {
-        console.log("Password recovery event detected — ResetPassword.tsx will handle session");
-        // Don't redirect, don't interfere — the user either:
-        // 1. Clicked the email link → lands on /reset-password with hash tokens
-        // 2. Is already on /reset-password
-        // ResetPassword.tsx reads tokens directly from the URL hash
-        return;
-      }
+      if (_event === 'PASSWORD_RECOVERY') return;
 
       const mappedSession = mapSessionData(supabaseSession);
       setSession(mappedSession);

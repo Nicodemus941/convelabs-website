@@ -24,9 +24,9 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // Load user's tenants when authentication state changes
+  // Load user's tenants when authentication state changes (skip for patients)
   useEffect(() => {
-    if (user) {
+    if (user && user.role !== 'patient') {
       loadUserTenants().catch(err => {
         console.error("Error loading user tenants:", err);
         setError(err as Error);
@@ -68,6 +68,8 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const loadUserTenants = async () => {
     if (!user) return [] as UserTenant[];
+    // Patients don't have tenants — skip the query to avoid 500 errors
+    if (user.role === 'patient') { setIsLoading(false); return [] as UserTenant[]; }
     
     setIsLoading(true);
     try {
