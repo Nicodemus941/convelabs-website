@@ -171,16 +171,22 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         weekend: data.serviceDetails.weekend,
       }, tipAmount, additionalPatientCount);
 
-      // Upload lab order files if present
+      // Upload lab order files and track paths
+      const labOrderPaths: string[] = [];
       for (const file of labOrderFiles) {
         const fileName = `laborder_${Date.now()}_${file.name}`;
-        await supabase.storage.from('lab-orders').upload(fileName, file);
+        const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
+        if (uploadErr) console.error('Lab order upload error:', uploadErr);
+        else labOrderPaths.push(fileName);
       }
 
-      // Upload insurance file if present
+      // Upload insurance file and track path
+      let insurancePath: string | null = null;
       if (insuranceFile) {
         const fileName = `insurance_${Date.now()}_${insuranceFile.name}`;
-        await supabase.storage.from('lab-orders').upload(fileName, insuranceFile);
+        const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, insuranceFile);
+        if (uploadErr) console.error('Insurance upload error:', uploadErr);
+        else insurancePath = fileName;
       }
 
       const appointmentDate = data.date instanceof Date
@@ -207,11 +213,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           zipCode: data.locationDetails.zipCode,
           locationType: data.locationDetails.locationType,
           instructions: data.locationDetails.instructions,
+          aptUnit: data.locationDetails.aptUnit,
+          gateCode: data.locationDetails.gateCode,
         },
         serviceDetails: {
           sameDay: data.serviceDetails.sameDay,
           weekend: data.serviceDetails.weekend,
-          additionalNotes: data.serviceDetails.additionalNotes,
+          additionalNotes: [
+            data.serviceDetails.additionalNotes,
+            labOrderPaths.length > 0 ? `Lab orders: ${labOrderPaths.join(', ')}` : '',
+            insurancePath ? `Insurance: ${insurancePath}` : '',
+          ].filter(Boolean).join(' | '),
         },
       });
 

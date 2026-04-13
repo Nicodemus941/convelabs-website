@@ -82,56 +82,73 @@ export function usePhlebotomistAppointments() {
       // Enrich with patient data
       const enriched: PhlebAppointment[] = await Promise.all(
         (appts || []).map(async (appt: any) => {
-          let patientName = 'Unknown Patient';
-          let patientPhone: string | null = null;
-          let patientEmail: string | null = null;
+          // PRIORITY 1: Use appointment columns directly (most reliable)
+          let patientName = appt.patient_name || 'Unknown Patient';
+          let patientPhone: string | null = appt.patient_phone || null;
+          let patientEmail: string | null = appt.patient_email || null;
           let patientDob: string | null = null;
           let patientInsurance: string | null = null;
           let patientInsuranceId: string | null = null;
           let patientInsuranceGroup: string | null = null;
+          let labOrderPath: string | null = appt.lab_order_file_path || null;
 
-          // Try lookup by patient_id first, then by email from notes
+          // PRIORITY 2: Lookup tenant_patients for insurance/DOB and missing fields
+          let tpData: any = null;
           if (appt.patient_id) {
-            const { data: patient } = await supabase
+            // Try by patient_id (could be tenant_patients.id)
+            const { data } = await supabase
               .from('tenant_patients')
-              .select('id, first_name, last_name, phone, email, date_of_birth, insurance_provider, insurance_member_id, insurance_group_number')
+              .select('*')
               .eq('id', appt.patient_id)
               .maybeSingle();
-
-            if (patient) {
-              patientName = `${patient.first_name} ${patient.last_name}`.trim();
-              patientPhone = patient.phone;
-              patientEmail = patient.email;
-              patientDob = patient.date_of_birth;
-              patientInsurance = patient.insurance_provider;
-              patientInsuranceId = patient.insurance_member_id;
-              patientInsuranceGroup = patient.insurance_group_number;
+            if (data) tpData = data;
+            else {
+              // Try by user_id (could be auth.users.id)
+              const { data: byUser } = await supabase
+                .from('tenant_patients')
+                .select('*')
+                .eq('user_id', appt.patient_id)
+                .maybeSingle();
+              if (byUser) tpData = byUser;
             }
           }
 
-          // Fallback: parse from notes and lookup by email
+          // Try by email if still no match
+          if (!tpData && (patientEmail || appt.notes?.includes('Email:'))) {
+            const email = patientEmail || appt.notes?.match(/Email:\s*([^\s|]+)/)?.[1]?.trim();
+            if (email) {
+              const { data } = await supabase
+                .from('tenant_patients')
+                .select('*')
+                .ilike('email', email)
+                .maybeSingle();
+              if (data) tpData = data;
+            }
+          }
+
+          // Fill from tenant_patients data
+          if (tpData) {
+            if (patientName === 'Unknown Patient') patientName = `${tpData.first_name || ''} ${tpData.last_name || ''}`.trim() || patientName;
+            if (!patientPhone && tpData.phone) patientPhone = tpData.phone;
+            if (!patientEmail && tpData.email) patientEmail = tpData.email;
+            patientDob = tpData.date_of_birth || null;
+            patientInsurance = tpData.insurance_provider || null;
+            patientInsuranceId = tpData.insurance_member_id || null;
+            patientInsuranceGroup = tpData.insurance_group_number || null;
+          }
+
+          // PRIORITY 3: Parse from notes (oldest fallback)
           if (patientName === 'Unknown Patient' && appt.notes) {
             const nameMatch = appt.notes.match(/Patient:\s*([^|]+)/);
-            const emailMatch = appt.notes.match(/Email:\s*([^|]+)/);
-            const phoneMatch = appt.notes.match(/Phone:\s*([^|]+)/);
             if (nameMatch) patientName = nameMatch[1].trim();
+          }
+          if (!patientPhone && appt.notes) {
+            const phoneMatch = appt.notes.match(/Phone:\s*([^|\s]+)/);
             if (phoneMatch) patientPhone = phoneMatch[1].trim();
+          }
+          if (!patientEmail && appt.notes) {
+            const emailMatch = appt.notes.match(/Email:\s*([^|\s]+)/);
             if (emailMatch) patientEmail = emailMatch[1].trim();
-
-            // Try email lookup in tenant_patients for phone/insurance
-            if (patientEmail && !patientPhone) {
-              const { data: tpByEmail } = await supabase
-                .from('tenant_patients')
-                .select('phone, email, insurance_provider, insurance_member_id, insurance_group_number')
-                .ilike('email', patientEmail.trim())
-                .maybeSingle();
-              if (tpByEmail) {
-                if (tpByEmail.phone) patientPhone = tpByEmail.phone;
-                if (tpByEmail.insurance_provider) patientInsurance = tpByEmail.insurance_provider;
-                if (tpByEmail.insurance_member_id) patientInsuranceId = tpByEmail.insurance_member_id;
-                if (tpByEmail.insurance_group_number) patientInsuranceGroup = tpByEmail.insurance_group_number;
-              }
-            }
           }
 
           // Normalize appointment_date to yyyy-MM-dd (may come as full timestamp)
@@ -145,6 +162,7 @@ export function usePhlebotomistAppointments() {
             address: appt.address || 'Address pending',
             zipcode: appt.zipcode || '',
             service_type: appt.service_type || 'mobile',
+            service_name: appt.service_name || null,
             notes: appt.notes,
             total_amount: appt.total_amount || 0,
             tip_amount: appt.tip_amount || 0,
@@ -153,6 +171,8 @@ export function usePhlebotomistAppointments() {
             invoice_status: appt.invoice_status || null,
             is_vip: appt.is_vip || false,
             booking_source: appt.booking_source || 'online',
+            gate_code: appt.gate_code || null,
+            lab_order_file_path: labOrderPath,
             patient_id: appt.patient_id,
             patient_name: patientName,
             patient_phone: patientPhone,

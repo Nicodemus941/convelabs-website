@@ -509,8 +509,14 @@ async function handleAppointmentPayment(session: any) {
         service_type: metadata.service_type || 'mobile',
         service_name: metadata.service_name || 'Blood Draw',
         gate_code: metadata.gate_code || null,
+        lab_order_file_path: (() => {
+          const notes = metadata.additional_notes || '';
+          const match = notes.match(/Lab orders?:\s*([^|]+)/);
+          return match ? match[1].trim() : null;
+        })(),
         notes: [
-          metadata.additional_notes,
+          // Strip the file paths from notes (they're stored in their own columns)
+          (metadata.additional_notes || '').replace(/Lab orders?:\s*[^|]+\|?\s*/g, '').replace(/Insurance:\s*[^|]+\|?\s*/g, '').trim(),
           metadata.instructions ? `Instructions: ${metadata.instructions}` : '',
           metadata.gate_code ? `Gate Code: ${metadata.gate_code}` : '',
         ].filter(Boolean).join(' | ') || null,

@@ -7,9 +7,10 @@ import {
   Clock, MapPin, Navigation, MessageSquare, User, Phone, Mail,
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
   Stethoscope, Shield, CalendarClock, DollarSign, Crown, AlertTriangle,
-  Globe, Pencil,
+  Globe, Pencil, FileText,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import OnTheWayDialog from './OnTheWayDialog';
 import PatientEditModal from './PatientEditModal';
@@ -190,6 +191,17 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               {/* Patient Details */}
               <div className="px-4 py-3 border-b">
                 <p className="text-sm font-semibold text-gray-800 mb-2">Patient Details</p>
+                {/* Contact info */}
+                <div className="space-y-1 mb-3 text-sm">
+                  {appointment.patient_phone ? (
+                    <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> <a href={`tel:${appointment.patient_phone}`} className="text-[#B91C1C] hover:underline">{appointment.patient_phone}</a></p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No phone on file</p>
+                  )}
+                  {appointment.patient_email && (
+                    <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> <a href={`mailto:${appointment.patient_email}`} className="text-[#B91C1C] hover:underline text-xs">{appointment.patient_email}</a></p>
+                  )}
+                </div>
                 <div className="flex gap-2 mb-3">
                   <Button size="sm" variant="outline" className="flex-1 gap-1.5 h-8 text-xs" onClick={handleCall}>
                     <Phone className="h-3 w-3" /> Call
@@ -226,9 +238,37 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 <p className="text-sm font-semibold text-gray-800 mb-2">Services</p>
                 <Badge className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1">
                   <Stethoscope className="h-3 w-3" />
-                  {appointment.service_type?.replace(/_/g, ' ')}
+                  {appointment.service_name || appointment.service_type?.replace(/_/g, ' ')}
                 </Badge>
+                {appointment.gate_code && (
+                  <p className="text-sm mt-2 flex items-center gap-1.5">
+                    <span className="text-muted-foreground">Gate Code:</span>
+                    <span className="font-mono font-bold text-[#B91C1C]">{appointment.gate_code}</span>
+                  </p>
+                )}
               </div>
+
+              {/* Lab Order */}
+              {appointment.lab_order_file_path && (
+                <div className="px-4 py-3 border-b">
+                  <p className="text-sm font-semibold text-gray-800 mb-2">Lab Order</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5 text-xs"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const paths = appointment.lab_order_file_path.split(',').map((p: string) => p.trim());
+                      for (const path of paths) {
+                        const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
+                        if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                      }
+                    }}
+                  >
+                    <FileText className="h-3.5 w-3.5" /> View Lab Order
+                  </Button>
+                </div>
+              )}
 
               {/* Notes */}
               {appointment.notes && (
