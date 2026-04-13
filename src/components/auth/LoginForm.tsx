@@ -80,10 +80,26 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
       }
     } catch (error: any) {
       console.error("Login error:", error);
-      // If login fails, check if this is a migrated user who needs to set password
       if (error?.message?.includes('Invalid login credentials')) {
-        // Check if user exists but has no confirmed password (migrated)
-        setIsMigratedUser(true);
+        // Check if this is a migrated patient who needs to reset password
+        // Look up in tenant_patients to see if they exist
+        const { data: existingPatient } = await supabase
+          .from('tenant_patients')
+          .select('id, first_name')
+          .ilike('email', email.trim())
+          .maybeSingle();
+
+        if (existingPatient) {
+          // Migrated user found — show welcome screen
+          setIsMigratedUser(true);
+          toast("We found your account!", {
+            description: "Welcome to the new ConveLabs system. Please reset your password to continue.",
+          });
+        } else {
+          toast.error("Invalid email or password. Please try again.");
+        }
+      } else {
+        toast.error(error?.message || "Login failed. Please try again.");
       }
     } finally {
       setIsSubmitting(false);

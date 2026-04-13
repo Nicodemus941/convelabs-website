@@ -15,6 +15,7 @@ import {
   PasswordStrengthMeter 
 } from "@/components/auth/FormValidation";
 import { UserRole } from "@/types/auth";
+import { supabase } from "@/integrations/supabase/client";
 
 interface SignupFormProps {
   onSignupComplete?: (email: string) => void;
@@ -93,18 +94,27 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
     return isValid;
   };
 
+  const [showMigratedMessage, setShowMigratedMessage] = useState(false);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
-    
+
     setIsSubmitting(true);
 
     try {
+      // Check if email already exists in tenant_patients (migrated patient)
+      const { data: existingPatient } = await supabase
+        .from('tenant_patients')
+        .select('id, first_name')
+        .ilike('email', email.trim())
+        .maybeSingle();
+
       const result = await signup(email, password, firstName, lastName, role);
-      
+
       if (result.success) {
         if (onSignupComplete) {
           onSignupComplete(email);
@@ -112,15 +122,72 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
           toast.success("Account created successfully!");
         }
       } else {
-        throw new Error(result.error?.message || "Failed to create account");
+        const errorMsg = result.error?.message || "";
+        // Check if account already exists
+        if (errorMsg.includes('already registered') || errorMsg.includes('already been registered') || errorMsg.includes('User already registered')) {
+          if (existingPatient) {
+            // Migrated patient — send password reset
+            await supabase.auth.resetPasswordForEmail(email.trim(), {
+              redirectTo: `${window.location.origin}/reset-password`,
+            });
+            setShowMigratedMessage(true);
+            toast("We found your account!", {
+              description: `Welcome back, ${existingPatient.first_name || 'patient'}! Check your email to set your password.`,
+            });
+          } else {
+            toast.error("An account with this email already exists. Please log in instead.");
+          }
+          return;
+        }
+        throw new Error(errorMsg || "Failed to create account");
       }
     } catch (error: any) {
       console.error("Signup error:", error);
-      toast.error(error.message || "Failed to create account. Please try again.");
+      const msg = error.message || "";
+      if (msg.includes('already registered') || msg.includes('already been registered')) {
+        // Check tenant_patients
+        const { data: tp } = await supabase.from('tenant_patients').select('first_name').ilike('email', email.trim()).maybeSingle();
+        if (tp) {
+          await supabase.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: `${window.location.origin}/reset-password`,
+          });
+          setShowMigratedMessage(true);
+          toast("We found your account!", {
+            description: `Welcome back! Check your email to set your password.`,
+          });
+        } else {
+          toast.error("This email is already registered. Please log in instead.");
+        }
+      } else {
+        toast.error(msg || "Failed to create account. Please try again.");
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (showMigratedMessage) {
+    return (
+      <div className="text-center space-y-4 py-4">
+        <div className="h-14 w-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+          <Check className="h-7 w-7 text-emerald-600" />
+        </div>
+        <h3 className="text-lg font-bold">We Found Your Account!</h3>
+        <p className="text-sm text-muted-foreground">
+          Welcome to the new ConveLabs booking system! We've sent a password reset link to <span className="font-semibold text-foreground">{email}</span>.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Check your email and click the link to set your password. Once done, you can log in and manage your appointments.
+        </p>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+          The link expires in 10 minutes. Check your spam folder if you don't see it.
+        </div>
+        <Button variant="outline" onClick={() => window.location.href = '/login'} className="w-full">
+          Go to Login
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
