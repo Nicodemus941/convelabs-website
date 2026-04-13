@@ -153,16 +153,10 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         const { data } = await supabase.from('tenant_patients').select('id').ilike('first_name', `%${firstName}%`).maybeSingle();
         if (data) patientId = data.id;
       }
-      // Fallback: current user
-      if (!patientId) {
-        const { data: session } = await supabase.auth.getSession();
-        patientId = session?.session?.user?.id || null;
-      }
 
+      // patient_id is now optional — admin can schedule without a matching patient record
       if (!patientId) {
-        toast.error('Could not find patient. Check the name or email.');
-        setIsSubmitting(false);
-        return;
+        console.log('No patient_id found — scheduling without patient link (admin override)');
       }
 
       // Parse time
