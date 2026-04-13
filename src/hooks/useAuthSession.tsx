@@ -83,15 +83,14 @@ export const useAuthSession = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
       console.log("Auth state changed:", _event);
 
-      // Handle password recovery — redirect to reset page if not already there
+      // Handle password recovery — let ResetPassword.tsx handle everything
       if (_event === 'PASSWORD_RECOVERY') {
-        console.log("Password recovery event detected");
-        if (!window.location.pathname.includes('/reset-password')) {
-          // Hard redirect to reset page — preserves hash tokens in URL
-          window.location.href = '/reset-password' + window.location.hash;
-          return; // Don't process further — page is redirecting
-        }
-        // Already on reset page — don't interfere, let ResetPassword.tsx handle the session
+        console.log("Password recovery event detected — ResetPassword.tsx will handle session");
+        // Don't redirect, don't interfere — the user either:
+        // 1. Clicked the email link → lands on /reset-password with hash tokens
+        // 2. Is already on /reset-password
+        // ResetPassword.tsx reads tokens directly from the URL hash
+        return;
       }
 
       const mappedSession = mapSessionData(supabaseSession);
