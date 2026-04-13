@@ -209,15 +209,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           // Get duration for this appointment type — prefer DURATION_MAP over DB default of 30
           const mappedDuration = DURATION_MAP[appt.service_type || 'mobile'] || 60;
           const duration = (appt.duration_minutes && appt.duration_minutes > 30) ? appt.duration_minutes : mappedDuration;
-          // Add travel buffer: 15min default, 30min if appointment is in an extended area
-          const EXTENDED_ZIPS = ['32746', '34715', '34787', '32708', '32779', '32833', '34786', '32836', '32803', '32789'];
-          const isExtended = appt.zipcode && EXTENDED_ZIPS.some((z: string) => appt.zipcode?.startsWith(z.substring(0, 3)));
-          const travelBuffer = isExtended ? 30 : 15;
+          // Travel buffer ONLY for extended area cities (30min)
+          // No travel buffer for standard Orlando metro area
+          const EXTENDED_AREA_CITIES = ['eustis', 'sanford', 'celebration', 'kissimmee', 'lake nona', 'clermont', 'montverde', 'geneva'];
+          const apptCity = (appt.address || '').toLowerCase();
+          const isExtendedArea = EXTENDED_AREA_CITIES.some(city => apptCity.includes(city));
+          const travelBuffer = isExtendedArea ? 30 : 0;
 
-          // Block FORWARD: only the slots the service duration occupies
-          // Travel buffer (15min) fits within the next slot's 30-min arrival window
-          // Exception: extended area (30min travel) needs an extra blocked slot
-          const forwardBlockedMinutes = travelBuffer >= 30 ? duration + travelBuffer : duration;
+          // Block FORWARD: service duration + travel buffer (if extended area)
+          const forwardBlockedMinutes = duration + travelBuffer;
           const forwardSlots = Math.ceil(forwardBlockedMinutes / 30);
           let fwdMin = startMin < 30 ? 0 : 30;
           let fwdHour = startHour;
