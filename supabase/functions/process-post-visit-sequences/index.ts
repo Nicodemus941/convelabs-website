@@ -93,8 +93,27 @@ Deno.serve(async (req) => {
             break;
           }
           case 'review_request': {
+            // Send both SMS and email for review requests
             if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
-              await sendSMS(seq.patient_phone, `Hi ${patientName}! Thank you for choosing ConveLabs. We'd love to hear about your experience. Leave us a review: https://g.page/r/convelabs/review`);
+              await sendSMS(seq.patient_phone, `Hi ${patientName}! Thank you for choosing ConveLabs. We'd love to hear about your experience. Leave us a Google review: https://g.page/r/CQYNAuLgDPeiEAI/review`);
+            }
+            if (MAILGUN_API_KEY && seq.patient_email) {
+              await sendEmail(seq.patient_email, 'We\'d Love Your Feedback!', `
+                <div style="font-family:Arial;max-width:600px;margin:0 auto;">
+                  <div style="background:#B91C1C;color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
+                    <h2 style="margin:0;">How Did We Do?</h2>
+                  </div>
+                  <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
+                    <p>Hi ${patientName},</p>
+                    <p>Thank you for choosing ConveLabs! Your feedback means the world to us and helps other patients discover our luxury mobile phlebotomy services.</p>
+                    <div style="text-align:center;margin:24px 0;">
+                      <a href="https://g.page/r/CQYNAuLgDPeiEAI/review" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Leave a Google Review ⭐</a>
+                    </div>
+                    <p style="text-align:center;font-size:12px;color:#6b7280;">It takes less than 30 seconds and makes a huge difference.</p>
+                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
+                  </div>
+                </div>
+              `);
             }
             break;
           }
