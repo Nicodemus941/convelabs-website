@@ -20,10 +20,13 @@ createRoot(document.getElementById("root")!).render(
   </QueryClientProvider>
 );
 
-// Register service worker for PWA
+// Register service worker for PWA — force update check on every load
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      // Force the SW to check for updates immediately
+      registration.update();
+    }).catch((err) => {
       console.log('SW registration failed:', err);
     });
   });
