@@ -34,27 +34,29 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
   const [memberLabel, setMemberLabel] = useState('');
 
-  // Auto-detect membership by patient email
+  // Auto-detect membership by patient email (no auth calls — avoid lock)
   React.useEffect(() => {
     const email = getValues('patientDetails.email');
     if (!email) return;
-    supabase.from('user_memberships' as any)
-      .select('*, membership_plans(*)')
-      .eq('status', 'active')
-      .then(async ({ data: memberships }) => {
-        if (!memberships?.length) return;
-        // Find membership matching this email via auth.users
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const match = memberships.find((m: any) => m.user_id === user.id);
-          if (match) {
-            const plan = (match as any).membership_plans;
-            if (plan?.name?.toLowerCase().includes('concierge')) { setMemberTier('concierge'); setMemberLabel('Concierge'); }
-            else if (plan?.name?.toLowerCase().includes('vip')) { setMemberTier('vip'); setMemberLabel('VIP'); }
-            else { setMemberTier('member'); setMemberLabel('Member'); }
-          }
-        }
-      }).catch(() => {});
+    // Look up patient in tenant_patients, then check memberships by user_id
+    supabase.from('tenant_patients').select('user_id').ilike('email', email).maybeSingle()
+      .then(({ data: tp }) => {
+        if (!tp?.user_id) return;
+        return supabase.from('user_memberships' as any)
+          .select('*, membership_plans(*)')
+          .eq('user_id', tp.user_id)
+          .eq('status', 'active')
+          .maybeSingle();
+      })
+      .then((res) => {
+        if (!res?.data) return;
+        const plan = (res.data as any).membership_plans;
+        const name = plan?.name?.toLowerCase() || '';
+        if (name.includes('concierge')) { setMemberTier('concierge'); setMemberLabel('Concierge'); }
+        else if (name.includes('vip')) { setMemberTier('vip'); setMemberLabel('VIP'); }
+        else if (plan) { setMemberTier('member'); setMemberLabel('Member'); }
+      })
+      .catch(() => {});
   }, []);
 
   // Fetch add-ons for this service type

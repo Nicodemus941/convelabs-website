@@ -5,15 +5,21 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// Type-safe client using Database type
+// Only detect session in URL on auth-related pages (login, reset-password, signup)
+const isAuthPage = typeof window !== 'undefined' &&
+  (window.location.pathname.includes('/reset-password') ||
+   window.location.pathname.includes('/login') ||
+   window.location.pathname.includes('/signup'));
+
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
     storage: localStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true, // Enable detecting auth session in URL to handle email verifications better
-    flowType: 'pkce' // Use PKCE flow for more secure authentication
-  },
+    detectSessionInUrl: isAuthPage,
+    flowType: 'pkce',
+    lock: { acquireTimeout: 3000 }, // Don't wait forever for locks
+  } as any,
   global: {
     headers: {
       'X-Client-Info': 'convelabs-web'

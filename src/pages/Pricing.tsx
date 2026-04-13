@@ -7,6 +7,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import Header from "@/components/home/Header";
 import Footer from "@/components/home/Footer";
 import { useBookingModalSafe } from "@/contexts/BookingModalContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -97,31 +98,29 @@ const FAQS = [
 
 const Pricing = () => {
   const bookingModal = useBookingModalSafe();
+  const { user } = useAuth();
   const [subscribing, setSubscribing] = React.useState<string | null>(null);
 
   const PLAN_PRICES: Record<string, number> = { 'Member': 99, 'VIP': 199, 'Concierge': 399 };
 
   const handleSubscribe = async (planName: string) => {
+    if (!user) { window.location.href = '/signup'; return; }
+
     setSubscribing(planName);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { window.location.href = '/signup'; return; }
-
       const price = PLAN_PRICES[planName] || 99;
-      const origin = window.location.origin;
 
-      // Create Stripe checkout directly via the Stripe API edge function
       const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
         body: {
           serviceType: 'membership',
           serviceName: `ConveLabs ${planName} Membership (Annual)`,
-          amount: price * 100, // cents
+          amount: price * 100,
           tipAmount: 0,
           appointmentDate: new Date().toISOString().split('T')[0],
           appointmentTime: '',
           patientDetails: {
-            firstName: user.user_metadata?.firstName || user.user_metadata?.first_name || '',
-            lastName: user.user_metadata?.lastName || user.user_metadata?.last_name || '',
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
             email: user.email || '',
           },
           locationDetails: { address: '', city: '', state: 'FL', zipCode: '' },
