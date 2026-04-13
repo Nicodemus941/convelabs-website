@@ -22,13 +22,23 @@ const ResetPassword = () => {
   useEffect(() => {
     let mounted = true;
 
+    // Store hash tokens before Supabase client consumes them
+    const hash = window.location.hash;
+    if (hash && hash.includes('access_token')) {
+      const hashParams = new URLSearchParams(hash.substring(1));
+      const at = hashParams.get('access_token');
+      const rt = hashParams.get('refresh_token');
+      if (at && rt) tokensRef.current = { access: at, refresh: rt };
+    }
+
     const initSession = async () => {
       try {
-        // 1. Check for PKCE code
-        const code = new URLSearchParams(window.location.search).get('code');
-        if (code) {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          if (!error && data?.session?.user?.email && mounted) {
+        // DON'T call setSession — let Supabase's built-in hash detection handle it
+        // Just wait for the session to appear (Supabase processes hash automatically)
+        for (let i = 0; i < 15; i++) {
+          await new Promise(r => setTimeout(r, 600));
+          const { data } = await supabase.auth.getSession();
+          if (data?.session?.user?.email && mounted) {
             setEmail(data.session.user.email);
             setSessionReady(true);
             window.history.replaceState({}, '', '/reset-password');
@@ -37,49 +47,22 @@ const ResetPassword = () => {
           }
         }
 
-        // 2. Check for hash tokens (implicit flow)
-        const hash = window.location.hash;
-        if (hash && hash.includes('access_token')) {
-          const hashParams = new URLSearchParams(hash.substring(1));
-          const accessToken = hashParams.get('access_token');
-          const refreshToken = hashParams.get('refresh_token');
-
-          if (accessToken && refreshToken) {
-            // Store tokens for retry
-            tokensRef.current = { access: accessToken, refresh: refreshToken };
-
-            const { data, error } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-
-            if (mounted) {
-              if (!error && data?.session?.user?.email) {
-                setEmail(data.session.user.email);
-              } else {
-                setEmail('your account');
-              }
-              setSessionReady(true);
-              window.history.replaceState({}, '', '/reset-password');
-              setLoading(false);
-              return;
-            }
-          }
-        }
-
-        // 3. Check if session already exists (e.g., onAuthStateChange handled it)
-        for (let i = 0; i < 8; i++) {
-          const { data } = await supabase.auth.getSession();
-          if (data?.session?.user?.email && mounted) {
+        // Session didn't appear after 9 seconds — try manual setSession as last resort
+        if (tokensRef.current && mounted) {
+          console.log('Fallback: manually setting session from stored tokens');
+          const { data, error } = await supabase.auth.setSession({
+            access_token: tokensRef.current.access,
+            refresh_token: tokensRef.current.refresh,
+          });
+          if (!error && data?.session?.user?.email) {
             setEmail(data.session.user.email);
             setSessionReady(true);
+            window.history.replaceState({}, '', '/reset-password');
             setLoading(false);
             return;
           }
-          await new Promise(r => setTimeout(r, 500));
         }
 
-        // No session found
         if (mounted) {
           setFormError("Your reset link has expired. Please request a new one.");
           setLoading(false);
@@ -93,7 +76,8 @@ const ResetPassword = () => {
       }
     };
 
-    initSession();
+    // Delay start to let Supabase client process the hash first
+    setTimeout(initSession, 500);
     return () => { mounted = false; };
   }, []);
 
@@ -113,16 +97,25 @@ const ResetPassword = () => {
     setIsSubmitting(true);
 
     try {
-      // Attempt 1: Direct update
+      // Wait a beat to ensure no other auth operations are in flight
+      await new Promise(r => setTimeout(r, 300));
+
       let { error } = await supabase.auth.updateUser({ password });
 
-      // Attempt 2: Re-set session from stored tokens and retry
-      if (error && tokensRef.current) {
-        console.log('Retrying with stored tokens...');
-        await supabase.auth.setSession({
-          access_token: tokensRef.current.access,
-          refresh_token: tokensRef.current.refresh,
-        });
+      // If lock error or session error, wait and retry once
+      if (error) {
+        console.log('First attempt failed:', error.message, '— retrying in 2s...');
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Re-set session if we have stored tokens
+        if (tokensRef.current) {
+          await supabase.auth.setSession({
+            access_token: tokensRef.current.access,
+            refresh_token: tokensRef.current.refresh,
+          }).catch(() => {});
+          await new Promise(r => setTimeout(r, 500));
+        }
+
         const retry = await supabase.auth.updateUser({ password });
         error = retry.error;
       }
