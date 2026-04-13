@@ -103,6 +103,13 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
       console.error('Failed to store T&C agreement:', e);
     }
 
+    // Store referral + add-on info in form context for the checkout session
+    if (referralApplied && referralCode) {
+      methods.setValue('serviceDetails.additionalNotes',
+        [getValues('serviceDetails.additionalNotes'), `Referral: ${referralCode} (-$${referralDiscount})`].filter(Boolean).join(' | ')
+      );
+    }
+
     onCheckout(tipAmount);
   };
 

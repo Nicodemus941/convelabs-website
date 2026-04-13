@@ -203,10 +203,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         ? data.date.toISOString()
         : new Date(data.date).toISOString();
 
+      // Apply referral discount if present (stored in additionalNotes by CheckoutStep)
+      const notes = data.serviceDetails.additionalNotes || '';
+      const referralMatch = notes.match(/Referral:.*-\$(\d+)/);
+      const referralDiscount = referralMatch ? parseFloat(referralMatch[1]) : 0;
+      const finalSubtotal = Math.max(breakdown.subtotal - referralDiscount, 0);
+
       const result = await createAppointmentCheckoutSession({
         serviceType: visitType,
         serviceName: service?.name || 'Blood Draw Service',
-        amount: Math.round(breakdown.subtotal * 100),
+        amount: Math.round(finalSubtotal * 100),
         tipAmount: Math.round(tipAmount * 100),
         appointmentDate,
         appointmentTime: data.time,

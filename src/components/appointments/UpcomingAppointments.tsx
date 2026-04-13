@@ -24,7 +24,7 @@ const UpcomingAppointments = () => {
     if (appointments?.length) {
       const upcoming = appointments.filter(
         (appt) => ['scheduled', 'confirmed'].includes(appt.status)
-      ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      ).sort((a, b) => new Date(a.date || a.appointment_date || 0).getTime() - new Date(b.date || b.appointment_date || 0).getTime());
       
       setUpcomingAppointments(upcoming);
     }

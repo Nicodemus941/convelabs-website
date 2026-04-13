@@ -40,18 +40,35 @@ export async function fetchAppointmentsSimplified(
   userId?: string
 ) {
   try {
-    // Direct Supabase query (replaced broken edge function call)
-    let query = supabase
-      .from('appointments')
-      .select('*')
-      .order('appointment_date', { ascending: false })
-      .limit(50);
-
+    // For patients: match by patient_id OR patient_email (IDs can mismatch)
     if (userId) {
-      query = query.eq('patient_id', userId);
+      // Get user's email for fallback matching
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const email = authUser?.email;
+
+      let data: any[] = [];
+
+      // Try by patient_id first
+      const { data: byId } = await supabase.from('appointments').select('*')
+        .eq('patient_id', userId).order('appointment_date', { ascending: false }).limit(50);
+      if (byId) data = [...byId];
+
+      // Also get by email (catches mismatched patient_ids)
+      if (email) {
+        const { data: byEmail } = await supabase.from('appointments').select('*')
+          .ilike('patient_email', email).order('appointment_date', { ascending: false }).limit(50);
+        if (byEmail) {
+          const existingIds = new Set(data.map(a => a.id));
+          data = [...data, ...byEmail.filter(a => !existingIds.has(a.id))];
+        }
+      }
+
+      return { data, error: null };
     }
 
-    const { data, error } = await query;
+    // Admin: get all
+    const { data, error } = await supabase.from('appointments').select('*')
+      .order('appointment_date', { ascending: false }).limit(50);
 
     if (error) {
       console.error("Error in fetchAppointmentsSimplified:", error);

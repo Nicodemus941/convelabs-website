@@ -34,24 +34,19 @@ const Footer = () => {
                 Patient Portal
               </span>
             </a>
-            <a
-              href="/login?redirect=/dashboard/phlebotomist"
-              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
-            >
-              <Shield className="h-6 w-6 mb-2 text-conve-red" />
-              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
-                Staff Portal
-              </span>
-            </a>
-            <a
-              href="/login?redirect=/dashboard/concierge_doctor"
-              className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
-            >
-              <Stethoscope className="h-6 w-6 mb-2 text-conve-red" />
-              <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">
-                Provider Portal
-              </span>
-            </a>
+            {/* Staff & Provider portals — only visible to non-patients */}
+            {(!user || !['patient'].includes(user.role || '')) && (
+              <>
+                <a href="/login?redirect=/dashboard/phlebotomist" className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group">
+                  <Shield className="h-6 w-6 mb-2 text-conve-red" />
+                  <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">Staff Portal</span>
+                </a>
+                <a href="/login?redirect=/dashboard/concierge_doctor" className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group">
+                  <Stethoscope className="h-6 w-6 mb-2 text-conve-red" />
+                  <span className="text-xs font-medium text-center group-hover:text-conve-red transition-colors">Provider Portal</span>
+                </a>
+              </>
+            )}
             <a
               href="/pricing"
               className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
