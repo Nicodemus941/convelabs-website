@@ -81,6 +81,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [overrideSlot, setOverrideSlot] = useState(false);
+  const [gateCode, setGateCode] = useState('');
 
   const resetForm = () => {
     setStep(1);
@@ -105,6 +106,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setOrgName('');
     setOrgEmail('');
     setOverrideSlot(false);
+    setGateCode('');
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -193,26 +195,38 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       const invoiceDueAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
       const billingEmail = orgBilling && orgEmail ? orgEmail : patientEmail;
 
+      // Determine duration
+      const durationMap: Record<string, number> = {
+        'therapeutic': 75, 'specialty-kit': 75, 'specialty-kit-genova': 80,
+        'partner-nd-wellness': 65, 'partner-aristotle-education': 75,
+      };
+      const duration = durationMap[serviceType] || 60;
+
       // Create appointment
       const { data: newAppt, error } = await supabase.from('appointments').insert([{
         appointment_date: appointmentDate,
         appointment_time: time,
         patient_id: patientId,
+        patient_name: patientName,
+        patient_email: patientEmail || null,
+        patient_phone: patientPhone || null,
         service_type: serviceType,
+        service_name: svc?.label || serviceType,
         status: 'scheduled',
         address: [address, city, zipcode].filter(Boolean).join(', ') || 'TBD',
         zipcode: zipcode || '32801',
         total_amount: finalPrice,
         service_price: finalPrice,
-        duration_minutes: serviceType === 'therapeutic' ? 75 : serviceType === 'specialty-kit-genova' ? 80 : 60,
+        duration_minutes: duration,
         booking_source: 'manual',
         is_vip: isVip,
         invoice_status: isWaived ? 'not_required' : 'sent',
         invoice_sent_at: isWaived ? null : new Date().toISOString(),
         invoice_due_at: isWaived ? null : invoiceDueAt,
         payment_status: isWaived ? 'completed' : 'pending',
+        gate_code: gateCode || null,
         phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164', // Auto-assign to Nico
-        notes: `Patient: ${patientName}${patientEmail ? ` | Email: ${patientEmail}` : ''}${patientPhone ? ` | Phone: ${patientPhone}` : ''}${discountNote}${orgBilling ? ` | Org: ${orgName}` : ''}${invoiceMemo ? ` | Memo: ${invoiceMemo}` : ''}${notes ? ` | Notes: ${notes}` : ''} | Created by admin`,
+        notes: [notes, gateCode ? `Gate: ${gateCode}` : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
       }]).select().single();
 
       if (error) {
@@ -406,7 +420,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <Label>Address</Label>
               <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label>City</Label>
                 <Input value={city} onChange={e => setCity(e.target.value)} placeholder="Orlando" />
@@ -415,27 +429,41 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 <Label>Zip Code</Label>
                 <Input value={zipcode} onChange={e => setZipcode(e.target.value)} placeholder="32801" />
               </div>
+              <div>
+                <Label>Gate Code</Label>
+                <Input value={gateCode} onChange={e => setGateCode(e.target.value)} placeholder="#1234" />
+              </div>
             </div>
             <div>
               <Label>Notes</Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Special instructions..." rows={2} />
+              <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Special instructions, gate code, parking..." rows={2} />
             </div>
 
-            {/* Pricing */}
+            {/* Pricing & Invoicing */}
             <div className="border-t pt-3">
-              <Label className="text-sm font-semibold">Pricing</Label>
-              <div className="flex gap-2 mt-2">
+              <Label className="text-sm font-semibold">Pricing & Invoice</Label>
+              <div className="flex flex-wrap gap-2 mt-2">
                 {(['none', 'percentage', 'fixed', 'waive'] as const).map(t => (
                   <Button key={t} type="button" size="sm" variant={discountType === t ? 'default' : 'outline'}
-                    className={`text-xs ${discountType === t ? 'bg-[#B91C1C] hover:bg-[#991B1B]' : ''}`}
+                    className={`text-xs ${discountType === t ? (t === 'waive' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-[#B91C1C] hover:bg-[#991B1B]') : ''}`}
                     onClick={() => { setDiscountType(t); setDiscountValue(''); }}>
-                    {t === 'none' ? 'Full Price' : t === 'percentage' ? '% Off' : t === 'fixed' ? '$ Off' : 'Waive'}
+                    {t === 'none' ? 'Full Price + Invoice' : t === 'percentage' ? '% Discount' : t === 'fixed' ? '$ Discount' : 'Waive Fee (No Invoice)'}
                   </Button>
                 ))}
               </div>
               {(discountType === 'percentage' || discountType === 'fixed') && (
                 <Input type="number" min="0" className="mt-2" value={discountValue} onChange={e => setDiscountValue(e.target.value)}
                   placeholder={discountType === 'percentage' ? 'Enter %' : 'Enter $ amount'} />
+              )}
+              {discountType === 'waive' && (
+                <p className="text-xs text-emerald-600 mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+                  Fee waived — no invoice will be created or sent to the patient. Appointment will be marked as paid.
+                </p>
+              )}
+              {discountType === 'none' && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  A Stripe invoice for ${SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150} will be emailed to {patientEmail || 'the patient'}.
+                </p>
               )}
             </div>
 

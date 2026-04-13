@@ -68,10 +68,13 @@ const AdminCalendar: React.FC = () => {
   useEffect(() => { fetchAppointments(); fetchTimeBlocks(); }, [fetchAppointments, fetchTimeBlocks]);
 
   const getPatientName = (appt: any): string => {
+    // Check direct patient_name column first
+    if (appt.patient_name) return appt.patient_name;
+    // Fallback: parse from notes
     if (appt.notes?.startsWith('Patient: ')) {
       return appt.notes.split(' | ')[0].replace('Patient: ', '');
     }
-    return appt.patient_email || 'Appointment';
+    return appt.patient_email || appt.service_name || 'Appointment';
   };
 
   // Convert appointments to FullCalendar events
