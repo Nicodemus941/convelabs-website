@@ -226,18 +226,17 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
             if (fwdMin >= 60) { fwdMin = 0; fwdHour += 1; }
           }
 
-          // Block BACKWARD: slots before the appointment that would overlap
-          // A new booking at an earlier slot with min 60min duration would conflict
-          const minNewDuration = 60; // minimum service duration
-          const backwardSlots = Math.ceil(minNewDuration / 30) - 1; // how many slots before would overlap
+          // Block BACKWARD: any earlier slot where a new 60min+travel booking would overlap this appointment
+          // Example: 9:00 AM appointment → block 8:00 AM (60min booking runs to 9:00) and 8:30 AM (runs to 9:30)
+          const newBookingDuration = 60 + travelBuffer; // min service (60) + travel buffer
+          const backwardSlots = Math.ceil(newBookingDuration / 30) - 1;
           let bwdMin = (startMin < 30 ? 0 : 30);
           let bwdHour = startHour;
 
           for (let i = 0; i < backwardSlots; i++) {
-            // Go back 30 minutes
             bwdMin -= 30;
             if (bwdMin < 0) { bwdMin = 30; bwdHour -= 1; }
-            if (bwdHour < 6) break; // don't block before operating hours
+            if (bwdHour < 6) break; // don't block before operating hours (6 AM)
             const key = toSlotKey(bwdHour, bwdMin);
             slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
           }
