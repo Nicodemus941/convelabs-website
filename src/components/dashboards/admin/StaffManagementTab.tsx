@@ -78,18 +78,27 @@ const StaffManagementTab = () => {
         ? `${staffLabel}: ${timeOffData.reason || 'Time off'}`
         : timeOffData.reason || 'Time off';
 
-      const { error } = await supabase.from('time_blocks' as any).insert({
-        staff_id: ['all', 'owner', 'admin'].includes(timeOffData.staffId) ? null : timeOffData.staffId || null,
+      const insertPayload = {
         start_date: timeOffData.startDate,
         end_date: timeOffData.endDate,
+        reason: fullReason,
+        block_type: timeOffData.staffId === 'all' ? 'office_closure' : 'time_off',
         start_time: timeOffData.startTime || null,
         end_time: timeOffData.endTime || null,
         recurring: timeOffData.recurring || false,
         recurring_day: timeOffData.recurringDay || null,
-        reason: fullReason,
-        block_type: timeOffData.staffId === 'all' ? 'office_closure' : 'time_off',
-      });
+      };
+
+      // Only include staff_id if it's a valid UUID (not 'all', 'owner', 'admin')
+      if (timeOffData.staffId && !['all', 'owner', 'admin'].includes(timeOffData.staffId)) {
+        (insertPayload as any).staff_id = timeOffData.staffId;
+      }
+
+      console.log('Creating time block:', insertPayload);
+      const { data: insertedBlock, error } = await supabase.from('time_blocks' as any).insert(insertPayload).select();
+      console.log('Insert result:', { insertedBlock, error });
       if (error) throw error;
+      if (!insertedBlock || insertedBlock.length === 0) throw new Error('Block was not created — check permissions');
 
       // Check for affected appointments in the blocked date range
       const { data: affected } = await supabase
@@ -343,10 +352,10 @@ const StaffManagementTab = () => {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <Label>Start Time <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-                  <Select value={timeOffData.startTime} onValueChange={v => setTimeOffData(p => ({ ...p, startTime: v }))}>
+                  <Select value={timeOffData.startTime || 'full-day'} onValueChange={v => setTimeOffData(p => ({ ...p, startTime: v === 'full-day' ? '' : v }))}>
                     <SelectTrigger><SelectValue placeholder="Full day" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Full Day</SelectItem>
+                      <SelectItem value="full-day">Full Day</SelectItem>
                       <SelectItem value="6:00 AM">6:00 AM</SelectItem>
                       <SelectItem value="7:00 AM">7:00 AM</SelectItem>
                       <SelectItem value="8:00 AM">8:00 AM</SelectItem>
@@ -364,10 +373,10 @@ const StaffManagementTab = () => {
                 </div>
                 <div>
                   <Label>End Time <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-                  <Select value={timeOffData.endTime} onValueChange={v => setTimeOffData(p => ({ ...p, endTime: v }))}>
+                  <Select value={timeOffData.endTime || 'full-day'} onValueChange={v => setTimeOffData(p => ({ ...p, endTime: v === 'full-day' ? '' : v }))}>
                     <SelectTrigger><SelectValue placeholder="Full day" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Full Day</SelectItem>
+                      <SelectItem value="full-day">Full Day</SelectItem>
                       <SelectItem value="12:00 PM">12:00 PM (Morning off)</SelectItem>
                       <SelectItem value="1:00 PM">1:00 PM</SelectItem>
                       <SelectItem value="2:00 PM">2:00 PM</SelectItem>
