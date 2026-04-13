@@ -83,11 +83,21 @@ export const useAuthSession = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
       console.log("Auth state changed:", _event);
 
-      // Handle password recovery — redirect to reset page
+      // Handle password recovery — redirect to reset page if not already there
       if (_event === 'PASSWORD_RECOVERY') {
-        console.log("Password recovery event detected, redirecting to reset page");
-        window.location.href = '/reset-password';
-        return;
+        console.log("Password recovery event detected");
+        if (!window.location.pathname.includes('/reset-password')) {
+          // Use router-friendly navigation that preserves session
+          window.history.pushState({}, '', '/reset-password');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+          // Fallback: hard redirect after a brief delay
+          setTimeout(() => {
+            if (!window.location.pathname.includes('/reset-password')) {
+              window.location.replace('/reset-password');
+            }
+          }, 500);
+        }
+        // Don't return — still process the session so ResetPassword can use it
       }
 
       const mappedSession = mapSessionData(supabaseSession);
