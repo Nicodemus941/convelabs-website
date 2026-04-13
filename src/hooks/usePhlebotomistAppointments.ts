@@ -90,15 +90,16 @@ export function usePhlebotomistAppointments() {
           let patientInsuranceId: string | null = null;
           let patientInsuranceGroup: string | null = null;
 
+          // Try lookup by patient_id first, then by email from notes
           if (appt.patient_id) {
             const { data: patient } = await supabase
               .from('tenant_patients')
-              .select('first_name, last_name, phone, email, date_of_birth, insurance_provider, insurance_member_id, insurance_group_number')
+              .select('id, first_name, last_name, phone, email, date_of_birth, insurance_provider, insurance_member_id, insurance_group_number')
               .eq('id', appt.patient_id)
-              .single();
+              .maybeSingle();
 
             if (patient) {
-              patientName = `${patient.first_name} ${patient.last_name}`;
+              patientName = `${patient.first_name} ${patient.last_name}`.trim();
               patientPhone = patient.phone;
               patientEmail = patient.email;
               patientDob = patient.date_of_birth;
@@ -108,9 +109,29 @@ export function usePhlebotomistAppointments() {
             }
           }
 
+          // Fallback: parse from notes and lookup by email
           if (patientName === 'Unknown Patient' && appt.notes) {
-            const match = appt.notes.match(/Patient:\s*([^|]+)/);
-            if (match) patientName = match[1].trim();
+            const nameMatch = appt.notes.match(/Patient:\s*([^|]+)/);
+            const emailMatch = appt.notes.match(/Email:\s*([^|]+)/);
+            const phoneMatch = appt.notes.match(/Phone:\s*([^|]+)/);
+            if (nameMatch) patientName = nameMatch[1].trim();
+            if (phoneMatch) patientPhone = phoneMatch[1].trim();
+            if (emailMatch) patientEmail = emailMatch[1].trim();
+
+            // Try email lookup in tenant_patients for phone/insurance
+            if (patientEmail && !patientPhone) {
+              const { data: tpByEmail } = await supabase
+                .from('tenant_patients')
+                .select('phone, email, insurance_provider, insurance_member_id, insurance_group_number')
+                .ilike('email', patientEmail.trim())
+                .maybeSingle();
+              if (tpByEmail) {
+                if (tpByEmail.phone) patientPhone = tpByEmail.phone;
+                if (tpByEmail.insurance_provider) patientInsurance = tpByEmail.insurance_provider;
+                if (tpByEmail.insurance_member_id) patientInsuranceId = tpByEmail.insurance_member_id;
+                if (tpByEmail.insurance_group_number) patientInsuranceGroup = tpByEmail.insurance_group_number;
+              }
+            }
           }
 
           // Normalize appointment_date to yyyy-MM-dd (may come as full timestamp)

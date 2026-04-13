@@ -12,6 +12,7 @@ import {
 import { toast } from '@/components/ui/sonner';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import OnTheWayDialog from './OnTheWayDialog';
+import PatientEditModal from './PatientEditModal';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
   scheduled: { label: 'Scheduled', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200', borderColor: '#3B82F6' },
@@ -33,6 +34,7 @@ interface Props {
 
 const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, isExpanded, onToggle }) => {
   const [showOnTheWay, setShowOnTheWay] = useState(false);
+  const [showPatientEdit, setShowPatientEdit] = useState(false);
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
   const handleNavigate = () => {
@@ -112,7 +114,11 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-gray-900 truncate">{appointment.patient_name}</h3>
+                    <h3
+                      className="font-semibold text-gray-900 truncate cursor-pointer hover:text-[#B91C1C] hover:underline transition-colors"
+                      onClick={(e) => { e.stopPropagation(); setShowPatientEdit(true); }}
+                      title="Click to edit patient details"
+                    >{appointment.patient_name}</h3>
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
@@ -273,6 +279,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientName={appointment.patient_name}
         patientPhone={appointment.patient_phone}
         onStatusUpdated={() => onStatusUpdate(appointment.id, 'en_route')}
+      />
+
+      <PatientEditModal
+        open={showPatientEdit}
+        onClose={() => setShowPatientEdit(false)}
+        patientId={appointment.patient_id}
+        patientEmail={appointment.patient_email}
+        initialName={appointment.patient_name}
       />
     </>
   );
