@@ -9,6 +9,7 @@ import Footer from "@/components/home/Footer";
 import { useBookingModalSafe } from "@/contexts/BookingModalContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 const PAY_PER_VISIT = [
   { service: "Office Visit (Standard)", price: "$55" },
@@ -98,24 +99,33 @@ const Pricing = () => {
   const bookingModal = useBookingModalSafe();
   const [subscribing, setSubscribing] = React.useState<string | null>(null);
 
+  const PLAN_PRICES: Record<string, number> = { 'Member': 99, 'VIP': 199, 'Concierge': 399 };
+
   const handleSubscribe = async (planName: string) => {
     setSubscribing(planName);
     try {
-      // Check if user is authenticated
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        // Not logged in — redirect to signup
-        window.location.href = '/signup';
-        return;
-      }
+      if (!user) { window.location.href = '/signup'; return; }
 
-      // Create Stripe checkout for membership
-      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
+      const price = PLAN_PRICES[planName] || 99;
+      const origin = window.location.origin;
+
+      // Create Stripe checkout directly via the Stripe API edge function
+      const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
         body: {
-          planId: planName.toLowerCase(),
-          billingFrequency: 'annual',
-          userId: user.id,
-          metadata: { plan_name: planName, source: 'pricing_page' },
+          serviceType: 'membership',
+          serviceName: `ConveLabs ${planName} Membership (Annual)`,
+          amount: price * 100, // cents
+          tipAmount: 0,
+          appointmentDate: new Date().toISOString().split('T')[0],
+          appointmentTime: '',
+          patientDetails: {
+            firstName: user.user_metadata?.firstName || user.user_metadata?.first_name || '',
+            lastName: user.user_metadata?.lastName || user.user_metadata?.last_name || '',
+            email: user.email || '',
+          },
+          locationDetails: { address: '', city: '', state: 'FL', zipCode: '' },
+          serviceDetails: { additionalNotes: `Membership: ${planName} Annual $${price}` },
         },
       });
 
@@ -125,10 +135,9 @@ const Pricing = () => {
       } else {
         throw new Error('No checkout URL returned');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Subscribe error:', err);
-      // Fallback to signup page
-      window.location.href = '/signup';
+      toast.error(err.message || 'Failed to start checkout. Please try again.');
     } finally {
       setSubscribing(null);
     }
