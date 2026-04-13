@@ -11,7 +11,7 @@ import {
 import { toast } from '@/components/ui/sonner';
 
 const SettingsTab: React.FC = () => {
-  const { user, signOut } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [phone, setPhone] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -22,13 +22,16 @@ const SettingsTab: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       if (!user) return;
-      const { data } = await supabase
+      // Try staff_profiles first
+      const { data: staffData } = await supabase
         .from('staff_profiles')
         .select('phone')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (data?.phone) setPhone(data.phone);
+      if (staffData?.phone) {
+        setPhone(staffData.phone);
+      }
       setIsLoaded(true);
     };
     load();
@@ -38,24 +41,40 @@ const SettingsTab: React.FC = () => {
     if (!user) return;
     setIsSaving(true);
     try {
-      const { error } = await supabase
+      // Update staff_profiles
+      const { error: staffError } = await supabase
         .from('staff_profiles')
-        .update({ phone })
+        .update({ phone } as any)
         .eq('user_id', user.id);
 
-      if (error) throw error;
-      toast.success('Phone number saved');
-    } catch (err) {
+      if (staffError) {
+        console.error('Staff profile update error:', staffError);
+        // Try upsert approach
+        const { error: upsertError } = await supabase
+          .from('staff_profiles')
+          .upsert({ user_id: user.id, phone, pay_rate: 0 } as any, { onConflict: 'user_id' });
+
+        if (upsertError) throw upsertError;
+      }
+
+      toast.success('Phone number saved successfully');
+    } catch (err: any) {
       console.error('Save error:', err);
-      toast.error('Failed to save phone number');
+      toast.error('Failed to save phone number: ' + (err.message || 'Unknown error'));
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleLogout = async () => {
-    await signOut();
-    navigate('/login');
+    try {
+      await logout();
+      navigate('/login');
+    } catch (err) {
+      console.error('Logout error:', err);
+      // Force redirect even if logout fails
+      window.location.href = '/login';
+    }
   };
 
   return (
