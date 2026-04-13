@@ -166,7 +166,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const dateStr = selectedDate.toISOString().split('T')[0];
         const { data } = await supabase
           .from('appointments')
-          .select('appointment_date, service_type, duration_minutes, address, zipcode')
+          .select('appointment_date, appointment_time, service_type, duration_minutes, address, zipcode')
           .gte('appointment_date', `${dateStr}T00:00:00`)
           .lte('appointment_date', `${dateStr}T23:59:59`)
           .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
@@ -179,10 +179,32 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const maxPerSlot = staffCount || 1;
         const slotCounts = new Map<string, number>();
 
-        data?.forEach(appt => {
-          const dt = new Date(appt.appointment_date);
-          const startHour = dt.getUTCHours();
-          const startMin = dt.getUTCMinutes();
+        data?.forEach((appt: any) => {
+          // Use appointment_time (local time like "6:30 AM" or "10:30:00") instead of UTC timestamp
+          let startHour = 0;
+          let startMin = 0;
+
+          if (appt.appointment_time) {
+            const timeStr = String(appt.appointment_time);
+            // Handle "6:30 AM" format
+            if (timeStr.includes('AM') || timeStr.includes('PM')) {
+              const [timePart, period] = timeStr.split(' ');
+              const [h, m] = timePart.split(':').map(Number);
+              startHour = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
+              startMin = m || 0;
+            }
+            // Handle "10:30:00" 24h format
+            else if (timeStr.includes(':')) {
+              const parts = timeStr.split(':').map(Number);
+              startHour = parts[0] || 0;
+              startMin = parts[1] || 0;
+            }
+          } else {
+            // Fallback to timestamp (less reliable due to timezone)
+            const dt = new Date(appt.appointment_date);
+            startHour = dt.getUTCHours();
+            startMin = dt.getUTCMinutes();
+          }
 
           // Get duration for this appointment type
           const duration = appt.duration_minutes || DURATION_MAP[appt.service_type || 'mobile'] || 60;

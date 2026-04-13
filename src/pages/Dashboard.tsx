@@ -147,6 +147,11 @@ const Dashboard = () => {
     );
   }
 
+  // Admin roles use AdminLayout (sidebar) — skip DashboardWrapper Header/Footer
+  if (userRole === "super_admin" || userRole === "office_manager") {
+    return renderDashboard();
+  }
+
   return (
     <DashboardWrapper>
       {renderDashboard()}
