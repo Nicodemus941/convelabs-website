@@ -279,7 +279,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           const duration = (appt.duration_minutes && appt.duration_minutes > 30) ? appt.duration_minutes : mappedDuration;
           // Travel buffer ONLY for extended area cities (30min)
           // No travel buffer for standard Orlando metro area
-          const EXTENDED_AREA_CITIES = ['eustis', 'sanford', 'celebration', 'kissimmee', 'lake nona', 'clermont', 'montverde', 'geneva'];
+          const EXTENDED_AREA_CITIES = ['eustis', 'sanford', 'celebration', 'kissimmee', 'lake nona', 'clermont', 'montverde', 'geneva', 'tavares', 'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola', 'daytona beach', 'deland', 'debary', 'orange city'];
           const apptCity = (appt.address || '').toLowerCase();
           const isExtendedArea = EXTENDED_AREA_CITIES.some(city => apptCity.includes(city));
           const travelBuffer = isExtendedArea ? 30 : 0;

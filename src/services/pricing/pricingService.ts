@@ -72,7 +72,9 @@ function getAdditionalPatientPrice(visitType: string, tier: MembershipTier = 'no
 // Cities that incur extended area surcharge
 export const EXTENDED_AREA_CITIES = [
   'lake nona', 'celebration', 'kissimmee', 'sanford', 'eustis',
-  'clermont', 'montverde', 'deltona', 'geneva',
+  'clermont', 'montverde', 'deltona', 'geneva', 'tavares',
+  'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola',
+  'daytona beach', 'deland', 'debary', 'orange city',
 ];
 
 export const DEFAULT_APPOINTMENT_DURATION = 60;
