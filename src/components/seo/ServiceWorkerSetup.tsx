@@ -3,30 +3,11 @@ import { Helmet } from 'react-helmet-async';
 
 export const ServiceWorkerSetup: React.FC = () => {
   React.useEffect(() => {
+    // Kill all service workers — ConveLabs doesn't need offline support
     if ('serviceWorker' in navigator) {
-      // AGGRESSIVE: Unregister ALL old service workers first, then register fresh
-      navigator.serviceWorker.getRegistrations().then(async (registrations) => {
-        for (const reg of registrations) {
-          // Force skip waiting on any waiting worker
-          if (reg.waiting) reg.waiting.postMessage('SKIP_WAITING');
-          // Unregister old workers completely
-          await reg.unregister();
-          console.log('Unregistered old service worker');
-        }
-        // Now register the fresh one
-        const newReg = await navigator.serviceWorker.register('/sw.js');
-        console.log('Registered fresh service worker v8');
-        newReg.addEventListener('updatefound', () => {
-          const newWorker = newReg.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'activated') {
-                console.log('New service worker activated');
-              }
-            });
-          }
-        });
-      }).catch(console.error);
+      navigator.serviceWorker.getRegistrations().then(regs => {
+        regs.forEach(reg => reg.unregister());
+      });
     }
   }, []);
 

@@ -122,21 +122,26 @@
     /></noscript>
     
     <div id="root"></div>
-    <!-- Force cache bust: v8 -->
+    <!-- Kill all service workers and caches — ConveLabs is online-only -->
     <script>
       (function(){
-        // Purge all old caches
-        if ('caches' in window) {
-          caches.keys().then(function(names) {
-            names.forEach(function(name) {
-              if (name !== 'convelabs-v8') caches.delete(name);
+        // NUCLEAR: Unregister ALL service workers permanently
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            regs.forEach(function(reg) {
+              reg.unregister().then(function() {
+                console.log('Service worker unregistered');
+              });
             });
           });
         }
-        // Force SW update
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistrations().then(function(regs) {
-            regs.forEach(function(reg) { reg.update(); });
+        // Delete ALL caches
+        if ('caches' in window) {
+          caches.keys().then(function(names) {
+            names.forEach(function(name) {
+              caches.delete(name);
+              console.log('Cache deleted:', name);
+            });
           });
         }
       })();
