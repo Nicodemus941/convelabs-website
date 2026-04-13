@@ -163,13 +163,26 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     const fetchBookedSlots = async () => {
       setLoadingSlots(true);
       try {
-        const dateStr = selectedDate.toISOString().split('T')[0];
-        const { data } = await supabase
+        // Use local date formatting to avoid timezone issues
+        const year = selectedDate.getFullYear();
+        const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+        const day = String(selectedDate.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+
+        console.log('Fetching booked slots for:', dateStr);
+
+        const { data, error: fetchError } = await supabase
           .from('appointments')
           .select('appointment_date, appointment_time, service_type, duration_minutes, address, zipcode')
           .gte('appointment_date', `${dateStr}T00:00:00`)
           .lte('appointment_date', `${dateStr}T23:59:59`)
           .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
+
+        if (fetchError) {
+          console.error('Slot fetch error:', fetchError);
+        }
+
+        console.log('Booked appointments found:', data?.length || 0, data);
 
         const { count: staffCount } = await supabase
           .from('staff_profiles')
