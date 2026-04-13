@@ -82,10 +82,17 @@ export const useAuthSession = () => {
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
       console.log("Auth state changed:", _event);
-      
+
+      // Handle password recovery — redirect to reset page
+      if (_event === 'PASSWORD_RECOVERY') {
+        console.log("Password recovery event detected, redirecting to reset page");
+        window.location.href = '/reset-password';
+        return;
+      }
+
       const mappedSession = mapSessionData(supabaseSession);
       setSession(mappedSession);
-      
+
       if (supabaseSession?.user) {
         const role = supabaseSession.user.user_metadata.role || null;
         setUserRole(role);
