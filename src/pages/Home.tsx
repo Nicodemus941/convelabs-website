@@ -1,5 +1,7 @@
-import React from "react";
+import React, { useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/home/Header";
 import Hero from "@/components/home/Hero";
 import TrustBanner from "@/components/home/TrustBanner";
@@ -21,6 +23,20 @@ import { OrganizationSchema } from "@/components/seo/OrganizationSchema";
 import { ReviewSchema } from "@/components/seo/ReviewSchema";
 
 const Home = () => {
+  const { user, isLoading } = useAuth();
+  const navigate = useNavigate();
+
+  // PWA auto-redirect: if user is logged in and in standalone mode, go to dashboard
+  useEffect(() => {
+    if (isLoading) return;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+      || (window.navigator as any).standalone === true;
+
+    if (user && isStandalone) {
+      navigate(`/dashboard/${user.role || 'patient'}`, { replace: true });
+    }
+  }, [user, isLoading, navigate]);
+
   return (
     <VisitorOptimizationProvider>
       <Helmet>

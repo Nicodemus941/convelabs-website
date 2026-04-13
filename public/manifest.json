@@ -2,7 +2,7 @@
   "name": "ConveLabs - Mobile Phlebotomy",
   "short_name": "ConveLabs",
   "description": "Luxury mobile phlebotomy & at-home blood draw services in Central Florida",
-  "start_url": "/",
+  "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#B91C1C",
