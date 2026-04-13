@@ -484,7 +484,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <Label>Address</Label>
               <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <Label>City</Label>
                 <Input value={city} onChange={e => setCity(e.target.value)} placeholder="Orlando" />

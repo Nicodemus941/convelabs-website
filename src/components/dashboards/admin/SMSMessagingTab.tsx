@@ -356,7 +356,7 @@ const SMSMessagingTab: React.FC = () => {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
         <Card className="border-0 shadow-sm">
           <CardContent className="p-3 text-center">
             <p className="text-2xl font-bold text-[#B91C1C]">{patients.length}</p>

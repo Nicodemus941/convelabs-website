@@ -330,7 +330,7 @@ const StaffManagementTab = () => {
           <Card>
             <CardHeader><CardTitle className="text-lg flex items-center gap-2"><CalendarOff className="h-5 w-5" /> Schedule Time Off</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <Label>Who is this for?</Label>
                   <Select value={timeOffData.staffId} onValueChange={v => setTimeOffData(p => ({ ...p, staffId: v }))}>
@@ -349,7 +349,7 @@ const StaffManagementTab = () => {
               </div>
 
               {/* Half-day / Time range (optional) */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <Label>Start Time <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
                   <Select value={timeOffData.startTime || 'full-day'} onValueChange={v => setTimeOffData(p => ({ ...p, startTime: v === 'full-day' ? '' : v }))}>
@@ -451,7 +451,7 @@ const StaffManagementTab = () => {
 
       {/* Add Staff Modal */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg w-[95vw] sm:w-full">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5" /> Add Staff Member</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">

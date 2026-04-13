@@ -144,7 +144,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         {/* Tabs */}
         <Tabs defaultValue="overview" className="px-6 pb-6">
-          <TabsList className="w-full grid grid-cols-4 mb-4">
+          <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 mb-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="billing">Billing</TabsTrigger>
             <TabsTrigger value="laborders">Lab Orders</TabsTrigger>

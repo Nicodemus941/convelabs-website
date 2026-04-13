@@ -186,7 +186,7 @@ const PatientProfileTab: React.FC = () => {
 
         {/* Tabs */}
         <Tabs defaultValue="appointments">
-          <TabsList className="grid grid-cols-4 w-full">
+          <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full">
             <TabsTrigger value="appointments">Appointments ({appointments.length})</TabsTrigger>
             <TabsTrigger value="specimens">Specimens ({specimens.length})</TabsTrigger>
             <TabsTrigger value="notes">Notes ({activities.length})</TabsTrigger>
