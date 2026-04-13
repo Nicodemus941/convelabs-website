@@ -54,6 +54,41 @@ const StaffManagementTab = () => {
   const [timeOffData, setTimeOffData] = useState({
     staffId: '', startDate: '', endDate: '', reason: '',
   });
+  const [timeBlocks, setTimeBlocks] = useState<any[]>([]);
+
+  const fetchTimeBlocks = async () => {
+    const { data } = await supabase.from('time_blocks' as any).select('*').order('start_date', { ascending: false });
+    setTimeBlocks(data || []);
+  };
+
+  const handleBlockTime = async () => {
+    if (!timeOffData.startDate || !timeOffData.endDate) {
+      toast.error('Start and end dates are required');
+      return;
+    }
+    try {
+      const { error } = await supabase.from('time_blocks' as any).insert({
+        staff_id: timeOffData.staffId || null,
+        start_date: timeOffData.startDate,
+        end_date: timeOffData.endDate,
+        reason: timeOffData.reason || 'Time off',
+        block_type: 'time_off',
+      });
+      if (error) throw error;
+      toast.success('Time block saved');
+      setTimeOffData({ staffId: '', startDate: '', endDate: '', reason: '' });
+      fetchTimeBlocks();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save time block');
+    }
+  };
+
+  const handleDeleteBlock = async (blockId: string) => {
+    if (!confirm('Delete this time block?')) return;
+    await supabase.from('time_blocks' as any).delete().eq('id', blockId);
+    toast.success('Time block removed');
+    fetchTimeBlocks();
+  };
 
   const fetchStaff = async () => {
     setLoading(true);
@@ -88,7 +123,7 @@ const StaffManagementTab = () => {
     }
   };
 
-  useEffect(() => { fetchStaff(); }, []);
+  useEffect(() => { fetchStaff(); fetchTimeBlocks(); }, []);
 
   const resetForm = () => {
     setFormData({ firstName: '', lastName: '', email: '', phone: '', role: 'phlebotomist', specialty: 'phlebotomy', payRate: '35', premiumRate: '55', bio: '' });
@@ -254,7 +289,32 @@ const StaffManagementTab = () => {
                 <div><Label>End</Label><Input type="date" value={timeOffData.endDate} onChange={e => setTimeOffData(p => ({ ...p, endDate: e.target.value }))} /></div>
                 <div><Label>Reason</Label><Input value={timeOffData.reason} onChange={e => setTimeOffData(p => ({ ...p, reason: e.target.value }))} placeholder="PTO, Sick..." /></div>
               </div>
-              <Button size="sm"><CalendarOff className="h-4 w-4 mr-1" /> Block Time</Button>
+              <Button size="sm" onClick={handleBlockTime} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
+                <CalendarOff className="h-4 w-4 mr-1" /> Block Time
+              </Button>
+
+              {/* Existing Time Blocks */}
+              {timeBlocks.length > 0 && (
+                <div className="mt-4 border-t pt-4">
+                  <p className="text-sm font-semibold mb-2">Blocked Dates</p>
+                  <div className="space-y-2">
+                    {timeBlocks.map((block: any) => (
+                      <div key={block.id} className="flex items-center justify-between bg-red-50 border border-red-200 rounded-lg p-3 text-sm">
+                        <div>
+                          <p className="font-medium text-red-800">
+                            {new Date(block.start_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {block.start_date !== block.end_date && ` — ${new Date(block.end_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
+                          </p>
+                          <p className="text-xs text-red-600">{block.reason || 'Blocked'}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" className="text-red-500 h-7" onClick={() => handleDeleteBlock(block.id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
