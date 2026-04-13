@@ -55,6 +55,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 }) => {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   // Patient search
   const [patientSearch, setPatientSearch] = useState('');
@@ -140,6 +141,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
   const handleSubmit = async () => {
     console.log('handleSubmit triggered', { patientName, serviceType, date, time, discountType });
+    setSubmitError('');
     setIsSubmitting(true);
     try {
       // Use selected patient ID or find by email/name
@@ -235,14 +237,18 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       if (error) {
         console.error('Appointment creation error:', error);
-        toast.error(`Failed: ${error.message || 'Unknown database error'}`, { duration: 6000 });
+        const errMsg = `Failed: ${error.message || 'Unknown database error'}`;
+        setSubmitError(errMsg);
+        toast.error(errMsg, { duration: 8000 });
         setIsSubmitting(false);
         return;
       }
 
       if (!newAppt) {
         console.error('No appointment returned after insert');
-        toast.error('Appointment was not created — please try again', { duration: 6000 });
+        const errMsg = 'Appointment was not created. RLS policy may be blocking — contact support.';
+        setSubmitError(errMsg);
+        toast.error(errMsg, { duration: 8000 });
         setIsSubmitting(false);
         return;
       }
@@ -306,7 +312,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       onCreated();
     } catch (err: any) {
       console.error('Schedule error:', err);
-      toast.error(err.message || 'Failed to schedule appointment');
+      const errMsg = err.message || 'Failed to schedule appointment';
+      setSubmitError(errMsg);
+      toast.error(errMsg, { duration: 8000 });
     } finally {
       setIsSubmitting(false);
     }
@@ -615,8 +623,15 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <p className="text-xs text-emerald-600 text-center">Fee waived — no invoice will be sent.</p>
             ) : null}
 
+            {submitError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+                <p className="font-medium">Error:</p>
+                <p className="text-xs mt-1">{submitError}</p>
+              </div>
+            )}
+
             <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
+              <Button variant="outline" onClick={() => { setStep(2); setSubmitError(''); }}>Back</Button>
               <Button onClick={handleSubmit} disabled={isSubmitting} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
                 {isSubmitting ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Scheduling...</> : 'Schedule Appointment'}
               </Button>
