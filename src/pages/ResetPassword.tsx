@@ -142,35 +142,55 @@ const ResetPassword = () => {
     setIsSubmitting(true);
 
     try {
-      // Use the stored access token from verifyOtp (avoids lock contention)
-      const token = accessToken;
-      if (!token) {
-        // Fallback: try to get from session
-        const { data: sd } = await supabase.auth.getSession();
-        if (!sd?.session?.access_token) {
-          setFormError("Session expired. Please request a new reset link.");
-          setIsSubmitting(false);
-          return;
-        }
+      // Get a fresh token — the stored one may have expired while user typed
+      let token = accessToken;
+
+      // Try refreshing the session first
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed?.session?.access_token) {
+        token = refreshed.session.access_token;
       }
 
-      const finalToken = token || (await supabase.auth.getSession()).data?.session?.access_token;
+      if (!token) {
+        setFormError("Session expired. Please request a new reset link.");
+        setIsSubmitting(false);
+        return;
+      }
 
-      // Call Supabase Auth REST API directly to avoid client lock issues
+      // Call Supabase Auth REST API directly with timeout
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
       const res = await fetch(`https://yluyonhrxxtyuiyrdixl.supabase.co/auth/v1/user`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${finalToken}`,
+          'Authorization': `Bearer ${token}`,
           'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsdXlvbmhyeHh0eXVpeXJkaXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc1MDExODgsImV4cCI6MjA2MzA3NzE4OH0.ZKP-k5fizUtKZsekV9RFL1wYcVfIHEeQWArs-4l5Q-Y',
         },
         body: JSON.stringify({ password }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (!res.ok) {
         const result = await res.json().catch(() => ({}));
         console.error('Password update failed:', res.status, result);
-        setFormError(result.msg || result.message || result.error_description || `Failed to update password (${res.status}). Please request a new reset link.`);
+
+        // If 504 or session error, try one more time with the Supabase client
+        if (res.status >= 500) {
+          console.log('Server error, retrying with Supabase client...');
+          const { error: retryErr } = await supabase.auth.updateUser({ password });
+          if (!retryErr) {
+            setIsSuccess(true);
+            toast.success("Password updated successfully!");
+            setTimeout(() => { window.location.href = '/login'; }, 2000);
+            return;
+          }
+          console.error('Retry also failed:', retryErr);
+        }
+
+        setFormError(result.msg || result.message || result.error_description || `Update failed (${res.status}). Please try again or request a new link.`);
         setIsSubmitting(false);
         return;
       }
@@ -185,7 +205,24 @@ const ResetPassword = () => {
 
     } catch (err: any) {
       console.error('Password reset error:', err);
-      setFormError(err.message || "An unexpected error occurred");
+      if (err.name === 'AbortError') {
+        // Timeout — try the Supabase client as fallback
+        console.log('Request timed out, trying Supabase client...');
+        try {
+          const { error } = await supabase.auth.updateUser({ password });
+          if (!error) {
+            setIsSuccess(true);
+            toast.success("Password updated successfully!");
+            setTimeout(() => { window.location.href = '/login'; }, 2000);
+            return;
+          }
+          setFormError("Request timed out. Please try again.");
+        } catch {
+          setFormError("Request timed out. Please try again.");
+        }
+      } else {
+        setFormError(err.message || "An unexpected error occurred");
+      }
     } finally {
       setIsSubmitting(false);
     }
