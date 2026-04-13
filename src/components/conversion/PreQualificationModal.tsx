@@ -141,7 +141,7 @@ export const PreQualificationModal: React.FC<PreQualificationModalProps> = ({
                   <span>5-star rated service</span>
                 </div>
                 <div>🕐 Same-day appointments</div>
-                <div>📊 Results in 24-48 hours</div>
+                <div>Specimen delivery confirmation sent to you</div>
               </div>
             </div>
           </div>

@@ -89,6 +89,34 @@ Deno.serve(async (req) => {
       const invoice = event.data.object;
       await handlePaymentFailure(invoice);
     }
+    // Handle invoice paid (for manual appointment invoices)
+    else if (event.type === 'invoice.paid') {
+      const invoice = event.data.object;
+      const appointmentId = invoice.metadata?.appointment_id;
+      if (appointmentId) {
+        console.log(`Invoice paid for appointment: ${appointmentId}`);
+        const { error } = await supabaseClient
+          .from('appointments')
+          .update({
+            payment_status: 'completed',
+            invoice_status: 'paid',
+            stripe_payment_intent_id: typeof invoice.payment_intent === 'string' ? invoice.payment_intent : null,
+          })
+          .eq('id', appointmentId);
+        if (error) console.error('Error updating appointment payment:', error);
+        else console.log(`Appointment ${appointmentId} marked as paid via invoice`);
+      } else if (invoice.id) {
+        // Try matching by stripe_invoice_id
+        const { error } = await supabaseClient
+          .from('appointments')
+          .update({
+            payment_status: 'completed',
+            invoice_status: 'paid',
+          })
+          .eq('stripe_invoice_id', invoice.id);
+        if (error) console.error('Error updating by invoice ID:', error);
+      }
+    }
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,

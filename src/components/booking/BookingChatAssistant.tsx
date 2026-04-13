@@ -20,7 +20,7 @@ Service area: Central Florida (Orlando metro).
 
 Common questions:
 - Fasting: 8-12 hours, water is okay
-- Results: Usually 24-48 hours via your lab portal
+- Results: Once specimens are delivered to the lab, we send you a confirmation with your lab-generated tracking ID. Results are available through your lab's patient portal
 - Lab orders: Upload during booking or provide your doctor's fax
 - Insurance: Lab testing is generally covered; our visit fee is out-of-pocket
 - Cancellation: Free if more than 24 hours before appointment
@@ -82,6 +82,8 @@ const BookingChatAssistant: React.FC<BookingChatAssistantProps> = ({ currentStep
             systemPrompt={systemPrompt}
             placeholder="Ask about services, pricing, fasting..."
             maxHeight="350px"
+            storeQuestions={true}
+            bookingStep={stepContext}
           />
         </div>
       )}

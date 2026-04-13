@@ -8,6 +8,7 @@ import { findAvailablePhlebotomist, updateAppointmentChain } from '@/services/ph
 import * as appointmentService from '@/services/appointments/appointmentService';
 import { mapAppointmentData } from '@/services/appointments/appointmentMappers';
 import { getCoordinatesFromFormData } from '@/services/appointments/locationUtils';
+import { supabase } from '@/integrations/supabase/client';
 
 export function useAppointments() {
   const { user } = useAuth();
@@ -179,6 +180,15 @@ export function useAppointments() {
       if (phlebotomistId && appointment.id) {
         console.log("Updating appointment chain");
         await updateAppointmentChain(appointment.id);
+
+        // Notify phlebotomist via SMS
+        try {
+          await supabase.functions.invoke('notify-phlebotomist-assignment', {
+            body: { appointmentId: appointment.id, phlebotomistId },
+          });
+        } catch (notifyErr) {
+          console.error('Phlebotomist notification error (non-blocking):', notifyErr);
+        }
       }
       
       // Send notifications

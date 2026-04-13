@@ -82,7 +82,7 @@ const Hero = () => {
               variants={itemVariants}
               className="text-lg sm:text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto mb-4"
             >
-              Skip the lab. A licensed phlebotomist comes to your home, office, or hotel. Results in 24-48 hours.
+              Skip the lab. A licensed phlebotomist comes to your home, office, or hotel. Specimen delivery confirmation sent directly to you.
             </motion.p>
 
             {/* Price anchor */}
@@ -137,7 +137,7 @@ const Hero = () => {
               </div>
               <div className="flex items-center gap-1.5">
                 <Clock className="h-4 w-4 text-conve-red" />
-                <span>Results in 24-48 hrs</span>
+                <span>Delivery Confirmation Sent</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle className="h-4 w-4 text-conve-red" />

@@ -573,7 +573,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "Local Coverage", description: "Deep knowledge of Lake Mary and Seminole County." },
       { title: "Flexible Hours", description: "Early morning to evening appointments." },
-      { title: "Fast Results", description: "Results delivered to your doctor within 24-48 hours." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "Affordable", description: "Starting at $125 with membership savings available." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Lake Mary",
@@ -621,7 +621,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "Resort Expertise", description: "We know Reunion's layout and access." },
       { title: "Flexible Scheduling", description: "Perfect for seasonal and vacation residents." },
-      { title: "Fast Results", description: "24-48 hour turnaround on most tests." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "No Hassle", description: "Skip the clinic — we come to you." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Reunion",
@@ -669,7 +669,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "Full Coverage", description: "Serving all of Altamonte Springs." },
       { title: "Flexible Hours", description: "Early morning to evening appointments." },
-      { title: "Fast Results", description: "Results within 24-48 hours." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "Affordable", description: "Starting at $125 per visit." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Altamonte Springs",
@@ -717,7 +717,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "Osceola Coverage", description: "Serving all of Kissimmee and surrounding areas." },
       { title: "Flexible Hours", description: "Morning to evening appointments available." },
-      { title: "Fast Results", description: "24-48 hour turnaround." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "No Hidden Fees", description: "Transparent pricing starting at $125." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Kissimmee",
@@ -765,7 +765,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "North Seminole Coverage", description: "Serving Sanford and surrounding areas." },
       { title: "Flexible Hours", description: "Early morning to evening appointments." },
-      { title: "Fast Results", description: "Results in 24-48 hours." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "Affordable", description: "Starting at $125 per visit." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Sanford",
@@ -813,7 +813,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "Lake County Coverage", description: "Serving Clermont and surrounding areas." },
       { title: "Flexible Scheduling", description: "Morning to evening appointments." },
-      { title: "Fast Results", description: "24-48 hour turnaround." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "No Hidden Fees", description: "Transparent pricing from $125." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Clermont",
@@ -861,7 +861,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "East Seminole Coverage", description: "Serving Oviedo and Winter Springs." },
       { title: "Family Friendly", description: "Multi-patient appointments available." },
-      { title: "Fast Results", description: "24-48 hour turnaround." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "Affordable", description: "Starting at $125 per visit." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Oviedo",
@@ -909,7 +909,7 @@ export const locations: Record<string, LocationData> = {
     whyChoose: [
       { title: "Central Location", description: "Conveniently located between Orlando and Winter Park." },
       { title: "Business District Coverage", description: "Serving Maitland Center offices." },
-      { title: "Fast Results", description: "24-48 hour turnaround." },
+      { title: "Fast Results", description: "Specimen delivery confirmation sent with your lab-generated tracking ID." },
       { title: "Transparent Pricing", description: "From $55 office / $150 mobile. Members save 15-25%." },
     ],
     ctaTitle: "Book a Mobile Blood Draw in Maitland",
@@ -976,7 +976,7 @@ export function getLocationFAQs(location: LocationData): { question: string; ans
     },
     {
       question: `How quickly do I get results from a blood draw in ${name}?`,
-      answer: `Most blood test results are available within 24-48 hours through your lab's patient portal (LabCorp, Quest Diagnostics, AdventHealth, or Orlando Health). We deliver your samples directly to the lab of your choice.`,
+      answer: `Once your specimens are delivered to the lab, we send you a confirmation text and email with your lab-generated tracking ID. Results are available through your lab's patient portal (LabCorp, Quest Diagnostics, AdventHealth, or Orlando Health). We deliver your samples directly to the lab of your choice.`,
     },
     {
       question: `Are ConveLabs phlebotomists licensed in ${name}?`,

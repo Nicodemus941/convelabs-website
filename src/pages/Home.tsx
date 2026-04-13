@@ -148,7 +148,7 @@ const Home = () => {
         steps={[
           { name: "Book Online", text: "Enter your ZIP code and choose an available appointment time." },
           { name: "Phlebotomist Comes to You", text: "A licensed phlebotomist arrives at your location with professional equipment." },
-          { name: "Results Sent to Doctor", text: "Your lab results are delivered securely to your physician within 24-48 hours." },
+          { name: "Specimen Delivery Confirmation", text: "Once your specimens are delivered to the lab, we send you a confirmation with your lab-generated tracking ID." },
         ]}
       />
       <OrganizationSchema />

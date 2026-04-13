@@ -30,7 +30,7 @@ const faqData = {
     },
     {
       question: "How quickly will I receive my results?",
-      answer: "Most routine lab results are available within 24-48 hours after your specimen reaches the lab. Specialized tests may take longer."
+      answer: "Once your specimens are delivered to the lab, we send you a confirmation text and email with your lab-generated tracking ID. Results timing varies by lab and test type, and are available through your lab's patient portal."
     }
   ],
   membership: [

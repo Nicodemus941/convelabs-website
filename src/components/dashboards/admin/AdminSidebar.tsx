@@ -1,13 +1,14 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
-  CalendarDays
+  CalendarDays, MessageSquare
 } from 'lucide-react';
 
-type SidebarItem = { name: string; icon: any; path: string; roles?: string[] };
+type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
 type SidebarSection = { label: string; items: SidebarItem[] };
 
 const SIDEBAR_SECTIONS: SidebarSection[] = [
@@ -25,6 +26,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       { name: 'Users', icon: Users, path: '/dashboard/super_admin/users' },
       { name: 'Staff', icon: Briefcase, path: '/dashboard/super_admin/staff' },
       { name: 'Services', icon: Package, path: '/dashboard/super_admin/services' },
+      { name: 'SMS Messages', icon: MessageSquare, path: '/dashboard/super_admin/sms', badge: true },
     ],
   },
   {
@@ -47,6 +49,29 @@ const AdminSidebar: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
   const userRole = user?.role || 'patient';
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+
+  // Subscribe to new SMS messages for notification indicator
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-sms-indicator')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sms_messages' }, () => {
+        // Don't show indicator if already on SMS page
+        if (!location.pathname.includes('/sms')) {
+          setHasNewMessages(true);
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [location.pathname]);
+
+  // Clear indicator when navigating to SMS page
+  useEffect(() => {
+    if (location.pathname.includes('/sms')) {
+      setHasNewMessages(false);
+    }
+  }, [location.pathname]);
 
   const isActive = (path: string) => {
     if (path === '/dashboard/super_admin') {
@@ -89,8 +114,16 @@ const AdminSidebar: React.FC = () => {
                         : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
                     }`}
                   >
-                    <Icon className={`h-4 w-4 ${active ? 'text-conve-red' : ''}`} />
+                    <div className="relative">
+                      <Icon className={`h-4 w-4 ${active ? 'text-conve-red' : ''}`} />
+                      {item.badge && hasNewMessages && !active && (
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse shadow-[0_0_6px_2px_rgba(74,222,128,0.6)]" />
+                      )}
+                    </div>
                     {item.name}
+                    {item.badge && hasNewMessages && !active && (
+                      <span className="ml-auto w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_4px_1px_rgba(74,222,128,0.5)]" />
+                    )}
                   </Link>
                 );
               })}

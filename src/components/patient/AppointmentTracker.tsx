@@ -90,7 +90,7 @@ const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment }) 
         {appointment.status === 'sample_delivered' && (
           <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
             <p className="text-sm text-purple-800">
-              ✅ Your samples have been delivered to the lab. Results will be available within 24-48 hours.
+              Your specimens have been successfully delivered to the lab. You will receive a confirmation text and email with your lab-generated tracking ID.
             </p>
           </div>
         )}
@@ -98,7 +98,7 @@ const AppointmentTracker: React.FC<AppointmentTrackerProps> = ({ appointment }) 
         {appointment.status === 'completed' && (
           <div className="bg-green-50 border border-green-200 rounded-lg p-3">
             <p className="text-sm text-green-800">
-              🎉 Your appointment is complete! Results will be available in your portal within 24-48 hours.
+              Your appointment is complete! Your specimens are on their way to the lab. We will notify you once they have been successfully delivered along with your lab-generated ID. Thank you for choosing ConveLabs!
             </p>
           </div>
         )}

@@ -5,6 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useClaudeAI } from '@/hooks/useClaudeAI';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -17,13 +18,17 @@ interface ClaudeAIChatProps {
   systemPrompt?: string;
   placeholder?: string;
   maxHeight?: string;
+  storeQuestions?: boolean;
+  bookingStep?: string;
 }
 
 export function ClaudeAIChat({
   title = "AI Assistant",
   systemPrompt = "You are a helpful AI assistant for a healthcare platform. Provide professional, accurate, and helpful responses.",
   placeholder = "Ask me anything...",
-  maxHeight = "500px"
+  maxHeight = "500px",
+  storeQuestions = false,
+  bookingStep,
 }: ClaudeAIChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -64,6 +69,21 @@ export function ClaudeAIChat({
         timestamp: new Date()
       };
       setMessages(prev => [...prev, assistantMessage]);
+
+      // Store question for FAQ analysis
+      if (storeQuestions) {
+        try {
+          await supabase.from('chatbot_inquiries' as any).insert({
+            question: userMessage.content,
+            answer: response,
+            page_url: window.location.pathname,
+            booking_step: bookingStep,
+            session_id: sessionStorage.getItem('booking_session') || crypto.randomUUID(),
+          });
+        } catch (e) {
+          console.error('Failed to store inquiry:', e);
+        }
+      }
     }
   };
 

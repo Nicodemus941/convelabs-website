@@ -65,9 +65,9 @@ const HelpCenter = () => {
             <AccordionItem value="item-2">
               <AccordionTrigger>How long does it take to receive lab results?</AccordionTrigger>
               <AccordionContent>
-                Lab results are typically available within 24-48 hours after the sample is collected, depending on
-                the type of test. You'll receive a notification in your dashboard when results are ready to view.
-                For specialized tests, it may take 3-5 business days.
+                Once specimens are delivered to the lab, a confirmation text and email will be sent with the lab-generated tracking ID.
+                Results timing varies by lab and test type, and are available through the lab's patient portal.
+                You'll receive a notification in your dashboard when results are ready to view.
               </AccordionContent>
             </AccordionItem>
             <AccordionItem value="item-3">

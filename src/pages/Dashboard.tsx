@@ -21,6 +21,7 @@ import MarketingTab from "@/components/dashboards/admin/MarketingTab";
 import StaffManagementTab from "@/components/dashboards/admin/StaffManagementTab";
 import WebhookEventMonitor from "@/components/dashboards/admin/WebhookEventMonitor";
 import AdminCalendar from "@/components/calendar/AdminCalendar";
+import SMSMessagingTab from "@/components/dashboards/admin/SMSMessagingTab";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -70,7 +71,8 @@ const Dashboard = () => {
           {adminTab === "marketing" && <MarketingTab />}
           {adminTab === "webhooks" && <WebhookEventMonitor />}
           {adminTab === "calendar" && <AdminCalendar />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar"].includes(adminTab) && (
+          {adminTab === "sms" && <SMSMessagingTab />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms"].includes(adminTab) && (
             <Navigate to="/dashboard/super_admin" replace />
           )}
         </AdminLayout>
@@ -122,6 +124,15 @@ const Dashboard = () => {
         return <Navigate to={`/dashboard/${user.role}`} replace />;
     }
   };
+
+  // Phlebotomist gets a full-screen PWA experience — no Header/Footer wrapper
+  if (userRole === "phlebotomist") {
+    return (
+      <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "phlebotomist"]}>
+        <PhlebotomistDashboard />
+      </RoleProtectedRoute>
+    );
+  }
 
   return (
     <DashboardWrapper>

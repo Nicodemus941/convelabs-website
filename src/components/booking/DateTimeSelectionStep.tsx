@@ -24,6 +24,69 @@ import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
 
+// US Government holidays - ConveLabs is closed on these dates
+function getBlockedHolidays(year: number): Date[] {
+  const holidays: Date[] = [];
+
+  // Fixed-date holidays
+  holidays.push(new Date(year, 0, 1));   // New Year's Day
+  holidays.push(new Date(year, 5, 19));  // Juneteenth
+  holidays.push(new Date(year, 6, 4));   // Fourth of July
+  holidays.push(new Date(year, 11, 24)); // Christmas Eve
+  holidays.push(new Date(year, 11, 25)); // Christmas Day
+  holidays.push(new Date(year, 11, 31)); // New Year's Eve
+
+  // MLK Day: 3rd Monday of January
+  const mlk = new Date(year, 0, 1);
+  let mondays = 0;
+  while (mondays < 3) { mlk.setDate(mlk.getDate() + 1); if (mlk.getDay() === 1) mondays++; }
+  holidays.push(new Date(mlk));
+
+  // Presidents' Day: 3rd Monday of February
+  const pres = new Date(year, 1, 1);
+  mondays = 0;
+  while (mondays < 3) { pres.setDate(pres.getDate() + 1); if (pres.getDay() === 1) mondays++; }
+  holidays.push(new Date(pres));
+
+  // Memorial Day: Last Monday of May
+  const mem = new Date(year, 5, 0); // May 31
+  while (mem.getDay() !== 1) mem.setDate(mem.getDate() - 1);
+  holidays.push(new Date(mem));
+
+  // Labor Day: 1st Monday of September
+  const labor = new Date(year, 8, 1);
+  while (labor.getDay() !== 1) labor.setDate(labor.getDate() + 1);
+  holidays.push(new Date(labor));
+
+  // Columbus Day: 2nd Monday of October
+  const col = new Date(year, 9, 1);
+  mondays = 0;
+  while (mondays < 2) { col.setDate(col.getDate() + 1); if (col.getDay() === 1) mondays++; }
+  holidays.push(new Date(col));
+
+  // Veterans Day: Nov 11
+  holidays.push(new Date(year, 10, 11));
+
+  // Thanksgiving: 4th Thursday of November
+  const tg = new Date(year, 10, 1);
+  let thursdays = 0;
+  while (thursdays < 4) { tg.setDate(tg.getDate() + 1); if (tg.getDay() === 4) thursdays++; }
+  holidays.push(new Date(tg));
+  // Thanksgiving Eve (day before)
+  holidays.push(new Date(year, tg.getMonth(), tg.getDate() - 1));
+
+  return holidays;
+}
+
+function isHoliday(date: Date): boolean {
+  const holidays = getBlockedHolidays(date.getFullYear());
+  return holidays.some(h =>
+    h.getFullYear() === date.getFullYear() &&
+    h.getMonth() === date.getMonth() &&
+    h.getDate() === date.getDate()
+  );
+}
+
 interface DateTimeSelectionStepProps {
   onNext: () => void;
   onBack: () => void;
@@ -233,9 +296,10 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             setCalendarOpen(false);
                           }
                         }}
-                        disabled={(date) => 
-                          date < today || 
-                          date > new Date(today.getFullYear(), today.getMonth() + 2, 0)
+                        disabled={(date) =>
+                          date < today ||
+                          date > new Date(today.getFullYear(), today.getMonth() + 2, 0) ||
+                          isHoliday(date)
                         }
                         initialFocus
                         className="p-3 pointer-events-auto"
@@ -275,7 +339,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   ) : isSunday ? (
                     <p className="text-sm text-muted-foreground py-4">No appointments available on Sundays.</p>
                   ) : (
-                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                       {activeWindows.map((window) => {
                         const isSelected = field.value === window.time;
                         const isBooked = bookedSlots.has(window.time);
@@ -285,7 +349,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             key={window.time}
                             type="button"
                             variant={isSelected ? "default" : "outline"}
-                            className={`w-full text-[11px] sm:text-xs px-2 py-2 h-auto whitespace-nowrap ${
+                            className={`w-full text-xs sm:text-sm px-2 py-3 h-auto min-h-[44px] whitespace-nowrap ${
                               isBooked ? 'opacity-40 line-through cursor-not-allowed' : ''
                             }`}
                             onClick={() => {

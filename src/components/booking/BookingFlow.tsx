@@ -244,7 +244,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const progressPercent = Math.min(((currentStep) / (totalSteps - 1)) * 100, 100);
 
   return (
-    <div className="w-full max-w-4xl mx-auto">
+    <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 md:px-0">
       <FormProvider {...methods}>
         {/* Progress indicator — desktop */}
         {currentStep < BookingStep.Confirmation && (

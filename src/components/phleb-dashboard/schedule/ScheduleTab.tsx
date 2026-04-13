@@ -1,0 +1,143 @@
+import React, { useState, useMemo } from 'react';
+import { startOfWeek, format, isToday } from 'date-fns';
+import { Calendar, Loader2, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
+import WeekStrip from './WeekStrip';
+import PhlebAppointmentCard from './PhlebAppointmentCard';
+import { CheckCircle2 } from 'lucide-react';
+
+interface ScheduleTabProps {
+  appointments: PhlebAppointment[];
+  isLoading: boolean;
+  monthDates: Set<string>;
+  onRefresh: () => void;
+  onStatusUpdate: (id: string, status: AppointmentStatus) => Promise<boolean>;
+}
+
+const ScheduleTab: React.FC<ScheduleTabProps> = ({
+  appointments,
+  isLoading,
+  monthDates,
+  onRefresh,
+  onStatusUpdate,
+}) => {
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
+
+  const dayAppointments = useMemo(() => {
+    return appointments.filter(a => a.appointment_date === selectedDateStr && a.status !== 'cancelled');
+  }, [appointments, selectedDateStr]);
+
+  const activeAppts = dayAppointments.filter(a => a.status !== 'completed');
+  const completedAppts = dayAppointments.filter(a => a.status === 'completed');
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await onRefresh();
+    setIsRefreshing(false);
+  };
+
+  const dayLabel = isToday(selectedDate) ? 'Today' : format(selectedDate, 'EEEE, MMM d');
+
+  return (
+    <div className="space-y-4">
+      {/* Week Strip */}
+      <WeekStrip
+        selectedDate={selectedDate}
+        onDateSelect={setSelectedDate}
+        weekStart={weekStart}
+        onWeekChange={setWeekStart}
+        appointmentDates={monthDates}
+      />
+
+      {/* Day Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-5 w-5 text-[#B91C1C]" />
+          <h2 className="text-lg font-bold">
+            {activeAppts.length} Appointment{activeAppts.length !== 1 ? 's' : ''} {dayLabel}
+          </h2>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="text-muted-foreground hover:text-[#B91C1C]"
+        >
+          <RefreshCw className={`h-4 w-4 mr-1 ${isRefreshing ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+      </div>
+
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex flex-col items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-[#B91C1C] mb-3" />
+          <p className="text-sm text-muted-foreground">Loading appointments...</p>
+        </div>
+      )}
+
+      {/* Empty */}
+      {!isLoading && dayAppointments.length === 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-dashed p-8 text-center">
+          <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-3">
+            <Calendar className="h-7 w-7 text-[#B91C1C]" />
+          </div>
+          <h3 className="font-semibold text-gray-800 mb-1">No appointments</h3>
+          <p className="text-sm text-muted-foreground">
+            {isToday(selectedDate) ? 'Nothing scheduled for today.' : `Nothing scheduled for ${format(selectedDate, 'MMMM d')}.`}
+          </p>
+        </div>
+      )}
+
+      {/* Active Appointments */}
+      {!isLoading && activeAppts.map((appt) => (
+        <PhlebAppointmentCard
+          key={appt.id}
+          appointment={appt}
+          onStatusUpdate={onStatusUpdate}
+          isExpanded={expandedCard === appt.id}
+          onToggle={() => setExpandedCard(expandedCard === appt.id ? null : appt.id)}
+        />
+      ))}
+
+      {/* Completed */}
+      {!isLoading && completedAppts.length > 0 && (
+        <div className="pt-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            Completed ({completedAppts.length})
+          </p>
+          {completedAppts.map((appt) => (
+            <div key={appt.id} className="bg-white rounded-xl shadow-sm border border-l-4 border-l-gray-300 opacity-70 p-3 mb-2">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-gray-700 text-sm truncate">{appt.patient_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {appt.appointment_time || ''} - {appt.address}
+                  </p>
+                </div>
+                {appt.tip_amount > 0 && (
+                  <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded">
+                    +${appt.tip_amount.toFixed(2)} tip
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ScheduleTab;

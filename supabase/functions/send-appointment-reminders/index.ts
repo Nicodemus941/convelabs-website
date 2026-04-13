@@ -1,6 +1,4 @@
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { sendSMS } from "../_shared/twilio.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,141 +6,208 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req) => {
-  // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-  
+
   try {
-    console.log("Appointment reminder function triggered");
-    
-    // Initialize Supabase admin client
-    const supabaseAdmin = createClient(
+    console.log('Appointment reminder function triggered');
+
+    const supabase = createClient(
       Deno.env.get('SUPABASE_URL') || '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
     );
-    
-    // Get the current date
+
+    const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+    const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+    const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER');
+    const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
+    const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
+
+    // Calculate the target date: exactly 24 hours from now
+    // We want appointments happening tomorrow (24hrs ahead), NOT today
     const now = new Date();
-    
-    // Get tomorrow's date
-    const tomorrow = new Date();
-    tomorrow.setDate(now.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-    
-    // Get end of tomorrow
-    const tomorrowEnd = new Date(tomorrow);
-    tomorrowEnd.setHours(23, 59, 59, 999);
-    
-    console.log(`Looking for appointments between ${tomorrow.toISOString()} and ${tomorrowEnd.toISOString()}`);
-    
-    // Get appointments for tomorrow
-    const { data: appointments, error } = await supabaseAdmin
+    const targetDate = new Date(now);
+    targetDate.setDate(targetDate.getDate() + 1);
+    const targetDateStr = targetDate.toISOString().split('T')[0]; // yyyy-MM-dd
+
+    console.log(`Sending reminders for appointments on: ${targetDateStr}`);
+
+    // Get appointments for the target date that haven't been cancelled
+    const { data: appointments, error } = await supabase
       .from('appointments')
-      .select(`
-        id, 
-        appointment_date, 
-        address, 
-        notes, 
-        status,
-        patient_id,
-        tenant_patients!inner(id, first_name, last_name, email, phone)
-      `)
-      .eq('status', 'scheduled')
-      .gte('appointment_date', tomorrow.toISOString())
-      .lt('appointment_date', tomorrowEnd.toISOString());
-    
+      .select('*')
+      .eq('appointment_date', targetDateStr)
+      .not('status', 'in', '("cancelled","completed")');
+
     if (error) {
-      console.error("Error fetching appointments:", error);
+      console.error('Error fetching appointments:', error);
       throw error;
     }
-    
-    console.log(`Found ${appointments?.length || 0} appointments to send reminders for`);
-    
-    const results = [];
-    
-    // Send reminders for each appointment
-    for (const appointment of appointments || []) {
+
+    console.log(`Found ${appointments?.length || 0} appointments for ${targetDateStr}`);
+
+    const results: { id: string; status: string; reason?: string }[] = [];
+
+    for (const appt of (appointments || [])) {
       try {
-        // Extract patient details - handle both property paths
-        const patientPhone = appointment.tenant_patients?.phone;
-        const patientName = `${appointment.tenant_patients?.first_name || ''} ${appointment.tenant_patients?.last_name || ''}`.trim();
-        
-        console.log(`Processing appointment for ${patientName}, phone: ${patientPhone || 'none'}`);
-        
-        if (!patientPhone) {
-          results.push({ id: appointment.id, status: 'skipped', reason: 'No phone number' });
-          continue;
+        // Get patient details
+        let patientName = 'there';
+        let patientPhone: string | null = null;
+        let patientEmail: string | null = null;
+
+        if (appt.patient_id) {
+          const { data: patient } = await supabase
+            .from('tenant_patients')
+            .select('first_name, last_name, phone, email')
+            .eq('id', appt.patient_id)
+            .single();
+
+          if (patient) {
+            patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || 'there';
+            patientPhone = patient.phone;
+            patientEmail = patient.email;
+          }
         }
-        
-        // Format appointment time
-        const appointmentDate = new Date(appointment.appointment_date);
-        const formattedTime = appointmentDate.toLocaleTimeString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true
+
+        // Fallback: parse from notes
+        if (patientName === 'there' && appt.notes) {
+          const nameMatch = appt.notes.match(/Patient:\s*([^|]+)/);
+          if (nameMatch) patientName = nameMatch[1].trim();
+          const emailMatch = appt.notes.match(/Email:\s*([^|]+)/);
+          if (emailMatch) patientEmail = emailMatch[1].trim();
+          const phoneMatch = appt.notes.match(/Phone:\s*([^|]+)/);
+          if (phoneMatch) patientPhone = phoneMatch[1].trim();
+        }
+
+        const appointmentTime = appt.appointment_time || 'your scheduled time';
+        const formattedDate = new Date(targetDateStr + 'T12:00:00').toLocaleDateString('en-US', {
+          weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
         });
-        
-        // Create reminder message
-        const message = `Hi ${patientName || 'there'}! This is a reminder for your ConveLabs appointment tomorrow at ${formattedTime}. A phlebotomist will visit you at the address provided. Reply HELP for assistance or CANCEL to cancel.`;
-        
-        // Send the SMS - ensure phone has proper format
-        const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
-        console.log(`Sending SMS to: ${formattedPhone}`);
-        
-        await sendSMS(formattedPhone, message);
-        
-        // Also send an email reminder if available
-        if (appointment.tenant_patients?.email) {
-          await supabaseAdmin.functions.invoke('send-email', {
-            body: {
-              to: appointment.tenant_patients.email,
-              subject: 'Your ConveLabs Appointment Tomorrow',
-              html: `
-                <h2>Appointment Reminder</h2>
-                <p>Hello ${patientName},</p>
-                <p>This is a reminder that you have a ConveLabs appointment scheduled for tomorrow at ${formattedTime}.</p>
-                <p><strong>Location:</strong> ${appointment.address}</p>
-                ${appointment.notes ? `<p><strong>Notes:</strong> ${appointment.notes}</p>` : ''}
-                <p>Our phlebotomist, Valerie, will arrive at your location at the scheduled time.</p>
-                <p>If you need to reschedule or have any questions, please contact us immediately.</p>
-                <p>Thank you for choosing ConveLabs for your healthcare needs.</p>
-              `
-            }
+
+        // Send SMS reminder
+        if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER && patientPhone) {
+          const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
+
+          const smsBody = `Hi ${patientName}! This is a friendly reminder from ConveLabs. Your appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have a sterile, well-lit area ready for the collection. Have your photo ID and lab order available. Questions? Call (941) 527-9169. We look forward to serving you!`;
+
+          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+          const formData = new URLSearchParams();
+          formData.append('To', formattedPhone);
+          formData.append('From', TWILIO_PHONE_NUMBER);
+          formData.append('Body', smsBody);
+
+          const smsRes = await fetch(twilioUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData,
           });
+
+          if (!smsRes.ok) {
+            const err = await smsRes.text();
+            console.error(`SMS failed for ${appt.id}:`, err);
+          } else {
+            console.log(`SMS reminder sent for appointment ${appt.id}`);
+          }
         }
-        
-        results.push({ id: appointment.id, status: 'sent' });
-      } catch (err) {
-        console.error(`Error sending reminder for appointment ${appointment.id}:`, err);
-        results.push({ id: appointment.id, status: 'error', error: err.message });
+
+        // Send email reminder
+        if (MAILGUN_API_KEY && patientEmail) {
+          const emailHtml = `
+<!DOCTYPE html>
+<html>
+<body style="font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f5;">
+  <div style="max-width:600px;margin:0 auto;padding:20px;">
+    <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:28px;border-radius:16px 16px 0 0;text-align:center;">
+      <h1 style="margin:0;font-size:22px;">Appointment Reminder</h1>
+      <p style="margin:6px 0 0;opacity:0.9;font-size:14px;">Your ConveLabs appointment is tomorrow</p>
+    </div>
+    <div style="background:white;border:1px solid #e5e7eb;border-top:none;padding:28px;border-radius:0 0 16px 16px;">
+      <p style="font-size:16px;color:#374151;">Hello ${patientName},</p>
+      <p style="font-size:14px;color:#6b7280;line-height:1.6;">
+        This is a friendly reminder that your ConveLabs appointment is scheduled for tomorrow. Our licensed phlebotomist will arrive at your location at the scheduled time.
+      </p>
+
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:20px;margin:20px 0;">
+        <table style="width:100%;font-size:14px;color:#374151;">
+          <tr><td style="padding:6px 0;color:#6b7280;width:35%;">Date</td><td style="font-weight:600;">${formattedDate}</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Time</td><td style="font-weight:600;">${appointmentTime}</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Location</td><td>${appt.address || 'Your provided address'}</td></tr>
+          <tr><td style="padding:6px 0;color:#6b7280;">Service</td><td style="text-transform:capitalize;">${(appt.service_type || 'blood draw').replace(/_/g, ' ')}</td></tr>
+        </table>
+      </div>
+
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:20px 0;">
+        <h3 style="margin:0 0 8px;font-size:14px;color:#166534;">How to Prepare</h3>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:#15803d;line-height:1.8;">
+          <li>Have your <strong>photo ID</strong> and <strong>lab order</strong> ready</li>
+          <li>Prepare a <strong>sterile, well-lit area</strong> for the collection</li>
+          <li>If fasting is required, no food 8-12 hours before (water is OK)</li>
+          <li>Wear a short-sleeved shirt or one with easily rolled-up sleeves</li>
+          <li>Stay well hydrated — drink plenty of water</li>
+        </ul>
+      </div>
+
+      <div style="text-align:center;margin:24px 0;">
+        <a href="https://convelabs.com/login?redirect=/dashboard/patient" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;">
+          View Your Appointment
+        </a>
+      </div>
+
+      <p style="font-size:13px;color:#6b7280;text-align:center;">
+        Need to reschedule? Call us at <strong>(941) 527-9169</strong>
+      </p>
+
+      <div style="margin-top:28px;padding-top:16px;border-top:1px solid #e5e7eb;text-align:center;">
+        <p style="font-size:11px;color:#9ca3af;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
+        <p style="font-size:11px;color:#9ca3af;">Luxury Mobile Phlebotomy Services</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+          const mgFormData = new FormData();
+          mgFormData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+          mgFormData.append('to', patientEmail);
+          mgFormData.append('subject', `Reminder: Your ConveLabs Appointment Tomorrow at ${appointmentTime}`);
+          mgFormData.append('html', emailHtml);
+
+          const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+            body: mgFormData,
+          });
+
+          if (!mgRes.ok) {
+            const err = await mgRes.text();
+            console.error(`Email failed for ${appt.id}:`, err);
+          } else {
+            console.log(`Email reminder sent for appointment ${appt.id}`);
+          }
+        }
+
+        results.push({ id: appt.id, status: 'sent' });
+      } catch (err: any) {
+        console.error(`Error processing appointment ${appt.id}:`, err);
+        results.push({ id: appt.id, status: 'error', reason: err.message });
       }
     }
-    
+
+    console.log(`Reminders complete: ${results.filter(r => r.status === 'sent').length} sent, ${results.filter(r => r.status === 'error').length} errors`);
+
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        processed: results.length,
-        results
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      }
+      JSON.stringify({ success: true, date: targetDateStr, processed: results.length, results }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-    
-  } catch (error) {
-    console.error('Send reminders error:', error);
-    
+  } catch (error: any) {
+    console.error('Reminder function error:', error);
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error.message 
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 500,
-      }
+      JSON.stringify({ success: false, error: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });

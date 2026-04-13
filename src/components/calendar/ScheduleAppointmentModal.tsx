@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calendar, UserPlus, Clock, ArrowRight, Loader2 } from 'lucide-react';
+import { Calendar, UserPlus, Clock, ArrowRight, Loader2, Crown } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -50,6 +51,13 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [city, setCity] = useState('');
   const [zipcode, setZipcode] = useState('');
   const [notes, setNotes] = useState('');
+  const [isVip, setIsVip] = useState(false);
+  const [discountType, setDiscountType] = useState<'none' | 'percentage' | 'fixed' | 'waive'>('none');
+  const [discountValue, setDiscountValue] = useState('');
+  const [invoiceMemo, setInvoiceMemo] = useState('');
+  const [orgBilling, setOrgBilling] = useState(false);
+  const [orgName, setOrgName] = useState('');
+  const [orgEmail, setOrgEmail] = useState('');
 
   const resetForm = () => {
     setStep(1);
@@ -63,6 +71,13 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setCity('');
     setZipcode('');
     setNotes('');
+    setIsVip(false);
+    setDiscountType('none');
+    setDiscountValue('');
+    setInvoiceMemo('');
+    setOrgBilling(false);
+    setOrgName('');
+    setOrgEmail('');
     setShowCreatePatient(false);
   };
 
@@ -118,7 +133,32 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       if (period === 'AM' && hours === 12) hours = 0;
       const appointmentDate = `${date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
-      const { error } = await supabase.from('appointments').insert([{
+      // Calculate service price with discount
+      const servicePriceMap: Record<string, number> = {
+        'mobile': 150, 'in-office': 55, 'senior': 100,
+        'specialty-kit': 185, 'specialty-kit-genova': 200, 'therapeutic': 200,
+      };
+      const basePrice = servicePriceMap[serviceType] || 150;
+      let finalPrice = basePrice;
+      let discountNote = '';
+
+      if (discountType === 'waive') {
+        finalPrice = 0;
+        discountNote = ' | Fee waived';
+      } else if (discountType === 'percentage' && discountValue) {
+        const pct = Math.min(parseFloat(discountValue) || 0, 100);
+        finalPrice = Math.round((basePrice * (1 - pct / 100)) * 100) / 100;
+        discountNote = ` | ${pct}% discount applied`;
+      } else if (discountType === 'fixed' && discountValue) {
+        finalPrice = Math.max(basePrice - (parseFloat(discountValue) || 0), 0);
+        discountNote = ` | $${parseFloat(discountValue).toFixed(2)} discount applied`;
+      }
+
+      const isWaived = finalPrice === 0;
+      const invoiceDueAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+      const billingEmail = orgBilling && orgEmail ? orgEmail : patientEmail;
+
+      const { data: newAppt, error } = await supabase.from('appointments').insert([{
         appointment_date: appointmentDate,
         appointment_time: time,
         patient_id: patientId,
@@ -126,12 +166,42 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         status: 'scheduled',
         address: address || 'TBD',
         zipcode: zipcode || '32801',
-        notes: `Patient: ${patientName}${patientEmail ? ` | Email: ${patientEmail}` : ''}${patientPhone ? ` | Phone: ${patientPhone}` : ''}${notes ? ` | Notes: ${notes}` : ''} | Created by admin`,
-      }]);
+        total_amount: finalPrice,
+        service_price: finalPrice,
+        booking_source: 'manual',
+        is_vip: isVip,
+        invoice_status: isWaived ? 'not_required' : 'sent',
+        invoice_sent_at: isWaived ? null : new Date().toISOString(),
+        invoice_due_at: isWaived ? null : invoiceDueAt,
+        payment_status: isWaived ? 'completed' : 'pending',
+        notes: `Patient: ${patientName}${patientEmail ? ` | Email: ${patientEmail}` : ''}${patientPhone ? ` | Phone: ${patientPhone}` : ''}${discountNote}${orgBilling ? ` | Org: ${orgName}` : ''}${invoiceMemo ? ` | Memo: ${invoiceMemo}` : ''}${notes ? ` | Notes: ${notes}` : ''} | Created by admin`,
+      }]).select().single();
 
       if (error) throw error;
 
-      toast.success('Appointment scheduled!');
+      // Send invoice email (skip if fee waived)
+      if (newAppt && !isWaived) {
+        supabase.functions.invoke('send-appointment-invoice', {
+          body: {
+            appointmentId: newAppt.id,
+            patientName: orgBilling ? orgName : patientName,
+            patientEmail: billingEmail,
+            patientPhone,
+            serviceType,
+            serviceName: SERVICE_TYPES.find(s => s.value === serviceType)?.label || serviceType,
+            servicePrice: finalPrice,
+            appointmentDate: date,
+            appointmentTime: time,
+            address: address || 'TBD',
+            isVip,
+            memo: invoiceMemo || (orgBilling ? `Patient: ${patientName}` : ''),
+            orgName: orgBilling ? orgName : undefined,
+          },
+        }).catch(err => console.error('Invoice send error (non-blocking):', err));
+      }
+
+      const statusMsg = isWaived ? ' (Fee waived)' : isVip ? ' (VIP)' : ' Invoice sent.';
+      toast.success(`Appointment scheduled!${statusMsg}`);
       handleClose();
       onCreated();
     } catch (err: any) {
@@ -194,6 +264,22 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 </SelectContent>
               </Select>
             </div>
+            <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+              <Checkbox
+                id="vip-patient"
+                checked={isVip}
+                onCheckedChange={(checked) => setIsVip(checked === true)}
+                className="mt-0.5"
+              />
+              <label htmlFor="vip-patient" className="text-sm cursor-pointer">
+                <span className="font-medium text-amber-800 flex items-center gap-1">
+                  <Crown className="h-3.5 w-3.5" /> VIP Patient
+                </span>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  VIP appointments will not be auto-cancelled if payment is not received.
+                </p>
+              </label>
+            </div>
             <div className="flex justify-end">
               <Button onClick={() => setStep(2)} disabled={!canGoToStep2}>
                 Next: Schedule <ArrowRight className="ml-1 h-4 w-4" />
@@ -240,6 +326,65 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <Label>Notes</Label>
               <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Special instructions..." rows={2} />
             </div>
+
+            {/* Discount / Waive Fee */}
+            <div className="border-t pt-3">
+              <Label className="text-sm font-semibold">Pricing Adjustment</Label>
+              <div className="flex gap-2 mt-2">
+                {(['none', 'percentage', 'fixed', 'waive'] as const).map(t => (
+                  <Button
+                    key={t}
+                    type="button"
+                    size="sm"
+                    variant={discountType === t ? 'default' : 'outline'}
+                    className={`text-xs ${discountType === t ? 'bg-[#B91C1C] hover:bg-[#991B1B]' : ''}`}
+                    onClick={() => { setDiscountType(t); setDiscountValue(''); }}
+                  >
+                    {t === 'none' ? 'Full Price' : t === 'percentage' ? '% Off' : t === 'fixed' ? '$ Off' : 'Waive Fee'}
+                  </Button>
+                ))}
+              </div>
+              {(discountType === 'percentage' || discountType === 'fixed') && (
+                <Input
+                  type="number"
+                  min="0"
+                  className="mt-2"
+                  value={discountValue}
+                  onChange={e => setDiscountValue(e.target.value)}
+                  placeholder={discountType === 'percentage' ? 'Enter % (e.g. 20)' : 'Enter $ amount (e.g. 25)'}
+                />
+              )}
+            </div>
+
+            {/* Organization Billing */}
+            <div className="border-t pt-3">
+              <div className="flex items-start gap-3">
+                <Checkbox id="org-billing" checked={orgBilling} onCheckedChange={(c) => setOrgBilling(c === true)} className="mt-1" />
+                <label htmlFor="org-billing" className="text-sm cursor-pointer">
+                  <span className="font-medium">Bill to Organization</span>
+                  <p className="text-xs text-muted-foreground">Invoice will be sent to the organization instead of the patient.</p>
+                </label>
+              </div>
+              {orgBilling && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <div>
+                    <Label className="text-xs">Organization Name</Label>
+                    <Input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Org name" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Billing Email</Label>
+                    <Input type="email" value={orgEmail} onChange={e => setOrgEmail(e.target.value)} placeholder="billing@org.com" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Invoice Memo */}
+            <div>
+              <Label className="text-xs">Invoice Memo (optional)</Label>
+              <Input value={invoiceMemo} onChange={e => setInvoiceMemo(e.target.value)} placeholder="e.g. Patient: John Doe - Annual Wellness" />
+            </div>
+
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
               <Button onClick={() => setStep(3)} disabled={!canGoToStep3}>
@@ -260,6 +405,17 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <div className="flex justify-between"><span className="text-muted-foreground">Date</span><span className="font-medium">{new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Time</span><span className="font-medium">{time}</span></div>
               {address && <div className="flex justify-between"><span className="text-muted-foreground">Address</span><span>{address}{city ? `, ${city}` : ''} {zipcode}</span></div>}
+              {isVip && <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium text-amber-700 flex items-center gap-1"><Crown className="h-3.5 w-3.5" /> VIP Patient</span></div>}
+              {discountType !== 'none' && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Discount</span>
+                  <span className="font-medium text-emerald-700">
+                    {discountType === 'waive' ? 'Fee Waived ($0.00)' : discountType === 'percentage' ? `${discountValue}% off` : `$${parseFloat(discountValue || '0').toFixed(2)} off`}
+                  </span>
+                </div>
+              )}
+              {orgBilling && <div className="flex justify-between"><span className="text-muted-foreground">Bill To</span><span className="font-medium">{orgName} ({orgEmail})</span></div>}
+              {invoiceMemo && <div className="flex justify-between"><span className="text-muted-foreground">Memo</span><span className="text-xs">{invoiceMemo}</span></div>}
               {notes && <div className="flex justify-between"><span className="text-muted-foreground">Notes</span><span>{notes}</span></div>}
             </div>
             <div className="flex justify-between">

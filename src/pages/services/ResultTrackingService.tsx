@@ -231,7 +231,7 @@ const ResultTrackingServicePage: React.FC = () => {
               <div className="space-y-6">
                 <div className="bg-white p-6 rounded-lg shadow-sm">
                   <h3 className="text-xl font-semibold mb-2">How quickly will I receive my results?</h3>
-                  <p>You'll receive results as soon as they are available from the laboratory, typically within 24-48 hours for routine tests. Some specialized tests may take longer, but our tracking system keeps you updated on expected timeframes.</p>
+                  <p>Once your specimens are delivered to the lab, we send you a confirmation text and email with your lab-generated tracking ID. Results timing varies by lab and test type, and are available through your lab's patient portal. Our tracking system keeps you updated throughout the process.</p>
                 </div>
                 
                 <div className="bg-white p-6 rounded-lg shadow-sm">

@@ -76,7 +76,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           {getValues('locationDetails.address') && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Address</span>
-              <span className="text-right max-w-[60%]">
+              <span className="text-right max-w-[55%] sm:max-w-[60%] break-words text-xs sm:text-sm">
                 {getValues('locationDetails.address')}{getValues('locationDetails.city') ? `, ${getValues('locationDetails.city')}` : ''}{getValues('locationDetails.state') ? `, ${getValues('locationDetails.state')}` : ''} {getValues('locationDetails.zipCode') || ''}
               </span>
             </div>

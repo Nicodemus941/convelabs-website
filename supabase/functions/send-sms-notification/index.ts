@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { appointmentId, notificationType, phoneNumber, eta, labName, trackingId } = await req.json()
+    const { appointmentId, notificationType, phoneNumber, eta, labName, trackingId, customMessage } = await req.json()
 
     console.log('SMS notification request:', { appointmentId, notificationType, phoneNumber })
 
@@ -25,21 +25,25 @@ serve(async (req) => {
 
     let message = ''
     switch (notificationType) {
+      case 'on_the_way_custom':
+        // Custom message from the phlebotomist dashboard (includes ETA + urine sample info)
+        message = customMessage || `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${eta} minutes. Please have a designated sterile, well-lit area where we can perform the collection. We're looking forward to serving you. See you soon!`
+        break
       case 'on_the_way':
-        message = `🚗 Your ConveLabs phlebotomist is on the way! Expected arrival: ${eta} minutes. Please be ready with your lab order and ID.`
+        message = `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${eta} minutes. Please have a designated sterile, well-lit area where we can perform the collection. We're looking forward to serving you. See you soon!`
         break
       case 'sample_delivered':
-        message = `✅ Your samples have been delivered to ${labName}. Tracking ID: ${trackingId}. You'll receive results within 24-48 hours.`
+        message = `Your specimens have been successfully delivered to ${labName || 'the lab'}. Your lab-generated tracking ID is: ${trackingId || 'pending'}. You will receive your results directly from your lab's patient portal. Thank you for choosing ConveLabs!`
         break
       case 'completed':
-        message = `🎉 Your ConveLabs appointment is complete! Results will be available in your portal within 24-48 hours. Thank you for choosing ConveLabs!`
+        message = `Your ConveLabs appointment is complete! Your specimens are on their way to the lab. We will send you a confirmation once they have been successfully delivered along with your lab-generated ID. Thank you for choosing ConveLabs!`
         break
       default:
-        message = 'ConveLabs appointment update'
+        message = customMessage || 'ConveLabs appointment update'
     }
 
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
-    
+
     const formData = new URLSearchParams()
     formData.append('To', phoneNumber)
     formData.append('From', TWILIO_PHONE_NUMBER)
@@ -61,12 +65,12 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
+      JSON.stringify({
+        success: true,
         messageSid: twilioResponse.sid,
-        message: 'SMS sent successfully' 
+        message: 'SMS sent successfully'
       }),
-      { 
+      {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
     )
@@ -74,11 +78,11 @@ serve(async (req) => {
   } catch (error) {
     console.error('SMS notification error:', error)
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error.message 
+      JSON.stringify({
+        success: false,
+        error: error.message
       }),
-      { 
+      {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }

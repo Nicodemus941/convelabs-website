@@ -647,6 +647,13 @@ export type Database = {
           vip_hours: boolean | null
           weekend_service: boolean | null
           zipcode: string
+          invoice_status: string | null
+          invoice_sent_at: string | null
+          invoice_reminder_sent_at: string | null
+          invoice_due_at: string | null
+          is_vip: boolean | null
+          stripe_invoice_id: string | null
+          booking_source: string | null
         }
         Insert: {
           address: string
@@ -701,6 +708,13 @@ export type Database = {
           vip_hours?: boolean | null
           weekend_service?: boolean | null
           zipcode: string
+          invoice_status?: string | null
+          invoice_sent_at?: string | null
+          invoice_reminder_sent_at?: string | null
+          invoice_due_at?: string | null
+          is_vip?: boolean | null
+          stripe_invoice_id?: string | null
+          booking_source?: string | null
         }
         Update: {
           address?: string
@@ -755,6 +769,13 @@ export type Database = {
           vip_hours?: boolean | null
           weekend_service?: boolean | null
           zipcode?: string
+          invoice_status?: string | null
+          invoice_sent_at?: string | null
+          invoice_reminder_sent_at?: string | null
+          invoice_due_at?: string | null
+          is_vip?: boolean | null
+          stripe_invoice_id?: string | null
+          booking_source?: string | null
         }
         Relationships: [
           {
@@ -6365,6 +6386,118 @@ export type Database = {
         }
         Relationships: []
       }
+      chatbot_inquiries: {
+        Row: {
+          id: string
+          session_id: string | null
+          question: string
+          answer: string | null
+          page_url: string | null
+          patient_email: string | null
+          patient_name: string | null
+          booking_step: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          session_id?: string | null
+          question: string
+          answer?: string | null
+          page_url?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          booking_step?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          session_id?: string | null
+          question?: string
+          answer?: string | null
+          page_url?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          booking_step?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      sms_conversations: {
+        Row: {
+          id: string
+          staff_profile_id: string
+          patient_id: string
+          patient_phone: string
+          staff_phone: string | null
+          last_message_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          staff_profile_id: string
+          patient_id: string
+          patient_phone: string
+          staff_phone?: string | null
+          last_message_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          staff_profile_id?: string
+          patient_id?: string
+          patient_phone?: string
+          staff_phone?: string | null
+          last_message_at?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_conversations_staff_profile_id_fkey"
+            columns: ["staff_profile_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sms_messages: {
+        Row: {
+          id: string
+          conversation_id: string
+          direction: string
+          body: string
+          twilio_message_sid: string | null
+          status: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          conversation_id: string
+          direction: string
+          body: string
+          twilio_message_sid?: string | null
+          status?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          conversation_id?: string
+          direction?: string
+          body?: string
+          twilio_message_sid?: string | null
+          status?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "sms_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_profiles: {
         Row: {
           availability_settings: Json | null
@@ -6377,6 +6510,7 @@ export type Database = {
           id: string
           last_review_date: string | null
           pay_rate: number
+          phone: string | null
           premium_pay_rate: number | null
           specialty: string | null
           tenant_id: string | null
@@ -6394,6 +6528,7 @@ export type Database = {
           id?: string
           last_review_date?: string | null
           pay_rate?: number
+          phone?: string | null
           premium_pay_rate?: number | null
           specialty?: string | null
           tenant_id?: string | null
@@ -6411,6 +6546,7 @@ export type Database = {
           id?: string
           last_review_date?: string | null
           pay_rate?: number
+          phone?: string | null
           premium_pay_rate?: number | null
           specialty?: string | null
           tenant_id?: string | null

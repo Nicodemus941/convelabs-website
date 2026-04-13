@@ -2,12 +2,14 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useAppointments } from "@/hooks/useAppointments";
+import { supabase } from "@/integrations/supabase/client";
 import { Appointment } from "@/types/appointmentTypes";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar, Clock, MapPin, User, ArrowRight, Plus, Star, FileText } from "lucide-react";
+import { Calendar, Clock, MapPin, User, ArrowRight, Plus, Star, FileText, Bell, MessageSquare, Mail } from "lucide-react";
 import { Link } from "react-router-dom";
+import { toast } from "@/components/ui/sonner";
 import UpcomingAppointments from "@/components/appointments/UpcomingAppointments";
 import AppointmentHistory from "@/components/appointments/AppointmentHistory";
 
@@ -15,8 +17,33 @@ const PatientDashboard = () => {
   const { user } = useAuth();
   const { getAppointments, appointments } = useAppointments();
   const [nextAppointment, setNextAppointment] = useState<Appointment | null>(null);
+  const [notifMethod, setNotifMethod] = useState<'sms' | 'email' | 'both'>('both');
+  const [notifSaving, setNotifSaving] = useState(false);
 
   useEffect(() => { getAppointments(); }, [getAppointments]);
+
+  // Load notification preferences
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('email_preferences').select('notification_method').eq('user_id', user.id).maybeSingle()
+      .then(({ data }) => {
+        if (data?.notification_method) setNotifMethod(data.notification_method as any);
+      });
+  }, [user]);
+
+  const handleNotifChange = async (method: 'sms' | 'email' | 'both') => {
+    if (!user) return;
+    setNotifSaving(true);
+    setNotifMethod(method);
+    const { error } = await supabase.from('email_preferences').upsert({
+      user_id: user.id,
+      notification_method: method,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+    setNotifSaving(false);
+    if (error) toast.error('Failed to save preference');
+    else toast.success(`Notifications set to ${method === 'both' ? 'SMS & Email' : method.toUpperCase()}`);
+  };
 
   useEffect(() => {
     if (appointments?.length) {
@@ -150,6 +177,32 @@ const PatientDashboard = () => {
               <Button variant="outline" size="sm" className="w-full mt-3" asChild>
                 <Link to="/profile">Edit Profile</Link>
               </Button>
+            </CardContent>
+          </Card>
+
+          {/* Notification Preferences */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Bell className="h-4 w-4" /> Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <p className="text-xs text-muted-foreground mb-2">How would you like to receive appointment reminders?</p>
+              {(['sms', 'email', 'both'] as const).map(method => (
+                <Button
+                  key={method}
+                  variant={notifMethod === method ? 'default' : 'outline'}
+                  size="sm"
+                  className={`w-full justify-start gap-2 ${notifMethod === method ? 'bg-[#B91C1C] hover:bg-[#991B1B]' : ''}`}
+                  onClick={() => handleNotifChange(method)}
+                  disabled={notifSaving}
+                >
+                  {method === 'sms' && <><MessageSquare className="h-4 w-4" /> SMS Only</>}
+                  {method === 'email' && <><Mail className="h-4 w-4" /> Email Only</>}
+                  {method === 'both' && <><Bell className="h-4 w-4" /> SMS & Email</>}
+                </Button>
+              ))}
             </CardContent>
           </Card>
 
