@@ -65,8 +65,11 @@ const LeadCapture = () => {
           <h3 className="text-2xl md:text-3xl font-bold mb-2">
             Not ready to book yet?
           </h3>
-          <p className="text-muted-foreground mb-6">
-            Enter your email for 10% off your first blood draw, plus tips on getting the most from your lab work.
+          <p className="text-muted-foreground mb-3">
+            Get <span className="font-semibold text-foreground">10% off your first visit</span> + our free guide:
+          </p>
+          <p className="text-sm font-medium text-foreground mb-5">
+            📋 "Understanding Your Blood Work Results" — what your doctor isn't telling you
           </p>
 
           <form onSubmit={handleSubmit} className="flex gap-3 max-w-md mx-auto">

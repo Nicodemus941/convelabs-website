@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Container } from "@/components/ui/container";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield } from "lucide-react";
 import { ENROLLMENT_URL, TESTS_URL, BOOKING_URL, AUTH_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
@@ -109,7 +110,17 @@ const Footer = () => {
           </div>
         </div>
         
-        <div className="border-t border-gray-800 mt-8 pt-6 flex flex-col md:flex-row justify-between items-center">
+        {/* Newsletter */}
+        <div className="border-t border-gray-800 mt-8 pt-6 pb-6 max-w-md mx-auto text-center">
+          <p className="text-sm font-semibold mb-2">Weekly Health Tips</p>
+          <p className="text-xs text-gray-400 mb-3">Get expert insights on blood work, preventive health, and wellness.</p>
+          <form onSubmit={(e) => { e.preventDefault(); const input = e.currentTarget.querySelector('input'); if (input?.value) { supabase.from('leads' as any).insert({ email: input.value, source: 'footer_newsletter', status: 'new' }).then(() => { input.value = ''; }); } }} className="flex gap-2">
+            <input type="email" placeholder="Your email" className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#B91C1C]" required />
+            <button type="submit" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">Subscribe</button>
+          </form>
+        </div>
+
+        <div className="border-t border-gray-800 mt-2 pt-6 flex flex-col md:flex-row justify-between items-center">
           <p className="text-gray-400">© {new Date().getFullYear()} ConveLabs. All rights reserved.</p>
           <div className="flex space-x-4 mt-4 md:mt-0">
             <a href="https://twitter.com/convelabs" className="text-gray-400 hover:text-white" aria-label="Twitter" target="_blank" rel="noopener noreferrer">
