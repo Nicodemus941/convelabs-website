@@ -85,7 +85,10 @@ Deno.serve(async (req) => {
         if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER && patientPhone) {
           const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
 
-          const smsBody = `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. If you have not uploaded your lab orders, please have your orders and insurance information ready. Prepare a sterile, well-lit area for the collection. Questions? Call (941) 527-9169. See you soon!`;
+          const hasLabOrder = !!appt.lab_order_file_path;
+          const smsBody = hasLabOrder
+            ? `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Your lab order is on file — we're all set! Please have a sterile, well-lit area ready and wear a short-sleeved shirt. See you soon!`
+            : `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have your lab order and insurance card ready. If you'd like to upload them now, visit convelabs.com/dashboard. Prepare a sterile, well-lit area. See you soon!`;
 
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
@@ -139,7 +142,10 @@ Deno.serve(async (req) => {
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:20px 0;">
         <h3 style="margin:0 0 8px;font-size:14px;color:#166534;">How to Prepare</h3>
         <ul style="margin:0;padding-left:18px;font-size:13px;color:#15803d;line-height:1.8;">
-          <li>Have your <strong>photo ID</strong> and <strong>lab order</strong> ready</li>
+          ${hasLabOrder
+            ? '<li>✅ Your <strong>lab order is on file</strong> — we\'re all set!</li>'
+            : '<li>Have your <strong>lab order</strong> ready (or <a href="https://convelabs.com/dashboard" style="color:#B91C1C;">upload it now</a>)</li>'}
+          <li>Have your <strong>photo ID</strong> and <strong>insurance card</strong> ready</li>
           <li>Prepare a <strong>sterile, well-lit area</strong> for the collection</li>
           <li>If fasting is required, no food 8-12 hours before (water is OK)</li>
           <li>Wear a short-sleeved shirt or one with easily rolled-up sleeves</li>
