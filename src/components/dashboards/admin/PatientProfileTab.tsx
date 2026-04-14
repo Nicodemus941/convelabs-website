@@ -9,7 +9,7 @@ import { format } from 'date-fns';
 import {
   User, Phone, Mail, Calendar, Clock, MapPin, Shield, FileText,
   Search, ArrowLeft, Package, ClipboardList, DollarSign, Stethoscope,
-  ChevronRight, Edit3, CalendarPlus, Receipt, MessageSquare, MoreHorizontal,
+  ChevronRight, Edit3, CalendarPlus, Receipt, MessageSquare, MoreHorizontal, UserPlus, Loader2,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -27,6 +27,9 @@ const PatientProfileTab: React.FC = () => {
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ amount: '', description: '', memo: '' });
+  const [createPatientOpen, setCreatePatientOpen] = useState(false);
+  const [newPatient, setNewPatient] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+  const [isCreating, setIsCreating] = useState(false);
 
   const [allPatients, setAllPatients] = useState<any[]>([]);
 
@@ -442,8 +445,8 @@ const PatientProfileTab: React.FC = () => {
         <p className="text-sm text-muted-foreground">Search for a patient to view their complete history</p>
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-lg">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="relative flex-1 max-w-lg w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             value={searchQuery}
@@ -452,7 +455,12 @@ const PatientProfileTab: React.FC = () => {
             className="pl-10 h-11"
           />
         </div>
-        <p className="text-sm text-muted-foreground">{patients.length} patient{patients.length !== 1 ? 's' : ''}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-muted-foreground whitespace-nowrap">{patients.length} patients</p>
+          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" onClick={() => setCreatePatientOpen(true)}>
+            <UserPlus className="h-4 w-4" /> Add Patient
+          </Button>
+        </div>
       </div>
 
       {patients.length > 0 && (
@@ -486,6 +494,93 @@ const PatientProfileTab: React.FC = () => {
           <div className="w-8 h-8 border-4 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
         </div>
       )}
+
+      {/* Create Patient Modal */}
+      <Dialog open={createPatientOpen} onOpenChange={setCreatePatientOpen}>
+        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-[#B91C1C]" /> Add New Patient</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><Label>First Name *</Label><Input value={newPatient.firstName} onChange={e => setNewPatient(p => ({ ...p, firstName: e.target.value }))} placeholder="John" /></div>
+              <div><Label>Last Name *</Label><Input value={newPatient.lastName} onChange={e => setNewPatient(p => ({ ...p, lastName: e.target.value }))} placeholder="Smith" /></div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><Label>Email</Label><Input type="email" value={newPatient.email} onChange={e => setNewPatient(p => ({ ...p, email: e.target.value }))} placeholder="john@email.com" /></div>
+              <div><Label>Phone</Label><Input type="tel" value={newPatient.phone} onChange={e => setNewPatient(p => ({ ...p, phone: e.target.value }))} placeholder="4071234567" /></div>
+            </div>
+            <div><Label>Date of Birth</Label><Input type="date" value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))} /></div>
+
+            <div className="border-t pt-3">
+              <p className="text-sm font-semibold mb-2">Address</p>
+              <div className="space-y-3">
+                <div><Label>Street</Label><Input value={newPatient.address} onChange={e => setNewPatient(p => ({ ...p, address: e.target.value }))} placeholder="123 Main St" /></div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div><Label>City</Label><Input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))} placeholder="Orlando" /></div>
+                  <div><Label>State</Label><Input value={newPatient.state} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))} /></div>
+                  <div><Label>ZIP</Label><Input value={newPatient.zipcode} onChange={e => setNewPatient(p => ({ ...p, zipcode: e.target.value }))} placeholder="32801" /></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-3">
+              <p className="text-sm font-semibold mb-2">Insurance</p>
+              <div className="space-y-3">
+                <div><Label>Provider</Label><Input value={newPatient.insuranceProvider} onChange={e => setNewPatient(p => ({ ...p, insuranceProvider: e.target.value }))} placeholder="Blue Cross" /></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><Label>Member ID</Label><Input value={newPatient.insuranceMemberId} onChange={e => setNewPatient(p => ({ ...p, insuranceMemberId: e.target.value }))} /></div>
+                  <div><Label>Group #</Label><Input value={newPatient.insuranceGroup} onChange={e => setNewPatient(p => ({ ...p, insuranceGroup: e.target.value }))} /></div>
+                </div>
+              </div>
+            </div>
+
+            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!newPatient.firstName || !newPatient.lastName || isCreating}
+              onClick={async () => {
+                setIsCreating(true);
+                try {
+                  // Check for duplicate email
+                  if (newPatient.email) {
+                    const { data: existing } = await supabase.from('tenant_patients').select('id').ilike('email', newPatient.email.trim()).maybeSingle();
+                    if (existing) { toast.error('A patient with this email already exists'); setIsCreating(false); return; }
+                  }
+
+                  const { data, error } = await supabase.from('tenant_patients').insert({
+                    first_name: newPatient.firstName, last_name: newPatient.lastName,
+                    email: newPatient.email || null, phone: newPatient.phone || null,
+                    date_of_birth: newPatient.dob || null,
+                    address: newPatient.address || null, city: newPatient.city || null,
+                    state: newPatient.state || null, zipcode: newPatient.zipcode || null,
+                    insurance_provider: newPatient.insuranceProvider || null,
+                    insurance_member_id: newPatient.insuranceMemberId || null,
+                    insurance_group_number: newPatient.insuranceGroup || null,
+                    tenant_id: '00000000-0000-0000-0000-000000000001',
+                  }).select().single();
+
+                  if (error) throw error;
+
+                  toast.success(`${newPatient.firstName} ${newPatient.lastName} added!`);
+                  setNewPatient({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+                  setCreatePatientOpen(false);
+
+                  // Refresh patient list
+                  const { data: refreshed } = await supabase.from('tenant_patients').select('*').order('first_name').limit(500);
+                  setAllPatients(refreshed || []);
+                  setPatients(refreshed || []);
+
+                  // Auto-select the new patient
+                  if (data) loadPatientData(data);
+                } catch (err: any) {
+                  toast.error(err.message || 'Failed to create patient');
+                } finally {
+                  setIsCreating(false);
+                }
+              }}>
+              {isCreating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating...</> : 'Create Patient'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
