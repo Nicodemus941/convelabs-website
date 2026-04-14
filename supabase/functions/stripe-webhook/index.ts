@@ -659,7 +659,17 @@ async function handleAppointmentPayment(session: any) {
             .update({ uses: (codeData.uses || 0) + 1 })
             .eq('id', codeData.id);
 
-          console.log(`Referral ${referralCode}: redemption recorded, referrer credited, uses=${(codeData.uses || 0) + 1}`);
+          // Add $25 credit to referrer's balance
+          await supabaseClient.from('referral_credits').insert({
+            user_id: codeData.user_id,
+            amount: codeData.referrer_credit || 25,
+            type: 'referral_earned',
+            referral_code_id: codeData.id,
+            appointment_id: appointment.id,
+            description: `Referral from ${metadata.patient_first_name || 'a friend'} (code: ${referralCode})`,
+          });
+
+          console.log(`Referral ${referralCode}: redemption + $${codeData.referrer_credit || 25} credit, uses=${(codeData.uses || 0) + 1}`);
 
           // Notify the referrer that their friend booked
           if (codeData.user_id) {
@@ -691,6 +701,29 @@ async function handleAppointmentPayment(session: any) {
                 });
                 console.log(`Referrer notified via SMS: ${referrer.phone}`);
               }
+            }
+          }
+
+          // Also notify the REFERRED FRIEND that their discount was applied
+          const friendPhone = metadata.patient_phone;
+          const friendName = metadata.patient_first_name || 'Friend';
+          if (friendPhone) {
+            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+            const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+              await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                  To: friendPhone.startsWith('+') ? friendPhone : `+1${friendPhone.replace(/\D/g, '')}`,
+                  Body: `ConveLabs: Hi ${friendName}! Your $${codeData.discount_amount || 25} referral discount was applied to your booking. Welcome to ConveLabs! After your visit, you'll get your own referral code to share.`,
+                  ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
+                }).toString(),
+              });
             }
           }
         }

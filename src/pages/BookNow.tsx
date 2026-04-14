@@ -27,6 +27,10 @@ const BookNow: React.FC = () => {
   const sessionId = searchParams.get('session_id');
   const status = searchParams.get('status');
 
+  // Persist referral code from URL into sessionStorage (survives multi-step flow)
+  const refCode = searchParams.get('ref');
+  if (refCode) sessionStorage.setItem('convelabs_referral', refCode);
+
   const [mode, setMode] = useState<PageMode>(() => {
     if (status === 'success' && sessionId) return 'verifying';
     if (status === 'cancel') return 'cancelled';

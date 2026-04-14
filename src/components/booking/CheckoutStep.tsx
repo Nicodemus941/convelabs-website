@@ -72,11 +72,15 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
   const addOnTotal = addOns.filter(a => selectedAddOns.has(a.id)).reduce((s, a) => s + (a.price || 0), 0);
 
-  // Check URL for referral code
+  // Check URL + sessionStorage for referral code (survives multi-step flow)
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref');
-    if (ref) { setReferralCode(ref); applyReferral(ref); }
+    const ref = params.get('ref') || sessionStorage.getItem('convelabs_referral');
+    if (ref) {
+      setReferralCode(ref);
+      applyReferral(ref);
+      sessionStorage.setItem('convelabs_referral', ref); // Persist through steps
+    }
   }, []);
 
   const applyReferral = async (code: string) => {
