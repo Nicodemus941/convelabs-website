@@ -144,14 +144,8 @@ class AnalyticsTracker {
         referrer: document.referrer
       };
 
-      // Send to analytics edge function
-      const { error } = await supabase.functions.invoke('track-analytics', {
-        body: payload
-      });
-
-      if (error) {
-        console.warn('Analytics tracking failed:', error);
-      }
+      // Analytics edge function not deployed — no-op to avoid 404 noise
+      void payload;
     } catch (error) {
       console.warn('Analytics tracking error:', error);
     }

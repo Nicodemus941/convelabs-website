@@ -68,8 +68,8 @@ export const TenantProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const loadUserTenants = async () => {
     if (!user) return [] as UserTenant[];
-    // Patients don't have tenants — skip the query to avoid 500 errors
-    if (user.role === 'patient') { setIsLoading(false); return [] as UserTenant[]; }
+    // Patients and super_admins don't have tenant memberships — skip the query
+    if (user.role === 'patient' || user.role === 'super_admin') { setIsLoading(false); return [] as UserTenant[]; }
     
     setIsLoading(true);
     try {

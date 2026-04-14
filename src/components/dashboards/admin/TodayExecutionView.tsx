@@ -65,21 +65,17 @@ const TodayExecutionView: React.FC<TodayExecutionViewProps> = ({ basePath }) => 
 
   const fetchToday = async () => {
     setLoading(true);
+    // appointment_date is timestamptz — use a day-range filter
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = format(tomorrow, 'yyyy-MM-dd');
     const { data } = await supabase
       .from('appointments')
       .select('*')
       .gte('appointment_date', todayStr)
-      .lt('appointment_date', `${todayStr}T23:59:59`)
+      .lt('appointment_date', tomorrowStr)
       .order('appointment_time', { ascending: true });
-    // Fallback: some rows may store date as plain text
-    const { data: data2 } = await supabase
-      .from('appointments')
-      .select('*')
-      .ilike('appointment_date', `${todayStr}%`)
-      .order('appointment_time', { ascending: true });
-    const merged = [...(data || []), ...(data2 || [])];
-    const unique = Array.from(new Map(merged.map(a => [a.id, a])).values());
-    setAppts(unique as Appt[]);
+    setAppts((data || []) as Appt[]);
     setLoading(false);
   };
 
