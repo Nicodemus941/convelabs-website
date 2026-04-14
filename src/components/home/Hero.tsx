@@ -73,8 +73,8 @@ const Hero = () => {
               variants={itemVariants}
               className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold leading-tight tracking-tight text-foreground mb-6"
             >
-              Blood Work Done Right{" "}
-              <span className="text-conve-red">— At Your Door</span>
+              Know You're Healthy{" "}
+              <span className="text-conve-red">— From Your Couch</span>
             </motion.h1>
 
             {/* Subtitle */}
@@ -82,7 +82,7 @@ const Hero = () => {
               variants={itemVariants}
               className="text-lg sm:text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto mb-4"
             >
-              Skip the lab. A licensed phlebotomist comes to you — same-day appointments, HIPAA compliant, and backed by our satisfaction guarantee.
+              A licensed phlebotomist at your door in 60 minutes. Results in 48 hours. Backed by our on-time guarantee — or your visit is free.
             </motion.p>
 
             {/* Price anchor */}
@@ -90,11 +90,9 @@ const Hero = () => {
               variants={itemVariants}
               className="text-base sm:text-lg font-semibold text-foreground mb-8"
             >
-              Office visits from{" "}
-              <span className="text-conve-red text-xl sm:text-2xl">$55</span>{" "}
-              · Mobile from{" "}
-              <span className="text-conve-red text-xl sm:text-2xl">$150</span>{" "}
-              · <span className="text-green-600">Members save up to 25%</span>
+              <span className="inline-flex items-center gap-2 bg-green-50 border border-green-200 rounded-full px-4 py-1 text-green-800 text-sm font-semibold">🛡️ On-time or it's free</span>
+              <br className="sm:hidden" />
+              <span className="text-base sm:text-lg mt-2 block">Office from <span className="text-conve-red font-bold">$55</span> · Mobile from <span className="text-conve-red font-bold">$150</span> · Members save up to 25%</span>
             </motion.p>
 
             {/* Dual CTA */}
@@ -104,7 +102,7 @@ const Hero = () => {
                 size="lg"
                 className="h-14 px-10 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-lg rounded-xl shadow-luxury-red hover:shadow-luxury-red-hover transition-all"
               >
-                Book Your Visit — From $55
+                Book Your Visit — Same-Day Available
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button
@@ -113,14 +111,29 @@ const Hero = () => {
                 variant="outline"
                 className="h-14 px-8 font-semibold text-lg rounded-xl border-2"
               >
-                See Pricing & Membership
+                See How It Works
               </Button>
             </motion.div>
 
-            {/* Social proof */}
-            <motion.p variants={itemVariants} className="text-sm text-muted-foreground mb-8">
-              Trusted by <span className="font-semibold text-foreground">500+ patients</span> across Central Florida
-            </motion.p>
+            {/* Social proof counters */}
+            <motion.div variants={itemVariants} className="flex flex-wrap justify-center gap-6 sm:gap-10 mb-8">
+              <div className="text-center">
+                <p className="text-2xl sm:text-3xl font-bold text-foreground">500+</p>
+                <p className="text-xs text-muted-foreground">Happy Patients</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl sm:text-3xl font-bold text-foreground">4.9<span className="text-amber-500">★</span></p>
+                <p className="text-xs text-muted-foreground">Google Rating</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl sm:text-3xl font-bold text-foreground">60min</p>
+                <p className="text-xs text-muted-foreground">Avg. Response</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl sm:text-3xl font-bold text-conve-red">$0</p>
+                <p className="text-xs text-muted-foreground">If We're Late</p>
+              </div>
+            </motion.div>
 
             {/* Trust signals row */}
             <motion.div

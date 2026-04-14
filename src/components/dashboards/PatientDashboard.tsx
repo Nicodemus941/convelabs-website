@@ -20,7 +20,7 @@ const PLANS = [
 const PatientDashboard = () => {
   const { user, logout } = useAuth();
   const [searchParams] = useSearchParams();
-  const [stats, setStats] = useState({ upcoming: 0, completed: 0, nextDate: '' });
+  const [stats, setStats] = useState({ upcoming: 0, completed: 0, nextDate: '', daysSince: 0, totalSpent: 0 });
   const [notifMethod, setNotifMethod] = useState<'sms' | 'email' | 'both'>('both');
   const [notifSaving, setNotifSaving] = useState(false);
   const [membershipModalOpen, setMembershipModalOpen] = useState(false);
@@ -61,11 +61,11 @@ const PatientDashboard = () => {
     if (!user) return;
     const loadStats = async () => {
       let all: any[] = [];
-      const { data: byId } = await supabase.from('appointments').select('status, appointment_date')
+      const { data: byId } = await supabase.from('appointments').select('status, appointment_date, total_amount, payment_status')
         .eq('patient_id', user.id);
       if (byId) all = [...byId];
       if (user.email) {
-        const { data: byEmail } = await supabase.from('appointments').select('status, appointment_date')
+        const { data: byEmail } = await supabase.from('appointments').select('status, appointment_date, total_amount, payment_status')
           .ilike('patient_email', user.email);
         if (byEmail) {
           const ids = new Set(all.map(a => a.id));
@@ -76,7 +76,10 @@ const PatientDashboard = () => {
       const completed = all.filter(a => a.status === 'completed');
       const next = upcoming.sort((a, b) => new Date(a.appointment_date || 0).getTime() - new Date(b.appointment_date || 0).getTime())[0];
       const nextDate = next?.appointment_date ? new Date(next.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'None';
-      setStats({ upcoming: upcoming.length, completed: completed.length, nextDate });
+      const lastCompleted = completed.sort((a, b) => new Date(b.appointment_date || 0).getTime() - new Date(a.appointment_date || 0).getTime())[0];
+      const daysSince = lastCompleted?.appointment_date ? Math.floor((Date.now() - new Date(lastCompleted.appointment_date).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+      const totalSpent = all.filter(a => a.payment_status === 'completed').reduce((s: number, a: any) => s + (a.total_amount || 0), 0);
+      setStats({ upcoming: upcoming.length, completed: completed.length, nextDate, daysSince, totalSpent });
     };
     loadStats();
 
@@ -125,14 +128,17 @@ const PatientDashboard = () => {
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-sm">
+        <Card className={`shadow-sm ${stats.daysSince > 180 ? 'border-red-200 bg-red-50/50' : stats.daysSince > 90 ? 'border-amber-200 bg-amber-50/50' : ''}`}>
           <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] md:text-xs text-muted-foreground">Completed</p>
-                <p className="text-xl md:text-2xl font-bold">{completedCount}</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">Last Blood Work</p>
+                <p className={`text-sm font-bold ${stats.daysSince > 180 ? 'text-red-600' : stats.daysSince > 90 ? 'text-amber-600' : 'text-green-600'}`}>
+                  {stats.daysSince > 0 ? `${stats.daysSince} days ago` : completedCount > 0 ? 'Recent' : 'Never'}
+                </p>
+                {stats.daysSince > 90 && <p className="text-[9px] text-muted-foreground">Recommended: every 90 days</p>}
               </div>
-              <FileText className="h-6 w-6 md:h-8 md:w-8 text-green-500 opacity-50" />
+              <FileText className={`h-6 w-6 md:h-8 md:w-8 opacity-50 ${stats.daysSince > 180 ? 'text-red-500' : stats.daysSince > 90 ? 'text-amber-500' : 'text-green-500'}`} />
             </div>
           </CardContent>
         </Card>
@@ -151,14 +157,19 @@ const PatientDashboard = () => {
             </div>
           </CardContent>
         </Card>
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-amber-200 bg-gradient-to-br from-amber-50/50 to-white">
           <CardContent className="p-3 md:p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[10px] md:text-xs text-muted-foreground">Membership</p>
-                <p className="text-sm font-bold">Non-member</p>
+                <p className="text-[10px] md:text-xs text-muted-foreground">
+                  {stats.totalSpent > 0 ? 'You could have saved' : 'Membership'}
+                </p>
+                <p className="text-sm font-bold text-amber-700">
+                  {stats.totalSpent > 0 ? `$${Math.round(stats.totalSpent * 0.13)}` : 'Save 13-34%'}
+                </p>
+                {stats.totalSpent > 0 && <p className="text-[9px] text-muted-foreground">on ${stats.totalSpent} spent this year</p>}
               </div>
-              <Star className="h-6 w-6 md:h-8 md:w-8 text-amber-500 opacity-50" />
+              <Star className="h-6 w-6 md:h-8 md:w-8 text-amber-500" />
             </div>
             <Button variant="link" size="sm" className="px-0 mt-1 text-[10px] md:text-xs text-[#B91C1C]" onClick={() => setMembershipModalOpen(true)}>
               Upgrade & Save →

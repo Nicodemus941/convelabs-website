@@ -60,7 +60,8 @@ Deno.serve(async (req) => {
     steps.push({ step: 'results_checkin', delay: 4320 });
     if (isFirstVisit) steps.push({ step: 'membership_upsell', delay: 10080 });
     if (isFirstVisit) steps.push({ step: 'referral_prompt', delay: 20160 });
-    steps.push({ step: 'rebooking_nudge', delay: isFirstVisit ? 43200 : 20160 });
+    // 45 days for first-timers, 21 days for returning patients
+    steps.push({ step: 'rebooking_nudge', delay: isFirstVisit ? 64800 : 30240 });
 
     const records = [];
     for (const s of steps) {

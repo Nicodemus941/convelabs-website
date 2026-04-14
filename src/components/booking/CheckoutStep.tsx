@@ -192,6 +192,21 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
+        {/* Membership upsell for non-members */}
+        {memberTier === 'none' && breakdown.servicePrice >= 100 && (
+          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 space-y-2">
+            <p className="font-semibold text-sm text-amber-900">💰 Save ${(breakdown.servicePrice - (breakdown.servicePrice * 0.87)).toFixed(0)} on this visit</p>
+            <p className="text-xs text-amber-700">
+              You're paying <span className="font-bold">${breakdown.servicePrice.toFixed(0)}</span>. Members pay <span className="font-bold">${(breakdown.servicePrice * 0.87).toFixed(0)}</span>.
+              Join for <span className="font-bold">$99/year</span> and save on every visit.
+            </p>
+            <Button type="button" variant="outline" size="sm" className="text-xs border-amber-300 text-amber-800 hover:bg-amber-100"
+              onClick={() => window.open('/pricing', '_blank')}>
+              View Membership Plans →
+            </Button>
+          </div>
+        )}
+
         {/* Price breakdown */}
         <div className="space-y-3">
           <h3 className="font-medium">Order Summary</h3>

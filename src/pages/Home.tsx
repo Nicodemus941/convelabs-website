@@ -4,6 +4,7 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/home/Header";
 import Hero from "@/components/home/Hero";
+import GuaranteeBanner from "@/components/home/GuaranteeBanner";
 import TrustBanner from "@/components/home/TrustBanner";
 import HowItWorks from "@/components/home/HowItWorks";
 import PricingTransparency from "@/components/home/PricingTransparency";
@@ -199,6 +200,7 @@ const Home = () => {
         <main>
           <PageTransition>
             <Hero />
+            <GuaranteeBanner />
             <TrustBanner />
             <HowItWorks />
             <PricingTransparency />

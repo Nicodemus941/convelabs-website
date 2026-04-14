@@ -102,9 +102,19 @@ const ReferralCard: React.FC = () => {
           </Button>
         </div>
 
-        <div className="flex items-center justify-between pt-2 border-t text-xs text-muted-foreground">
-          <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {uses} friend{uses !== 1 ? 's' : ''} referred</span>
-          <span className="flex items-center gap-1"><DollarSign className="h-3 w-3" /> ${uses * 25} earned</span>
+        {/* Progress bar to free visit */}
+        <div className="pt-2 border-t space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">{uses}/5 referrals</span>
+            <span className="font-semibold text-[#B91C1C]">{uses >= 5 ? '🎉 FREE visit earned!' : `${5 - uses} more for a FREE visit`}</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="bg-[#B91C1C] h-2 rounded-full transition-all" style={{ width: `${Math.min((uses / 5) * 100, 100)}%` }} />
+          </div>
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <span>{uses} friend{uses !== 1 ? 's' : ''} referred</span>
+            <span>${uses * 25} earned</span>
+          </div>
         </div>
       </CardContent>
     </Card>
