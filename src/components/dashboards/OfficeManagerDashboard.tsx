@@ -70,15 +70,23 @@ const OfficeManagerDashboard = () => {
   useEffect(() => { fetchAppointments(); }, []);
 
   const getPatientName = (appt: any): string => {
-    if (appt.notes?.startsWith('Patient: ')) return appt.notes.split(' | ')[0].replace('Patient: ', '');
-    return appt.patient_email || appt.patient_name || 'Unknown';
+    if (appt.patient_name) return appt.patient_name;
+    if (appt.notes?.match(/Patient:\s*([^|]+)/)) return appt.notes.match(/Patient:\s*([^|]+)/)[1].trim();
+    return appt.service_name || 'Appointment';
   };
 
   const getPatientContact = (appt: any) => {
-    const emailMatch = appt.notes?.match(/Email:\s*([^|]+)/);
-    const phoneMatch = appt.notes?.match(/Phone:\s*([^|]+)/);
-    return { email: emailMatch?.[1]?.trim(), phone: phoneMatch?.[1]?.trim() };
+    return {
+      email: appt.patient_email || appt.notes?.match(/Email:\s*([^|\s]+)/)?.[1]?.trim(),
+      phone: appt.patient_phone || appt.notes?.match(/Phone:\s*([^|\s]+)/)?.[1]?.trim(),
+    };
   };
+
+  // Attention needed items
+  const overdueInvoices = appointments.filter(a => a.invoice_status === 'sent' && a.invoice_due_at && new Date(a.invoice_due_at) < new Date() && a.status !== 'cancelled');
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayUpcoming = appointments.filter(a => a.appointment_date?.substring(0, 10) === todayStr && ['scheduled', 'confirmed'].includes(a.status));
+  const missingLabOrders = todayUpcoming.filter(a => !a.lab_order_file_path && ['mobile', 'senior'].includes(a.service_type));
 
   const filteredAppointments = useMemo(() => {
     let filtered = appointments;
@@ -170,6 +178,27 @@ const OfficeManagerDashboard = () => {
           </Button>
         </div>
       </div>
+
+      {/* Attention Needed */}
+      {(overdueInvoices.length > 0 || missingLabOrders.length > 0) && (
+        <div className="space-y-2">
+          {overdueInvoices.length > 0 && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5">
+              <DollarSign className="h-4 w-4 text-red-600 flex-shrink-0" />
+              <span className="text-sm text-red-800 font-medium">{overdueInvoices.length} overdue invoice{overdueInvoices.length !== 1 ? 's' : ''} need attention</span>
+              <Button variant="ghost" size="sm" className="ml-auto text-xs text-red-700" asChild>
+                <Link to="/dashboard/super_admin/invoices">View →</Link>
+              </Button>
+            </div>
+          )}
+          {missingLabOrders.length > 0 && (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
+              <Calendar className="h-4 w-4 text-amber-600 flex-shrink-0" />
+              <span className="text-sm text-amber-800 font-medium">{missingLabOrders.length} appointment{missingLabOrders.length !== 1 ? 's' : ''} today without lab orders</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
