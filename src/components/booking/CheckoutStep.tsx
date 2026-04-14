@@ -264,6 +264,16 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
+        {/* Family member upsell */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
+          <p className="font-semibold text-sm text-blue-900">👨‍👩‍👧 Bringing a family member?</p>
+          <p className="text-xs text-blue-700">Add them to this visit for just <span className="font-bold">$75</span> — no separate appointment needed.</p>
+          <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 mt-1"
+            onClick={() => { toast.info('Call (941) 527-9169 to add a family member to this visit.'); }}>
+            Add Family Member — $75
+          </Button>
+        </div>
+
         {/* Tip selector */}
         <TipSelector value={tipAmount} onChange={setTipAmount} />
 

@@ -61,6 +61,61 @@ Deno.serve(async (req) => {
 
         // Execute based on step type
         switch (seq.step) {
+          case 'what_to_expect': {
+            // Get appointment details for the prep email
+            let apptDate = '', apptTime = '', apptAddress = '', serviceName = '';
+            if (seq.appointment_id) {
+              const { data: appt } = await supabase.from('appointments')
+                .select('appointment_date, appointment_time, address, service_name')
+                .eq('id', seq.appointment_id).maybeSingle();
+              if (appt) {
+                try { apptDate = new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }); } catch { apptDate = appt.appointment_date?.substring(0,10) || ''; }
+                apptTime = appt.appointment_time || '';
+                apptAddress = appt.address || '';
+                serviceName = appt.service_name || 'Blood Draw';
+              }
+            }
+            if (MAILGUN_API_KEY && seq.patient_email) {
+              await sendEmail(seq.patient_email, `What to Expect — Your ConveLabs Visit${apptDate ? ' on ' + apptDate : ''}`, `
+                <div style="font-family:Arial;max-width:600px;margin:0 auto;">
+                  <div style="background:linear-gradient(135deg,#1e293b,#334155);color:white;padding:28px;border-radius:12px 12px 0 0;text-align:center;">
+                    <h2 style="margin:0;font-size:20px;">Getting Ready for Your Visit</h2>
+                    <p style="margin:6px 0 0;opacity:0.8;font-size:13px;">${apptDate}${apptTime ? ' at ' + apptTime : ''}</p>
+                  </div>
+                  <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
+                    <p>Hi ${patientName},</p>
+                    <p>Your <strong>${serviceName}</strong> appointment is coming up! Here's how to prepare:</p>
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:16px 0;">
+                      <h3 style="margin:0 0 10px;font-size:14px;color:#166534;">✅ Your Prep Checklist</h3>
+                      <ul style="margin:0;padding-left:18px;font-size:13px;color:#15803d;line-height:2;">
+                        <li><strong>Lab order</strong> — have it printed or on your phone</li>
+                        <li><strong>Photo ID</strong> — driver's license or passport</li>
+                        <li><strong>Insurance card</strong> — front and back</li>
+                        <li><strong>Hydrate</strong> — drink plenty of water today</li>
+                        <li><strong>Fasting?</strong> — if required, no food 8-12 hours before</li>
+                        <li><strong>Clothing</strong> — wear a short-sleeved shirt</li>
+                        <li><strong>Space</strong> — prepare a clean, well-lit area</li>
+                      </ul>
+                    </div>
+                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin:16px 0;text-align:center;">
+                      <p style="margin:0;font-size:14px;font-weight:600;">Your Phlebotomist</p>
+                      <p style="margin:4px 0 0;font-size:13px;color:#6b7280;">Nicodemme "Nico" Jean-Baptiste</p>
+                      <p style="margin:2px 0 0;font-size:12px;color:#9ca3af;">Licensed Phlebotomist · ConveLabs</p>
+                    </div>
+                    <div style="text-align:center;margin:20px 0;">
+                      <a href="https://convelabs.com/dashboard" style="display:inline-block;background:#B91C1C;color:white;padding:12px 28px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
+                    </div>
+                    <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin:16px 0;text-align:center;">
+                      <p style="margin:0;font-size:13px;color:#991B1B;">💡 <strong>Bringing a family member?</strong> Add them to the same visit for just $75.</p>
+                      <a href="tel:9415279169" style="font-size:12px;color:#B91C1C;">Call (941) 527-9169 to add</a>
+                    </div>
+                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810<br>(941) 527-9169 · convelabs.com</p>
+                  </div>
+                </div>
+              `);
+            }
+            break;
+          }
           case 'specimen_confirm': {
             if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
               await sendSMS(seq.patient_phone, `Hi ${patientName}! Your ConveLabs specimens are on the way to the lab. We'll send you a confirmation with your lab-generated tracking ID once delivered. Thank you for choosing ConveLabs!`);

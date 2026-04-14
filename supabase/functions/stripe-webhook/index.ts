@@ -739,6 +739,19 @@ async function handleAppointmentPayment(session: any) {
       console.error('Failed to send appointment confirmation (non-fatal):', notifErr);
     }
 
+    // Schedule "What to Expect" follow-up email (2 hours after booking)
+    try {
+      await supabaseClient.from('post_visit_sequences').insert({
+        appointment_id: appointment.id,
+        patient_id: patientId,
+        patient_email: metadata.patient_email,
+        patient_phone: metadata.patient_phone,
+        step: 'what_to_expect',
+        scheduled_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+        status: 'pending',
+      });
+    } catch (e) { console.error('What-to-expect schedule error:', e); }
+
     return appointment;
   } catch (error) {
     console.error('Error processing appointment payment:', error);
