@@ -220,7 +220,10 @@ export function usePhlebotomistAppointments() {
               patientPhone: appt.patient_phone,
               patientName: appt.patient_name,
             },
-          }).catch(err => console.error('Post-visit trigger error (non-blocking):', err));
+          }).then(({ error: seqErr }) => {
+            if (seqErr) toast.error('Follow-up sequence failed — admin notified');
+            else toast.success('Post-visit follow-up sequence triggered');
+          }).catch(() => toast.error('Follow-up sequence failed'));
         }
       }
 

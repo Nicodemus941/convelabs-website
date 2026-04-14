@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { startOfWeek, format, isToday } from 'date-fns';
-import { Calendar, Loader2, RefreshCw } from 'lucide-react';
+import { Calendar, Loader2, RefreshCw, DollarSign, Clock, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import WeekStrip from './WeekStrip';
@@ -44,8 +44,47 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
   const dayLabel = isToday(selectedDate) ? 'Today' : format(selectedDate, 'EEEE, MMM d');
 
+  // Today summary stats
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const todayAppts = appointments.filter(a => a.appointment_date === todayStr && a.status !== 'cancelled');
+  const todayCompleted = todayAppts.filter(a => a.status === 'completed');
+  const todayRemaining = todayAppts.filter(a => !['completed', 'cancelled'].includes(a.status));
+  const todayEarnings = todayCompleted.reduce((s, a) => s + (a.total_amount || 0), 0);
+  const todayTips = todayCompleted.reduce((s, a) => s + (a.tip_amount || 0), 0);
+  const nextAppt = todayRemaining.sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''))[0];
+
   return (
     <div className="space-y-4">
+      {/* Today Summary Banner */}
+      {isToday(selectedDate) && todayAppts.length > 0 && (
+        <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-xl p-4 shadow-md">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-medium text-gray-400">Today's Overview</p>
+            <span className="text-xs text-gray-500">{format(new Date(), 'EEEE, MMM d')}</span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <p className="text-2xl font-bold">{todayCompleted.length}/{todayAppts.length}</p>
+              <p className="text-[10px] text-gray-400">Completed</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-emerald-400">${todayEarnings}</p>
+              <p className="text-[10px] text-gray-400">Earned{todayTips > 0 ? ` (+$${todayTips} tips)` : ''}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-amber-400">{todayRemaining.length}</p>
+              <p className="text-[10px] text-gray-400">Remaining</p>
+            </div>
+          </div>
+          {nextAppt && (
+            <div className="mt-3 pt-3 border-t border-gray-700 flex items-center gap-2 text-sm">
+              <Clock className="h-3.5 w-3.5 text-gray-400" />
+              <span className="text-gray-300">Next: <span className="text-white font-medium">{nextAppt.patient_name}</span> at {nextAppt.appointment_time}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Week Strip */}
       <WeekStrip
         selectedDate={selectedDate}

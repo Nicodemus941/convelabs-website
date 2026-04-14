@@ -68,7 +68,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         delivery_notes: deliveryNotes || null,
         collection_time: new Date().toISOString(),
         delivered_at: new Date().toISOString(),
-        delivered_by: 'Nicodemme "Nico" Jean-Baptiste',
+        delivered_by: (() => { try { const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token'); if (stored) { const p = JSON.parse(stored); return p?.user?.user_metadata?.full_name || p?.user?.email || 'Phlebotomist'; } } catch {} return 'Phlebotomist'; })(),
         status: 'delivered',
       });
 

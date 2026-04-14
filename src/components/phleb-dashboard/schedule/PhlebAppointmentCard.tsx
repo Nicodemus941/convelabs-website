@@ -333,11 +333,38 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               </div>
 
               {/* Manage */}
-              <div className="px-4 py-3">
+              <div className="px-4 py-3 space-y-2">
                 <p className="text-sm font-semibold text-gray-800 mb-2">Manage Appointment</p>
-                <Button variant="outline" size="sm" className="w-full gap-2 h-10" onClick={() => toast.info('Reschedule feature coming soon')}>
-                  <CalendarClock className="h-4 w-4" /> Reschedule Appointment
+                <Button variant="outline" size="sm" className="w-full gap-2 h-10" onClick={async (e) => {
+                  e.stopPropagation();
+                  // Quick reschedule — notify admin
+                  const reason = prompt('Reason for reschedule:');
+                  if (!reason) return;
+                  await supabase.functions.invoke('send-sms-notification', {
+                    body: { to: '9415279169', message: `Phleb reschedule request: ${appointment.patient_name} (${appointment.appointment_time}). Reason: ${reason}` },
+                  }).catch(() => {});
+                  toast.success('Reschedule request sent to admin');
+                }}>
+                  <CalendarClock className="h-4 w-4" /> Request Reschedule
                 </Button>
+                {['scheduled', 'confirmed'].includes(appointment.status) && (
+                  <Button variant="outline" size="sm" className="w-full gap-2 h-10 border-red-200 text-red-600 hover:bg-red-50" onClick={async (e) => {
+                    e.stopPropagation();
+                    const reason = prompt('Cancellation reason (e.g., patient not home):');
+                    if (!reason) return;
+                    await supabase.from('appointments').update({
+                      status: 'cancelled', cancellation_reason: reason, cancelled_at: new Date().toISOString(),
+                    }).eq('id', appointment.id);
+                    // Notify admin
+                    await supabase.functions.invoke('send-sms-notification', {
+                      body: { to: '9415279169', message: `Appointment cancelled by phleb: ${appointment.patient_name}. Reason: ${reason}` },
+                    }).catch(() => {});
+                    toast.success('Appointment cancelled');
+                    onStatusUpdate(appointment.id, 'cancelled');
+                  }}>
+                    <AlertTriangle className="h-4 w-4" /> Cancel (Patient No-Show)
+                  </Button>
+                )}
               </div>
             </div>
           )}
