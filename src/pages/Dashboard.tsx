@@ -94,7 +94,7 @@ const Dashboard = () => {
           {adminTab === "patients" && <PatientProfileTab />}
           {adminTab === "organizations" && <OrganizationsTab />}
           {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations"].includes(adminTab) && (
-            <Navigate to="/dashboard/super_admin" replace />
+            <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>
       </RoleProtectedRoute>
