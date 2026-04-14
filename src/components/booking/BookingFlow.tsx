@@ -207,7 +207,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const notes = data.serviceDetails.additionalNotes || '';
       const referralMatch = notes.match(/Referral:.*-\$(\d+)/);
       const referralDiscount = referralMatch ? parseFloat(referralMatch[1]) : 0;
-      const finalSubtotal = Math.max(breakdown.subtotal - referralDiscount, 0);
+      // Bundle: patient prepays for additional future visits at a discount
+      const bundleExtra = parseFloat(String((data as any).bundleExtra || 0)) || 0;
+      const bundleCount = parseInt(String((data as any).bundleCount || 0), 10) || 0;
+      const finalSubtotal = Math.max(breakdown.subtotal - referralDiscount + bundleExtra, 0);
 
       const result = await createAppointmentCheckoutSession({
         serviceType: visitType,
@@ -239,6 +242,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             data.serviceDetails.additionalNotes,
             labOrderPaths.length > 0 ? `Lab orders: ${labOrderPaths.join(', ')}` : '',
             insurancePath ? `Insurance: ${insurancePath}` : '',
+            bundleCount > 0 ? `BundleCount: ${bundleCount}` : '',
           ].filter(Boolean).join(' | '),
         },
       });

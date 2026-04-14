@@ -12,9 +12,8 @@ import { calculateTotal, getServiceById, isExtendedArea } from '@/services/prici
 import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
-import { Shield, Gift, Tag, Plus } from 'lucide-react';
+import { Shield, Gift, Tag, Plus, Layers } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 
 interface CheckoutStepProps {
   onBack: () => void;
@@ -33,6 +32,9 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
   const [memberLabel, setMemberLabel] = useState('');
+  const [bundleEnabled, setBundleEnabled] = useState(false);
+  const BUNDLE_COUNT = 4;
+  const BUNDLE_DISCOUNT = 0.15;
 
   // Auto-detect membership by patient email (no auth calls — avoid lock)
   React.useEffect(() => {
@@ -71,6 +73,8 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   }, [serviceId]);
 
   const addOnTotal = addOns.filter(a => selectedAddOns.has(a.id)).reduce((s, a) => s + (a.price || 0), 0);
+  // Bundle extra: patient prepays for 3 MORE visits (total of 4) at 15% off the 4-pack.
+  // bundleExtra = servicePrice × ((BUNDLE_COUNT × (1 - DISCOUNT)) - 1)
 
   // Check URL + sessionStorage for referral code (survives multi-step flow)
   React.useEffect(() => {
@@ -134,11 +138,21 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
       console.error('Failed to store T&C agreement:', e);
     }
 
-    // Store referral + add-on info in form context for the checkout session
+    // Store referral + add-on + bundle info in form context for the checkout session
+    const noteParts = [getValues('serviceDetails.additionalNotes')];
     if (referralApplied && referralCode) {
-      methods.setValue('serviceDetails.additionalNotes',
-        [getValues('serviceDetails.additionalNotes'), `Referral: ${referralCode} (-$${referralDiscount})`].filter(Boolean).join(' | ')
-      );
+      noteParts.push(`Referral: ${referralCode} (-$${referralDiscount})`);
+    }
+    if (bundleEnabled) {
+      noteParts.push(`BUNDLE: ${BUNDLE_COUNT} visits @ ${Math.round(BUNDLE_DISCOUNT * 100)}% off (1 of ${BUNDLE_COUNT} today, ${BUNDLE_COUNT - 1} credits remaining)`);
+    }
+    methods.setValue('serviceDetails.additionalNotes', noteParts.filter(Boolean).join(' | '));
+
+    // Pass bundle surcharge via tipAmount? No — extend onCheckout payload instead.
+    // We piggyback bundle extra into tipAmount would be wrong. Use a data attr on form.
+    if (bundleEnabled) {
+      methods.setValue('bundleCount' as any, BUNDLE_COUNT);
+      methods.setValue('bundleExtra' as any, breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1));
     }
 
     onCheckout(tipAmount);
@@ -264,6 +278,34 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
+        {/* Multi-visit bundle — highest LTV lever */}
+        <div className={`rounded-xl p-4 space-y-2 transition ${bundleEnabled ? 'bg-emerald-50 border-2 border-emerald-400' : 'bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200'}`}>
+          <div className="flex items-start gap-3">
+            <Checkbox
+              checked={bundleEnabled}
+              onCheckedChange={(c) => setBundleEnabled(!!c)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <p className="font-semibold text-sm flex items-center gap-1.5">
+                <Layers className="h-4 w-4 text-purple-700" /> Book 4 visits, save 15%
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Lock in today's pricing for your next 4 visits.{' '}
+                <span className="font-bold text-emerald-700">
+                  ${(breakdown.servicePrice * BUNDLE_COUNT).toFixed(0)} → ${(breakdown.servicePrice * BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)).toFixed(0)}
+                </span>{' '}
+                (save ${(breakdown.servicePrice * BUNDLE_COUNT * BUNDLE_DISCOUNT).toFixed(0)})
+              </p>
+              {bundleEnabled && (
+                <p className="text-[11px] text-emerald-700 mt-1 font-medium">
+                  ✓ Today's visit is the first of 4. Schedule the remaining 3 anytime within 12 months.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Family member upsell */}
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
           <p className="font-semibold text-sm text-blue-900">👨‍👩‍👧 Bringing a family member?</p>
@@ -294,12 +336,19 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
+        {bundleEnabled && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">3 future visits (bundle, 15% off)</span>
+            <span>+${(breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1)).toFixed(2)}</span>
+          </div>
+        )}
+
         <Separator />
 
         {/* Total */}
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
-          <span>${(breakdown.total + addOnTotal).toFixed(2)}</span>
+          <span>${(breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0)).toFixed(2)}</span>
         </div>
 
         {/* Referral Code */}
@@ -374,7 +423,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             ) : (
               <>
                 <CreditCard className="mr-2 h-4 w-4" />
-                Proceed to Payment — ${breakdown.total.toFixed(2)}
+                Proceed to Payment — ${(breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0)).toFixed(2)}
               </>
             )}
           </Button>

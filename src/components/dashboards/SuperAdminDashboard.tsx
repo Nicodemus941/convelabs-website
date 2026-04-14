@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { format, startOfWeek, endOfWeek, startOfMonth, subWeeks } from 'date-fns';
 import RevenueChart from './charts/RevenueChart';
 import ServiceBreakdown from './charts/ServiceBreakdown';
+import TodayExecutionView from './admin/TodayExecutionView';
 
 const SERVICE_COLORS: Record<string, string> = {
   mobile: '#B91C1C', 'in-office': '#3B82F6', senior: '#7C3AED',
@@ -161,6 +162,9 @@ const SuperAdminDashboard = () => {
           </Button>
         </div>
       </div>
+
+      {/* Today's Execution — Hormozi "money dashboard" */}
+      <TodayExecutionView basePath="/dashboard/super_admin" />
 
       {/* Alerts */}
       {(stats.overdueInvoices > 0 || stats.cancelledMonth > 3) && (

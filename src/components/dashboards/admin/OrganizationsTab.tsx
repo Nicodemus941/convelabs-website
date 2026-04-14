@@ -25,6 +25,7 @@ interface OrgInvoice {
   id: string; org_id: string; patient_name: string | null; service_type: string | null;
   amount: number; memo: string | null; status: string; sent_at: string | null;
   paid_at: string | null; created_at: string;
+  dunning_stage?: number | null; last_dunning_at?: string | null; dunning_paused?: boolean | null;
 }
 
 const OrganizationsTab: React.FC = () => {
@@ -128,6 +129,20 @@ const OrganizationsTab: React.FC = () => {
     } catch (err: any) { toast.error(err.message || 'Failed to send'); }
   };
 
+  const handleRunDunning = async () => {
+    const t = toast.loading('Running dunning sweep...');
+    try {
+      const { data, error } = await supabase.functions.invoke('process-org-invoice-dunning', { body: {} });
+      toast.dismiss(t);
+      if (error) throw error;
+      toast.success(`Dunning sweep complete: ${data?.sent || 0} emails sent`);
+      if (selectedOrg) fetchInvoices(selectedOrg.id);
+    } catch (err: any) {
+      toast.dismiss(t);
+      toast.error(err.message || 'Dunning failed');
+    }
+  };
+
   const handleMarkPaid = async (invoiceId: string) => {
     await supabase.from('org_invoices' as any).update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', invoiceId);
     toast.success('Marked as paid');
@@ -177,7 +192,16 @@ const OrganizationsTab: React.FC = () => {
                     <TableCell className="text-sm">{inv.patient_name || '—'}</TableCell>
                     <TableCell className="text-sm">{inv.service_type || '—'}</TableCell>
                     <TableCell className="font-semibold">${inv.amount.toFixed(2)}</TableCell>
-                    <TableCell><Badge variant="outline" className={`text-xs ${inv.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : inv.status === 'sent' ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-600'}`}>{inv.status}</Badge></TableCell>
+                    <TableCell>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="outline" className={`text-xs ${inv.status === 'paid' ? 'bg-emerald-50 text-emerald-700' : inv.status === 'sent' ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-600'}`}>{inv.status}</Badge>
+                        {inv.status === 'sent' && (inv.dunning_stage || 0) > 0 && (
+                          <Badge variant="outline" className={`text-[10px] ${inv.dunning_stage === 3 ? 'bg-red-50 text-red-700 border-red-200' : inv.dunning_stage === 2 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-yellow-50 text-yellow-700 border-yellow-200'}`}>
+                            Dunning {inv.dunning_stage}/3
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">{inv.sent_at ? format(new Date(inv.sent_at), 'MMM d') : '—'}</TableCell>
                     <TableCell className="text-right space-x-1">
                       {inv.status === 'draft' && <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => handleSendInvoice(inv)}><Send className="h-3 w-3 mr-1" /> Send</Button>}
@@ -222,6 +246,9 @@ const OrganizationsTab: React.FC = () => {
         </div>
         <div className="flex gap-2">
           <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setShowAddOrg(true)}><Plus className="h-4 w-4" /> Add Organization</Button>
+          <Button variant="outline" size="sm" onClick={handleRunDunning} title="Send 7/14/30-day reminders for all unpaid sent invoices">
+            <Send className="h-4 w-4 mr-1" /> Run Dunning
+          </Button>
           <Button variant="outline" size="sm" onClick={fetchOrgs}><RefreshCw className="h-4 w-4" /></Button>
         </div>
       </div>

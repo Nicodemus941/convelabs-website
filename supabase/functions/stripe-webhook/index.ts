@@ -619,6 +619,33 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // Create visit bundle record if the booking included a bundle purchase
+    try {
+      const notes = metadata.additional_notes || '';
+      const bundleMatch = notes.match(/BundleCount:\s*(\d+)/);
+      if (bundleMatch && appointment?.id) {
+        const bundleCount = parseInt(bundleMatch[1], 10);
+        if (bundleCount > 1) {
+          const expires = new Date();
+          expires.setFullYear(expires.getFullYear() + 1);
+          await supabaseClient.from('visit_bundles' as any).insert({
+            patient_email: metadata.patient_email || null,
+            patient_id: patientId,
+            initial_appointment_id: appointment.id,
+            credits_purchased: bundleCount,
+            credits_remaining: bundleCount - 1, // first visit already booked
+            discount_percent: 15,
+            amount_paid: (servicePrice + tipAmount) / 100,
+            stripe_checkout_session_id: checkoutSessionId,
+            expires_at: expires.toISOString(),
+          });
+          console.log(`Created visit bundle: ${bundleCount - 1} credits remaining for ${metadata.patient_email}`);
+        }
+      }
+    } catch (bundleErr) {
+      console.error('Bundle creation error (non-fatal):', bundleErr);
+    }
+
     // Release any slot holds for this date/time
     if (appointmentDate && appointmentTime) {
       await supabaseClient

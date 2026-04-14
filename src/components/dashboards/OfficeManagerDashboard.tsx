@@ -14,6 +14,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { format, startOfWeek, startOfMonth } from 'date-fns';
 import AdminCalendar from "@/components/calendar/AdminCalendar";
+import TodayExecutionView from "@/components/dashboards/admin/TodayExecutionView";
 
 type ViewMode = 'table' | 'calendar';
 type DateFilter = 'today' | 'week' | 'month' | 'all';
@@ -178,6 +179,9 @@ const OfficeManagerDashboard = () => {
           </Button>
         </div>
       </div>
+
+      {/* Today's Execution — Hormozi "money dashboard" */}
+      <TodayExecutionView basePath={`/dashboard/${user?.role || 'office_manager'}`} />
 
       {/* Attention Needed */}
       {(overdueInvoices.length > 0 || missingLabOrders.length > 0) && (
