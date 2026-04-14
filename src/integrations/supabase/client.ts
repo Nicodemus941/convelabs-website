@@ -18,8 +18,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     persistSession: true,
     detectSessionInUrl: isAuthPage,
     flowType: 'pkce',
-    lock: { acquireTimeout: 3000 }, // Don't wait forever for locks
-  } as any,
+  },
   global: {
     headers: {
       'X-Client-Info': 'convelabs-web'
