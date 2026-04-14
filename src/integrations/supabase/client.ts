@@ -32,20 +32,16 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
   }
 });
 
-// Helper to get auth token for API calls
-export const getAuthToken = async () => {
+// Helper to get auth token — reads from localStorage to avoid lock contention
+export const getAuthToken = () => {
   try {
-    // First try to get the session
-    const { data } = await supabase.auth.getSession();
-    if (data?.session?.access_token) {
-      return data.session.access_token;
+    const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return parsed?.access_token || null;
     }
-    
-    // If no session, try to refresh
-    const { data: refreshData } = await supabase.auth.refreshSession();
-    return refreshData?.session?.access_token;
-  } catch (error) {
-    console.error("Error getting auth token:", error);
+    return null;
+  } catch {
     return null;
   }
 };

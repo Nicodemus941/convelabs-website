@@ -48,38 +48,12 @@ export const useAuthSession = () => {
   };
 
   useEffect(() => {
-    // Get initial session
-    const getInitialSession = async () => {
-      try {
-        setIsLoading(true);
-        const { data: { session: supabaseSession }, error } = await supabase.auth.getSession();
-        if (error) console.error('Session error:', error);
-        
-        const mappedSession = mapSessionData(supabaseSession);
-        setSession(mappedSession);
-        
-        if (supabaseSession?.user) {
-          const role = supabaseSession.user.user_metadata.role || null;
-          setUserRole(role);
-          setUser(mapUserData(supabaseSession.user, role as UserRole));
-        }
-        
-        setAuthInitialized(true);
-      } catch (error) {
-        console.error('Unexpected error during session retrieval:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    // SINGLE SOURCE OF TRUTH: Only use onAuthStateChange, never call getSession directly.
+    // This eliminates lock contention between getSession() and the auth listener.
+    setIsLoading(true);
 
-    getInitialSession();
-
-    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
-      // Skip redundant INITIAL_SESSION events after first init
-      if (_event === 'INITIAL_SESSION' && authInitialized) return;
-
-      // Handle password recovery — let ResetPassword.tsx handle everything
+      // Process the session from the listener (no separate getSession call)
       if (_event === 'PASSWORD_RECOVERY') return;
 
       const mappedSession = mapSessionData(supabaseSession);
@@ -93,6 +67,8 @@ export const useAuthSession = () => {
         setUserRole(null);
         setUser(null);
       }
+
+      setAuthInitialized(true);
       setIsLoading(false);
     });
 
