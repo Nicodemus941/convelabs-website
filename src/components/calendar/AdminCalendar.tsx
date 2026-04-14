@@ -553,7 +553,7 @@ const AdminCalendar: React.FC = () => {
                       booking_source: 'manual',
                       invoice_status: recurringForm.waiveFee ? 'not_required' : 'sent',
                       payment_status: recurringForm.waiveFee ? 'completed' : 'pending',
-                      phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
+                      phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164', // TODO: dynamic staff selection when team scales
                       notes: `Recurring ${recurringForm.frequency} (${i + 1}/${occurrences})`,
                     });
 

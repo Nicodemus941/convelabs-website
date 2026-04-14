@@ -24,7 +24,7 @@ const SuperAdminDashboard = () => {
     totalAppointments: 0, thisWeekAppointments: 0, completedToday: 0,
     revenueMTD: 0, totalPatients: 0, newPatientsMonth: 0,
     overdueInvoices: 0, todayAppointments: 0, cancelledMonth: 0,
-    avgRevenue: 0,
+    avgRevenue: 0, repeatRate: 0, onlineBookings: 0, manualBookings: 0,
   });
   const [recentAppointments, setRecentAppointments] = useState<any[]>([]);
   const [weeklyRevenue, setWeeklyRevenue] = useState<{ label: string; revenue: number; tips: number }[]>([]);
@@ -71,6 +71,19 @@ const SuperAdminDashboard = () => {
       const revenueMTD = revenueAppts?.reduce((s, a) => s + (a.total_amount || 0), 0) || 0;
       const completedCount = revenueAppts?.length || 1;
 
+      // Calculate repeat rate (patients with 2+ appointments / total patients)
+      const patientEmails = new Set<string>();
+      const repeatEmails = new Set<string>();
+      (recent || []).concat(revenueAppts || []).forEach((a: any) => {
+        const email = a.patient_email;
+        if (email) { if (patientEmails.has(email)) repeatEmails.add(email); patientEmails.add(email); }
+      });
+      const repeatRate = patientEmails.size > 0 ? Math.round((repeatEmails.size / patientEmails.size) * 100) : 0;
+
+      // Booking source breakdown
+      const onlineBookings = (revenueAppts || []).filter((a: any) => a.booking_source === 'online').length;
+      const manualBookings = (revenueAppts || []).filter((a: any) => a.booking_source === 'manual').length;
+
       setStats({
         totalAppointments: totalAppts || 0,
         thisWeekAppointments: weekAppts || 0,
@@ -82,6 +95,7 @@ const SuperAdminDashboard = () => {
         overdueInvoices: overdueInvoices || 0,
         cancelledMonth: cancelledMonth || 0,
         avgRevenue: Math.round(revenueMTD / completedCount),
+        repeatRate, onlineBookings, manualBookings,
       });
 
       setRecentAppointments(recent || []);
@@ -125,8 +139,9 @@ const SuperAdminDashboard = () => {
   };
 
   const getPatientName = (appt: any) => {
-    if (appt.notes?.startsWith('Patient: ')) return appt.notes.split(' | ')[0].replace('Patient: ', '');
-    return appt.patient_email || appt.patient_name || 'Unknown Patient';
+    if (appt.patient_name) return appt.patient_name;
+    if (appt.notes?.match(/Patient:\s*([^|]+)/)) return appt.notes.match(/Patient:\s*([^|]+)/)[1].trim();
+    return appt.service_name || 'Appointment';
   };
 
   return (
@@ -187,6 +202,40 @@ const SuperAdminDashboard = () => {
             </CardContent>
           </Card>
         ))}
+      </div>
+
+      {/* Business Intelligence Row — Hormozi metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="shadow-sm border-l-4 border-l-emerald-500">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Repeat Rate</p>
+            <p className={`text-2xl font-bold ${stats.repeatRate >= 30 ? 'text-emerald-600' : 'text-amber-600'}`}>{loading ? '—' : `${stats.repeatRate}%`}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">{stats.repeatRate >= 30 ? 'Healthy retention' : 'Needs improvement'}</p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm border-l-4 border-l-blue-500">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Online vs Manual</p>
+            <p className="text-2xl font-bold">{loading ? '—' : `${stats.onlineBookings}/${stats.manualBookings}`}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Online / Admin booked</p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm border-l-4 border-l-purple-500">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Cancellation Rate</p>
+            <p className={`text-2xl font-bold ${stats.cancelledMonth > 5 ? 'text-red-600' : 'text-emerald-600'}`}>
+              {loading ? '—' : `${stats.totalAppointments > 0 ? Math.round((stats.cancelledMonth / (stats.thisWeekAppointments || 1)) * 100) : 0}%`}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-1">{stats.cancelledMonth} this month</p>
+          </CardContent>
+        </Card>
+        <Card className="shadow-sm border-l-4 border-l-amber-500">
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground mb-1">Revenue per Patient</p>
+            <p className="text-2xl font-bold">{loading ? '—' : `$${stats.totalPatients > 0 ? Math.round(stats.revenueMTD / stats.totalPatients) : 0}`}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">LTV indicator (MTD)</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Charts Row */}
