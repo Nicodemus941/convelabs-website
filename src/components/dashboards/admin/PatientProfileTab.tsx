@@ -132,7 +132,8 @@ const PatientProfileTab: React.FC = () => {
               <Edit3 className="h-3.5 w-3.5" /> Edit Info
             </Button>
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              window.location.href = `/dashboard/super_admin/calendar`;
+              const role = JSON.parse(localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token') || '{}')?.user?.user_metadata?.role || 'office_manager';
+              window.location.href = `/dashboard/${role}/calendar`;
             }}>
               <CalendarPlus className="h-3.5 w-3.5" /> Schedule
             </Button>

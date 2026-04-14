@@ -1,6 +1,7 @@
 
 import React from "react";
 import { Link, useParams } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Package, Calendar, FileText, Settings, Webhook } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,9 @@ const AdminTabsLayout: React.FC<AdminTabsLayoutProps> = ({ children, title }) =>
     { id: "webhooks", label: "Webhooks", icon: <Webhook className="h-4 w-4" /> }
   ];
 
+  const { user } = useAuth();
+  const basePath = `/dashboard/${user?.role || 'office_manager'}`;
+
   return (
     <div className="container mx-auto p-4">
       <div className="mb-6">
@@ -31,7 +35,7 @@ const AdminTabsLayout: React.FC<AdminTabsLayoutProps> = ({ children, title }) =>
           {tabs.map((tab) => (
             <Link
               key={tab.id}
-              to={`/dashboard/super_admin/${tab.id}`}
+              to={`${basePath}/${tab.id}`}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-md whitespace-nowrap transition-colors",
                 adminTab === tab.id

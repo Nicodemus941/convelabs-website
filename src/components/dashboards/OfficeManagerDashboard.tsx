@@ -174,7 +174,7 @@ const OfficeManagerDashboard = () => {
             <Download className="h-4 w-4 mr-1" /> Export CSV
           </Button>
           <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white" asChild>
-            <Link to="/dashboard/super_admin/calendar"><Plus className="h-4 w-4 mr-1" /> Schedule</Link>
+            <Link to={`/dashboard/${user?.role || 'office_manager'}/calendar`}><Plus className="h-4 w-4 mr-1" /> Schedule</Link>
           </Button>
         </div>
       </div>
@@ -187,7 +187,7 @@ const OfficeManagerDashboard = () => {
               <DollarSign className="h-4 w-4 text-red-600 flex-shrink-0" />
               <span className="text-sm text-red-800 font-medium">{overdueInvoices.length} overdue invoice{overdueInvoices.length !== 1 ? 's' : ''} need attention</span>
               <Button variant="ghost" size="sm" className="ml-auto text-xs text-red-700" asChild>
-                <Link to="/dashboard/super_admin/invoices">View →</Link>
+                <Link to={`/dashboard/${user?.role || 'office_manager'}/invoices`}>View →</Link>
               </Button>
             </div>
           )}

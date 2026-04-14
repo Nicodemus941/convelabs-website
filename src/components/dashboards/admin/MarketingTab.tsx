@@ -10,7 +10,8 @@ const MarketingTab = () => {
   const navigate = useNavigate();
   
   const handleCancel = () => {
-    navigate('/dashboard/super_admin');
+    const role = JSON.parse(localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token') || '{}')?.user?.user_metadata?.role || 'office_manager';
+    navigate(`/dashboard/${role}`);
   };
 
   return (
