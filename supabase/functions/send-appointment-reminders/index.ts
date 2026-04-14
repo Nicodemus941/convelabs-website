@@ -37,8 +37,9 @@ Deno.serve(async (req) => {
     const { data: appointments, error } = await supabase
       .from('appointments')
       .select('*')
-      .eq('appointment_date', targetDateStr)
-      .not('status', 'in', '("cancelled","completed")');
+      .gte('appointment_date', `${targetDateStr}T00:00:00`)
+      .lte('appointment_date', `${targetDateStr}T23:59:59`)
+      .in('status', ['scheduled', 'confirmed']);
 
     if (error) {
       console.error('Error fetching appointments:', error);
@@ -51,34 +52,29 @@ Deno.serve(async (req) => {
 
     for (const appt of (appointments || [])) {
       try {
-        // Get patient details
-        let patientName = 'there';
-        let patientPhone: string | null = null;
-        let patientEmail: string | null = null;
+        // Get patient details — priority: appointment columns → tenant_patients → notes
+        let patientName = appt.patient_name || 'there';
+        let patientPhone: string | null = appt.patient_phone || null;
+        let patientEmail: string | null = appt.patient_email || null;
 
-        if (appt.patient_id) {
-          const { data: patient } = await supabase
-            .from('tenant_patients')
-            .select('first_name, last_name, phone, email')
-            .eq('id', appt.patient_id)
-            .single();
-
+        // Fill gaps from tenant_patients
+        if ((!patientPhone || !patientEmail) && appt.patient_id) {
+          const { data: patient } = await supabase.from('tenant_patients')
+            .select('first_name, last_name, phone, email').eq('id', appt.patient_id).maybeSingle();
           if (patient) {
-            patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || 'there';
-            patientPhone = patient.phone;
-            patientEmail = patient.email;
+            if (patientName === 'there') patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim() || 'there';
+            if (!patientPhone) patientPhone = patient.phone;
+            if (!patientEmail) patientEmail = patient.email;
           }
         }
 
-        // Fallback: parse from notes
+        // Last fallback: notes
         if (patientName === 'there' && appt.notes) {
-          const nameMatch = appt.notes.match(/Patient:\s*([^|]+)/);
-          if (nameMatch) patientName = nameMatch[1].trim();
-          const emailMatch = appt.notes.match(/Email:\s*([^|]+)/);
-          if (emailMatch) patientEmail = emailMatch[1].trim();
-          const phoneMatch = appt.notes.match(/Phone:\s*([^|]+)/);
-          if (phoneMatch) patientPhone = phoneMatch[1].trim();
+          const m = appt.notes.match(/Patient:\s*([^|]+)/);
+          if (m) patientName = m[1].trim();
         }
+        if (!patientPhone && appt.notes) { const m = appt.notes.match(/Phone:\s*([^|\s]+)/); if (m) patientPhone = m[1].trim(); }
+        if (!patientEmail && appt.notes) { const m = appt.notes.match(/Email:\s*([^|\s]+)/); if (m) patientEmail = m[1].trim(); }
 
         const appointmentTime = appt.appointment_time || 'your scheduled time';
         const formattedDate = new Date(targetDateStr + 'T12:00:00').toLocaleDateString('en-US', {
@@ -89,7 +85,7 @@ Deno.serve(async (req) => {
         if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER && patientPhone) {
           const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
 
-          const smsBody = `Hi ${patientName}! This is a friendly reminder from ConveLabs. Your appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have a sterile, well-lit area ready for the collection. Have your photo ID and lab order available. Questions? Call (941) 527-9169. We look forward to serving you!`;
+          const smsBody = `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. If you have not uploaded your lab orders, please have your orders and insurance information ready. Prepare a sterile, well-lit area for the collection. Questions? Call (941) 527-9169. See you soon!`;
 
           const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
           const formData = new URLSearchParams();
