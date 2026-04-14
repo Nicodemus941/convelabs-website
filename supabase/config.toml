@@ -8,6 +8,9 @@ schemas = ["public", "storage"]
 [functions.ai-sales-chat]
 verify_jwt = false
 
+[functions.process-org-invoice-dunning]
+verify_jwt = false
+
 [db]
 port = 54322
 
