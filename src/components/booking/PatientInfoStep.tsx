@@ -1,10 +1,12 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X, CheckCircle } from 'lucide-react';
 import { useFormContext, useFieldArray } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import {
   Popover,
   PopoverContent,
@@ -21,12 +23,48 @@ interface PatientInfoStepProps {
   onBack: () => void;
 }
 
-const PatientInfoStep: React.FC<PatientInfoStepProps> = ({ 
-  onNext, 
-  onBack 
+const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
+  onNext,
+  onBack
 }) => {
-  const { control, watch, setValue } = useFormContext<BookingFormValues>();
+  const { control, watch, setValue, getValues } = useFormContext<BookingFormValues>();
   const dateOfBirth = watch('patientDetails.dateOfBirth');
+  const [recognized, setRecognized] = useState(false);
+  const [recognizedName, setRecognizedName] = useState('');
+  const [hasAuthAccount, setHasAuthAccount] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  const handleEmailBlur = async () => {
+    const email = getValues('patientDetails.email');
+    if (!email || !email.includes('@')) return;
+
+    setChecking(true);
+    try {
+      const { data: tp } = await supabase.from('tenant_patients')
+        .select('first_name, last_name, phone, date_of_birth, user_id, insurance_provider')
+        .ilike('email', email.trim())
+        .maybeSingle();
+
+      if (tp) {
+        setRecognized(true);
+        setRecognizedName(tp.first_name || '');
+        setHasAuthAccount(!!tp.user_id);
+
+        // Auto-fill fields if empty
+        if (!getValues('patientDetails.firstName') && tp.first_name) setValue('patientDetails.firstName', tp.first_name);
+        if (!getValues('patientDetails.lastName') && tp.last_name) setValue('patientDetails.lastName', tp.last_name);
+        if (!getValues('patientDetails.phone') && tp.phone) setValue('patientDetails.phone', tp.phone);
+
+        toast.success(`Welcome back, ${tp.first_name}! We've filled in your info.`);
+      } else {
+        setRecognized(false);
+      }
+    } catch {
+      // Non-blocking
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const { fields, append, remove } = useFieldArray({
     control,
@@ -171,15 +209,30 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                 <FormItem className="space-y-2">
                   <label className="text-sm font-medium">Email</label>
                   <FormControl>
-                    <Input 
-                      {...field} 
+                    <Input
+                      {...field}
                       placeholder="john@example.com"
                       type="email"
+                      onBlur={(e) => { field.onBlur(); handleEmailBlur(); }}
                     />
                   </FormControl>
-                  <p className="text-xs text-muted-foreground">
-                    For appointment confirmation and results notification
-                  </p>
+                  {recognized && (
+                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                      <CheckCircle className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                      <div className="text-xs">
+                        <p className="font-medium text-emerald-800">Welcome back, {recognizedName}!</p>
+                        <p className="text-emerald-600">We found your account and filled in your details.</p>
+                        {!hasAuthAccount && (
+                          <p className="text-emerald-600 mt-0.5">After booking, you'll receive a link to set up your password and access your dashboard.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {!recognized && (
+                    <p className="text-xs text-muted-foreground">
+                      For appointment confirmation and results notification
+                    </p>
+                  )}
                   {fieldState.error && (
                     <FormMessage>
                       {fieldState.error.message}

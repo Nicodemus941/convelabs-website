@@ -126,9 +126,9 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
         // Check if account already exists
         if (errorMsg.includes('already registered') || errorMsg.includes('already been registered') || errorMsg.includes('User already registered')) {
           if (existingPatient) {
-            // Migrated patient — send password reset
-            await supabase.auth.resetPasswordForEmail(email.trim(), {
-              redirectTo: `${window.location.origin}/reset-password`,
+            // Migrated patient — send password reset via Mailgun (avoid lock)
+            await supabase.functions.invoke('send-password-reset', {
+              body: { email: email.trim() },
             });
             setShowMigratedMessage(true);
             toast("We found your account!", {
