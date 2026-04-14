@@ -30,6 +30,7 @@ const PatientProfileTab: React.FC = () => {
   const [createPatientOpen, setCreatePatientOpen] = useState(false);
   const [newPatient, setNewPatient] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const [allPatients, setAllPatients] = useState<any[]>([]);
 
@@ -535,43 +536,56 @@ const PatientProfileTab: React.FC = () => {
               </div>
             </div>
 
+            {createError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{createError}</div>
+            )}
+
             <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!newPatient.firstName || !newPatient.lastName || isCreating}
               onClick={async () => {
+                console.log('Create patient clicked:', newPatient.firstName, newPatient.lastName);
+                setCreateError('');
                 setIsCreating(true);
                 try {
-                  // Check for duplicate email
                   if (newPatient.email) {
                     const { data: existing } = await supabase.from('tenant_patients').select('id').ilike('email', newPatient.email.trim()).maybeSingle();
-                    if (existing) { toast.error('A patient with this email already exists'); setIsCreating(false); return; }
+                    if (existing) { setCreateError('A patient with this email already exists'); setIsCreating(false); return; }
                   }
 
+                  console.log('Inserting patient...');
                   const { data, error } = await supabase.from('tenant_patients').insert({
-                    first_name: newPatient.firstName, last_name: newPatient.lastName,
-                    email: newPatient.email || null, phone: newPatient.phone || null,
+                    first_name: newPatient.firstName.trim(),
+                    last_name: newPatient.lastName.trim(),
+                    email: newPatient.email?.trim() || null,
+                    phone: newPatient.phone?.trim() || null,
                     date_of_birth: newPatient.dob || null,
-                    address: newPatient.address || null, city: newPatient.city || null,
-                    state: newPatient.state || null, zipcode: newPatient.zipcode || null,
-                    insurance_provider: newPatient.insuranceProvider || null,
-                    insurance_member_id: newPatient.insuranceMemberId || null,
-                    insurance_group_number: newPatient.insuranceGroup || null,
+                    address: newPatient.address?.trim() || null,
+                    city: newPatient.city?.trim() || null,
+                    state: newPatient.state?.trim() || null,
+                    zipcode: newPatient.zipcode?.trim() || null,
+                    insurance_provider: newPatient.insuranceProvider?.trim() || null,
+                    insurance_member_id: newPatient.insuranceMemberId?.trim() || null,
+                    insurance_group_number: newPatient.insuranceGroup?.trim() || null,
                     tenant_id: '00000000-0000-0000-0000-000000000001',
                   }).select().single();
 
+                  console.log('Insert result:', { data, error });
                   if (error) throw error;
+                  if (!data) throw new Error('Patient was not created');
 
                   toast.success(`${newPatient.firstName} ${newPatient.lastName} added!`);
                   setNewPatient({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
                   setCreatePatientOpen(false);
 
-                  // Refresh patient list
                   const { data: refreshed } = await supabase.from('tenant_patients').select('*').order('first_name').limit(500);
                   setAllPatients(refreshed || []);
                   setPatients(refreshed || []);
 
-                  // Auto-select the new patient
                   if (data) loadPatientData(data);
                 } catch (err: any) {
-                  toast.error(err.message || 'Failed to create patient');
+                  console.error('Create patient error:', err);
+                  const msg = err.message || 'Failed to create patient';
+                  setCreateError(msg);
+                  toast.error(msg, { duration: 6000 });
                 } finally {
                   setIsCreating(false);
                 }
