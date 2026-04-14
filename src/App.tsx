@@ -24,6 +24,7 @@ const Corporate = lazy(() => import('@/pages/Corporate'));
 const CorporateBilling = lazy(() => import('@/pages/CorporateBilling'));
 const CorporateInviteAccept = lazy(() => import('@/pages/CorporateInviteAccept'));
 const AcceptStaffInvite = lazy(() => import('@/pages/AcceptStaffInvite'));
+const StaffOnboarding = lazy(() => import('@/pages/StaffOnboarding'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -58,6 +59,7 @@ function App() {
                         <Route path="/corporate-billing" element={<CorporateBilling />} />
                         <Route path="/corporate-invite/:token" element={<CorporateInviteAccept />} />
                         <Route path="/accept-invite" element={<AcceptStaffInvite />} />
+                        <Route path="/onboarding" element={<StaffOnboarding />} />
                       </Routes>
                     </Suspense>
                   </ConversionAnalytics>
