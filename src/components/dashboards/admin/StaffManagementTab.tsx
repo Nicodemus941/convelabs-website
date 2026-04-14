@@ -9,9 +9,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { UserPlus, RefreshCw, User, Trash2, Clock, CalendarOff, Mail, Loader2 } from "lucide-react";
+import { UserPlus, RefreshCw, User, Trash2, Clock, CalendarOff, Mail, Loader2, Send } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import InviteStaffDialog from "./InviteStaffDialog";
 
 interface StaffMember {
   id: string;
@@ -43,6 +44,7 @@ const StaffManagementTab = () => {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -256,6 +258,9 @@ const StaffManagementTab = () => {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={fetchStaff}><RefreshCw className="h-4 w-4 mr-1" /> Refresh</Button>
+          <Button size="sm" variant="outline" onClick={() => setShowInviteModal(true)}>
+            <Send className="h-4 w-4 mr-1" /> Send Offer
+          </Button>
           <Button size="sm" className="bg-conve-red hover:bg-conve-red-dark text-white" onClick={() => { resetForm(); setShowAddModal(true); }}>
             <UserPlus className="h-4 w-4 mr-1" /> Add Staff
           </Button>
@@ -449,7 +454,14 @@ const StaffManagementTab = () => {
         </TabsContent>
       </Tabs>
 
-      {/* Add Staff Modal */}
+      {/* Invite Staff Modal (token-based, sends offer email) */}
+      <InviteStaffDialog
+        open={showInviteModal}
+        onOpenChange={setShowInviteModal}
+        onSent={fetchStaff}
+      />
+
+      {/* Add Staff Modal (direct add — existing flow) */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>
         <DialogContent className="max-w-lg w-[95vw] sm:w-full">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5" /> Add Staff Member</DialogTitle></DialogHeader>

@@ -23,6 +23,7 @@ const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
 const Corporate = lazy(() => import('@/pages/Corporate'));
 const CorporateBilling = lazy(() => import('@/pages/CorporateBilling'));
 const CorporateInviteAccept = lazy(() => import('@/pages/CorporateInviteAccept'));
+const AcceptStaffInvite = lazy(() => import('@/pages/AcceptStaffInvite'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -56,6 +57,7 @@ function App() {
                         <Route path="/corporate" element={<Corporate />} />
                         <Route path="/corporate-billing" element={<CorporateBilling />} />
                         <Route path="/corporate-invite/:token" element={<CorporateInviteAccept />} />
+                        <Route path="/accept-invite" element={<AcceptStaffInvite />} />
                       </Routes>
                     </Suspense>
                   </ConversionAnalytics>
