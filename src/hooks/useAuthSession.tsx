@@ -48,12 +48,20 @@ export const useAuthSession = () => {
   };
 
   useEffect(() => {
-    // SINGLE SOURCE OF TRUTH: Only use onAuthStateChange, never call getSession directly.
-    // This eliminates lock contention between getSession() and the auth listener.
     setIsLoading(true);
 
+    // Safety timeout: if auth doesn't resolve in 3 seconds, stop loading
+    // This prevents the app from hanging forever if Supabase client stalls
+    const timeout = setTimeout(() => {
+      if (!authInitialized) {
+        console.warn('Auth timeout — proceeding without session');
+        setAuthInitialized(true);
+        setIsLoading(false);
+      }
+    }, 3000);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, supabaseSession) => {
-      // Process the session from the listener (no separate getSession call)
+      clearTimeout(timeout);
       if (_event === 'PASSWORD_RECOVERY') return;
 
       const mappedSession = mapSessionData(supabaseSession);
