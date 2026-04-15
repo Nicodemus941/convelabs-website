@@ -127,13 +127,63 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     return () => clearTimeout(timer);
   }, [patientSearch]);
 
-  const selectPatient = (p: PatientResult) => {
+  const selectPatient = async (p: PatientResult) => {
     setSelectedPatient(p);
     setPatientName(`${p.first_name} ${p.last_name}`.trim());
     setPatientEmail(p.email || '');
     setPatientPhone(p.phone || '');
     setPatientSearch(`${p.first_name} ${p.last_name}`.trim());
     setShowResults(false);
+
+    // Hydrate from three sources, priority order:
+    //   (1) tenant_patients — the canonical patient profile. Holds address,
+    //       gate_code, preferred_day/time, standing_order_doctor. When admin
+    //       corrects these mid-booking, the submit handler writes them back
+    //       (self-healing data).
+    //   (2) most recent appointment — latest truth in case they moved and
+    //       tenant_patients hasn't caught up.
+    //   (3) user_profiles — only exists for patients with auth accounts
+    //       (~4% of the book), kept as last-resort fallback.
+    // Pre-populating these cuts 30+ seconds off re-entry and kills the
+    // "what's your address again?" call that tanks same-day bookings.
+    const [{ data: tp }, { data: lastAppt }, { data: profile }] = await Promise.all([
+      supabase
+        .from('tenant_patients')
+        .select('address, city, state, zipcode, gate_code, preferred_day, preferred_time, standing_order_doctor, patient_notes, insurance_provider, insurance_member_id')
+        .eq('id', p.id)
+        .maybeSingle(),
+      supabase
+        .from('appointments')
+        .select('address_street, address_city, address_zip, gate_code, service_type, notes')
+        .eq('patient_id', p.id)
+        .order('appointment_date', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('user_profiles')
+        .select('address_street, address_city, address_state, address_zipcode')
+        .eq('id', p.id)
+        .maybeSingle(),
+    ]);
+
+    const street = tp?.address || lastAppt?.address_street || profile?.address_street || '';
+    const cityVal = tp?.city || lastAppt?.address_city || profile?.address_city || '';
+    const zip = tp?.zipcode || lastAppt?.address_zip || profile?.address_zipcode || '';
+    const gc = tp?.gate_code || lastAppt?.gate_code || '';
+
+    if (street) setAddress(street);
+    if (cityVal) setCity(cityVal);
+    if (zip) setZipcode(zip);
+    if (gc) setGateCode(gc);
+    if (lastAppt?.service_type && !serviceType) setServiceType(lastAppt.service_type);
+
+    // Stitch phleb-facing context into notes: standing order doctor + prior
+    // patient notes ("hard stick", "dog in yard") + last-visit notes.
+    const noteBits: string[] = [];
+    if (tp?.standing_order_doctor) noteBits.push(`Standing order: Dr. ${tp.standing_order_doctor}`);
+    if (tp?.patient_notes) noteBits.push(tp.patient_notes);
+    if (lastAppt?.notes) noteBits.push(`Previous visit: ${lastAppt.notes}`);
+    if (noteBits.length && !notes) setNotes(noteBits.join(' | '));
   };
 
   const canGoToStep2 = patientName.trim() && serviceType;
@@ -290,6 +340,27 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       }
 
       console.log('Appointment created:', newAppt.id);
+
+      // Self-healing data: if admin typed a new/corrected address or gate_code
+      // for a known patient, write it back to tenant_patients so the next
+      // booking pre-fills with the right info. Fire-and-forget — a failure
+      // here must not block the appointment that just saved.
+      if (patientId) {
+        const backfill: Record<string, string> = {};
+        if (address) backfill.address = address;
+        if (city) backfill.city = city;
+        if (zipcode) backfill.zipcode = zipcode;
+        if (gateCode) backfill.gate_code = gateCode;
+        if (Object.keys(backfill).length > 0) {
+          supabase
+            .from('tenant_patients')
+            .update({ ...backfill, updated_at: new Date().toISOString() })
+            .eq('id', patientId)
+            .then(({ error: bfErr }) => {
+              if (bfErr) console.warn('tenant_patients backfill failed (non-fatal):', bfErr.message);
+            });
+        }
+      }
 
       // Send Stripe invoice (non-blocking)
       if (newAppt && !isWaived && billingEmail) {
@@ -519,6 +590,11 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             <div>
               <Label>Address</Label>
               <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" />
+              {selectedPatient && !address && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                  ⚠ No address on file for this patient — ask them directly or the tech won't know where to go.
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>

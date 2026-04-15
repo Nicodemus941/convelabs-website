@@ -27,3 +27,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local-only data imports (PII + scripts with DB creds)
+_import/
