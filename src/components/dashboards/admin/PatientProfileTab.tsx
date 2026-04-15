@@ -182,21 +182,32 @@ const PatientProfileTab: React.FC = () => {
                 )}
               </div>
 
-              {/* Address from most recent appointment */}
+              {/* Address — prefer canonical tenant_patients fields (populated by CSV
+                  import + self-heal on every booking), fall back to latest
+                  appointment address for patients whose profile field is empty. */}
               {(() => {
+                const tpAddr = [selectedPatient.address, selectedPatient.city, selectedPatient.state, selectedPatient.zipcode]
+                  .filter(Boolean).join(', ');
                 const latestWithAddress = appointments.find(a => a.address && a.address !== 'Pending');
-                return latestWithAddress ? (
+                const displayAddress = tpAddr || latestWithAddress?.address || null;
+                const displayGate = selectedPatient.gate_code || latestWithAddress?.gate_code || null;
+                return displayAddress ? (
                   <div className="space-y-2 md:col-span-3 border-t pt-4 mt-2">
                     <p className="text-sm font-semibold flex items-center gap-1.5"><MapPin className="h-4 w-4" /> Address on File</p>
-                    <p className="text-sm">{latestWithAddress.address}</p>
-                    {latestWithAddress.gate_code && (
-                      <p className="text-xs text-muted-foreground">Gate Code: <span className="font-mono font-medium text-foreground">{latestWithAddress.gate_code}</span></p>
+                    <p className="text-sm">{displayAddress}</p>
+                    {displayGate && (
+                      <p className="text-xs text-muted-foreground">Gate Code: <span className="font-mono font-medium text-foreground">{displayGate}</span></p>
                     )}
-                    {latestWithAddress.notes && latestWithAddress.notes.toLowerCase().includes('gate') && (
-                      <p className="text-xs text-amber-600">Note contains gate info — check appointment notes</p>
+                    {selectedPatient.patient_notes && (
+                      <p className="text-xs text-muted-foreground italic">{selectedPatient.patient_notes}</p>
                     )}
                   </div>
-                ) : null;
+                ) : (
+                  <div className="space-y-2 md:col-span-3 border-t pt-4 mt-2">
+                    <p className="text-sm font-semibold flex items-center gap-1.5 text-amber-700"><MapPin className="h-4 w-4" /> No address on file</p>
+                    <p className="text-xs text-amber-600">Ask patient at their next visit — address will auto-save.</p>
+                  </div>
+                );
               })()}
 
               <div className="grid grid-cols-2 gap-3">
