@@ -58,7 +58,7 @@ const PatientProfileTab: React.FC = () => {
     if (filter === 'dormant') {
       list = list.filter(p => !patientsWithAppts.has(p.id));
     } else if (filter === 'incomplete') {
-      list = list.filter(p => !p.address || !p.city || !p.zipcode);
+      list = list.filter(p => !p.address || p.address.trim() === '');
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -498,7 +498,7 @@ const PatientProfileTab: React.FC = () => {
       {/* Filter chips: All / Dormant / Incomplete */}
       {(() => {
         const dormantCount = allPatients.filter(p => !patientsWithAppts.has(p.id)).length;
-        const incompleteCount = allPatients.filter(p => !p.address || !p.city || !p.zipcode).length;
+        const incompleteCount = allPatients.filter(p => !p.address || p.address.trim() === '').length;
         return (
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -539,7 +539,7 @@ const PatientProfileTab: React.FC = () => {
                     {!patientsWithAppts.has(p.id) && (
                       <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">Never booked</Badge>
                     )}
-                    {(!p.address || !p.city || !p.zipcode) && (
+                    {(!p.address || p.address.trim() === '') && (
                       <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">No address</Badge>
                     )}
                   </div>
