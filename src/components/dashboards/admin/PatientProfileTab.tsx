@@ -33,34 +33,43 @@ const PatientProfileTab: React.FC = () => {
   const [createError, setCreateError] = useState('');
 
   const [allPatients, setAllPatients] = useState<any[]>([]);
+  const [patientsWithAppts, setPatientsWithAppts] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<'all' | 'dormant' | 'incomplete'>('all');
 
-  // Load all patients on mount
+  // Load all patients + appointment activity on mount
   useEffect(() => {
     const loadAll = async () => {
-      const { data } = await supabase
-        .from('tenant_patients')
-        .select('*')
-        .order('first_name', { ascending: true })
-        .limit(500);
-      setAllPatients(data || []);
-      setPatients(data || []);
+      const [{ data: pts }, { data: appts }] = await Promise.all([
+        supabase.from('tenant_patients').select('*').eq('is_active', true).order('first_name', { ascending: true }).limit(1000),
+        supabase.from('appointments').select('patient_id').not('patient_id', 'is', null),
+      ]);
+      const activeIds = new Set<string>();
+      for (const a of appts || []) if (a.patient_id) activeIds.add(a.patient_id);
+      setAllPatients(pts || []);
+      setPatients(pts || []);
+      setPatientsWithAppts(activeIds);
     };
     loadAll();
   }, []);
 
-  // Filter patients as user types
+  // Filter patients as user types + filter chip
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setPatients(allPatients);
-      return;
+    let list = allPatients;
+    if (filter === 'dormant') {
+      list = list.filter(p => !patientsWithAppts.has(p.id));
+    } else if (filter === 'incomplete') {
+      list = list.filter(p => !p.address || !p.city || !p.zipcode);
     }
-    const q = searchQuery.toLowerCase();
-    setPatients(allPatients.filter(p =>
-      `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-      (p.email && p.email.toLowerCase().includes(q)) ||
-      (p.phone && p.phone.includes(q))
-    ));
-  }, [searchQuery, allPatients]);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(p =>
+        `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
+        (p.email && p.email.toLowerCase().includes(q)) ||
+        (p.phone && p.phone.includes(q))
+      );
+    }
+    setPatients(list);
+  }, [searchQuery, allPatients, filter, patientsWithAppts]);
 
   const loadPatientData = useCallback(async (patient: any) => {
     setSelectedPatient(patient);
@@ -486,6 +495,36 @@ const PatientProfileTab: React.FC = () => {
         </div>
       </div>
 
+      {/* Filter chips: All / Dormant / Incomplete */}
+      {(() => {
+        const dormantCount = allPatients.filter(p => !patientsWithAppts.has(p.id)).length;
+        const incompleteCount = allPatients.filter(p => !p.address || !p.city || !p.zipcode).length;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setFilter('all')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${filter === 'all' ? 'bg-[#B91C1C] text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
+            >
+              All ({allPatients.length})
+            </button>
+            <button
+              onClick={() => setFilter('dormant')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${filter === 'dormant' ? 'bg-amber-600 text-white' : 'bg-amber-50 hover:bg-amber-100 text-amber-800'}`}
+              title="Patients in the database who have never booked an appointment — your warmest leads."
+            >
+              🔥 Dormant / Never Booked ({dormantCount})
+            </button>
+            <button
+              onClick={() => setFilter('incomplete')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${filter === 'incomplete' ? 'bg-blue-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-800'}`}
+              title="Patients missing address, city, or ZIP — chart them up on their next call."
+            >
+              📍 Missing Address ({incompleteCount})
+            </button>
+          </div>
+        );
+      })()}
+
       {patients.length > 0 && (
         <div className="space-y-2 max-w-lg">
           {patients.map(p => (
@@ -495,9 +534,17 @@ const PatientProfileTab: React.FC = () => {
                   <User className="h-5 w-5 text-[#B91C1C]" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold">{p.first_name} {p.last_name}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-semibold">{p.first_name} {p.last_name}</p>
+                    {!patientsWithAppts.has(p.id) && (
+                      <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">Never booked</Badge>
+                    )}
+                    {(!p.address || !p.city || !p.zipcode) && (
+                      <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">No address</Badge>
+                    )}
+                  </div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    {p.email && <span>{p.email}</span>}
+                    {p.email && <span className="truncate">{p.email}</span>}
                     {p.phone && <span>{p.phone}</span>}
                   </div>
                 </div>
