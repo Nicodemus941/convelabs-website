@@ -75,7 +75,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [zipcode, setZipcode] = useState('');
   const [notes, setNotes] = useState('');
   const [isVip, setIsVip] = useState(false);
-  const [discountType, setDiscountType] = useState<'none' | 'percentage' | 'fixed' | 'waive'>('none');
+  const [discountType, setDiscountType] = useState<'none' | 'percentage' | 'fixed' | 'waive' | 'custom'>('none');
   const [discountValue, setDiscountValue] = useState('');
   const [invoiceMemo, setInvoiceMemo] = useState('');
   const [orgBilling, setOrgBilling] = useState(false);
@@ -234,6 +234,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const previewBasePrice = SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150;
   const previewSurchargeTotal = previewSurcharges.reduce((s, x) => s + x.amount, 0);
   const previewTotal = discountType === 'waive' ? 0
+    : discountType === 'custom' && discountValue ? Math.max(parseFloat(discountValue) || 0, 0)
     : discountType === 'percentage' && discountValue ? Math.round((previewBasePrice + previewSurchargeTotal) * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100
     : discountType === 'fixed' && discountValue ? Math.max((previewBasePrice + previewSurchargeTotal) - (parseFloat(discountValue) || 0), 0)
     : previewBasePrice + previewSurchargeTotal;
@@ -299,6 +300,11 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       let discountNote = surchargeItems.join(', ');
 
       if (discountType === 'waive') { finalPrice = 0; discountNote = 'Fee waived'; }
+      else if (discountType === 'custom' && discountValue) {
+        const overridePrice = Math.max(parseFloat(discountValue) || 0, 0);
+        discountNote += (discountNote ? ' | ' : '') + `Custom price $${overridePrice.toFixed(2)} (base ${basePrice + surchargeTotal})`;
+        finalPrice = overridePrice;
+      }
       else if (discountType === 'percentage' && discountValue) {
         const pct = Math.min(parseFloat(discountValue) || 0, 100);
         finalPrice = Math.round(finalPrice * (1 - pct / 100) * 100) / 100;
@@ -708,7 +714,37 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                   <span className="block font-semibold">$ Discount</span>
                   <span className="block text-[10px] opacity-70 mt-0.5">Fixed dollar amount off</span>
                 </button>
+                <button type="button" onClick={() => { setDiscountType('custom'); setDiscountValue(''); }}
+                  className={`p-2.5 rounded-lg border-2 text-xs font-medium transition-all text-left col-span-2 ${
+                    discountType === 'custom' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}>
+                  <span className="block font-semibold">Custom Price</span>
+                  <span className="block text-[10px] opacity-70 mt-0.5">Override total with any dollar amount</span>
+                </button>
               </div>
+
+              {/* Custom price input */}
+              {discountType === 'custom' && (
+                <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                  <Label className="text-xs font-medium text-purple-900">Custom Total ($)</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-sm text-muted-foreground">$</span>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={discountValue}
+                      onChange={e => setDiscountValue(e.target.value)}
+                      placeholder="e.g. 125.00"
+                      className="flex-1"
+                      autoFocus
+                    />
+                  </div>
+                  <p className="text-[11px] text-purple-700 mt-1">
+                    Normal price with surcharges: <span className="font-semibold">${(previewBasePrice + previewSurchargeTotal).toFixed(2)}</span>. Entering a custom amount overrides this total.
+                  </p>
+                </div>
+              )}
 
               {/* Discount amount input */}
               {(discountType === 'percentage' || discountType === 'fixed') && (
@@ -801,8 +837,11 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               {address && <div className="flex justify-between"><span className="text-muted-foreground">Address</span><span>{[address, city, zipcode].filter(Boolean).join(', ')}</span></div>}
               {isVip && <div className="flex justify-between"><span className="text-muted-foreground">Status</span><span className="font-medium text-amber-700 flex items-center gap-1"><Crown className="h-3.5 w-3.5" /> VIP</span></div>}
               {discountType !== 'none' && (
-                <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="font-medium text-emerald-700">
-                  {discountType === 'waive' ? 'Fee Waived ($0)' : discountType === 'percentage' ? `${discountValue}% off` : `$${parseFloat(discountValue || '0').toFixed(2)} off`}
+                <div className="flex justify-between"><span className="text-muted-foreground">{discountType === 'custom' ? 'Custom Price' : 'Discount'}</span><span className="font-medium text-emerald-700">
+                  {discountType === 'waive' ? 'Fee Waived ($0)'
+                    : discountType === 'custom' ? `Overridden to $${parseFloat(discountValue || '0').toFixed(2)}`
+                    : discountType === 'percentage' ? `${discountValue}% off`
+                    : `$${parseFloat(discountValue || '0').toFixed(2)} off`}
                 </span></div>
               )}
               {orgBilling && <div className="flex justify-between"><span className="text-muted-foreground">Bill To</span><span>{orgName} ({orgEmail})</span></div>}
