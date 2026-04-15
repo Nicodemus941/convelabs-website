@@ -24,7 +24,7 @@ const PatientProfileTab: React.FC = () => {
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ amount: '', description: '', memo: '' });
   const [createPatientOpen, setCreatePatientOpen] = useState(false);
@@ -126,7 +126,7 @@ const PatientProfileTab: React.FC = () => {
           </div>
           <div className="flex flex-wrap gap-2 pl-10 sm:pl-0">
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '', insuranceGroup: p.insurance_group_number || '' });
+              setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '', address: p.address || '', city: p.city || '', state: p.state || '', zipcode: p.zipcode || '', gateCode: p.gate_code || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '', insuranceGroup: p.insurance_group_number || '' });
               setEditModalOpen(true);
             }}>
               <Edit3 className="h-3.5 w-3.5" /> Edit Info
@@ -378,6 +378,18 @@ const PatientProfileTab: React.FC = () => {
                 <div><Label>Date of Birth</Label><Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} /></div>
               </div>
               <div className="border-t pt-3 space-y-2">
+                <p className="text-sm font-semibold">Home Address</p>
+                <div><Label>Street</Label><Input value={editForm.address} onChange={e => setEditForm(pr => ({ ...pr, address: e.target.value }))} placeholder="123 Main St" /></div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2"><Label>City</Label><Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} /></div>
+                  <div><Label>State</Label><Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value }))} maxLength={2} placeholder="FL" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><Label>ZIP</Label><Input value={editForm.zipcode} onChange={e => setEditForm(pr => ({ ...pr, zipcode: e.target.value }))} /></div>
+                  <div><Label>Gate Code</Label><Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Optional" /></div>
+                </div>
+              </div>
+              <div className="border-t pt-3 space-y-2">
                 <p className="text-sm font-semibold">Insurance</p>
                 <div><Label>Provider</Label><Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="e.g. Blue Cross" /></div>
                 <div className="grid grid-cols-2 gap-3">
@@ -389,13 +401,18 @@ const PatientProfileTab: React.FC = () => {
                 const { error } = await supabase.from('tenant_patients').update({
                   first_name: editForm.firstName, last_name: editForm.lastName,
                   email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
+                  address: editForm.address || null,
+                  city: editForm.city || null,
+                  state: editForm.state || null,
+                  zipcode: editForm.zipcode || null,
+                  gate_code: editForm.gateCode || null,
                   insurance_provider: editForm.insuranceProvider || null,
                   insurance_member_id: editForm.insuranceMemberId || null,
                   insurance_group_number: editForm.insuranceGroup || null,
                 }).eq('id', p.id);
                 if (error) { toast.error(error.message); return; }
                 toast.success('Patient info updated');
-                setSelectedPatient({ ...p, ...editForm, first_name: editForm.firstName, last_name: editForm.lastName });
+                setSelectedPatient({ ...p, first_name: editForm.firstName, last_name: editForm.lastName, email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null, address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null, gate_code: editForm.gateCode || null, insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null });
                 setEditModalOpen(false);
                 // Refresh patient list
                 const { data } = await supabase.from('tenant_patients').select('*').order('first_name').limit(500);
