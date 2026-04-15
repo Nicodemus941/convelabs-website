@@ -186,6 +186,41 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     if (noteBits.length && !notes) setNotes(noteBits.join(' | '));
   };
 
+  // Manual "look up saved address" — runs hydration using whatever identifier
+  // we have (selected id, email, or phone-digits). Rescues cases where the
+  // admin typed a name without clicking a dropdown result.
+  const [lookupStatus, setLookupStatus] = useState<'idle' | 'searching' | 'found' | 'missing' | 'no-match'>('idle');
+  const lookupSavedAddress = async () => {
+    setLookupStatus('searching');
+    let query = supabase.from('tenant_patients')
+      .select('id, address, city, state, zipcode, gate_code, preferred_day, preferred_time, standing_order_doctor, patient_notes');
+    let found: any = null;
+    if (selectedPatient?.id) {
+      const { data } = await query.eq('id', selectedPatient.id).maybeSingle();
+      found = data;
+    } else if (patientEmail) {
+      const { data } = await query.ilike('email', patientEmail.trim()).maybeSingle();
+      found = data;
+    } else if (patientPhone) {
+      const digitsOnly = patientPhone.replace(/\D+/g, '');
+      if (digitsOnly) {
+        const { data } = await query.ilike('phone', `%${digitsOnly}%`).maybeSingle();
+        found = data;
+      }
+    }
+    if (!found) { setLookupStatus('no-match'); return; }
+    if (!found.address && !found.city && !found.gate_code) { setLookupStatus('missing'); return; }
+    if (found.address) setAddress(found.address);
+    if (found.city) setCity(found.city);
+    if (found.zipcode) setZipcode(found.zipcode);
+    if (found.gate_code) setGateCode(found.gate_code);
+    const noteBits: string[] = [];
+    if (found.standing_order_doctor) noteBits.push(`Standing order: Dr. ${found.standing_order_doctor}`);
+    if (found.patient_notes) noteBits.push(found.patient_notes);
+    if (noteBits.length && !notes) setNotes(noteBits.join(' | '));
+    setLookupStatus('found');
+  };
+
   const canGoToStep2 = patientName.trim() && serviceType;
   const canGoToStep3 = date && time;
 
@@ -588,11 +623,37 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             </div>
 
             <div>
-              <Label>Address</Label>
+              <div className="flex items-center justify-between">
+                <Label>Address</Label>
+                {(selectedPatient || patientEmail || patientPhone) && (
+                  <button
+                    type="button"
+                    onClick={lookupSavedAddress}
+                    className="text-xs text-[#B91C1C] hover:underline"
+                  >
+                    {lookupStatus === 'searching' ? 'Looking up…' : '↻ Look up saved address'}
+                  </button>
+                )}
+              </div>
               <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" />
-              {selectedPatient && !address && (
+              {lookupStatus === 'found' && (
+                <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mt-1">
+                  ✓ Loaded saved address from patient profile.
+                </p>
+              )}
+              {lookupStatus === 'missing' && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
-                  ⚠ No address on file for this patient — ask them directly or the tech won't know where to go.
+                  ⚠ Patient on file but no address saved yet — ask the patient; we'll save it back for next time.
+                </p>
+              )}
+              {lookupStatus === 'no-match' && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                  ⚠ No matching patient in our records by that email/phone.
+                </p>
+              )}
+              {lookupStatus === 'idle' && selectedPatient && !address && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-1">
+                  ⚠ No address loaded. Click "Look up saved address" or type manually.
                 </p>
               )}
             </div>
