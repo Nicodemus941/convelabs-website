@@ -114,33 +114,54 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
     setIsSaving(true);
     try {
       // Update appointment record
-      const { error: apptError } = await supabase.from('appointments').update({
+      const updatePayload = {
         patient_name: editForm.patient_name,
         patient_email: editForm.patient_email,
         patient_phone: editForm.patient_phone,
         address: editForm.address,
         gate_code: editForm.gate_code,
         notes: editForm.notes,
-      }).eq('id', appt.id);
-      if (apptError) throw apptError;
+      };
+      console.log('[AppointmentEdit] Saving appointment', appt.id, updatePayload);
+      const { data: updatedRows, error: apptError } = await supabase
+        .from('appointments')
+        .update(updatePayload)
+        .eq('id', appt.id)
+        .select();
+
+      if (apptError) {
+        console.error('[AppointmentEdit] Supabase error:', apptError);
+        throw apptError;
+      }
+      console.log('[AppointmentEdit] Updated rows:', updatedRows);
+
+      if (!updatedRows || updatedRows.length === 0) {
+        toast.error('No rows updated — you may not have permission');
+        return;
+      }
 
       // Also update tenant_patients record if we have one
       if (patientData?.id) {
         const nameParts = editForm.patient_name.trim().split(/\s+/);
         const firstName = nameParts[0] || '';
         const lastName = nameParts.slice(1).join(' ') || '';
-        await supabase.from('tenant_patients').update({
+        const { error: patientError } = await supabase.from('tenant_patients').update({
           first_name: firstName,
           last_name: lastName,
           email: editForm.patient_email,
           phone: editForm.patient_phone,
         }).eq('id', patientData.id);
+        if (patientError) console.warn('[AppointmentEdit] tenant_patients update error:', patientError);
       }
+
+      // Mutate the local appointment object so the panel shows updated data immediately
+      Object.assign(appt, updatePayload);
 
       toast.success('Patient information saved');
       setIsEditing(false);
       onUpdate();
     } catch (err: any) {
+      console.error('[AppointmentEdit] Save failed:', err);
       toast.error('Failed to save: ' + (err.message || 'Unknown error'));
     } finally {
       setIsSaving(false);
