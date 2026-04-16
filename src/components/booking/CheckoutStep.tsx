@@ -1,19 +1,29 @@
 import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { useFormContext } from 'react-hook-form';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { ChevronLeft, Loader2, CreditCard } from 'lucide-react';
+import { ChevronLeft, Loader2, CreditCard, AlertTriangle } from 'lucide-react';
 import { FormField, FormItem, FormControl, FormLabel, FormMessage } from '@/components/ui/form';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
 import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
-import { Shield, Gift, Tag, Plus, Layers } from 'lucide-react';
+import { Shield, Gift, Tag, Plus, Layers, X, UserPlus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+
+interface FamilyMember {
+  name: string;
+  dob: string;
+  relationship: string;
+}
+const FAMILY_MEMBER_PRICE = 75;
 
 interface CheckoutStepProps {
   onBack: () => void;
@@ -22,9 +32,11 @@ interface CheckoutStepProps {
 }
 
 const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing }) => {
+  const { user } = useAuth();
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
   const [tipAmount, setTipAmount] = useState(0);
+  const [showMismatchDialog, setShowMismatchDialog] = useState(false);
   const [referralCode, setReferralCode] = useState('');
   const [referralDiscount, setReferralDiscount] = useState(0);
   const [referralApplied, setReferralApplied] = useState(false);
@@ -33,8 +45,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
   const [memberLabel, setMemberLabel] = useState('');
   const [bundleEnabled, setBundleEnabled] = useState(false);
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [showFamilyForm, setShowFamilyForm] = useState(false);
+  const [familyForm, setFamilyForm] = useState({ name: '', dob: '', relationship: 'Spouse' });
   const BUNDLE_COUNT = 4;
   const BUNDLE_DISCOUNT = 0.15;
+
+  // Must be defined before useEffects that reference it
+  const serviceId = getValues('serviceDetails.visitType') || getValues('serviceDetails.selectedService');
 
   // Auto-detect membership by patient email (no auth calls — avoid lock)
   React.useEffect(() => {
@@ -101,7 +119,6 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     }
   };
 
-  const serviceId = getValues('serviceDetails.visitType') || getValues('serviceDetails.selectedService');
   const serviceDetails = getValues('serviceDetails');
   const locationCity = getValues('locationDetails.city') || '';
   const additionalPatients = watch('additionalPatients') || [];
@@ -114,6 +131,23 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     weekend: serviceDetails?.weekend,
     extendedArea,
   }, tipAmount, additionalPatients.length, memberTier);
+
+  const effectiveReferralDiscount = referralApplied ? referralDiscount : 0;
+  const familyMemberTotal = familyMembers.length * FAMILY_MEMBER_PRICE;
+
+  const handleAddFamilyMember = () => {
+    if (!familyForm.name.trim()) { toast.error('Please enter the family member\'s name'); return; }
+    if (!familyForm.dob) { toast.error('Please enter their date of birth'); return; }
+    setFamilyMembers(prev => [...prev, { ...familyForm, name: familyForm.name.trim() }]);
+    setFamilyForm({ name: '', dob: '', relationship: 'Spouse' });
+    setShowFamilyForm(false);
+    toast.success(`Family member added (+$${FAMILY_MEMBER_PRICE})`);
+  };
+
+  const handleRemoveFamilyMember = (index: number) => {
+    setFamilyMembers(prev => prev.filter((_, i) => i !== index));
+    toast.info('Family member removed');
+  };
 
   const selectedDate = watch('date');
 
@@ -146,6 +180,10 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     if (bundleEnabled) {
       noteParts.push(`BUNDLE: ${BUNDLE_COUNT} visits @ ${Math.round(BUNDLE_DISCOUNT * 100)}% off (1 of ${BUNDLE_COUNT} today, ${BUNDLE_COUNT - 1} credits remaining)`);
     }
+    if (familyMembers.length > 0) {
+      const fmNames = familyMembers.map(fm => `${fm.name} (${fm.relationship}, DOB: ${fm.dob})`).join('; ');
+      noteParts.push(`FAMILY: ${familyMembers.length} member(s) @ $${FAMILY_MEMBER_PRICE} each — ${fmNames}`);
+    }
     methods.setValue('serviceDetails.additionalNotes', noteParts.filter(Boolean).join(' | '));
 
     // Pass bundle surcharge via tipAmount? No — extend onCheckout payload instead.
@@ -154,7 +192,34 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
       methods.setValue('bundleCount' as any, BUNDLE_COUNT);
       methods.setValue('bundleExtra' as any, breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1));
     }
+    if (familyMembers.length > 0) {
+      methods.setValue('familyMembers' as any, familyMembers);
+      methods.setValue('familyMemberExtra' as any, familyMemberTotal);
+    }
 
+    // HIPAA safeguard: detect when logged-in user's email matches patient email
+    // but the names don't match — signals "booking for someone else" with wrong email
+    if (user?.email) {
+      const patientEmail = getValues('patientDetails.email')?.trim().toLowerCase();
+      const userEmail = user.email.trim().toLowerCase();
+      const patientFirst = (getValues('patientDetails.firstName') || '').trim().toLowerCase();
+      const patientLast = (getValues('patientDetails.lastName') || '').trim().toLowerCase();
+      const userFirst = (user.firstName || '').trim().toLowerCase();
+      const userLast = (user.lastName || '').trim().toLowerCase();
+
+      if (patientEmail === userEmail && (patientFirst !== userFirst || patientLast !== userLast)) {
+        // Email matches logged-in user but name is different — likely booking for someone else
+        // with the wrong email still attached
+        setShowMismatchDialog(true);
+        return;
+      }
+    }
+
+    onCheckout(tipAmount);
+  };
+
+  const handleConfirmCheckout = () => {
+    setShowMismatchDialog(false);
     onCheckout(tipAmount);
   };
 
@@ -307,13 +372,82 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         </div>
 
         {/* Family member upsell */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
-          <p className="font-semibold text-sm text-blue-900">👨‍👩‍👧 Bringing a family member?</p>
-          <p className="text-xs text-blue-700">Add them to this visit for just <span className="font-bold">$75</span> — no separate appointment needed.</p>
-          <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 mt-1"
-            onClick={() => { toast.info('Call (941) 527-9169 to add a family member to this visit.'); }}>
-            Add Family Member — $75
-          </Button>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-semibold text-sm text-blue-900">👨‍👩‍👧 Bringing a family member?</p>
+              <p className="text-xs text-blue-700">Add them to this visit for just <span className="font-bold">${FAMILY_MEMBER_PRICE}</span> each — no separate appointment needed.</p>
+            </div>
+          </div>
+
+          {/* Added family members list */}
+          {familyMembers.map((fm, i) => (
+            <div key={i} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{fm.name}</p>
+                <p className="text-[11px] text-muted-foreground">{fm.relationship} · DOB: {fm.dob}</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-xs font-semibold text-blue-800">+${FAMILY_MEMBER_PRICE}</span>
+                <button type="button" onClick={() => handleRemoveFamilyMember(i)} className="text-red-400 hover:text-red-600 p-0.5">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+
+          {/* Add family member form */}
+          {showFamilyForm ? (
+            <div className="bg-white border border-blue-200 rounded-lg p-3 space-y-3">
+              <div>
+                <Label className="text-xs font-medium">Full Name *</Label>
+                <Input
+                  value={familyForm.name}
+                  onChange={e => setFamilyForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. Jane Smith"
+                  className="mt-1 h-9 text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs font-medium">Date of Birth *</Label>
+                  <Input
+                    type="date"
+                    value={familyForm.dob}
+                    onChange={e => setFamilyForm(f => ({ ...f, dob: e.target.value }))}
+                    className="mt-1 h-9 text-sm"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs font-medium">Relationship</Label>
+                  <select
+                    value={familyForm.relationship}
+                    onChange={e => setFamilyForm(f => ({ ...f, relationship: e.target.value }))}
+                    className="mt-1 h-9 w-full text-sm border rounded-md px-2 bg-white"
+                  >
+                    <option>Spouse</option>
+                    <option>Child</option>
+                    <option>Parent</option>
+                    <option>Sibling</option>
+                    <option>Other</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" className="text-xs bg-blue-600 hover:bg-blue-700 text-white flex-1" onClick={handleAddFamilyMember}>
+                  <UserPlus className="h-3.5 w-3.5 mr-1" /> Confirm (+${FAMILY_MEMBER_PRICE})
+                </Button>
+                <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setShowFamilyForm(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 w-full"
+              onClick={() => setShowFamilyForm(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add Family Member — ${FAMILY_MEMBER_PRICE}
+            </Button>
+          )}
         </div>
 
         {/* Tip selector */}
@@ -343,12 +477,26 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
+        {familyMemberTotal > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">{familyMembers.length} family member{familyMembers.length > 1 ? 's' : ''} × ${FAMILY_MEMBER_PRICE}</span>
+            <span>+${familyMemberTotal.toFixed(2)}</span>
+          </div>
+        )}
+
+        {effectiveReferralDiscount > 0 && (
+          <div className="flex justify-between text-sm text-emerald-700">
+            <span>Referral discount</span>
+            <span>-${effectiveReferralDiscount.toFixed(2)}</span>
+          </div>
+        )}
+
         <Separator />
 
         {/* Total */}
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
-          <span>${(breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0)).toFixed(2)}</span>
+          <span>${Math.max(0, breakdown.total + addOnTotal + familyMemberTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}</span>
         </div>
 
         {/* Referral Code */}
@@ -423,11 +571,39 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             ) : (
               <>
                 <CreditCard className="mr-2 h-4 w-4" />
-                Proceed to Payment — ${(breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0)).toFixed(2)}
+                Proceed to Payment — ${Math.max(0, breakdown.total + addOnTotal + familyMemberTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}
               </>
             )}
           </Button>
         </div>
+        {/* HIPAA mismatch warning dialog */}
+        <AlertDialog open={showMismatchDialog} onOpenChange={setShowMismatchDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2 text-amber-700">
+                <AlertTriangle className="h-5 w-5" /> Patient Email Verification
+              </AlertDialogTitle>
+              <AlertDialogDescription className="space-y-3 text-left">
+                <p>
+                  The patient name is <strong>{getValues('patientDetails.firstName')} {getValues('patientDetails.lastName')}</strong>, but the email
+                  (<strong>{getValues('patientDetails.email')}</strong>) belongs to your account (<strong>{user?.firstName} {user?.lastName}</strong>).
+                </p>
+                <p>
+                  Appointment confirmations and notifications will be sent to this email. If you're booking for someone else,
+                  please go back and enter <strong>the patient's own email</strong> so they receive their own notifications.
+                </p>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+              <AlertDialogCancel onClick={onBack}>
+                Go Back & Fix Email
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={handleConfirmCheckout} className="bg-amber-600 hover:bg-amber-700">
+                Continue Anyway — Send to My Email
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </CardContent>
     </Card>
   );

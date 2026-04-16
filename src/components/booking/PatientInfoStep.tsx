@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X, CheckCircle } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X, CheckCircle, Users } from 'lucide-react';
 import { useFormContext, useFieldArray } from 'react-hook-form';
+import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,12 +28,14 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
   onNext,
   onBack
 }) => {
+  const { user } = useAuth();
   const { control, watch, setValue, getValues } = useFormContext<BookingFormValues>();
   const dateOfBirth = watch('patientDetails.dateOfBirth');
   const [recognized, setRecognized] = useState(false);
   const [recognizedName, setRecognizedName] = useState('');
   const [hasAuthAccount, setHasAuthAccount] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [bookingForSelf, setBookingForSelf] = useState(true);
 
   const handleEmailBlur = async () => {
     const email = getValues('patientDetails.email');
@@ -71,6 +74,24 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
     name: 'additionalPatients',
   });
   
+  const handleBookingForToggle = (forSelf: boolean) => {
+    setBookingForSelf(forSelf);
+    if (forSelf && user) {
+      // Restore logged-in user's info
+      setValue('patientDetails.firstName', user.firstName || '');
+      setValue('patientDetails.lastName', user.lastName || '');
+      setValue('patientDetails.email', user.email || '');
+      setRecognized(false);
+    } else {
+      // Clear all fields so the booker must enter the actual patient's info
+      setValue('patientDetails.firstName', '');
+      setValue('patientDetails.lastName', '');
+      setValue('patientDetails.email', '');
+      setValue('patientDetails.phone', '');
+      setRecognized(false);
+    }
+  };
+
   return (
     <Card className="shadow-sm">
       <CardContent className="p-5 md:p-6">
@@ -81,6 +102,30 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
               Please provide the patient's details
             </p>
           </div>
+
+          {/* Booking-for toggle — only show when user is logged in */}
+          {user && (
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={bookingForSelf ? 'default' : 'outline'}
+                size="sm"
+                className="flex-1 text-xs"
+                onClick={() => handleBookingForToggle(true)}
+              >
+                Booking for myself
+              </Button>
+              <Button
+                type="button"
+                variant={!bookingForSelf ? 'default' : 'outline'}
+                size="sm"
+                className="flex-1 text-xs gap-1.5"
+                onClick={() => handleBookingForToggle(false)}
+              >
+                <Users className="h-3.5 w-3.5" /> Booking for someone else
+              </Button>
+            </div>
+          )}
           
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

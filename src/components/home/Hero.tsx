@@ -1,10 +1,22 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Clock, Shield, CheckCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
+import { supabase } from "@/integrations/supabase/client";
 
 const Hero = () => {
+  const [visitCount, setVisitCount] = useState(500);
+
+  useEffect(() => {
+    // Fetch real completed appointment count for social proof
+    supabase.from('appointments').select('id', { count: 'exact', head: true })
+      .eq('status', 'completed')
+      .then(({ count }) => {
+        if (count && count > 100) setVisitCount(count);
+      });
+  }, []);
+
   const handleBookNow = () => {
     window.location.href = GHS_BOOKING_PAGE;
   };
@@ -118,8 +130,8 @@ const Hero = () => {
             {/* Social proof counters */}
             <motion.div variants={itemVariants} className="flex flex-wrap justify-center gap-6 sm:gap-10 mb-8">
               <div className="text-center">
-                <p className="text-2xl sm:text-3xl font-bold text-foreground">500+</p>
-                <p className="text-xs text-muted-foreground">Happy Patients</p>
+                <p className="text-2xl sm:text-3xl font-bold text-foreground">{visitCount.toLocaleString()}+</p>
+                <p className="text-xs text-muted-foreground">Home Visits Completed</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl sm:text-3xl font-bold text-foreground">4.9<span className="text-amber-500">★</span></p>
@@ -154,7 +166,7 @@ const Hero = () => {
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle className="h-4 w-4 text-conve-red" />
-                <span>500+ Patients Served</span>
+                <span>{visitCount.toLocaleString()}+ Patients Served</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Shield className="h-4 w-4 text-conve-red" />

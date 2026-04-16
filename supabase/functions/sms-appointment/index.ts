@@ -287,7 +287,15 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-  
+
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
   try {
     // Initialize Supabase admin client
     const supabaseAdmin = createClient(

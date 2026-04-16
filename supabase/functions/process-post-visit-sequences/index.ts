@@ -8,6 +8,14 @@ const corsHeaders = {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
   try {
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') || '',

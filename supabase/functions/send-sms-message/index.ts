@@ -13,6 +13,14 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const { conversationId, phoneNumber, message, staffProfileId, patientId } = await req.json();
 

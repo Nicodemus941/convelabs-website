@@ -24,7 +24,7 @@ const SuperAdminDashboard = () => {
   const [stats, setStats] = useState({
     totalAppointments: 0, thisWeekAppointments: 0, completedToday: 0,
     revenueMTD: 0, totalPatients: 0, newPatientsMonth: 0,
-    overdueInvoices: 0, todayAppointments: 0, cancelledMonth: 0,
+    overdueInvoices: 0, todayAppointments: 0, cancelledMonth: 0, completedMonth: 0,
     avgRevenue: 0, repeatRate: 0, onlineBookings: 0, manualBookings: 0,
   });
   const [recentAppointments, setRecentAppointments] = useState<any[]>([]);
@@ -55,6 +55,8 @@ const SuperAdminDashboard = () => {
         { data: revenueAppts },
         { data: recent },
         { data: allMonthAppts },
+        { data: allCompletedForRepeat },
+        { count: completedMonth },
       ] = await Promise.all([
         supabase.from('appointments').select('*', { count: 'exact', head: true }),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('appointment_date', weekStartStr),
@@ -67,19 +69,22 @@ const SuperAdminDashboard = () => {
         supabase.from('appointments').select('total_amount, tip_amount, service_type, appointment_date').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
         supabase.from('appointments').select('*').order('appointment_date', { ascending: false }).order('appointment_time', { ascending: true }).limit(10),
         supabase.from('appointments').select('service_type').gte('appointment_date', monthStartStr).not('status', 'eq', 'cancelled'),
+        supabase.from('appointments').select('patient_email').eq('status', 'completed'),
+        supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed').gte('appointment_date', monthStartStr),
       ]);
 
       const revenueMTD = revenueAppts?.reduce((s, a) => s + (a.total_amount || 0), 0) || 0;
       const completedCount = revenueAppts?.length || 1;
 
-      // Calculate repeat rate (patients with 2+ appointments / total patients)
-      const patientEmails = new Set<string>();
-      const repeatEmails = new Set<string>();
-      (recent || []).concat(revenueAppts || []).forEach((a: any) => {
+      // Calculate repeat rate from ALL completed appointments (patients with 2+ visits / total unique patients)
+      const visitCounts = new Map<string, number>();
+      (allCompletedForRepeat || []).forEach((a: any) => {
         const email = a.patient_email;
-        if (email) { if (patientEmails.has(email)) repeatEmails.add(email); patientEmails.add(email); }
+        if (email) visitCounts.set(email, (visitCounts.get(email) || 0) + 1);
       });
-      const repeatRate = patientEmails.size > 0 ? Math.round((repeatEmails.size / patientEmails.size) * 100) : 0;
+      let patientsWithRepeatVisits = 0;
+      visitCounts.forEach((count) => { if (count >= 2) patientsWithRepeatVisits++; });
+      const repeatRate = visitCounts.size > 0 ? Math.round((patientsWithRepeatVisits / visitCounts.size) * 100) : 0;
 
       // Booking source breakdown
       const onlineBookings = (revenueAppts || []).filter((a: any) => a.booking_source === 'online').length;
@@ -95,6 +100,7 @@ const SuperAdminDashboard = () => {
         newPatientsMonth: newPatients || 0,
         overdueInvoices: overdueInvoices || 0,
         cancelledMonth: cancelledMonth || 0,
+        completedMonth: completedMonth || 0,
         avgRevenue: Math.round(revenueMTD / completedCount),
         repeatRate, onlineBookings, manualBookings,
       });
@@ -228,7 +234,7 @@ const SuperAdminDashboard = () => {
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground mb-1">Cancellation Rate</p>
             <p className={`text-2xl font-bold ${stats.cancelledMonth > 5 ? 'text-red-600' : 'text-emerald-600'}`}>
-              {loading ? '—' : `${stats.totalAppointments > 0 ? Math.round((stats.cancelledMonth / (stats.thisWeekAppointments || 1)) * 100) : 0}%`}
+              {loading ? '—' : `${(stats.completedMonth + stats.cancelledMonth) > 0 ? Math.round((stats.cancelledMonth / (stats.completedMonth + stats.cancelledMonth)) * 100) : 0}%`}
             </p>
             <p className="text-[10px] text-muted-foreground mt-1">{stats.cancelledMonth} this month</p>
           </CardContent>

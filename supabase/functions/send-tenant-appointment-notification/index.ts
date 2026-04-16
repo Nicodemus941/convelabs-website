@@ -1,6 +1,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.36.0";
+import { verifyRecipientEmail } from "../_shared/verify-recipient.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,6 +12,14 @@ serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
+  }
+
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {
@@ -132,6 +141,26 @@ serve(async (req) => {
         `;
     }
     
+    // HIPAA verification guard: verify recipient before sending
+    const emailCheck = await verifyRecipientEmail(appointmentId, patientEmail, patientName);
+    if (!emailCheck.safe) {
+      console.warn('HIPAA guard blocked email to ' + patientEmail + ': ' + emailCheck.reason);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          blocked: true,
+          reason: emailCheck.reason,
+          message: 'HIPAA verification failed - email not sent'
+        }),
+        {
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders
+          },
+        }
+      );
+    }
+
     // Send email via the send-email function
     const emailResponse = await supabaseClient.functions.invoke('send-email', {
       body: {
@@ -140,7 +169,7 @@ serve(async (req) => {
         html: htmlContent
       }
     });
-    
+
     console.log("Email function response:", emailResponse);
     
     // If the appointment has a phlebotomist assigned, also notify them

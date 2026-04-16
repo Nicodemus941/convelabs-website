@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from "../_shared/stripe.ts";
+import { verifyRecipientEmail, verifyRecipientPhone } from "../_shared/verify-recipient.ts";
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -163,18 +164,18 @@ async function handleCreditPackPurchase(session: any) {
       throw new Error('No customer email provided');
     }
     
-    // Get user ID from email
-    const { data: userData, error: userError } = await supabaseClient
-      .from('auth.users')
-      .select('id')
-      .eq('email', customerEmail)
-      .single();
-    
-    if (userError || !userData) {
-      throw new Error(`Could not find user with email ${customerEmail}`);
+    // Get user ID from tenant_patients (auth.users is not accessible via PostgREST)
+    const { data: patientData, error: patientError } = await supabaseClient
+      .from('tenant_patients')
+      .select('user_id, id')
+      .ilike('email', customerEmail)
+      .maybeSingle();
+
+    if (patientError || !patientData?.user_id) {
+      throw new Error(`Could not find patient with email ${customerEmail}`);
     }
-    
-    const userId = userData.id;
+
+    const userId = patientData.user_id;
     const creditsAmount = parseInt(metadata.credits_amount || '4', 10);
     const expiration = new Date();
     expiration.setFullYear(expiration.getFullYear() + 1); // Credit packs expire after 1 year
@@ -230,18 +231,18 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       throw new Error('No plan ID provided');
     }
 
-    // Get user ID from email
-    const { data: userData, error: userError } = await supabaseClient
-      .from('auth.users')
-      .select('id')
-      .eq('email', customerEmail)
-      .single();
+    // Get user ID from tenant_patients (auth.users not accessible via PostgREST)
+    const { data: memberPatient, error: memberPatientError } = await supabaseClient
+      .from('tenant_patients')
+      .select('user_id, id')
+      .ilike('email', customerEmail)
+      .maybeSingle();
 
-    if (userError || !userData) {
-      throw new Error(`Could not find user with email ${customerEmail}`);
+    if (memberPatientError || !memberPatient?.user_id) {
+      throw new Error(`Could not find patient with email ${customerEmail}`);
     }
 
-    const userId = userData.id;
+    const userId = memberPatient.user_id;
 
     // Fetch the selected plan
     const { data: planData, error: planError } = await supabaseClient
@@ -535,10 +536,8 @@ async function handleAppointmentPayment(session: any) {
     // Find patient_id — try user_id from metadata first, then lookup by email
     let patientId = userId || null;
     if (!patientId && metadata.patient_email) {
-      // Use admin API to find user by email (can't query auth.users as a table)
+      // Look up patient by email in tenant_patients
       try {
-        const { data: { users } } = await supabaseClient.auth.admin.listUsers({ page: 1, perPage: 1 });
-        // Fallback: search tenant_patients
         const { data: tp } = await supabaseClient
           .from('tenant_patients')
           .select('id')
@@ -706,27 +705,32 @@ async function handleAppointmentPayment(session: any) {
               .eq('id', codeData.user_id)
               .maybeSingle();
 
-            if (referrer?.phone) {
-              const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-              const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-              const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
-              if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-                const credit = codeData.referrer_credit || 25;
-                const smsBody = `ConveLabs: Great news ${referrer.first_name || ''}! Your referral code ${referralCode} was just used. You earned a $${credit} credit toward your next visit. Thank you for spreading the word!`;
-                const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-                await fetch(twilioUrl, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                  },
-                  body: new URLSearchParams({
-                    To: referrer.phone.startsWith('+') ? referrer.phone : `+1${referrer.phone.replace(/\D/g, '')}`,
-                    Body: smsBody,
-                    ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
-                  }).toString(),
-                });
-                console.log(`Referrer notified via SMS: ${referrer.phone}`);
+            if (referrer?.phone && !Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+              const referrerPhoneCheck = await verifyRecipientPhone(appointment.id, referrer.phone, referrer.first_name || 'Referrer');
+              if (!referrerPhoneCheck.safe) {
+                console.warn('HIPAA guard blocked referrer SMS to ' + referrer.phone + ': ' + referrerPhoneCheck.reason);
+              } else {
+                const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+                const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+                const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+                if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+                  const credit = codeData.referrer_credit || 25;
+                  const smsBody = `ConveLabs: Great news ${referrer.first_name || ''}! Your referral code ${referralCode} was just used. You earned a $${credit} credit toward your next visit. Thank you for spreading the word!`;
+                  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+                  await fetch(twilioUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                      To: referrer.phone.startsWith('+') ? referrer.phone : `+1${referrer.phone.replace(/\D/g, '')}`,
+                      Body: smsBody,
+                      ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
+                    }).toString(),
+                  });
+                  console.log(`Referrer notified via SMS: ${referrer.phone}`);
+                }
               }
             }
           }
@@ -734,23 +738,28 @@ async function handleAppointmentPayment(session: any) {
           // Also notify the REFERRED FRIEND that their discount was applied
           const friendPhone = metadata.patient_phone;
           const friendName = metadata.patient_first_name || 'Friend';
-          if (friendPhone) {
-            const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-            const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-            const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
-            if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-              await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-                  'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams({
-                  To: friendPhone.startsWith('+') ? friendPhone : `+1${friendPhone.replace(/\D/g, '')}`,
-                  Body: `ConveLabs: Hi ${friendName}! Your $${codeData.discount_amount || 25} referral discount was applied to your booking. Welcome to ConveLabs! After your visit, you'll get your own referral code to share.`,
-                  ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
-                }).toString(),
-              });
+          if (friendPhone && !Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+            const friendPhoneCheck = await verifyRecipientPhone(appointment.id, friendPhone, friendName);
+            if (!friendPhoneCheck.safe) {
+              console.warn('HIPAA guard blocked referred friend SMS to ' + friendPhone + ': ' + friendPhoneCheck.reason);
+            } else {
+              const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+              const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+              const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+              if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+                await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                  },
+                  body: new URLSearchParams({
+                    To: friendPhone.startsWith('+') ? friendPhone : `+1${friendPhone.replace(/\D/g, '')}`,
+                    Body: `ConveLabs: Hi ${friendName}! Your $${codeData.discount_amount || 25} referral discount was applied to your booking. Welcome to ConveLabs! After your visit, you'll get your own referral code to share.`,
+                    ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
+                  }).toString(),
+                });
+              }
             }
           }
         }
@@ -760,24 +769,28 @@ async function handleAppointmentPayment(session: any) {
     }
 
     // Send confirmation email + SMS via Mailgun and Twilio
-    try {
-      await sendAppointmentConfirmation(appointment, metadata);
-    } catch (notifErr) {
-      console.error('Failed to send appointment confirmation (non-fatal):', notifErr);
-    }
+    if (!Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+      try {
+        await sendAppointmentConfirmation(appointment, metadata);
+      } catch (notifErr) {
+        console.error('Failed to send appointment confirmation (non-fatal):', notifErr);
+      }
 
-    // Schedule "What to Expect" follow-up email (2 hours after booking)
-    try {
-      await supabaseClient.from('post_visit_sequences').insert({
-        appointment_id: appointment.id,
-        patient_id: patientId,
-        patient_email: metadata.patient_email,
-        patient_phone: metadata.patient_phone,
-        step: 'what_to_expect',
-        scheduled_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
-        status: 'pending',
-      });
-    } catch (e) { console.error('What-to-expect schedule error:', e); }
+      // Schedule "What to Expect" follow-up email (2 hours after booking)
+      try {
+        await supabaseClient.from('post_visit_sequences').insert({
+          appointment_id: appointment.id,
+          patient_id: patientId,
+          patient_email: metadata.patient_email,
+          patient_phone: metadata.patient_phone,
+          step: 'what_to_expect',
+          scheduled_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+          status: 'pending',
+        });
+      } catch (e) { console.error('What-to-expect schedule error:', e); }
+    } else {
+      console.log('NOTIFICATIONS_SUSPENDED: skipping appointment confirmation and what-to-expect sequence');
+    }
 
     return appointment;
   } catch (error) {
@@ -814,87 +827,97 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 
   // 1. Send confirmation EMAIL via Mailgun
   if (email && MAILGUN_API_KEY) {
-    try {
-      const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-        <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:28px;border-radius:12px 12px 0 0;text-align:center;">
-          <h1 style="margin:0;font-size:22px;">Appointment Confirmed!</h1>
-          <p style="margin:6px 0 0;opacity:0.9;">ConveLabs Mobile Phlebotomy</p>
-        </div>
-        <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
-          <p>Hi ${firstName},</p>
-          <p>Your appointment has been confirmed! Here are the details:</p>
-          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0;">
-            <table style="width:100%;font-size:14px;">
-              <tr><td style="padding:6px 0;color:#6b7280;">Service</td><td style="padding:6px 0;font-weight:600;text-align:right;">${serviceName}</td></tr>
-              <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;text-align:right;">${displayDate}</td></tr>
-              ${appointmentTime ? `<tr><td style="padding:6px 0;color:#6b7280;">Time</td><td style="padding:6px 0;font-weight:600;text-align:right;">${appointmentTime}</td></tr>` : ''}
-              ${address ? `<tr><td style="padding:6px 0;color:#6b7280;">Location</td><td style="padding:6px 0;font-weight:600;text-align:right;">${address}</td></tr>` : ''}
-              <tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Total Paid</td><td style="padding:10px 0 6px;font-weight:700;font-size:18px;text-align:right;color:#B91C1C;">$${totalAmount.toFixed(2)}</td></tr>
-            </table>
+    const emailCheck = await verifyRecipientEmail(appointment.id, email, patientName);
+    if (!emailCheck.safe) {
+      console.warn('HIPAA guard blocked confirmation email to ' + email + ': ' + emailCheck.reason);
+    } else {
+      try {
+        const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+          <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:28px;border-radius:12px 12px 0 0;text-align:center;">
+            <h1 style="margin:0;font-size:22px;">Appointment Confirmed!</h1>
+            <p style="margin:6px 0 0;opacity:0.9;">ConveLabs Mobile Phlebotomy</p>
           </div>
-          <p style="font-size:13px;color:#6b7280;"><strong>What to expect:</strong> A licensed phlebotomist will arrive at your location during your scheduled time window. Please have your lab order and insurance card ready.</p>
-          <p style="font-size:13px;color:#6b7280;">Need to reschedule? Call us at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a></p>
-          <div style="text-align:center;margin:20px 0;">
-            <a href="https://convelabs.com/dashboard" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
+          <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
+            <p>Hi ${firstName},</p>
+            <p>Your appointment has been confirmed! Here are the details:</p>
+            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0;">
+              <table style="width:100%;font-size:14px;">
+                <tr><td style="padding:6px 0;color:#6b7280;">Service</td><td style="padding:6px 0;font-weight:600;text-align:right;">${serviceName}</td></tr>
+                <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;text-align:right;">${displayDate}</td></tr>
+                ${appointmentTime ? `<tr><td style="padding:6px 0;color:#6b7280;">Time</td><td style="padding:6px 0;font-weight:600;text-align:right;">${appointmentTime}</td></tr>` : ''}
+                ${address ? `<tr><td style="padding:6px 0;color:#6b7280;">Location</td><td style="padding:6px 0;font-weight:600;text-align:right;">${address}</td></tr>` : ''}
+                <tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Total Paid</td><td style="padding:10px 0 6px;font-weight:700;font-size:18px;text-align:right;color:#B91C1C;">$${totalAmount.toFixed(2)}</td></tr>
+              </table>
+            </div>
+            <p style="font-size:13px;color:#6b7280;"><strong>What to expect:</strong> A licensed phlebotomist will arrive at your location during your scheduled time window. Please have your lab order and insurance card ready.</p>
+            <p style="font-size:13px;color:#6b7280;">Need to reschedule? Call us at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a></p>
+            <div style="text-align:center;margin:20px 0;">
+              <a href="https://convelabs.com/dashboard" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
+            </div>
+            <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
           </div>
-          <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
-        </div>
-      </div>`;
+        </div>`;
 
-      const formData = new FormData();
-      formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
-      formData.append('to', email);
-      formData.append('subject', `Appointment Confirmed - ${displayDate}`);
-      formData.append('html', emailHtml);
+        const formData = new FormData();
+        formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+        formData.append('to', email);
+        formData.append('subject', `Appointment Confirmed - ${displayDate}`);
+        formData.append('html', emailHtml);
 
-      const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
-        method: 'POST',
-        headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
-        body: formData,
-      });
+        const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+          body: formData,
+        });
 
-      if (mgRes.ok) {
-        console.log(`Confirmation email sent to ${email}`);
-      } else {
-        const errText = await mgRes.text();
-        console.error(`Mailgun error: ${mgRes.status} ${errText}`);
+        if (mgRes.ok) {
+          console.log(`Confirmation email sent to ${email}`);
+        } else {
+          const errText = await mgRes.text();
+          console.error(`Mailgun error: ${mgRes.status} ${errText}`);
+        }
+      } catch (emailErr) {
+        console.error('Email send error:', emailErr);
       }
-    } catch (emailErr) {
-      console.error('Email send error:', emailErr);
     }
   }
 
   // 2. Send confirmation SMS via Twilio
   if (phone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-    try {
-      const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\n${address ? `Location: ${address}\n` : ''}\nTotal: $${totalAmount.toFixed(2)}\n\nA phlebotomist will arrive at your scheduled time. Have your lab order & insurance ready.\n\nQuestions? Call (941) 527-9169`;
+    const smsCheck = await verifyRecipientPhone(appointment.id, phone, patientName);
+    if (!smsCheck.safe) {
+      console.warn('HIPAA guard blocked confirmation SMS to ' + phone + ': ' + smsCheck.reason);
+    } else {
+      try {
+        const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\n${address ? `Location: ${address}\n` : ''}\nTotal: $${totalAmount.toFixed(2)}\n\nA phlebotomist will arrive at your scheduled time. Have your lab order & insurance ready.\n\nQuestions? Call (941) 527-9169`;
 
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-      const twilioBody = new URLSearchParams({
-        To: phone,
-        Body: smsBody,
-        ...(TWILIO_MESSAGING_SERVICE_SID
-          ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
-          : { From: TWILIO_PHONE_NUMBER || '+14074104939' }),
-      });
+        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+        const twilioBody = new URLSearchParams({
+          To: phone,
+          Body: smsBody,
+          ...(TWILIO_MESSAGING_SERVICE_SID
+            ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
+            : { From: TWILIO_PHONE_NUMBER || '+14074104939' }),
+        });
 
-      const twilioRes = await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: twilioBody.toString(),
-      });
+        const twilioRes = await fetch(twilioUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: twilioBody.toString(),
+        });
 
-      if (twilioRes.ok) {
-        console.log(`Confirmation SMS sent to ${phone}`);
-      } else {
-        const errText = await twilioRes.text();
-        console.error(`Twilio error: ${twilioRes.status} ${errText}`);
+        if (twilioRes.ok) {
+          console.log(`Confirmation SMS sent to ${phone}`);
+        } else {
+          const errText = await twilioRes.text();
+          console.error(`Twilio error: ${twilioRes.status} ${errText}`);
+        }
+      } catch (smsErr) {
+        console.error('SMS send error:', smsErr);
       }
-    } catch (smsErr) {
-      console.error('SMS send error:', smsErr);
     }
   }
 
@@ -991,18 +1014,18 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
       throw new Error('No plan ID provided');
     }
 
-    // Get user ID from email
-    const { data: userData, error: userError } = await supabaseClient
-      .from('auth.users')
-      .select('id')
-      .eq('email', customerEmail)
-      .single();
+    // Get user ID from tenant_patients (auth.users not accessible via PostgREST)
+    const { data: memberPatient, error: memberPatientError } = await supabaseClient
+      .from('tenant_patients')
+      .select('user_id, id')
+      .ilike('email', customerEmail)
+      .maybeSingle();
 
-    if (userError || !userData) {
-      throw new Error(`Could not find user with email ${customerEmail}`);
+    if (memberPatientError || !memberPatient?.user_id) {
+      throw new Error(`Could not find patient with email ${customerEmail}`);
     }
 
-    const userId = userData.id;
+    const userId = memberPatient.user_id;
 
     // Fetch the selected plan
     const { data: planData, error: planError } = await supabaseClient

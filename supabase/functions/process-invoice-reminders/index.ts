@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
+import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,22 +11,76 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 
 /**
- * Hormozi-style invoice escalation:
+ * Hormozi-style SMART invoice escalation v2
  *
- * T+0h   → Invoice sent (handled by send-appointment-invoice)
- * T+6h   → Gentle reminder — friendly nudge, pay link
- * T+11h  → Final warning — "cancelling in 1 hour"
- * T+12h  → Auto-cancel — void Stripe invoice, cancel appointment
+ * KEY PRINCIPLES:
+ * 1. Urgency scales with appointment proximity — someone booked 3 weeks out
+ *    gets gentle nudges; someone booked tomorrow gets aggressive follow-up.
+ * 2. QUIET HOURS: No messages before 8 AM or after 8 PM Eastern.
+ *    If a message is due at 5:45 AM, it waits until 8 AM.
+ * 3. VIP patients are excluded from ALL reminders and auto-cancellation.
  *
- * VIP patients are excluded from ALL reminders and auto-cancellation.
- * They pay on their own time.
+ * ESCALATION TIERS (based on days until appointment):
+ *
+ * ┌─────────────────────┬───────────┬───────────────┬─────────────┐
+ * │ Appointment Window  │ Reminder  │ Final Warning │ Auto-Cancel │
+ * ├─────────────────────┼───────────┼───────────────┼─────────────┤
+ * │ ≤ 48h away (urgent) │ +3h       │ +6h           │ +9h         │
+ * │ 2–7 days (soon)     │ +6h       │ +24h          │ +48h        │
+ * │ 7+ days (relaxed)   │ +24h      │ 72h pre-appt  │ 48h pre-appt│
+ * └─────────────────────┴───────────┴───────────────┴─────────────┘
  *
  * invoice_status lifecycle: sent → reminded → final_warning → paid | cancelled
  */
 
+// ── Quiet hours: 8 AM – 8 PM Eastern ─────────────────────────────
+const QUIET_START_HOUR = 20; // 8 PM ET
+const QUIET_END_HOUR = 8;   // 8 AM ET
+
+function isQuietHours(): boolean {
+  // Get current hour in America/New_York
+  const etNow = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+  const etHour = new Date(etNow).getHours();
+  // Quiet = 8 PM (20) through 7:59 AM (< 8)
+  return etHour >= QUIET_START_HOUR || etHour < QUIET_END_HOUR;
+}
+
+// ── Appointment proximity tier ────────────────────────────────────
+type Tier = 'urgent' | 'soon' | 'relaxed';
+
+function getApptTier(appointmentDate: string, appointmentTime: string): Tier {
+  // Build the actual appointment datetime
+  const dateStr = appointmentDate.split('T')[0]; // "2026-05-11"
+  const apptMs = new Date(`${dateStr}T${appointmentTime}Z`).getTime();
+  const hoursUntil = (apptMs - Date.now()) / (1000 * 60 * 60);
+
+  if (hoursUntil <= 48) return 'urgent';
+  if (hoursUntil <= 168) return 'soon'; // 7 days
+  return 'relaxed';
+}
+
+// Hours after invoice_sent_at before each phase triggers
+const TIER_THRESHOLDS = {
+  urgent:  { reminder: 3,  finalWarning: 6,   cancel: 9 },
+  soon:    { reminder: 6,  finalWarning: 24,  cancel: 48 },
+  relaxed: { reminder: 24, finalWarning: null, cancel: null }, // null = relative to appt date
+} as const;
+
+// For 'relaxed' tier, final warning = 72h before appt, cancel = 48h before appt
+const RELAXED_FINAL_WARNING_HOURS_BEFORE = 72;
+const RELAXED_CANCEL_HOURS_BEFORE = 48;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
+  }
+
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
   }
 
   try {
@@ -37,13 +92,24 @@ Deno.serve(async (req) => {
     const TWILIO_PHONE = Deno.env.get('TWILIO_PHONE_NUMBER');
     const now = Date.now();
 
+    // ── QUIET HOURS GATE ──────────────────────────────────────────
+    // If it's outside 8 AM – 8 PM Eastern, skip ALL messaging.
+    // The cron still runs (to keep checking), but no messages go out.
+    if (isQuietHours()) {
+      console.log('Quiet hours (before 8 AM or after 8 PM ET) — skipping all messages.');
+      return new Response(
+        JSON.stringify({ success: true, skipped: true, reason: 'quiet_hours' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     let gentleReminders = 0;
     let finalWarnings = 0;
     let cancellations = 0;
+    let skippedRelaxed = 0;
 
     // ── Helper: resolve patient contact info ──────────────────────
     const getContact = (appt: any) => {
-      // Prefer direct columns (populated by ScheduleAppointmentModal)
       let name = appt.patient_name || '';
       let email = appt.patient_email || '';
       let phone = appt.patient_phone || '';
@@ -54,6 +120,13 @@ Deno.serve(async (req) => {
       if (!phone) { const m = appt.notes?.match(/Phone:\s*([^|]+)/); if (m) phone = m[1].trim(); }
 
       return { name: name || 'there', email, phone };
+    };
+
+    // ── Helper: get appointment datetime in ms ────────────────────
+    const getApptTimeMs = (appt: any): number => {
+      const dateStr = (appt.appointment_date || '').split('T')[0];
+      const timeStr = appt.appointment_time || '12:00:00';
+      return new Date(`${dateStr}T${timeStr}Z`).getTime();
     };
 
     // ── Helper: send email ────────────────────────────────────────
@@ -89,17 +162,12 @@ Deno.serve(async (req) => {
     };
 
     // ── Helper: Stripe pay link ───────────────────────────────────
-    // Prefer stored URL → fetch from Stripe → fallback to booking page
     const getPayLink = async (appt: any): Promise<string> => {
-      // 1. Use stored hosted URL (set by send-appointment-invoice)
       if (appt.stripe_invoice_url) return appt.stripe_invoice_url;
-
-      // 2. Fetch from Stripe for older invoices without stored URL
       if (appt.stripe_invoice_id) {
         try {
           const inv = await stripe.invoices.retrieve(appt.stripe_invoice_id);
           if (inv.hosted_invoice_url) {
-            // Backfill the URL for next time
             await supabase.from('appointments').update({
               stripe_invoice_url: inv.hosted_invoice_url,
             }).eq('id', appt.id);
@@ -109,7 +177,6 @@ Deno.serve(async (req) => {
           console.error(`Failed to fetch Stripe invoice ${appt.stripe_invoice_id}:`, e);
         }
       }
-
       return 'https://convelabs.com/book-now';
     };
 
@@ -129,19 +196,27 @@ Deno.serve(async (req) => {
       </div>`;
 
     // ════════════════════════════════════════════════════════════════
-    // PHASE 1: Gentle Reminder (invoice sent 6+ hours ago, not VIP)
+    // PHASE 1: Gentle Reminder
+    // Trigger: invoice_status = 'sent' AND enough time has passed
+    //   urgent (≤48h to appt):  3h after invoice
+    //   soon   (2-7 days):      6h after invoice
+    //   relaxed (7+ days):      24h after invoice
     // ════════════════════════════════════════════════════════════════
-    const sixHoursAgo = new Date(now - 6 * 60 * 60 * 1000).toISOString();
-
-    const { data: gentleAppts } = await supabase
+    const { data: sentAppts } = await supabase
       .from('appointments')
       .select('*')
       .eq('invoice_status', 'sent')
       .eq('is_vip', false)
-      .lt('invoice_sent_at', sixHoursAgo)
       .not('status', 'eq', 'cancelled');
 
-    for (const appt of (gentleAppts || [])) {
+    for (const appt of (sentAppts || [])) {
+      const tier = getApptTier(appt.appointment_date, appt.appointment_time);
+      const thresholdHours = TIER_THRESHOLDS[tier].reminder;
+      const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
+      const hoursSinceSent = (now - invoiceSentAt) / (1000 * 60 * 60);
+
+      if (hoursSinceSent < thresholdHours) continue; // Not time yet
+
       const { name, email, phone } = getContact(appt);
       const payLink = await getPayLink(appt);
       const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
@@ -151,79 +226,150 @@ Deno.serve(async (req) => {
         invoice_reminder_sent_at: new Date().toISOString(),
       }).eq('id', appt.id);
 
-      await sendEmail(email, `Friendly Reminder — Your ${amount} ConveLabs Invoice`, emailWrapper(
-        '#1e40af', 'Friendly Reminder',
-        `<p>Hi ${name},</p>
-         <p>Just a quick reminder — your invoice of <strong>${amount}</strong> for your upcoming ConveLabs visit is still open.</p>
-         <p>You can pay in under 30 seconds using the link below:</p>
-         <div style="text-align:center;margin:20px 0;">
-           <a href="${payLink}" style="display:inline-block;background:#1e40af;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} Now</a>
-         </div>
-         <p style="font-size:13px;color:#6b7280;">If you've already paid, please disregard this message. We're looking forward to seeing you!</p>`
-      ));
+      const emailCheck1 = await verifyRecipientEmail(appt.id, email, name);
+      if (!emailCheck1.safe) {
+        console.warn(`HIPAA guard blocked email to ${email}: ${emailCheck1.reason}`);
+      } else {
+        await sendEmail(email, `Friendly Reminder — Your ${amount} ConveLabs Invoice`, emailWrapper(
+          '#1e40af', 'Friendly Reminder',
+          `<p>Hi ${name},</p>
+           <p>Just a quick reminder — your invoice of <strong>${amount}</strong> for your upcoming ConveLabs visit is still open.</p>
+           <p>You can pay in under 30 seconds using the link below:</p>
+           <div style="text-align:center;margin:20px 0;">
+             <a href="${payLink}" style="display:inline-block;background:#1e40af;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} Now</a>
+           </div>
+           <p style="font-size:13px;color:#6b7280;">If you've already paid, please disregard this message. We're looking forward to seeing you!</p>`
+        ));
+      }
 
-      await sendSMS(phone,
-        `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay here: ${payLink} — Looking forward to your visit!`
-      );
+      const phoneCheck1 = await verifyRecipientPhone(appt.id, phone, name);
+      if (!phoneCheck1.safe) {
+        console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck1.reason}`);
+      } else {
+        await sendSMS(phone,
+          `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay here: ${payLink} — Looking forward to your visit!`
+        );
+      }
 
+      console.log(`[REMINDER] ${name} (${tier} tier, ${hoursSinceSent.toFixed(1)}h since invoice)`);
       gentleReminders++;
     }
 
     // ════════════════════════════════════════════════════════════════
-    // PHASE 2: Final Warning (reminded 5+ hours ago = ~11h total)
+    // PHASE 2: Final Warning
+    // Trigger: invoice_status = 'reminded' AND enough time has passed
+    //   urgent:  6h after invoice sent
+    //   soon:    24h after invoice sent
+    //   relaxed: 72h BEFORE appointment
     // ════════════════════════════════════════════════════════════════
-    const fiveHoursAgo = new Date(now - 5 * 60 * 60 * 1000).toISOString();
-
-    const { data: warningAppts } = await supabase
+    const { data: remindedAppts } = await supabase
       .from('appointments')
       .select('*')
       .eq('invoice_status', 'reminded')
       .eq('is_vip', false)
-      .lt('invoice_reminder_sent_at', fiveHoursAgo)
       .not('status', 'eq', 'cancelled');
 
-    for (const appt of (warningAppts || [])) {
+    for (const appt of (remindedAppts || [])) {
+      const tier = getApptTier(appt.appointment_date, appt.appointment_time);
+      const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
+      const apptTimeMs = getApptTimeMs(appt);
+      const hoursSinceSent = (now - invoiceSentAt) / (1000 * 60 * 60);
+      const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
+
+      let shouldWarn = false;
+      if (tier === 'relaxed') {
+        // Fire when we're within 72h of the appointment
+        shouldWarn = hoursUntilAppt <= RELAXED_FINAL_WARNING_HOURS_BEFORE;
+      } else {
+        const thresholdHours = TIER_THRESHOLDS[tier].finalWarning!;
+        shouldWarn = hoursSinceSent >= thresholdHours;
+      }
+
+      if (!shouldWarn) continue;
+
       const { name, email, phone } = getContact(appt);
       const payLink = await getPayLink(appt);
       const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
 
+      // Calculate how long they have before cancellation
+      let cancelTimeLabel: string;
+      if (tier === 'urgent') {
+        cancelTimeLabel = 'approximately 3 hours';
+      } else if (tier === 'soon') {
+        cancelTimeLabel = 'approximately 24 hours';
+      } else {
+        cancelTimeLabel = 'approximately 24 hours';
+      }
+
       await supabase.from('appointments').update({
         invoice_status: 'final_warning',
+        invoice_final_warning_at: new Date().toISOString(),
       }).eq('id', appt.id);
 
-      await sendEmail(email, `Action Required — Your Appointment Will Be Cancelled in 1 Hour`, emailWrapper(
-        '#d97706', '⏰ Final Notice',
-        `<p>Hi ${name},</p>
-         <p>Your ConveLabs invoice of <strong>${amount}</strong> is still unpaid.</p>
-         <p style="color:#b45309;font-weight:600;font-size:15px;">Your appointment will be automatically cancelled in approximately 1 hour if payment is not received.</p>
-         <p>We don't want to cancel — please pay now to keep your spot:</p>
-         <div style="text-align:center;margin:20px 0;">
-           <a href="${payLink}" style="display:inline-block;background:#d97706;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} — Keep My Appointment</a>
-         </div>
-         <p style="font-size:13px;color:#6b7280;">If you're having trouble paying or need assistance, call us at (941) 527-9169.</p>`
-      ));
+      const emailCheck2 = await verifyRecipientEmail(appt.id, email, name);
+      if (!emailCheck2.safe) {
+        console.warn(`HIPAA guard blocked email to ${email}: ${emailCheck2.reason}`);
+      } else {
+        await sendEmail(email, `Action Required — Your Appointment Will Be Cancelled`, emailWrapper(
+          '#d97706', '⏰ Final Notice',
+          `<p>Hi ${name},</p>
+           <p>Your ConveLabs invoice of <strong>${amount}</strong> is still unpaid.</p>
+           <p style="color:#b45309;font-weight:600;font-size:15px;">Your appointment will be automatically cancelled in ${cancelTimeLabel} if payment is not received.</p>
+           <p>We don't want to cancel — please pay now to keep your spot:</p>
+           <div style="text-align:center;margin:20px 0;">
+             <a href="${payLink}" style="display:inline-block;background:#d97706;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} — Keep My Appointment</a>
+           </div>
+           <p style="font-size:13px;color:#6b7280;">If you're having trouble paying or need assistance, call us at (941) 527-9169.</p>`
+        ));
+      }
 
-      await sendSMS(phone,
-        `${name}, your ConveLabs appointment will be cancelled in ~1 hour due to unpaid invoice (${amount}). Pay now to keep your spot: ${payLink}`
-      );
+      const phoneCheck2 = await verifyRecipientPhone(appt.id, phone, name);
+      if (!phoneCheck2.safe) {
+        console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck2.reason}`);
+      } else {
+        await sendSMS(phone,
+          `${name}, your ConveLabs appointment will be cancelled in ${cancelTimeLabel} due to unpaid invoice (${amount}). Pay now to keep your spot: ${payLink}`
+        );
+      }
 
+      console.log(`[FINAL WARNING] ${name} (${tier} tier, ${hoursUntilAppt.toFixed(1)}h until appt)`);
       finalWarnings++;
     }
 
     // ════════════════════════════════════════════════════════════════
-    // PHASE 3: Auto-Cancel (final_warning sent 1+ hour ago = ~12h)
+    // PHASE 3: Auto-Cancel
+    // Trigger: invoice_status = 'final_warning' AND enough time has passed
+    //   urgent:  9h after invoice sent
+    //   soon:    48h after invoice sent
+    //   relaxed: 48h BEFORE appointment
     // ════════════════════════════════════════════════════════════════
-    const oneHourAgo = new Date(now - 1 * 60 * 60 * 1000).toISOString();
-
-    const { data: cancelAppts } = await supabase
+    const { data: warningAppts } = await supabase
       .from('appointments')
       .select('*')
       .eq('invoice_status', 'final_warning')
       .eq('is_vip', false)
-      .lt('invoice_reminder_sent_at', oneHourAgo)   // reminder_sent_at was set during Phase 1
       .not('status', 'eq', 'cancelled');
 
-    for (const appt of (cancelAppts || [])) {
+    for (const appt of (warningAppts || [])) {
+      const tier = getApptTier(appt.appointment_date, appt.appointment_time);
+      const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
+      const apptTimeMs = getApptTimeMs(appt);
+      const hoursSinceSent = (now - invoiceSentAt) / (1000 * 60 * 60);
+      const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
+
+      let shouldCancel = false;
+      if (tier === 'relaxed') {
+        shouldCancel = hoursUntilAppt <= RELAXED_CANCEL_HOURS_BEFORE;
+      } else {
+        const thresholdHours = TIER_THRESHOLDS[tier].cancel!;
+        shouldCancel = hoursSinceSent >= thresholdHours;
+      }
+
+      if (!shouldCancel) {
+        skippedRelaxed++;
+        continue;
+      }
+
       const { name, email, phone } = getContact(appt);
 
       // Cancel appointment
@@ -231,7 +377,7 @@ Deno.serve(async (req) => {
         status: 'cancelled',
         invoice_status: 'cancelled',
         cancelled_at: new Date().toISOString(),
-        cancellation_reason: 'Auto-cancelled: invoice unpaid after 12 hours',
+        cancellation_reason: `Auto-cancelled: invoice unpaid (${tier} tier)`,
       }).eq('id', appt.id);
 
       // Void Stripe invoice
@@ -244,25 +390,36 @@ Deno.serve(async (req) => {
         }
       }
 
-      await sendEmail(email, `Your ConveLabs Appointment Has Been Cancelled`, emailWrapper(
-        '#991B1B', 'Appointment Cancelled',
-        `<p>Hi ${name},</p>
-         <p>Your ConveLabs appointment has been cancelled because payment was not received within the required timeframe.</p>
-         <p>Your appointment slot has been released and is now available for other patients.</p>
-         <p><strong>Want to rebook?</strong> We'd love to continue serving you:</p>
-         <div style="text-align:center;margin:20px 0;">
-           <a href="https://convelabs.com/book-now" style="display:inline-block;background:#B91C1C;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Book a New Appointment</a>
-         </div>`
-      ));
+      const emailCheck3 = await verifyRecipientEmail(appt.id, email, name);
+      if (!emailCheck3.safe) {
+        console.warn(`HIPAA guard blocked email to ${email}: ${emailCheck3.reason}`);
+      } else {
+        await sendEmail(email, `Your ConveLabs Appointment Has Been Cancelled`, emailWrapper(
+          '#991B1B', 'Appointment Cancelled',
+          `<p>Hi ${name},</p>
+           <p>Your ConveLabs appointment has been cancelled because payment was not received within the required timeframe.</p>
+           <p>Your appointment slot has been released and is now available for other patients.</p>
+           <p><strong>Want to rebook?</strong> We'd love to continue serving you:</p>
+           <div style="text-align:center;margin:20px 0;">
+             <a href="https://convelabs.com/book-now" style="display:inline-block;background:#B91C1C;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Book a New Appointment</a>
+           </div>`
+        ));
+      }
 
-      await sendSMS(phone,
-        `Hi ${name}, your ConveLabs appointment has been cancelled due to non-payment. You can easily rebook at convelabs.com/book-now — we'd love to see you!`
-      );
+      const phoneCheck3 = await verifyRecipientPhone(appt.id, phone, name);
+      if (!phoneCheck3.safe) {
+        console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck3.reason}`);
+      } else {
+        await sendSMS(phone,
+          `Hi ${name}, your ConveLabs appointment has been cancelled due to non-payment. You can easily rebook at convelabs.com/book-now — we'd love to see you!`
+        );
+      }
 
+      console.log(`[CANCELLED] ${name} (${tier} tier, ${hoursSinceSent.toFixed(1)}h since invoice)`);
       cancellations++;
     }
 
-    console.log(`Invoice processing: ${gentleReminders} gentle reminders, ${finalWarnings} final warnings, ${cancellations} cancellations`);
+    console.log(`Invoice processing: ${gentleReminders} reminders, ${finalWarnings} final warnings, ${cancellations} cancellations, ${skippedRelaxed} not yet due`);
 
     return new Response(
       JSON.stringify({
@@ -270,6 +427,7 @@ Deno.serve(async (req) => {
         gentleReminders,
         finalWarnings,
         cancellations,
+        skippedRelaxed,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

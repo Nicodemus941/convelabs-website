@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,6 +9,14 @@ const corsHeaders = {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {
@@ -81,40 +90,50 @@ Deno.serve(async (req) => {
           weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
         });
 
+        const hasLabOrder = !!appt.lab_order_file_path;
+
         // Send SMS reminder
         if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER && patientPhone) {
-          const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
-
-          const hasLabOrder = !!appt.lab_order_file_path;
-          const smsBody = hasLabOrder
-            ? `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Your lab order is on file — we're all set! Please have a sterile, well-lit area ready and wear a short-sleeved shirt. See you soon!`
-            : `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have your lab order and insurance card ready. If you'd like to upload them now, visit convelabs.com/dashboard. Prepare a sterile, well-lit area. See you soon!`;
-
-          const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-          const formData = new URLSearchParams();
-          formData.append('To', formattedPhone);
-          formData.append('From', TWILIO_PHONE_NUMBER);
-          formData.append('Body', smsBody);
-
-          const smsRes = await fetch(twilioUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: formData,
-          });
-
-          if (!smsRes.ok) {
-            const err = await smsRes.text();
-            console.error(`SMS failed for ${appt.id}:`, err);
+          const phoneCheck = await verifyRecipientPhone(appt.id, patientPhone, patientName);
+          if (!phoneCheck.safe) {
+            console.warn(`HIPAA guard blocked SMS to ${patientPhone}: ${phoneCheck.reason}`);
           } else {
-            console.log(`SMS reminder sent for appointment ${appt.id}`);
+            const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
+
+            const smsBody = hasLabOrder
+              ? `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Your lab order is on file — we're all set! Please have a sterile, well-lit area ready and wear a short-sleeved shirt. See you soon!`
+              : `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have your lab order and insurance card ready. If you'd like to upload them now, visit convelabs.com/dashboard. Prepare a sterile, well-lit area. See you soon!`;
+
+            const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+            const formData = new URLSearchParams();
+            formData.append('To', formattedPhone);
+            formData.append('From', TWILIO_PHONE_NUMBER);
+            formData.append('Body', smsBody);
+
+            const smsRes = await fetch(twilioUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: formData,
+            });
+
+            if (!smsRes.ok) {
+              const err = await smsRes.text();
+              console.error(`SMS failed for ${appt.id}:`, err);
+            } else {
+              console.log(`SMS reminder sent for appointment ${appt.id}`);
+            }
           }
         }
 
         // Send email reminder
         if (MAILGUN_API_KEY && patientEmail) {
+          const emailCheck = await verifyRecipientEmail(appt.id, patientEmail, patientName);
+          if (!emailCheck.safe) {
+            console.warn(`HIPAA guard blocked email to ${patientEmail}: ${emailCheck.reason}`);
+          } else {
           const emailHtml = `
 <!DOCTYPE html>
 <html>
@@ -189,6 +208,7 @@ Deno.serve(async (req) => {
             console.error(`Email failed for ${appt.id}:`, err);
           } else {
             console.log(`Email reminder sent for appointment ${appt.id}`);
+          }
           }
         }
 

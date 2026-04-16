@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { verifyRecipientPhone } from "../_shared/verify-recipient.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,6 +9,14 @@ const corsHeaders = {
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
+  }
+
+  // Global notification kill switch
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {
@@ -66,6 +75,24 @@ serve(async (req) => {
     let normalizedPhone = phoneNumber.replace(/\D/g, '')
     if (normalizedPhone.length === 10) normalizedPhone = `+1${normalizedPhone}`
     else if (!normalizedPhone.startsWith('+')) normalizedPhone = `+${normalizedPhone}`
+
+    // HIPAA verification guard: verify recipient before sending
+    const patientName = body.patientName || 'Unknown';
+    const phoneCheck = await verifyRecipientPhone(appointmentId || 'unknown', normalizedPhone, patientName);
+    if (!phoneCheck.safe) {
+      console.warn('HIPAA guard blocked SMS to ' + normalizedPhone + ': ' + phoneCheck.reason);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          blocked: true,
+          reason: phoneCheck.reason,
+          message: 'HIPAA verification failed - SMS not sent'
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
 
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
 

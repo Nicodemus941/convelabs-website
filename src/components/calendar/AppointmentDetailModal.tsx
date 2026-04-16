@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
 import {
   User, Calendar, Clock, MapPin, Phone, Mail, MessageSquare,
-  Edit3, CalendarClock, XCircle, DollarSign, FileText, Shield,
-  ChevronDown, UserPlus, Stethoscope,
+  CalendarClock, XCircle, DollarSign, FileText, Shield,
+  ChevronDown, ChevronUp, UserPlus, AlertTriangle, UserX,
+  X, MoreHorizontal, ChevronRight, Upload, ExternalLink,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -20,13 +22,20 @@ interface AppointmentDetailModalProps {
   onUpdate: () => void;
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  scheduled: { label: 'Pending', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-  confirmed: { label: 'Confirmed', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-  en_route: { label: 'En Route', color: 'bg-orange-100 text-orange-800 border-orange-300' },
-  in_progress: { label: 'In Progress', color: 'bg-purple-100 text-purple-800 border-purple-300' },
-  completed: { label: 'Completed', color: 'bg-gray-100 text-gray-700 border-gray-300' },
-  cancelled: { label: 'Cancelled', color: 'bg-red-100 text-red-800 border-red-300' },
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  scheduled: { label: 'Scheduled', color: 'text-blue-700', bg: 'bg-blue-50 border-blue-200' },
+  confirmed: { label: 'Confirmed', color: 'text-blue-800', bg: 'bg-blue-100 border-blue-300' },
+  en_route: { label: 'En Route', color: 'text-orange-700', bg: 'bg-orange-50 border-orange-200' },
+  in_progress: { label: 'In Progress', color: 'text-cyan-700', bg: 'bg-cyan-50 border-cyan-200' },
+  completed: { label: 'Completed', color: 'text-gray-600', bg: 'bg-gray-100 border-gray-300' },
+  cancelled: { label: 'Cancelled', color: 'text-red-700', bg: 'bg-red-50 border-red-200' },
+};
+
+const PAYMENT_BADGE: Record<string, { label: string; icon: string; className: string }> = {
+  completed: { label: 'Paid', icon: '✓', className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  pending: { label: 'Unpaid', icon: '○', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  refunded: { label: 'Refunded', icon: '↩', className: 'bg-gray-50 text-gray-600 border-gray-200' },
+  partial_refund: { label: 'Partial Refund', icon: '↩', className: 'bg-amber-50 text-amber-600 border-amber-200' },
 };
 
 const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
@@ -35,22 +44,20 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const [patientData, setPatientData] = useState<any>(null);
   const [showInsurance, setShowInsurance] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [noShowCount, setNoShowCount] = useState(0);
+  const [appointmentHistory, setAppointmentHistory] = useState<any[]>([]);
 
   const appt = appointment;
 
-  // Load patient data from tenant_patients (try by id, then by email)
   useEffect(() => {
     if (!appt) return;
     const lookup = async () => {
-      // Try by patient_id first
       if (appt.patient_id) {
         const { data } = await supabase.from('tenant_patients').select('*').eq('id', appt.patient_id).maybeSingle();
         if (data) { setPatientData(data); return; }
-        // patient_id might be auth.users.id — try user_id column
         const { data: byUserId } = await supabase.from('tenant_patients').select('*').eq('user_id', appt.patient_id).maybeSingle();
         if (byUserId) { setPatientData(byUserId); return; }
       }
-      // Fallback: lookup by email from appointment record or notes
       const email = appt.patient_email || appt.notes?.match(/Email:\s*([^|\s]+)/)?.[1]?.trim();
       if (email) {
         const { data } = await supabase.from('tenant_patients').select('*').ilike('email', email).maybeSingle();
@@ -59,40 +66,64 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
       setPatientData(null);
     };
     lookup();
+
+    // No-show history
+    const email = appt.patient_email;
+    if (email) {
+      supabase.from('appointments').select('id', { count: 'exact', head: true })
+        .ilike('patient_email', email).eq('no_show', true)
+        .then(({ count }) => setNoShowCount(count || 0));
+
+      // Appointment history for this patient
+      supabase.from('appointments')
+        .select('id, appointment_date, appointment_time, service_name, service_type, total_amount, status, notes')
+        .ilike('patient_email', email)
+        .order('appointment_date', { ascending: false })
+        .limit(10)
+        .then(({ data }) => setAppointmentHistory(data || []));
+    }
   }, [appt?.id, appt?.patient_id]);
 
   if (!appt) return null;
 
-  // Priority: 1) appointment columns, 2) tenant_patients data, 3) notes parsing
   const patientName = appt.patient_name
     || (patientData ? `${patientData.first_name || ''} ${patientData.last_name || ''}`.trim() : '')
     || appt.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim()
     || 'Unknown Patient';
 
-  const patientEmail = appt.patient_email
-    || patientData?.email
-    || appt.notes?.match(/Email:\s*([^|\s]+)/)?.[1]?.trim()
-    || '';
-
-  const patientPhone = appt.patient_phone
-    || patientData?.phone
-    || appt.notes?.match(/Phone:\s*([^|\s]+)/)?.[1]?.trim()
-    || '';
-
-  const patientDOB = patientData?.date_of_birth || '';
+  const patientEmail = appt.patient_email || patientData?.email || '';
+  const patientPhone = appt.patient_phone || patientData?.phone || '';
   const insuranceProvider = patientData?.insurance_provider || '';
   const insuranceMemberId = patientData?.insurance_member_id || '';
   const insuranceGroup = patientData?.insurance_group_number || '';
 
-  const serviceName = appt.service_name
-    || appt.notes?.match(/Service:\s*([^|]+)/)?.[1]?.trim()
-    || '';
-
+  const serviceName = appt.service_name || appt.notes?.match(/Service:\s*([^|]+)/)?.[1]?.trim() || '';
   const dateStr = appt.appointment_date?.substring(0, 10) || '';
-  const formattedDate = dateStr ? format(new Date(dateStr + 'T12:00:00'), 'MMMM do, yyyy') : '';
+  const formattedDate = dateStr ? format(new Date(dateStr + 'T12:00:00'), 'EEEE, MMMM d, yyyy') : '';
   const timeStr = appt.appointment_time || '';
-  const serviceType = (appt.service_type || 'mobile').replace(/_|-/g, ' ');
+  const durationMin = appt.duration_minutes || 60;
   const statusCfg = STATUS_CONFIG[appt.status] || STATUS_CONFIG.scheduled;
+  const paymentCfg = PAYMENT_BADGE[appt.payment_status] || PAYMENT_BADGE.pending;
+
+  // Calculate end time for display
+  const getTimeRange = () => {
+    if (!timeStr) return 'Time TBD';
+    const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)?/i);
+    if (!match) return timeStr;
+    let h = parseInt(match[1]);
+    const m = parseInt(match[2]);
+    const period = match[3]?.toUpperCase();
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    const endH = h + Math.floor((m + durationMin) / 60);
+    const endM = (m + durationMin) % 60;
+    const fmt = (hr: number, mn: number) => {
+      const p = hr >= 12 ? 'pm' : 'am';
+      const h12 = hr > 12 ? hr - 12 : hr === 0 ? 12 : hr;
+      return `${h12}:${String(mn).padStart(2, '0')} ${p}`;
+    };
+    return `${fmt(h, m)} – ${fmt(endH, endM)} (${durationMin} mins)`;
+  };
 
   const handleStatusChange = async (newStatus: string) => {
     const { error } = await supabase.from('appointments').update({ status: newStatus }).eq('id', appt.id);
@@ -107,288 +138,318 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
     await handleStatusChange('cancelled');
   };
 
+  const handleNoShow = async () => {
+    if (!confirm(`Mark ${patientName} as a no-show?`)) return;
+    const noShowFee = (appt.total_amount || 0) * 0.5;
+    const { error } = await supabase.from('appointments').update({
+      status: 'cancelled', no_show: true, no_show_at: new Date().toISOString(),
+      no_show_fee: noShowFee, cancellation_reason: `No-show (fee: $${noShowFee.toFixed(2)})`,
+      cancelled_at: new Date().toISOString(),
+    }).eq('id', appt.id);
+    if (error) { toast.error('Failed to mark no-show'); return; }
+    toast.success(`${patientName} marked as no-show.${noShowFee > 0 ? ` $${noShowFee.toFixed(2)} fee logged.` : ''}`);
+    onUpdate();
+    onClose();
+  };
+
   const handleMessage = () => {
-    if (patientPhone) {
-      window.open(`sms:${patientPhone}`, '_blank');
-    } else {
-      toast.error('No phone number on file');
-    }
+    if (patientPhone) window.open(`sms:${patientPhone}`, '_blank');
+    else toast.error('No phone number on file');
   };
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-0 w-[95vw] sm:w-full">
-        {/* Header */}
-        <div className="px-6 pt-6 pb-4">
+    <Sheet open={open} onOpenChange={onClose}>
+      <SheetContent className="w-full sm:max-w-[420px] p-0 overflow-y-auto" side="right">
+        <VisuallyHidden><SheetTitle>Appointment Details</SheetTitle></VisuallyHidden>
+        {/* Top bar — actions */}
+        <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between">
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md transition">
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setRescheduleOpen(true)}>
+              <CalendarClock className="h-3.5 w-3.5 mr-1" /> Reschedule
+            </Button>
+            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleMessage}>
+              <MessageSquare className="h-3.5 w-3.5 mr-1" /> Message
+            </Button>
+          </div>
+        </div>
+
+        {/* Payment badge */}
+        <div className="px-5 pt-4">
+          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${paymentCfg.className}`}>
+            <span>{paymentCfg.icon}</span>
+            {appt.total_amount > 0 ? `$${((appt.total_amount || 0) + (appt.tip_amount || 0)).toFixed(2)} ${paymentCfg.label.toLowerCase()}` : paymentCfg.label}
+          </div>
+        </div>
+
+        {/* Patient name + contact */}
+        <div className="px-5 pt-4 pb-3">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-bold text-gray-900">{patientName}</h2>
+            {noShowCount > 0 && (
+              <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 text-[10px] gap-0.5">
+                <AlertTriangle className="h-2.5 w-2.5" /> {noShowCount} no-show{noShowCount > 1 ? 's' : ''}
+              </Badge>
+            )}
+          </div>
+          <Badge variant="outline" className={`mt-1.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.color}`}>
+            {statusCfg.label}
+          </Badge>
+
+          <div className="mt-3 space-y-1.5">
+            {patientPhone && (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm">
+                  <Phone className="h-3.5 w-3.5 text-gray-400" />
+                  <a href={`tel:${patientPhone}`} className="text-blue-600 hover:underline">{patientPhone}</a>
+                </div>
+                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Phone</span>
+              </div>
+            )}
+            {patientEmail && (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="h-3.5 w-3.5 text-gray-400" />
+                  <a href={`mailto:${patientEmail}`} className="text-blue-600 hover:underline truncate max-w-[220px]">{patientEmail}</a>
+                </div>
+                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Email</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Time & Date */}
+        <div className="px-5 py-4 space-y-1">
+          <p className="text-sm font-semibold text-gray-900">{getTimeRange()}</p>
+          <p className="text-sm text-gray-500">{formattedDate}</p>
+        </div>
+
+        <Separator />
+
+        {/* Location & Staff */}
+        <div className="px-5 py-4 space-y-3">
           <div className="flex items-start justify-between">
             <div>
-              <h2 className="text-xl font-bold">Appointment Details</h2>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                <User className="h-3.5 w-3.5" />
-                <span>{patientName}</span>
-                <span>|</span>
-                <span className="capitalize">{serviceType}</span>
-                <span>|</span>
-                <span>{dateStr ? format(new Date(dateStr + 'T12:00:00'), 'MMM d') : ''}, {timeStr}</span>
-              </div>
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Location</p>
+              <p className="text-sm text-gray-900">{appt.address || 'TBD'}</p>
+              {appt.gate_code && <p className="text-xs text-gray-500 mt-0.5">Gate: {appt.gate_code}</p>}
             </div>
-            <div className="flex gap-1.5">
-              <Badge variant="outline" className={`${statusCfg.color} font-medium`}>{statusCfg.label}</Badge>
-              {appt.payment_status === 'completed' && (
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-300">Paid</Badge>
-              )}
+            <div className="text-right">
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Staff</p>
+              <p className="text-sm text-gray-900">
+                {appt.phlebotomist_id === '91c76708-8c5b-4068-92c6-323805a3b164' ? 'Nico Jean-Baptiste' : 'Assigned Staff'}
+              </p>
             </div>
           </div>
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="overview" className="px-6 pb-6">
-          <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 mb-4">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="billing">Billing</TabsTrigger>
-            <TabsTrigger value="laborders">Lab Orders</TabsTrigger>
-            <TabsTrigger value="more">More</TabsTrigger>
-          </TabsList>
+        <Separator />
 
-          <TabsContent value="overview" className="space-y-4 mt-0">
-            {/* Patient Information */}
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-sm">
-                <User className="h-4 w-4" /> Patient Information
-              </div>
-              <div className="pl-6 space-y-1.5">
-                <p className="font-medium">{patientName}</p>
-                {patientDOB && <p className="text-xs text-muted-foreground">DOB: {patientDOB}</p>}
-                {patientEmail && (
-                  <p className="flex items-center gap-1.5 text-sm"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {patientEmail}</p>
-                )}
-                {patientPhone && (
-                  <p className="flex items-center gap-1.5 text-sm"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {patientPhone}</p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Payment Method: <span className="font-medium text-foreground">{appt.payment_status === 'completed' ? 'Paid' : insuranceProvider ? 'Insurance' : 'Self Pay'}</span>
-                </p>
-              </div>
+        {/* Notes */}
+        {appt.notes && (
+          <>
+            <div className="px-5 py-4">
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-1">Notes</p>
+              <p className="text-sm text-gray-700">{appt.notes}</p>
             </div>
+            <Separator />
+          </>
+        )}
 
-            {/* Insurance (collapsible) */}
-            <button
-              className="w-full border rounded-lg p-4 flex items-center justify-between text-sm font-semibold hover:bg-muted/30 transition"
-              onClick={() => setShowInsurance(!showInsurance)}
-            >
-              <div className="flex items-center gap-2"><Shield className="h-4 w-4" /> Insurance Information</div>
-              <ChevronDown className={`h-4 w-4 transition-transform ${showInsurance ? 'rotate-180' : ''}`} />
-            </button>
-            {showInsurance && (
-              <div className="border rounded-lg p-4 pl-10 space-y-1 text-sm -mt-2">
-                {insuranceProvider ? (
-                  <>
-                    <p><span className="text-muted-foreground">Provider:</span> {insuranceProvider}</p>
-                    {insuranceMemberId && <p><span className="text-muted-foreground">Member ID:</span> {insuranceMemberId}</p>}
-                    {insuranceGroup && <p><span className="text-muted-foreground">Group:</span> {insuranceGroup}</p>}
-                  </>
-                ) : (
-                  <p className="text-muted-foreground">No insurance on file. Self-pay patient.</p>
-                )}
-              </div>
-            )}
+        {/* Booked by */}
+        <div className="px-5 py-4">
+          <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Booked By</p>
+          <p className="text-sm text-gray-700">
+            {appt.booked_by_name || (appt.booking_source === 'manual' ? 'Admin (Manual)' : patientName)}
+            {appt.created_at && ` on ${format(new Date(appt.created_at), 'MMM d, yyyy \'at\' h:mm a')}`}
+          </p>
+        </div>
 
-            {/* Appointment Details */}
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-sm">
-                <Calendar className="h-4 w-4" /> Appointment Details
-              </div>
-              <div className="pl-6 space-y-1.5 text-sm">
-                <p className="flex items-center gap-1.5"><Calendar className="h-3.5 w-3.5 text-muted-foreground" /> {formattedDate}</p>
-                <p className="flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-muted-foreground" /> {timeStr || 'Time TBD'}</p>
-                <p className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-muted-foreground" /> {appt.address || 'Address TBD'}</p>
-              </div>
-            </div>
+        <Separator />
 
-            {/* Service Information */}
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-sm">
-                <Stethoscope className="h-4 w-4" /> Service Information
-              </div>
-              <div className="pl-6 text-sm space-y-1">
-                {serviceName && <p>Service: <span className="font-medium">{serviceName}</span></p>}
-                <p>Type: <span className="font-medium capitalize">{serviceType}</span></p>
-                {appt.total_amount > 0 ? (
-                  <p>Amount: <span className="font-medium">${appt.total_amount}</span>{appt.tip_amount > 0 && ` (incl. $${appt.tip_amount} tip)`}</p>
-                ) : appt.payment_status === 'completed' ? (
-                  <p>Amount: <span className="font-medium text-emerald-600">Fee Waived</span></p>
-                ) : null}
-                {appt.gate_code && <p>Gate Code: <span className="font-mono font-medium">{appt.gate_code}</span></p>}
-                {appt.booking_source && <p>Source: <span className="font-medium capitalize">{appt.booking_source}</span></p>}
-              </div>
+        {/* Services & Items — Square style */}
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-sm font-bold text-gray-900">Services & Items</p>
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-900">{serviceName || 'Blood Draw Service'}</p>
+              <p className="text-xs text-gray-500">{timeStr} · {durationMin} minutes</p>
             </div>
+            <p className="text-sm font-medium">${(appt.service_price || appt.total_amount || 0).toFixed(2)}</p>
+          </div>
 
-            {/* Assigned Staff */}
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-semibold text-sm">
-                  <UserPlus className="h-4 w-4" /> Assigned Staff
-                </div>
-                <select
-                  className="text-xs border rounded-md px-2 py-1 bg-white"
-                  defaultValue={appt.phlebotomist_id || '91c76708-8c5b-4068-92c6-323805a3b164'}
-                  onChange={async (e) => {
-                    const newId = e.target.value;
-                    const { error } = await supabase.from('appointments').update({ phlebotomist_id: newId }).eq('id', appt.id);
-                    if (error) toast.error('Failed to assign staff');
-                    else {
-                      toast.success('Staff assigned');
-                      // Notify new phlebotomist
-                      const { data: staff } = await supabase.from('staff_profiles').select('phone').eq('user_id', newId).maybeSingle();
-                      if (staff?.phone) {
-                        supabase.functions.invoke('send-sms-notification', {
-                          body: { to: staff.phone, message: `New assignment: ${patientName} on ${formattedDate} at ${timeStr}. Location: ${appt.address || 'TBD'}` },
-                        }).catch(() => {});
-                      }
-                      onUpdate();
-                    }
-                  }}
-                >
-                  <option value="91c76708-8c5b-4068-92c6-323805a3b164">Nico (Phlebotomist)</option>
-                </select>
-              </div>
-              <div className="pl-6 text-sm">
-                <p className="font-medium">{appt.phlebotomist_id === '91c76708-8c5b-4068-92c6-323805a3b164' ? 'Nicodemme "Nico" Jean-Baptiste' : 'Assigned Phlebotomist'}</p>
-                <p className="text-xs text-muted-foreground">Owner / Phlebotomist</p>
-              </div>
+          {appt.tip_amount > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Tip</span>
+              <span className="text-emerald-600">${Number(appt.tip_amount).toFixed(2)}</span>
             </div>
-          </TabsContent>
+          )}
 
-          <TabsContent value="billing" className="space-y-4 mt-0">
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-sm">
-                <DollarSign className="h-4 w-4" /> Billing Information
-              </div>
-              <div className="pl-6 space-y-1.5 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Service Fee</span><span className="font-medium">${appt.total_amount || 0}</span></div>
-                {appt.tip_amount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Tip</span><span className="font-medium text-emerald-600">${appt.tip_amount}</span></div>}
-                <div className="flex justify-between border-t pt-1.5 mt-1.5"><span className="font-semibold">Total</span><span className="font-bold">${(appt.total_amount || 0) + (appt.tip_amount || 0)}</span></div>
-              </div>
-            </div>
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-sm">
-                <FileText className="h-4 w-4" /> Invoice Status
-              </div>
-              <div className="pl-6 space-y-1.5 text-sm">
-                <p>Status: <Badge variant="outline" className="text-xs ml-1">{appt.invoice_status || 'N/A'}</Badge></p>
-                <p>Payment: <Badge variant="outline" className={`text-xs ml-1 ${appt.payment_status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{appt.payment_status || 'pending'}</Badge></p>
-                {appt.booking_source && <p>Source: <span className="capitalize">{appt.booking_source}</span></p>}
-                {appt.stripe_invoice_id && <p className="text-xs text-muted-foreground truncate">Stripe: {appt.stripe_invoice_id}</p>}
-              </div>
-            </div>
-          </TabsContent>
+          <Separator className="my-1" />
 
-          <TabsContent value="laborders" className="mt-0 space-y-3">
-            {appt.lab_order_file_path ? (
-              <div className="border rounded-lg p-4 space-y-3">
-                <p className="font-semibold text-sm flex items-center gap-2"><FileText className="h-4 w-4" /> Lab Order on File</p>
-                {appt.lab_order_file_path.split(',').map((path: string, i: number) => (
-                  <Button key={i} variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start" onClick={async () => {
-                    const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path.trim(), 3600);
-                    if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                    else toast.error('Could not load file');
-                  }}>
-                    <FileText className="h-3.5 w-3.5" /> {path.trim().split('/').pop() || `Lab Order ${i + 1}`}
-                  </Button>
-                ))}
-              </div>
-            ) : (
-              <div className="border rounded-lg p-6 text-center">
-                <FileText className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">No lab order uploaded for this appointment</p>
-              </div>
-            )}
-            {/* Admin upload */}
-            <div className="border rounded-lg p-4 space-y-3">
-              <p className="text-sm font-medium">Upload Lab Order</p>
-              <div className="flex items-center gap-3">
-                <label className="flex-1 cursor-pointer">
-                  <div className="border-2 border-dashed border-gray-200 hover:border-[#B91C1C]/50 rounded-lg p-4 text-center transition-colors">
-                    <FileText className="h-6 w-6 mx-auto text-muted-foreground mb-1" />
-                    <p className="text-xs font-medium">Click to select file</p>
-                    <p className="text-[10px] text-muted-foreground">PDF, JPG, PNG</p>
-                  </div>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png,.heic"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      toast.info(`Uploading ${file.name}...`);
-                      const fileName = `laborder_${appt.id}_${Date.now()}_${file.name}`;
-                      const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
-                      if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
-                      const existingPath = appt.lab_order_file_path || '';
-                      const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
-                      const { error: updateErr } = await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
-                      if (updateErr) { toast.error('Failed to link file to appointment'); return; }
-                      toast.success(`Lab order "${file.name}" uploaded successfully`);
-                      onUpdate();
-                      // Reset the input so same file can be re-selected
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
-              </div>
-            </div>
-          </TabsContent>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">Subtotal</span>
+            <span>${(appt.total_amount || 0).toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between text-sm font-bold">
+            <span>Total</span>
+            <span>${((appt.total_amount || 0) + (appt.tip_amount || 0)).toFixed(2)}</span>
+          </div>
 
-          <TabsContent value="more" className="space-y-4 mt-0">
-            {appt.notes && (
-              <div className="border rounded-lg p-4">
-                <p className="font-semibold text-sm mb-2">Notes</p>
-                <p className="text-sm text-muted-foreground">{appt.notes}</p>
-              </div>
-            )}
-            <div className="border rounded-lg p-4 space-y-2">
-              <p className="font-semibold text-sm">Status Actions</p>
-              <div className="flex flex-wrap gap-2">
-                {appt.status === 'scheduled' && (
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => handleStatusChange('confirmed')}>Confirm</Button>
-                )}
-                {(appt.status === 'scheduled' || appt.status === 'confirmed') && (
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => handleStatusChange('en_route')}>En Route</Button>
-                )}
-                {appt.status === 'en_route' && (
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => handleStatusChange('in_progress')}>Begin Job</Button>
-                )}
-                {appt.status === 'in_progress' && (
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => handleStatusChange('completed')}>Complete</Button>
-                )}
-              </div>
+          {/* Invoice link if exists */}
+          {appt.stripe_invoice_id && (
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-1">
+              <FileText className="h-3 w-3" />
+              <span className="truncate">{appt.stripe_invoice_id}</span>
             </div>
-            <div className="border rounded-lg p-4">
-              <p className="font-semibold text-sm mb-1">Appointment ID</p>
-              <p className="text-xs text-muted-foreground font-mono">{appt.id}</p>
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        {/* Bottom Action Bar */}
-        <div className="border-t px-6 py-3 flex flex-wrap gap-2 bg-gray-50/50">
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={handleMessage}>
-            <MessageSquare className="h-3.5 w-3.5" /> Message
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs" onClick={() => setRescheduleOpen(true)}>
-            <CalendarClock className="h-3.5 w-3.5" /> Reschedule
-          </Button>
-          {appt.status !== 'cancelled' && appt.status !== 'completed' && (
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs text-red-600 hover:bg-red-50" onClick={handleCancel}>
-              <XCircle className="h-3.5 w-3.5" /> Cancel
-            </Button>
           )}
         </div>
-      </DialogContent>
-    </Dialog>
 
-    {/* Reschedule Modal */}
+        <Separator />
+
+        {/* Insurance (collapsible) */}
+        <button
+          className="w-full px-5 py-3 flex items-center justify-between text-sm hover:bg-gray-50 transition"
+          onClick={() => setShowInsurance(!showInsurance)}
+        >
+          <div className="flex items-center gap-2 font-medium text-gray-900">
+            <Shield className="h-4 w-4 text-gray-400" /> Insurance
+          </div>
+          {showInsurance ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
+        </button>
+        {showInsurance && (
+          <div className="px-5 pb-4 text-sm">
+            {insuranceProvider ? (
+              <div className="space-y-1 pl-6">
+                <p><span className="text-gray-400">Provider:</span> {insuranceProvider}</p>
+                {insuranceMemberId && <p><span className="text-gray-400">Member ID:</span> {insuranceMemberId}</p>}
+                {insuranceGroup && <p><span className="text-gray-400">Group:</span> {insuranceGroup}</p>}
+              </div>
+            ) : (
+              <p className="text-gray-400 pl-6">No insurance on file — self-pay patient</p>
+            )}
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Lab Orders */}
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-sm font-bold text-gray-900">Lab Orders</p>
+          {appt.lab_order_file_path ? (
+            appt.lab_order_file_path.split(',').map((path: string, i: number) => (
+              <Button key={i} variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start h-8" onClick={async () => {
+                const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path.trim(), 3600);
+                if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                else toast.error('Could not load file');
+              }}>
+                <FileText className="h-3.5 w-3.5" /> {path.trim().split('/').pop() || `Lab Order ${i + 1}`}
+                <ExternalLink className="h-3 w-3 ml-auto" />
+              </Button>
+            ))
+          ) : (
+            <p className="text-xs text-gray-400">No lab order uploaded</p>
+          )}
+          <label className="cursor-pointer">
+            <div className="border border-dashed border-gray-200 hover:border-blue-300 rounded-lg p-3 text-center transition-colors">
+              <Upload className="h-4 w-4 mx-auto text-gray-400 mb-1" />
+              <p className="text-xs text-gray-500">Upload lab order</p>
+            </div>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.heic"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                toast.info(`Uploading ${file.name}...`);
+                const fileName = `laborder_${appt.id}_${Date.now()}_${file.name}`;
+                const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
+                if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
+                const existingPath = appt.lab_order_file_path || '';
+                const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
+                const { error: updateErr } = await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
+                if (updateErr) { toast.error('Failed to link file'); return; }
+                toast.success('Lab order uploaded');
+                onUpdate();
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+
+        <Separator />
+
+        {/* Appointment History */}
+        {appointmentHistory.length > 0 && (
+          <div className="px-5 py-4 space-y-3">
+            <p className="text-sm font-bold text-gray-900">Appointment History</p>
+            {appointmentHistory.slice(0, 5).map((hist) => {
+              const hDate = hist.appointment_date?.substring(0, 10);
+              return (
+                <div key={hist.id} className={`text-xs space-y-0.5 ${hist.id === appt.id ? 'font-semibold' : ''}`}>
+                  <div className="flex justify-between">
+                    <span className="text-gray-700">
+                      {hDate ? format(new Date(hDate + 'T12:00:00'), 'EEE, MMM d, yyyy') : '—'}, {hist.appointment_time || ''}
+                    </span>
+                    <span className="font-medium">${hist.total_amount || 0}</span>
+                  </div>
+                  <p className="text-gray-500">{hist.service_name || hist.service_type || 'Blood Draw'}</p>
+                  {hist.status === 'cancelled' && <p className="text-red-500">Cancelled</p>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Status Actions — sticky bottom */}
+        <div className="sticky bottom-0 bg-white border-t px-5 py-3 space-y-2">
+          {/* Quick status progression */}
+          <div className="flex flex-wrap gap-2">
+            {appt.status === 'scheduled' && (
+              <Button size="sm" className="flex-1 h-9 text-xs bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleStatusChange('confirmed')}>
+                Confirm
+              </Button>
+            )}
+            {(appt.status === 'scheduled' || appt.status === 'confirmed') && (
+              <Button size="sm" className="flex-1 h-9 text-xs bg-orange-500 hover:bg-orange-600 text-white" onClick={() => handleStatusChange('en_route')}>
+                En Route
+              </Button>
+            )}
+            {appt.status === 'en_route' && (
+              <Button size="sm" className="flex-1 h-9 text-xs bg-cyan-600 hover:bg-cyan-700 text-white" onClick={() => handleStatusChange('in_progress')}>
+                Begin Job
+              </Button>
+            )}
+            {appt.status === 'in_progress' && (
+              <Button size="sm" className="flex-1 h-9 text-xs bg-gray-700 hover:bg-gray-800 text-white" onClick={() => handleStatusChange('completed')}>
+                Complete
+              </Button>
+            )}
+          </div>
+
+          {/* Destructive actions */}
+          {appt.status !== 'cancelled' && appt.status !== 'completed' && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 h-8 text-xs text-amber-600 border-amber-200 hover:bg-amber-50" onClick={handleNoShow}>
+                <UserX className="h-3.5 w-3.5 mr-1" /> No-Show
+              </Button>
+              <Button variant="outline" size="sm" className="flex-1 h-8 text-xs text-red-600 border-red-200 hover:bg-red-50" onClick={handleCancel}>
+                <XCircle className="h-3.5 w-3.5 mr-1" /> Cancel
+              </Button>
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+
     <RescheduleAppointmentModal
       appointment={appt}
       open={rescheduleOpen}

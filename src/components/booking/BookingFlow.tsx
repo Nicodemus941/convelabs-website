@@ -114,13 +114,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     return () => { mounted = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (user) {
-      methods.setValue('patientDetails.firstName', user.firstName || '');
-      methods.setValue('patientDetails.lastName', user.lastName || '');
-      methods.setValue('patientDetails.email', user.email || '');
-    }
-  }, [user, methods]);
+  // Pre-fill is handled by defaultValues (line 72-76) and the
+  // "Booking for myself / someone else" toggle in PatientInfoStep.
+  // We intentionally do NOT overwrite form fields here — doing so caused
+  // the logged-in user's email to persist even when booking for another patient,
+  // which sent notifications to the wrong person (HIPAA violation).
 
   const handleNext = () => {
     prevStepRef.current = currentStep;

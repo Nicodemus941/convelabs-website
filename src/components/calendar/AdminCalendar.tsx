@@ -17,12 +17,12 @@ import ScheduleAppointmentModal from './ScheduleAppointmentModal';
 import './calendar-styles.css';
 
 const STATUS_COLORS: Record<string, string> = {
-  scheduled: '#3b82f6',
-  confirmed: '#22c55e',
-  en_route: '#f97316',
-  in_progress: '#a855f7',
-  completed: '#9ca3af',
-  cancelled: '#ef4444',
+  scheduled: '#2563eb',
+  confirmed: '#1d4ed8',
+  en_route: '#ea580c',
+  in_progress: '#0891b2',
+  completed: '#6b7280',
+  cancelled: '#fca5a5',
 };
 
 const AdminCalendar: React.FC = () => {
@@ -110,8 +110,48 @@ const AdminCalendar: React.FC = () => {
     return `${h12}:${String(m).padStart(2, '0')} ${period}`;
   };
 
+  // Custom event content renderer — Square-style compact cards
+  const renderEventContent = (eventInfo: any) => {
+    const appt = eventInfo.event.extendedProps.appointment;
+    if (!appt || eventInfo.event.extendedProps.isBlock) {
+      return <span>{eventInfo.event.title}</span>;
+    }
+
+    const viewType = eventInfo.view?.type || currentView;
+    const isTimeGrid = viewType.startsWith('timeGrid');
+
+    if (!isTimeGrid) {
+      // Month view — keep compact single line
+      return (
+        <span>
+          {eventInfo.timeText && <span className="fc-event-content-time">{eventInfo.timeText} </span>}
+          {eventInfo.event.title}
+        </span>
+      );
+    }
+
+    // Week/Day view — Square-style stacked layout
+    const serviceName = appt.service_name || appt.service_type || '';
+    // Shorten common service names
+    const shortService = serviceName
+      .replace('At-Home Blood Work (Seminole, Orange, & Volusia County)', 'At-Home Blood Work')
+      .replace('Mobile Blood Draw', 'At-Home Blood Work')
+      .replace('Specialty Collection Kit', 'Specialty Kit')
+      .replace('Therapeutic Phlebotomy', 'Therapeutic Blood Work')
+      .replace('Senior Blood Draw', 'Senior (65+)')
+      .replace("Patient's Pricing ONLY", "Patient's Pricing");
+
+    return (
+      <div style={{ overflow: 'hidden', height: '100%' }}>
+        <div className="fc-event-content-time">{eventInfo.timeText}</div>
+        <div className="fc-event-content-name">{eventInfo.event.title}</div>
+        <div className="fc-event-content-service">{shortService}</div>
+      </div>
+    );
+  };
+
   // Filter: hide cancelled from month view, show all in week/day
-  const [currentView, setCurrentView] = useState('dayGridMonth');
+  const [currentView, setCurrentView] = useState('timeGridWeek');
   const visibleAppointments = currentView === 'dayGridMonth'
     ? appointments.filter(a => a.status !== 'cancelled')
     : appointments;
@@ -252,73 +292,46 @@ const AdminCalendar: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-        <div>
-          <h2 className="text-2xl font-bold">Appointment Calendar</h2>
-          <p className="text-muted-foreground text-sm">Click a date to schedule, click an appointment to view details</p>
+      {/* Header — compact like Square */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div className="flex items-center gap-4">
+          <h2 className="text-lg font-semibold">Calendar</h2>
+          <div className="hidden sm:flex items-center gap-3 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{stats.today}</span> today
+            <span className="text-muted-foreground/40">|</span>
+            <span className="font-medium text-foreground">{stats.upcoming}</span> upcoming
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={fetchAppointments}>
-            <RefreshCw className="h-4 w-4 mr-1" /> Refresh
+          <Button variant="ghost" size="sm" onClick={fetchAppointments} className="h-8 px-2">
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setBlockModalOpen(true)}>
-            <CalendarOff className="h-4 w-4 mr-1" /> Block Dates
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setBlockModalOpen(true)}>
+            <CalendarOff className="h-3.5 w-3.5 mr-1" /> Block
           </Button>
-          <Button variant="outline" size="sm" onClick={() => setRecurringModalOpen(true)}>
-            <Repeat className="h-4 w-4 mr-1" /> Recurring
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setRecurringModalOpen(true)}>
+            <Repeat className="h-3.5 w-3.5 mr-1" /> Recurring
           </Button>
-          <Button size="sm" className="bg-conve-red hover:bg-conve-red-dark text-white"
+          <Button size="sm" className="h-8 bg-[#1e293b] hover:bg-[#0f172a] text-white text-xs"
             onClick={() => { setScheduleDefaultDate(''); setScheduleModalOpen(true); }}>
-            <Plus className="h-4 w-4 mr-1" /> New Appointment
+            <Plus className="h-3.5 w-3.5 mr-1" /> Create
           </Button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <Calendar className="h-8 w-8 text-blue-500 opacity-60" />
-            <div>
-              <p className="text-2xl font-bold">{stats.today}</p>
-              <p className="text-xs text-muted-foreground">Today</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <Clock className="h-8 w-8 text-green-500 opacity-60" />
-            <div>
-              <p className="text-2xl font-bold">{stats.thisWeek}</p>
-              <p className="text-xs text-muted-foreground">This Week</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 flex items-center gap-3">
-            <Users className="h-8 w-8 text-purple-500 opacity-60" />
-            <div>
-              <p className="text-2xl font-bold">{stats.upcoming}</p>
-              <p className="text-xs text-muted-foreground">Upcoming</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Status Legend */}
-      <div className="flex flex-wrap gap-3 text-xs">
+      {/* Status Legend — inline, subtle */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
         {Object.entries(STATUS_COLORS).map(([status, color]) => (
-          <div key={status} className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
+          <div key={status} className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: color, opacity: status === 'cancelled' ? 0.5 : 1 }} />
             <span className="capitalize text-muted-foreground">{status.replace('_', ' ')}</span>
           </div>
         ))}
       </div>
 
       {/* Calendar */}
-      <Card>
-        <CardContent className="p-4">
+      <Card className="border shadow-sm">
+        <CardContent className="p-2 sm:p-3">
           {loading ? (
             <div className="flex justify-center items-center py-20">
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -326,14 +339,17 @@ const AdminCalendar: React.FC = () => {
           ) : (
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="dayGridMonth"
+              initialView="timeGridWeek"
               headerToolbar={{
                 left: 'prev,next today',
                 center: 'title',
                 right: 'dayGridMonth,timeGridWeek,timeGridDay',
               }}
+              titleFormat={{ year: 'numeric', month: 'short', day: 'numeric' }}
+              dayHeaderFormat={{ weekday: 'short', month: '2-digit', day: '2-digit', omitCommas: true }}
               timeZone="America/New_York"
               events={allEvents}
+              eventContent={renderEventContent}
               eventClick={handleEventClick}
               dateClick={handleDateClick}
               editable={true}
@@ -354,12 +370,11 @@ const AdminCalendar: React.FC = () => {
               allDaySlot={false}
               weekends={true}
               businessHours={{
-                daysOfWeek: [1, 2, 3, 4, 5],
+                daysOfWeek: [1, 2, 3, 4, 5, 6],
                 startTime: '06:00',
-                endTime: '17:30',
+                endTime: '18:00',
               }}
               eventDidMount={(info) => {
-                // Add tooltip with full details
                 const appt = info.event.extendedProps.appointment;
                 if (appt && !info.event.extendedProps.isBlock) {
                   info.el.title = `${info.event.title}\n${appt.appointment_time || ''}\n${appt.address || ''}\n${appt.service_name || appt.service_type || ''}`;
