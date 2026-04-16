@@ -28,6 +28,7 @@ import NotesTab from "@/components/dashboards/admin/NotesTab";
 import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
+import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -95,7 +96,8 @@ const Dashboard = () => {
           {adminTab === "patients" && <PatientProfileTab />}
           {adminTab === "organizations" && <OrganizationsTab />}
           {adminTab === "operations" && <OperationsPanel />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations"].includes(adminTab) && (
+          {adminTab === "ai-assistant" && <AIOpsAssistant />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations", "ai-assistant"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>
