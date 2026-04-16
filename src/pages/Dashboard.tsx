@@ -27,6 +27,7 @@ import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingT
 import NotesTab from "@/components/dashboards/admin/NotesTab";
 import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
+import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -93,7 +94,8 @@ const Dashboard = () => {
           {adminTab === "notes" && <NotesTab />}
           {adminTab === "patients" && <PatientProfileTab />}
           {adminTab === "organizations" && <OrganizationsTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations"].includes(adminTab) && (
+          {adminTab === "operations" && <OperationsPanel />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>

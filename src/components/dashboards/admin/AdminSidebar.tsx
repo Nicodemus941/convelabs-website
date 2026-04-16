@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
-  CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2
+  CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench
 } from 'lucide-react';
 
 type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
@@ -33,6 +33,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Organizations', icon: Building2, path: `${basePath}/organizations` },
         { name: 'Specimens', icon: FlaskConical, path: `${basePath}/specimens` },
         { name: 'Notes', icon: ClipboardList, path: `${basePath}/notes` },
+        { name: 'Operations', icon: Wrench, path: `${basePath}/operations` },
       ],
     },
     {
