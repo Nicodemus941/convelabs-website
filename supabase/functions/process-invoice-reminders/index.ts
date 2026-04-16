@@ -20,15 +20,21 @@ const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
  *    If a message is due at 5:45 AM, it waits until 8 AM.
  * 3. VIP patients are excluded from ALL reminders and auto-cancellation.
  *
- * ESCALATION TIERS (based on days until appointment):
+ * ESCALATION (phase-gap based — prevents tier-shift bug):
  *
- * ┌─────────────────────┬───────────┬───────────────┬─────────────┐
- * │ Appointment Window  │ Reminder  │ Final Warning │ Auto-Cancel │
- * ├─────────────────────┼───────────┼───────────────┼─────────────┤
- * │ ≤ 48h away (urgent) │ +3h       │ +6h           │ +9h         │
- * │ 2–7 days (soon)     │ +6h       │ +24h          │ +48h        │
- * │ 7+ days (relaxed)   │ +24h      │ 72h pre-appt  │ 48h pre-appt│
- * └─────────────────────┴───────────┴───────────────┴─────────────┘
+ * Phase 1 — Gentle Reminder:
+ *   Triggers X hours after invoice sent (urgent=3h, soon=6h, relaxed=24h)
+ *
+ * Phase 2 — Final Warning:
+ *   Triggers ≥12 hours after the reminder was sent (not invoice!)
+ *
+ * Phase 3 — Auto-Cancel:
+ *   Triggers ≥24 hours after the final warning was sent (not invoice!)
+ *   AND appointment must be within 7 days (no urgency to cancel far-out appts)
+ *
+ * MINIMUM TIMELINE: invoice → 3h → reminder → 12h → warning → 24h → cancel
+ * = At least 39 hours from invoice to cancellation (urgent tier).
+ * = Patient always gets 24h after the "your appt will be cancelled" message.
  *
  * invoice_status lifecycle: sent → reminded → final_warning → paid | cancelled
  */
@@ -59,16 +65,22 @@ function getApptTier(appointmentDate: string, appointmentTime: string): Tier {
   return 'relaxed';
 }
 
-// Hours after invoice_sent_at before each phase triggers
-const TIER_THRESHOLDS = {
-  urgent:  { reminder: 3,  finalWarning: 6,   cancel: 9 },
-  soon:    { reminder: 6,  finalWarning: 24,  cancel: 48 },
-  relaxed: { reminder: 24, finalWarning: null, cancel: null }, // null = relative to appt date
+// Hours after invoice_sent_at before first reminder triggers
+const REMINDER_THRESHOLDS = {
+  urgent:  3,   // ≤48h to appt: remind 3h after invoice
+  soon:    6,   // 2-7 days:     remind 6h after invoice
+  relaxed: 24,  // 7+ days:      remind 24h after invoice
 } as const;
 
-// For 'relaxed' tier, final warning = 72h before appt, cancel = 48h before appt
-const RELAXED_FINAL_WARNING_HOURS_BEFORE = 72;
-const RELAXED_CANCEL_HOURS_BEFORE = 48;
+// MINIMUM hours after the PREVIOUS phase before escalating.
+// This prevents the tier-shift bug where changing from relaxed→urgent
+// would immediately trigger all phases in one cron run.
+const MIN_HOURS_REMINDER_TO_WARNING = 12;   // At least 12h between reminder and final warning
+const MIN_HOURS_WARNING_TO_CANCEL = 24;     // At least 24h between final warning and cancel
+
+// Never auto-cancel an appointment that's more than 7 days away.
+// There's no urgency to free the slot — just keep reminding.
+const NO_CANCEL_IF_MORE_THAN_HOURS = 168; // 7 days
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -211,7 +223,7 @@ Deno.serve(async (req) => {
 
     for (const appt of (sentAppts || [])) {
       const tier = getApptTier(appt.appointment_date, appt.appointment_time);
-      const thresholdHours = TIER_THRESHOLDS[tier].reminder;
+      const thresholdHours = REMINDER_THRESHOLDS[tier];
       const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
       const hoursSinceSent = (now - invoiceSentAt) / (1000 * 60 * 60);
 
@@ -257,10 +269,7 @@ Deno.serve(async (req) => {
 
     // ════════════════════════════════════════════════════════════════
     // PHASE 2: Final Warning
-    // Trigger: invoice_status = 'reminded' AND enough time has passed
-    //   urgent:  6h after invoice sent
-    //   soon:    24h after invoice sent
-    //   relaxed: 72h BEFORE appointment
+    // Trigger: invoice_status = 'reminded' AND ≥12h since reminder sent
     // ════════════════════════════════════════════════════════════════
     const { data: remindedAppts } = await supabase
       .from('appointments')
@@ -270,36 +279,23 @@ Deno.serve(async (req) => {
       .not('status', 'eq', 'cancelled');
 
     for (const appt of (remindedAppts || [])) {
-      const tier = getApptTier(appt.appointment_date, appt.appointment_time);
-      const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
-      const apptTimeMs = getApptTimeMs(appt);
-      const hoursSinceSent = (now - invoiceSentAt) / (1000 * 60 * 60);
-      const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
+      // Use time since the REMINDER was sent, not since original invoice.
+      // This prevents the tier-shift bug where a relaxed→urgent transition
+      // would immediately satisfy thresholds based on invoice age.
+      const reminderSentAt = appt.invoice_reminder_sent_at
+        ? new Date(appt.invoice_reminder_sent_at).getTime()
+        : new Date(appt.invoice_sent_at).getTime(); // fallback
+      const hoursSinceReminder = (now - reminderSentAt) / (1000 * 60 * 60);
 
-      let shouldWarn = false;
-      if (tier === 'relaxed') {
-        // Fire when we're within 72h of the appointment
-        shouldWarn = hoursUntilAppt <= RELAXED_FINAL_WARNING_HOURS_BEFORE;
-      } else {
-        const thresholdHours = TIER_THRESHOLDS[tier].finalWarning!;
-        shouldWarn = hoursSinceSent >= thresholdHours;
-      }
-
-      if (!shouldWarn) continue;
+      // Must wait at least MIN_HOURS_REMINDER_TO_WARNING since the reminder
+      if (hoursSinceReminder < MIN_HOURS_REMINDER_TO_WARNING) continue;
 
       const { name, email, phone } = getContact(appt);
       const payLink = await getPayLink(appt);
       const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
 
-      // Calculate how long they have before cancellation
-      let cancelTimeLabel: string;
-      if (tier === 'urgent') {
-        cancelTimeLabel = 'approximately 3 hours';
-      } else if (tier === 'soon') {
-        cancelTimeLabel = 'approximately 24 hours';
-      } else {
-        cancelTimeLabel = 'approximately 24 hours';
-      }
+      // Patient always gets at least 24h after the final warning before cancellation
+      const cancelTimeLabel = '24 hours';
 
       await supabase.from('appointments').update({
         invoice_status: 'final_warning',
@@ -338,10 +334,8 @@ Deno.serve(async (req) => {
 
     // ════════════════════════════════════════════════════════════════
     // PHASE 3: Auto-Cancel
-    // Trigger: invoice_status = 'final_warning' AND enough time has passed
-    //   urgent:  9h after invoice sent
-    //   soon:    48h after invoice sent
-    //   relaxed: 48h BEFORE appointment
+    // Trigger: invoice_status = 'final_warning' AND ≥24h since warning
+    //          AND appointment is within 7 days (no urgency otherwise)
     // ════════════════════════════════════════════════════════════════
     const { data: warningAppts } = await supabase
       .from('appointments')
@@ -351,21 +345,25 @@ Deno.serve(async (req) => {
       .not('status', 'eq', 'cancelled');
 
     for (const appt of (warningAppts || [])) {
-      const tier = getApptTier(appt.appointment_date, appt.appointment_time);
-      const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
       const apptTimeMs = getApptTimeMs(appt);
-      const hoursSinceSent = (now - invoiceSentAt) / (1000 * 60 * 60);
       const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
 
-      let shouldCancel = false;
-      if (tier === 'relaxed') {
-        shouldCancel = hoursUntilAppt <= RELAXED_CANCEL_HOURS_BEFORE;
-      } else {
-        const thresholdHours = TIER_THRESHOLDS[tier].cancel!;
-        shouldCancel = hoursSinceSent >= thresholdHours;
+      // SAFEGUARD: Never auto-cancel if the appointment is more than 7 days away.
+      // There's no urgency — just keep the final_warning status and wait.
+      if (hoursUntilAppt > NO_CANCEL_IF_MORE_THAN_HOURS) {
+        console.log(`Skipping cancel for appt ${appt.id} — ${hoursUntilAppt.toFixed(0)}h away, no urgency`);
+        skippedRelaxed++;
+        continue;
       }
 
-      if (!shouldCancel) {
+      // Use time since the FINAL WARNING was sent, not since original invoice.
+      const warningSentAt = appt.invoice_final_warning_at
+        ? new Date(appt.invoice_final_warning_at).getTime()
+        : new Date(appt.invoice_sent_at).getTime(); // fallback
+      const hoursSinceWarning = (now - warningSentAt) / (1000 * 60 * 60);
+
+      // Must wait at least MIN_HOURS_WARNING_TO_CANCEL since the final warning
+      if (hoursSinceWarning < MIN_HOURS_WARNING_TO_CANCEL) {
         skippedRelaxed++;
         continue;
       }
@@ -415,7 +413,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      console.log(`[CANCELLED] ${name} (${tier} tier, ${hoursSinceSent.toFixed(1)}h since invoice)`);
+      console.log(`[CANCELLED] ${name} (${hoursUntilAppt.toFixed(1)}h until appt, ${hoursSinceWarning.toFixed(1)}h since warning)`);
       cancellations++;
     }
 
