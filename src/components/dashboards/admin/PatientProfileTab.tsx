@@ -371,22 +371,22 @@ const PatientProfileTab: React.FC = () => {
             <DialogHeader><DialogTitle className="text-lg font-bold text-center">Edit Customer</DialogTitle></DialogHeader>
             <div className="divide-y">
               {/* Name */}
-              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600">First Name</Label>
                 <Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} className="h-9" />
               </div>
-              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600">Last Name</Label>
                 <Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} className="h-9" />
               </div>
               {/* Birthday */}
-              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600">Birthday</Label>
                 <Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} className="h-9" />
               </div>
               {/* Address */}
-              <div className="grid grid-cols-[140px_1fr] items-start py-3 gap-3">
-                <Label className="text-sm font-semibold text-gray-600 mt-2">Address</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start py-3 gap-1 sm:gap-3">
+                <Label className="text-sm font-semibold text-gray-600 sm:mt-2">Address</Label>
                 <div className="space-y-2">
                   <Input value={editForm.address} onChange={e => setEditForm(pr => ({ ...pr, address: e.target.value }))} placeholder="Street address" className="h-9" />
                   <Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} placeholder="City" className="h-9" />
@@ -397,25 +397,25 @@ const PatientProfileTab: React.FC = () => {
                 </div>
               </div>
               {/* Gate Code */}
-              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600">Gate Code</Label>
                 <Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Gate Code" className="h-9" />
               </div>
               {/* Phone */}
-              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600">Phone Number</Label>
                 <Input value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} className="h-9" />
               </div>
               {/* Email */}
-              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600">Email Address</Label>
                 <Input type="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} className="h-9" />
               </div>
               {/* Insurance */}
-              <div className="grid grid-cols-[140px_1fr] items-start py-3 gap-3">
-                <Label className="text-sm font-semibold text-gray-600 mt-2 text-[#B91C1C]">Insurance Courier &amp; Member ID</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start py-3 gap-1 sm:gap-3">
+                <Label className="text-sm font-semibold text-gray-600 text-[#B91C1C]">Insurance Courier &amp; Member ID</Label>
                 <div className="space-y-2">
-                  <Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="Insurance Courier & Member ID (Lab Will Bill Insurance)" className="h-9 text-sm" />
+                  <Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="Insurance provider" className="h-9 text-sm" />
                   <div className="grid grid-cols-2 gap-2">
                     <Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} placeholder="Member ID" className="h-9" />
                     <Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} placeholder="Group #" className="h-9" />

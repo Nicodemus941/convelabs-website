@@ -151,7 +151,8 @@ const AdminCalendar: React.FC = () => {
   };
 
   // Filter: always hide cancelled appointments from the calendar
-  const [currentView, setCurrentView] = useState('timeGridWeek');
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const [currentView, setCurrentView] = useState(isMobile ? 'timeGridDay' : 'timeGridWeek');
   const visibleAppointments = appointments.filter(a => a.status !== 'cancelled');
 
   // Convert appointments to FullCalendar events
@@ -337,7 +338,7 @@ const AdminCalendar: React.FC = () => {
           ) : (
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
+              initialView={isMobile ? 'timeGridDay' : 'timeGridWeek'}
               headerToolbar={{
                 left: 'prev,next today',
                 center: 'title',
