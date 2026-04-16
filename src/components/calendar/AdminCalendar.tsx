@@ -150,11 +150,9 @@ const AdminCalendar: React.FC = () => {
     );
   };
 
-  // Filter: hide cancelled from month view, show all in week/day
+  // Filter: always hide cancelled appointments from the calendar
   const [currentView, setCurrentView] = useState('timeGridWeek');
-  const visibleAppointments = currentView === 'dayGridMonth'
-    ? appointments.filter(a => a.status !== 'cancelled')
-    : appointments;
+  const visibleAppointments = appointments.filter(a => a.status !== 'cancelled');
 
   // Convert appointments to FullCalendar events
   const calendarEvents = visibleAppointments.map(appt => {

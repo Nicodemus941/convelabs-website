@@ -4,11 +4,14 @@ import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   User, Calendar, Clock, MapPin, Phone, Mail, MessageSquare,
   CalendarClock, XCircle, DollarSign, FileText, Shield,
   ChevronDown, ChevronUp, UserPlus, AlertTriangle, UserX,
   X, MoreHorizontal, ChevronRight, Upload, ExternalLink,
+  Pencil, Save, Loader2,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -46,6 +49,12 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [noShowCount, setNoShowCount] = useState(0);
   const [appointmentHistory, setAppointmentHistory] = useState<any[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    patient_name: '', patient_email: '', patient_phone: '',
+    address: '', gate_code: '', notes: '',
+  });
 
   const appt = appointment;
 
@@ -83,6 +92,60 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         .then(({ data }) => setAppointmentHistory(data || []));
     }
   }, [appt?.id, appt?.patient_id]);
+
+  // Reset edit mode when appointment changes
+  useEffect(() => {
+    setIsEditing(false);
+  }, [appt?.id]);
+
+  const startEditing = () => {
+    setEditForm({
+      patient_name: appt.patient_name || '',
+      patient_email: appt.patient_email || patientData?.email || '',
+      patient_phone: appt.patient_phone || patientData?.phone || '',
+      address: appt.address || '',
+      gate_code: appt.gate_code || '',
+      notes: appt.notes || '',
+    });
+    setIsEditing(true);
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      // Update appointment record
+      const { error: apptError } = await supabase.from('appointments').update({
+        patient_name: editForm.patient_name,
+        patient_email: editForm.patient_email,
+        patient_phone: editForm.patient_phone,
+        address: editForm.address,
+        gate_code: editForm.gate_code,
+        notes: editForm.notes,
+      }).eq('id', appt.id);
+      if (apptError) throw apptError;
+
+      // Also update tenant_patients record if we have one
+      if (patientData?.id) {
+        const nameParts = editForm.patient_name.trim().split(/\s+/);
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+        await supabase.from('tenant_patients').update({
+          first_name: firstName,
+          last_name: lastName,
+          email: editForm.patient_email,
+          phone: editForm.patient_phone,
+        }).eq('id', patientData.id);
+      }
+
+      toast.success('Patient information saved');
+      setIsEditing(false);
+      onUpdate();
+    } catch (err: any) {
+      toast.error('Failed to save: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   if (!appt) return null;
 
@@ -187,38 +250,60 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         {/* Patient name + contact */}
         <div className="px-5 pt-4 pb-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-gray-900">{patientName}</h2>
-            {noShowCount > 0 && (
-              <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 text-[10px] gap-0.5">
-                <AlertTriangle className="h-2.5 w-2.5" /> {noShowCount} no-show{noShowCount > 1 ? 's' : ''}
+          {isEditing ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] text-gray-400 uppercase tracking-wide">Patient Name</label>
+                <Input value={editForm.patient_name} onChange={e => setEditForm(f => ({ ...f, patient_name: e.target.value }))} className="h-9 text-sm mt-0.5" />
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-400 uppercase tracking-wide">Phone</label>
+                <Input value={editForm.patient_phone} onChange={e => setEditForm(f => ({ ...f, patient_phone: e.target.value }))} className="h-9 text-sm mt-0.5" />
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-400 uppercase tracking-wide">Email</label>
+                <Input value={editForm.patient_email} onChange={e => setEditForm(f => ({ ...f, patient_email: e.target.value }))} className="h-9 text-sm mt-0.5" />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-gray-900">{patientName}</h2>
+                {noShowCount > 0 && (
+                  <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 text-[10px] gap-0.5">
+                    <AlertTriangle className="h-2.5 w-2.5" /> {noShowCount} no-show{noShowCount > 1 ? 's' : ''}
+                  </Badge>
+                )}
+                <button onClick={startEditing} className="ml-auto p-1.5 hover:bg-gray-100 rounded-md transition" title="Edit patient info">
+                  <Pencil className="h-3.5 w-3.5 text-gray-400" />
+                </button>
+              </div>
+              <Badge variant="outline" className={`mt-1.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.color}`}>
+                {statusCfg.label}
               </Badge>
-            )}
-          </div>
-          <Badge variant="outline" className={`mt-1.5 text-[11px] font-medium ${statusCfg.bg} ${statusCfg.color}`}>
-            {statusCfg.label}
-          </Badge>
 
-          <div className="mt-3 space-y-1.5">
-            {patientPhone && (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone className="h-3.5 w-3.5 text-gray-400" />
-                  <a href={`tel:${patientPhone}`} className="text-blue-600 hover:underline">{patientPhone}</a>
-                </div>
-                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Phone</span>
+              <div className="mt-3 space-y-1.5">
+                {patientPhone && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Phone className="h-3.5 w-3.5 text-gray-400" />
+                      <a href={`tel:${patientPhone}`} className="text-blue-600 hover:underline">{patientPhone}</a>
+                    </div>
+                    <span className="text-[11px] text-gray-400 uppercase tracking-wide">Phone</span>
+                  </div>
+                )}
+                {patientEmail && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Mail className="h-3.5 w-3.5 text-gray-400" />
+                      <a href={`mailto:${patientEmail}`} className="text-blue-600 hover:underline truncate max-w-[220px]">{patientEmail}</a>
+                    </div>
+                    <span className="text-[11px] text-gray-400 uppercase tracking-wide">Email</span>
+                  </div>
+                )}
               </div>
-            )}
-            {patientEmail && (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail className="h-3.5 w-3.5 text-gray-400" />
-                  <a href={`mailto:${patientEmail}`} className="text-blue-600 hover:underline truncate max-w-[220px]">{patientEmail}</a>
-                </div>
-                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Email</span>
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <Separator />
@@ -233,29 +318,46 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         {/* Location & Staff */}
         <div className="px-5 py-4 space-y-3">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Location</p>
-              <p className="text-sm text-gray-900">{appt.address || 'TBD'}</p>
-              {appt.gate_code && <p className="text-xs text-gray-500 mt-0.5">Gate: {appt.gate_code}</p>}
+          {isEditing ? (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] text-gray-400 uppercase tracking-wide">Address</label>
+                <Input value={editForm.address} onChange={e => setEditForm(f => ({ ...f, address: e.target.value }))} className="h-9 text-sm mt-0.5" />
+              </div>
+              <div>
+                <label className="text-[11px] text-gray-400 uppercase tracking-wide">Gate Code</label>
+                <Input value={editForm.gate_code} onChange={e => setEditForm(f => ({ ...f, gate_code: e.target.value }))} className="h-9 text-sm mt-0.5" placeholder="Gate code (optional)" />
+              </div>
             </div>
-            <div className="text-right">
-              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Staff</p>
-              <p className="text-sm text-gray-900">
-                {appt.phlebotomist_id === '91c76708-8c5b-4068-92c6-323805a3b164' ? 'Nico Jean-Baptiste' : 'Assigned Staff'}
-              </p>
+          ) : (
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Location</p>
+                <p className="text-sm text-gray-900">{appt.address || 'TBD'}</p>
+                {appt.gate_code && <p className="text-xs text-gray-500 mt-0.5">Gate: {appt.gate_code}</p>}
+              </div>
+              <div className="text-right">
+                <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Staff</p>
+                <p className="text-sm text-gray-900">
+                  {appt.phlebotomist_id === '91c76708-8c5b-4068-92c6-323805a3b164' ? 'Nico Jean-Baptiste' : 'Assigned Staff'}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <Separator />
 
         {/* Notes */}
-        {appt.notes && (
+        {(appt.notes || isEditing) && (
           <>
             <div className="px-5 py-4">
               <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-1">Notes</p>
-              <p className="text-sm text-gray-700">{appt.notes}</p>
+              {isEditing ? (
+                <Textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} className="text-sm min-h-[60px]" placeholder="Add notes..." />
+              ) : (
+                <p className="text-sm text-gray-700">{appt.notes}</p>
+              )}
             </div>
             <Separator />
           </>
@@ -411,6 +513,19 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         {/* Status Actions — sticky bottom */}
         <div className="sticky bottom-0 bg-white border-t px-5 py-3 space-y-2">
+          {/* Edit save/cancel bar */}
+          {isEditing && (
+            <div className="flex gap-2 mb-1">
+              <Button size="sm" className="flex-1 h-9 text-xs bg-emerald-600 hover:bg-emerald-700 text-white" onClick={handleSave} disabled={isSaving}>
+                {isSaving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1" />}
+                {isSaving ? 'Saving...' : 'Save Changes'}
+              </Button>
+              <Button variant="outline" size="sm" className="h-9 text-xs" onClick={() => setIsEditing(false)} disabled={isSaving}>
+                Cancel
+              </Button>
+            </div>
+          )}
+
           {/* Quick status progression */}
           <div className="flex flex-wrap gap-2">
             {appt.status === 'scheduled' && (
