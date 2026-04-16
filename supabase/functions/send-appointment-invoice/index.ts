@@ -79,9 +79,10 @@ Deno.serve(async (req) => {
     const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
     await stripe.invoices.sendInvoice(invoice.id);
 
-    // Update appointment with Stripe invoice ID
+    // Update appointment with Stripe invoice ID + hosted pay URL
     await supabase.from('appointments').update({
       stripe_invoice_id: invoice.id,
+      stripe_invoice_url: finalizedInvoice.hosted_invoice_url || null,
       invoice_status: 'sent',
       invoice_sent_at: new Date().toISOString(),
     }).eq('id', appointmentId);

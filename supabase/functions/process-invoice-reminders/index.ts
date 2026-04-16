@@ -89,10 +89,27 @@ Deno.serve(async (req) => {
     };
 
     // ── Helper: Stripe pay link ───────────────────────────────────
-    const getPayLink = (appt: any) => {
+    // Prefer stored URL → fetch from Stripe → fallback to booking page
+    const getPayLink = async (appt: any): Promise<string> => {
+      // 1. Use stored hosted URL (set by send-appointment-invoice)
+      if (appt.stripe_invoice_url) return appt.stripe_invoice_url;
+
+      // 2. Fetch from Stripe for older invoices without stored URL
       if (appt.stripe_invoice_id) {
-        return `https://invoice.stripe.com/i/${appt.stripe_invoice_id}`;
+        try {
+          const inv = await stripe.invoices.retrieve(appt.stripe_invoice_id);
+          if (inv.hosted_invoice_url) {
+            // Backfill the URL for next time
+            await supabase.from('appointments').update({
+              stripe_invoice_url: inv.hosted_invoice_url,
+            }).eq('id', appt.id);
+            return inv.hosted_invoice_url;
+          }
+        } catch (e) {
+          console.error(`Failed to fetch Stripe invoice ${appt.stripe_invoice_id}:`, e);
+        }
       }
+
       return 'https://convelabs.com/book-now';
     };
 
@@ -126,7 +143,7 @@ Deno.serve(async (req) => {
 
     for (const appt of (gentleAppts || [])) {
       const { name, email, phone } = getContact(appt);
-      const payLink = getPayLink(appt);
+      const payLink = await getPayLink(appt);
       const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
 
       await supabase.from('appointments').update({
@@ -167,7 +184,7 @@ Deno.serve(async (req) => {
 
     for (const appt of (warningAppts || [])) {
       const { name, email, phone } = getContact(appt);
-      const payLink = getPayLink(appt);
+      const payLink = await getPayLink(appt);
       const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
 
       await supabase.from('appointments').update({
