@@ -35,7 +35,7 @@ type Appt = {
   service_name: string | null;
   total_amount: number | null;
   lab_order_file_path: string | null;
-  phleb_id: string | null;
+  phlebotomist_id: string | null;
   notes: string | null;
 };
 
@@ -94,7 +94,7 @@ const TodayExecutionView: React.FC<TodayExecutionViewProps> = ({ basePath }) => 
     const booked = active.reduce((s, a) => s + (a.total_amount || 0), 0);
     const unpaid = active.filter(a => a.payment_status !== 'completed').length;
     const missingLabOrder = remaining.filter(a => !a.lab_order_file_path && (a.service_type === 'mobile' || a.service_type === 'senior')).length;
-    const unassigned = remaining.filter(a => !a.phleb_id).length;
+    const unassigned = remaining.filter(a => !a.phlebotomist_id).length;
     return {
       total: active.length,
       completed: completed.length,
@@ -109,12 +109,14 @@ const TodayExecutionView: React.FC<TodayExecutionViewProps> = ({ basePath }) => 
   }, [appts]);
 
   const sorted = useMemo(() => {
-    return [...appts].sort((a, b) => {
-      const sa = STATUS_ORDER.indexOf(a.status);
-      const sb = STATUS_ORDER.indexOf(b.status);
-      if (sa !== sb) return sa - sb;
-      return (a.appointment_time || '').localeCompare(b.appointment_time || '');
-    });
+    return [...appts]
+      .filter(a => a.status !== 'cancelled')
+      .sort((a, b) => {
+        const sa = STATUS_ORDER.indexOf(a.status);
+        const sb = STATUS_ORDER.indexOf(b.status);
+        if (sa !== sb) return sa - sb;
+        return (a.appointment_time || '').localeCompare(b.appointment_time || '');
+      });
   }, [appts]);
 
   const updateStatus = async (id: string, status: string) => {
@@ -245,7 +247,7 @@ const TodayExecutionView: React.FC<TodayExecutionViewProps> = ({ basePath }) => 
                       <div className="flex gap-1 mt-1 flex-wrap">
                         {missingLab && <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-700 text-[10px]">No lab order</Badge>}
                         {unpaid && <Badge variant="outline" className="bg-red-50 border-red-300 text-red-700 text-[10px]">Unpaid</Badge>}
-                        {!a.phleb_id && a.status !== 'completed' && a.status !== 'cancelled' && (
+                        {!a.phlebotomist_id && a.status !== 'completed' && a.status !== 'cancelled' && (
                           <Badge variant="outline" className="bg-blue-50 border-blue-300 text-blue-700 text-[10px]">Unassigned</Badge>
                         )}
                       </div>

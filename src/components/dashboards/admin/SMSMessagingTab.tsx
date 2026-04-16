@@ -1,21 +1,30 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
-import { format } from 'date-fns';
+import { format, formatDistanceToNow } from 'date-fns';
 import {
-  MessageSquare, Send, ArrowLeft, Loader2, User, Phone,
-  Search, RefreshCw, Plus, UserPlus,
+  MessageSquare, Send, Loader2, User, Phone, Mail,
+  Search, Plus, Calendar, DollarSign, MapPin, ChevronRight,
+  Inbox, Bell, ArrowLeft, X,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
+
+/**
+ * SMS INBOX — Square Appointments style
+ * 3-column layout: Conversation list | Thread | Customer context
+ * Hormozi layer: every conversation shows revenue context (total spent, upcoming appts)
+ */
 
 interface PatientContact {
   id: string;
   name: string;
   phone: string;
   email: string | null;
-  lastAppointment: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
 }
 
 interface Message {
@@ -23,124 +32,154 @@ interface Message {
   direction: 'inbound' | 'outbound';
   body: string;
   created_at: string;
+  status?: string;
+}
+
+interface ConversationPreview {
+  patient: PatientContact;
+  lastMessage: string;
+  lastMessageAt: string;
+  lastDirection: 'inbound' | 'outbound';
+  unread: boolean;
+}
+
+interface PatientAppointment {
+  id: string;
+  appointment_date: string;
+  appointment_time: string | null;
+  status: string;
+  service_name: string | null;
+  service_type: string | null;
+  total_amount: number | null;
+  payment_status: string | null;
+  phlebotomist_id: string | null;
 }
 
 const SMSMessagingTab: React.FC = () => {
   const [patients, setPatients] = useState<PatientContact[]>([]);
-  const [filteredPatients, setFilteredPatients] = useState<PatientContact[]>([]);
+  const [conversations, setConversations] = useState<ConversationPreview[]>([]);
   const [activePatient, setActivePatient] = useState<PatientContact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [patientAppts, setPatientAppts] = useState<PatientAppointment[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [showNewMessage, setShowNewMessage] = useState(false);
-  const [newRecipientPhone, setNewRecipientPhone] = useState('');
-  const [newRecipientName, setNewRecipientName] = useState('');
+  const [filter, setFilter] = useState<'inbox' | 'unread' | 'all'>('inbox');
+  const [showCompose, setShowCompose] = useState(false);
+  const [composePhone, setComposePhone] = useState('');
+  const [composeName, setComposeName] = useState('');
+  const [totalSpent, setTotalSpent] = useState(0);
+  const [totalTransactions, setTotalTransactions] = useState(0);
+  // Mobile: show thread panel when patient selected
+  const [mobileShowThread, setMobileShowThread] = useState(false);
+  const [mobileShowContext, setMobileShowContext] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch all patients with phone numbers from tenant_patients
-  const fetchPatients = useCallback(async () => {
+  // Load patients + build conversation previews
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data: patientData, error } = await supabase
-        .from('tenant_patients')
-        .select('id, first_name, last_name, phone, email')
-        .order('first_name', { ascending: true });
+      const [{ data: pts }, { data: notifs }, { data: convMsgs }] = await Promise.all([
+        supabase.from('tenant_patients').select('id, first_name, last_name, phone, email, address, city, state').not('phone', 'is', null).order('first_name'),
+        supabase.from('sms_notifications' as any).select('phone_number, message_content, created_at').order('created_at', { ascending: false }),
+        supabase.from('sms_messages' as any).select('conversation_id, direction, body, created_at').order('created_at', { ascending: false }),
+      ]);
 
-      if (error) {
-        console.error('Failed to load patients:', error);
-      }
-      console.log('Patients loaded:', patientData?.length || 0);
-
-      if (error) throw error;
-
-      const contactList: PatientContact[] = (patientData || [])
-        .map((p: any) => ({
-          id: p.id,
-          name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown',
-          phone: p.phone,
-          email: p.email,
-          lastAppointment: null,
-        }));
-
+      const contactList: PatientContact[] = (pts || []).filter((p: any) => p.phone).map((p: any) => ({
+        id: p.id,
+        name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown',
+        phone: p.phone,
+        email: p.email,
+        address: p.address,
+        city: p.city,
+        state: p.state,
+      }));
       setPatients(contactList);
-      setFilteredPatients(contactList);
+
+      // Build conversation previews from message history
+      const phoneToLastMsg = new Map<string, { body: string; at: string; dir: 'inbound' | 'outbound' }>();
+
+      // From sms_notifications (outbound)
+      for (const n of (notifs as any[]) || []) {
+        const phone = (n.phone_number || '').replace(/^\+1/, '').replace(/\D/g, '');
+        if (!phoneToLastMsg.has(phone)) {
+          phoneToLastMsg.set(phone, { body: n.message_content || '', at: n.created_at, dir: 'outbound' });
+        }
+      }
+
+      // From sms_messages (could be inbound)
+      for (const m of (convMsgs as any[]) || []) {
+        // We don't have phone directly on sms_messages, skip for now — notifications cover outbound
+      }
+
+      const convos: ConversationPreview[] = [];
+      for (const patient of contactList) {
+        const cleanPhone = patient.phone.replace(/\D/g, '');
+        const last = phoneToLastMsg.get(cleanPhone);
+        if (last) {
+          convos.push({
+            patient,
+            lastMessage: last.body,
+            lastMessageAt: last.at,
+            lastDirection: last.dir,
+            unread: last.dir === 'inbound',
+          });
+        }
+      }
+      // Sort by most recent message
+      convos.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+      setConversations(convos);
     } catch (err) {
-      console.error('Error loading patients:', err);
+      console.error('Error loading SMS data:', err);
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchPatients(); }, [fetchPatients]);
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Filter patients by search
-  useEffect(() => {
-    if (!searchQuery.trim()) {
-      setFilteredPatients(patients);
-    } else {
-      const q = searchQuery.toLowerCase();
-      setFilteredPatients(
-        patients.filter(p =>
-          (p.name && p.name.toLowerCase().includes(q)) ||
-          (p.phone && p.phone.includes(q)) ||
-          (p.email && p.email.toLowerCase().includes(q))
-        )
-      );
-    }
-  }, [searchQuery, patients]);
-
-  // Load SMS history for a patient from sms_notifications table (existing Twilio messages)
+  // Load messages for active patient
   const loadMessages = useCallback(async (patient: PatientContact) => {
-    try {
-      // Try sms_messages table first (from conversations)
-      const { data: convMsgs } = await supabase
-        .from('sms_messages' as any)
-        .select('*')
-        .order('created_at', { ascending: true });
+    const cleanPhone = patient.phone.replace(/\D/g, '');
+    const phoneVariants = [cleanPhone, `+1${cleanPhone}`, patient.phone];
 
-      // Also try sms_notifications (existing outbound messages)
-      const { data: notifMsgs } = await supabase
-        .from('sms_notifications' as any)
-        .select('*')
-        .order('created_at', { ascending: true });
+    const [{ data: notifMsgs }, { data: appts }] = await Promise.all([
+      supabase.from('sms_notifications' as any).select('*').order('created_at', { ascending: true }),
+      supabase.from('appointments').select('*').eq('patient_id', patient.id).order('appointment_date', { ascending: false }),
+    ]);
 
-      const allMessages: Message[] = [];
-
-      // Add messages from sms_messages
-      if (convMsgs) {
-        (convMsgs as any[]).forEach((m: any) => {
-          allMessages.push({
-            id: m.id,
-            direction: m.direction || 'outbound',
-            body: m.body || m.message_content || '',
-            created_at: m.created_at,
-          });
-        });
+    const allMsgs: Message[] = [];
+    if (notifMsgs) {
+      for (const m of notifMsgs as any[]) {
+        const msgPhone = (m.phone_number || '').replace(/^\+1/, '').replace(/\D/g, '');
+        if (phoneVariants.includes(msgPhone) || phoneVariants.includes(m.phone_number)) {
+          allMsgs.push({ id: m.id, direction: 'outbound', body: m.message_content || '', created_at: m.created_at });
+        }
       }
-
-      // Add messages from sms_notifications (all outbound)
-      if (notifMsgs) {
-        (notifMsgs as any[]).forEach((m: any) => {
-          // Only include notifications for this patient's phone
-          if (m.phone_number === patient.phone || m.phone_number === `+1${patient.phone.replace(/\D/g, '')}`) {
-            allMessages.push({
-              id: m.id,
-              direction: 'outbound',
-              body: m.message_content || '',
-              created_at: m.created_at,
-            });
-          }
-        });
-      }
-
-      // Sort by date and dedupe
-      allMessages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-      setMessages(allMessages);
-    } catch {
-      setMessages([]);
     }
+
+    // Also check sms_messages table
+    const { data: convMsgs } = await supabase.from('sms_messages' as any).select('*').order('created_at', { ascending: true });
+    if (convMsgs) {
+      for (const m of convMsgs as any[]) {
+        // Include all for now — we can filter by conversation_id later when we have proper linking
+        allMsgs.push({ id: m.id, direction: m.direction || 'outbound', body: m.body || '', created_at: m.created_at, status: m.status });
+      }
+    }
+
+    allMsgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    // Dedupe by id
+    const seen = new Set<string>();
+    const deduped = allMsgs.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
+    setMessages(deduped);
+
+    // Set appointment data for context panel
+    const appointments = (appts || []) as PatientAppointment[];
+    setPatientAppts(appointments);
+    const paid = appointments.filter(a => a.payment_status === 'completed');
+    setTotalSpent(paid.reduce((s, a) => s + (a.total_amount || 0), 0));
+    setTotalTransactions(paid.length);
   }, []);
 
   useEffect(() => {
@@ -151,46 +190,30 @@ const SMSMessagingTab: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Subscribe to new messages
+  // Realtime subscription
   useEffect(() => {
     const channel = supabase
       .channel('admin-sms-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sms_messages' }, (payload) => {
         const msg = payload.new as any;
-        setMessages(prev => [...prev, {
-          id: msg.id,
-          direction: msg.direction,
-          body: msg.body,
-          created_at: msg.created_at,
-        }]);
+        setMessages(prev => [...prev, { id: msg.id, direction: msg.direction, body: msg.body, created_at: msg.created_at }]);
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const handleSend = async (phone: string, name: string) => {
-    if (!newMessage.trim()) return;
+  const handleSend = async () => {
+    if (!newMessage.trim() || !activePatient) return;
     setIsSending(true);
     try {
+      const phone = activePatient.phone.startsWith('+') ? activePatient.phone : `+1${activePatient.phone.replace(/\D/g, '')}`;
       const { error } = await supabase.functions.invoke('send-sms-notification', {
-        body: {
-          phoneNumber: phone.startsWith('+') ? phone : `+1${phone.replace(/\D/g, '')}`,
-          notificationType: 'custom',
-          customMessage: newMessage.trim(),
-        },
+        body: { phoneNumber: phone, notificationType: 'custom', customMessage: newMessage.trim() },
       });
       if (error) throw error;
-
-      const msg: Message = {
-        id: crypto.randomUUID(),
-        direction: 'outbound',
-        body: newMessage.trim(),
-        created_at: new Date().toISOString(),
-      };
-      setMessages(prev => [...prev, msg]);
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), direction: 'outbound', body: newMessage.trim(), created_at: new Date().toISOString() }]);
       setNewMessage('');
-      toast.success(`Message sent to ${name}`);
+      toast.success(`Sent to ${activePatient.name}`);
     } catch (err) {
       console.error('Send error:', err);
       toast.error('Failed to send message');
@@ -199,228 +222,381 @@ const SMSMessagingTab: React.FC = () => {
     }
   };
 
-  const handleSendToNew = async () => {
-    if (!newMessage.trim() || !newRecipientPhone.trim()) return;
+  const handleComposeSend = async () => {
+    if (!newMessage.trim() || !composePhone.trim()) return;
     setIsSending(true);
     try {
-      const phone = newRecipientPhone.startsWith('+') ? newRecipientPhone : `+1${newRecipientPhone.replace(/\D/g, '')}`;
+      const phone = composePhone.startsWith('+') ? composePhone : `+1${composePhone.replace(/\D/g, '')}`;
       const { error } = await supabase.functions.invoke('send-sms-notification', {
-        body: {
-          phoneNumber: phone,
-          notificationType: 'custom',
-          customMessage: newMessage.trim(),
-        },
+        body: { phoneNumber: phone, notificationType: 'custom', customMessage: newMessage.trim() },
       });
       if (error) throw error;
-      toast.success(`Message sent to ${newRecipientName || newRecipientPhone}`);
+      toast.success(`Sent to ${composeName || composePhone}`);
       setNewMessage('');
-      setShowNewMessage(false);
-      setNewRecipientPhone('');
-      setNewRecipientName('');
+      setShowCompose(false);
+      setComposePhone('');
+      setComposeName('');
+      fetchData();
     } catch (err) {
-      console.error('Send error:', err);
-      toast.error('Failed to send message');
+      toast.error('Failed to send');
     } finally {
       setIsSending(false);
     }
   };
 
-  // Chat view
-  if (activePatient) {
-    return (
-      <div className="h-[calc(100vh-120px)] flex flex-col">
-        <div className="flex items-center gap-3 pb-3 border-b mb-3">
-          <Button variant="ghost" size="sm" onClick={() => setActivePatient(null)}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div className="w-10 h-10 rounded-full bg-[#B91C1C]/10 flex items-center justify-center">
-            <User className="h-5 w-5 text-[#B91C1C]" />
+  // Filter conversations
+  const filteredConvos = useMemo(() => {
+    let list = filter === 'unread' ? conversations.filter(c => c.unread) : conversations;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(c =>
+        c.patient.name.toLowerCase().includes(q) ||
+        c.patient.phone.includes(q) ||
+        (c.patient.email && c.patient.email.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [conversations, filter, searchQuery]);
+
+  // For "All" filter — show patients without conversations too
+  const allContactsFiltered = useMemo(() => {
+    if (filter !== 'all') return [];
+    let list = patients.filter(p => !conversations.find(c => c.patient.id === p.id));
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(p => p.name.toLowerCase().includes(q) || p.phone.includes(q));
+    }
+    return list;
+  }, [patients, conversations, filter, searchQuery]);
+
+  const selectPatient = (p: PatientContact) => {
+    setActivePatient(p);
+    setMobileShowThread(true);
+    setMobileShowContext(false);
+  };
+
+  const initials = (name: string) => {
+    const parts = name.split(' ').filter(Boolean);
+    return parts.length >= 2 ? `${parts[0][0]}${parts[1][0]}`.toUpperCase() : (parts[0]?.[0] || '?').toUpperCase();
+  };
+
+  const upcoming = patientAppts.filter(a => ['scheduled', 'confirmed'].includes(a.status));
+  const past = patientAppts.filter(a => ['completed', 'specimen_delivered'].includes(a.status));
+
+  return (
+    <div className="flex h-[calc(100vh-100px)] md:h-[calc(100vh-80px)] border rounded-lg overflow-hidden bg-white">
+
+      {/* ======= COLUMN 1: Conversation List ======= */}
+      <div className={`w-full md:w-80 lg:w-96 border-r flex flex-col bg-white flex-shrink-0 ${mobileShowThread ? 'hidden md:flex' : 'flex'}`}>
+        {/* Header */}
+        <div className="p-4 border-b">
+          <div className="flex items-center justify-between mb-3">
+            <h1 className="text-xl font-bold">Messages</h1>
+            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setShowCompose(true)}>
+              <Plus className="h-4 w-4" />
+            </Button>
           </div>
-          <div className="flex-1">
-            <p className="font-semibold">{activePatient.name}</p>
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              <Phone className="h-3 w-3" /> {activePatient.phone}
-            </p>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search Inbox" className="pl-9 h-9 text-sm bg-gray-50" />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-3 px-2">
-          {messages.length === 0 && (
-            <div className="text-center py-12">
-              <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="text-muted-foreground">No messages yet. Send a message to start.</p>
+        {/* Filter tabs */}
+        <div className="flex items-center gap-1 px-4 py-2 border-b">
+          <button onClick={() => setFilter('inbox')} className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'inbox' ? 'bg-[#1e293b] text-white border-[#1e293b]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+            Inbox
+          </button>
+          <button onClick={() => setFilter('unread')} className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'unread' ? 'bg-[#1e293b] text-white border-[#1e293b]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+            Unread
+          </button>
+          <button onClick={() => setFilter('all')} className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'all' ? 'bg-[#1e293b] text-white border-[#1e293b]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
+            All Patients
+          </button>
+        </div>
+
+        {/* Conversation list */}
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+          ) : (
+            <>
+              {filteredConvos.map((c) => (
+                <div
+                  key={c.patient.id}
+                  onClick={() => selectPatient(c.patient)}
+                  className={`flex items-start gap-3 px-4 py-3 cursor-pointer border-b transition-colors ${
+                    activePatient?.id === c.patient.id ? 'bg-blue-50' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-sm font-semibold text-gray-600">
+                    {initials(c.patient.name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className={`text-sm truncate ${c.unread ? 'font-bold' : 'font-medium'}`}>{c.patient.name}</p>
+                      <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                        {formatDistanceToNow(new Date(c.lastMessageAt), { addSuffix: false }).replace('about ', '')}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {c.lastDirection === 'outbound' ? 'You: ' : ''}{c.lastMessage}
+                    </p>
+                  </div>
+                  {c.unread && <span className="w-2.5 h-2.5 rounded-full bg-blue-500 flex-shrink-0 mt-1.5" />}
+                </div>
+              ))}
+
+              {/* All patients without conversations */}
+              {filter === 'all' && allContactsFiltered.map((p) => (
+                <div
+                  key={p.id}
+                  onClick={() => selectPatient(p)}
+                  className={`flex items-center gap-3 px-4 py-3 cursor-pointer border-b transition-colors ${
+                    activePatient?.id === p.id ? 'bg-blue-50' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 text-sm font-semibold text-gray-600">
+                    {initials(p.name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{p.name}</p>
+                    <p className="text-xs text-muted-foreground">{p.phone}</p>
+                  </div>
+                </div>
+              ))}
+
+              {filteredConvos.length === 0 && allContactsFiltered.length === 0 && (
+                <div className="py-12 text-center">
+                  <Inbox className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">{searchQuery ? 'No results' : 'No conversations yet'}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ======= COLUMN 2: Message Thread ======= */}
+      <div className={`flex-1 flex flex-col min-w-0 ${!mobileShowThread && !activePatient ? 'hidden md:flex' : mobileShowThread ? 'flex' : 'hidden md:flex'}`}>
+        {showCompose ? (
+          /* Compose new message */
+          <div className="flex flex-col h-full">
+            <div className="flex items-center gap-3 px-4 py-3 border-b">
+              <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={() => { setShowCompose(false); setMobileShowThread(false); }}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8 hidden md:flex" onClick={() => setShowCompose(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+              <h2 className="font-semibold">New Message</h2>
+            </div>
+            <div className="p-4 border-b space-y-3">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium w-12">To:</label>
+                <Input value={composeName} onChange={e => setComposeName(e.target.value)} placeholder="Name" className="h-9 text-sm flex-1" />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium w-12">Phone:</label>
+                <Input value={composePhone} onChange={e => setComposePhone(e.target.value)} placeholder="(555) 000-0000" className="h-9 text-sm flex-1" type="tel" />
+              </div>
+            </div>
+            <div className="flex-1" />
+            <div className="border-t p-3 flex gap-2">
+              <Input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Send via text" className="flex-1 h-10"
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleComposeSend()} />
+              <Button onClick={handleComposeSend} disabled={isSending || !newMessage.trim() || !composePhone.trim()}
+                className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-10 px-4">
+                {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+        ) : activePatient ? (
+          <div className="flex flex-col h-full">
+            {/* Thread header */}
+            <div className="flex items-center gap-3 px-4 py-3 border-b bg-white">
+              <Button variant="ghost" size="icon" className="h-8 w-8 md:hidden" onClick={() => { setMobileShowThread(false); setActivePatient(null); }}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-base">{activePatient.name}</p>
+                <p className="text-xs text-muted-foreground">{activePatient.phone}</p>
+              </div>
+              <span className="text-xs text-muted-foreground hidden sm:block">ConveLabs</span>
+              <Button variant="ghost" size="sm" className="lg:hidden text-xs" onClick={() => setMobileShowContext(!mobileShowContext)}>
+                <User className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Mobile context panel (overlay) */}
+            {mobileShowContext && (
+              <div className="lg:hidden border-b bg-gray-50 p-4 space-y-3 max-h-[40vh] overflow-y-auto">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-sm">Customer Info</p>
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setMobileShowContext(false)}><X className="h-3 w-3" /></Button>
+                </div>
+                {activePatient.email && <p className="text-sm text-blue-600">{activePatient.email}</p>}
+                <p className="text-sm">{activePatient.phone}</p>
+                <p className="text-xs text-muted-foreground">{totalTransactions} transactions | ${totalSpent.toFixed(2)} spent</p>
+              </div>
+            )}
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1 bg-white">
+              {messages.length === 0 && (
+                <div className="text-center py-12">
+                  <MessageSquare className="h-12 w-12 text-gray-200 mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm">No messages yet</p>
+                  <p className="text-xs text-muted-foreground mt-1">Send a message to start the conversation</p>
+                </div>
+              )}
+
+              {messages.map((msg, i) => {
+                const prevMsg = messages[i - 1];
+                const showDate = !prevMsg || format(new Date(msg.created_at), 'MMM d, yyyy') !== format(new Date(prevMsg.created_at), 'MMM d, yyyy');
+                return (
+                  <React.Fragment key={msg.id}>
+                    {showDate && (
+                      <div className="text-center py-3">
+                        <span className="text-[11px] text-muted-foreground bg-white px-2">
+                          {format(new Date(msg.created_at), 'MMMM d, yyyy')} at {format(new Date(msg.created_at), 'h:mm a')}
+                        </span>
+                      </div>
+                    )}
+                    <div className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'} mb-1`}>
+                      {msg.direction === 'inbound' && (
+                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 mr-2 mt-auto text-xs font-semibold text-gray-500">
+                          {initials(activePatient.name)}
+                        </div>
+                      )}
+                      <div className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                        msg.direction === 'outbound'
+                          ? 'bg-blue-600 text-white rounded-br-md'
+                          : 'bg-gray-100 text-gray-800 rounded-bl-md'
+                      }`}>
+                        <p className="text-sm whitespace-pre-wrap">{msg.body}</p>
+                        {!showDate && (
+                          <p className={`text-[10px] mt-1 ${msg.direction === 'outbound' ? 'text-blue-200' : 'text-gray-400'}`}>
+                            {format(new Date(msg.created_at), 'h:mm a')}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="border-t bg-white p-3 flex gap-2 items-center">
+              <Input
+                value={newMessage}
+                onChange={e => setNewMessage(e.target.value)}
+                placeholder="Send via text"
+                className="flex-1 h-10 text-sm"
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
+              />
+              <Button
+                onClick={handleSend}
+                disabled={isSending || !newMessage.trim()}
+                size="icon"
+                className="h-10 w-10 bg-[#B91C1C] hover:bg-[#991B1B] text-white rounded-lg"
+              >
+                {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          /* Empty state */
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+              <MessageSquare className="h-8 w-8 text-gray-300" />
+            </div>
+            <h3 className="font-semibold text-gray-700 mb-1">Select a conversation</h3>
+            <p className="text-sm text-muted-foreground max-w-xs">
+              Choose a conversation from the left or start a new one
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ======= COLUMN 3: Customer Context (desktop only) ======= */}
+      {activePatient && !showCompose && (
+        <div className="hidden lg:flex w-72 xl:w-80 border-l flex-col bg-white flex-shrink-0 overflow-y-auto">
+          {/* Contact info */}
+          <div className="p-4 border-b">
+            {activePatient.email && (
+              <a href={`mailto:${activePatient.email}`} className="text-sm text-blue-600 hover:underline block font-medium">{activePatient.email}</a>
+            )}
+            <p className="text-sm text-gray-700 mt-1">{activePatient.phone}</p>
+            {activePatient.address && (
+              <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
+                <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                {activePatient.address}{activePatient.city ? `, ${activePatient.city}` : ''}{activePatient.state ? `, ${activePatient.state}` : ''}
+              </p>
+            )}
+          </div>
+
+          {/* Revenue summary — Hormozi: always show the money */}
+          <div className="px-4 py-3 border-b">
+            <p className="text-sm">
+              <span className="font-semibold text-blue-700">{totalTransactions} transactions</span>
+              <span className="text-muted-foreground mx-2">|</span>
+              <span className="font-semibold text-emerald-700">${totalSpent.toFixed(2)} spent</span>
+            </p>
+          </div>
+
+          {/* Upcoming appointments */}
+          {upcoming.length > 0 && (
+            <div className="p-4 border-b">
+              <p className="text-sm font-bold mb-3">Upcoming appointments</p>
+              {upcoming.map(a => (
+                <div key={a.id} className="flex items-start gap-2 mb-3 last:mb-0">
+                  <Calendar className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-tight">
+                      {(a.service_name || a.service_type || 'Blood Work').replace(/_|-/g, ' ')}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}
+                      {a.appointment_time ? `, ${a.appointment_time}` : ''}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-300 flex-shrink-0 mt-0.5" />
+                </div>
+              ))}
             </div>
           )}
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex ${msg.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
-                msg.direction === 'outbound'
-                  ? 'bg-[#B91C1C] text-white rounded-br-md'
-                  : 'bg-gray-100 text-gray-800 rounded-bl-md'
-              }`}>
-                <p className="text-sm">{msg.body}</p>
-                <p className={`text-[10px] mt-1 ${msg.direction === 'outbound' ? 'text-red-200' : 'text-gray-400'}`}>
-                  {format(new Date(msg.created_at), 'MMM d, h:mm a')}
-                </p>
-              </div>
-            </div>
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
 
-        <div className="border-t pt-3 mt-3 flex gap-2">
-          <Input
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Type a message..."
-            className="flex-1"
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend(activePatient.phone, activePatient.name)}
-          />
-          <Button
-            className="bg-[#B91C1C] hover:bg-[#991B1B] text-white px-4"
-            onClick={() => handleSend(activePatient.phone, activePatient.name)}
-            disabled={isSending || !newMessage.trim()}
-          >
-            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // New message compose
-  if (showNewMessage) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => setShowNewMessage(false)}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <h2 className="text-lg font-bold">New Message</h2>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium">Recipient Name</label>
-            <Input value={newRecipientName} onChange={e => setNewRecipientName(e.target.value)} placeholder="Patient name" />
+          {/* Previous appointments */}
+          <div className="p-4">
+            <p className="text-sm font-bold mb-3">Previous appointments</p>
+            {past.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No previous appointments</p>
+            ) : (
+              past.slice(0, 5).map(a => (
+                <div key={a.id} className="flex items-start gap-2 mb-3 last:mb-0">
+                  <Calendar className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-tight">
+                      {(a.service_name || a.service_type || 'Blood Work').replace(/_|-/g, ' ')}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}
+                      {a.appointment_time ? `, ${a.appointment_time}` : ''}
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-300 flex-shrink-0 mt-0.5" />
+                </div>
+              ))
+            )}
+            {past.length > 5 && (
+              <button className="text-xs text-blue-600 hover:underline mt-1">View all</button>
+            )}
           </div>
-          <div>
-            <label className="text-sm font-medium">Phone Number *</label>
-            <Input value={newRecipientPhone} onChange={e => setNewRecipientPhone(e.target.value)} placeholder="+1 (555) 000-0000" type="tel" />
-          </div>
-          <div>
-            <label className="text-sm font-medium">Message *</label>
-            <Input
-              value={newMessage}
-              onChange={e => setNewMessage(e.target.value)}
-              placeholder="Type your message..."
-              onKeyDown={e => e.key === 'Enter' && handleSendToNew()}
-            />
-          </div>
-          <Button
-            className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-2"
-            onClick={handleSendToNew}
-            disabled={isSending || !newMessage.trim() || !newRecipientPhone.trim()}
-          >
-            {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Send className="h-4 w-4" /> Send Message</>}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Patient list with search
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <MessageSquare className="h-5 w-5 text-[#B91C1C]" />
-          SMS Messages
-        </h2>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowNewMessage(true)} className="gap-1">
-            <Plus className="h-4 w-4" /> New Message
-          </Button>
-          <Button variant="outline" size="sm" onClick={fetchPatients} className="gap-1">
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </Button>
-        </div>
-      </div>
-
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search patients by name, phone, or email..."
-          className="pl-9"
-        />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-[#B91C1C]">{patients.length}</p>
-            <p className="text-xs text-muted-foreground">Patients</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-emerald-600">{patients.filter(p => p.phone).length}</p>
-            <p className="text-xs text-muted-foreground">With Phone</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-blue-600">{patients.filter(p => p.email).length}</p>
-            <p className="text-xs text-muted-foreground">With Email</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {isLoading && (
-        <div className="flex justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" />
         </div>
       )}
-
-      {!isLoading && filteredPatients.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="p-8 text-center">
-            <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-            <h3 className="font-semibold text-gray-800 mb-1">
-              {searchQuery ? 'No patients match your search' : 'No patients with phone numbers'}
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              {searchQuery ? 'Try a different search term.' : 'Patient phone numbers will appear here when added.'}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="space-y-2">
-        {filteredPatients.map((patient) => (
-          <Card
-            key={patient.id}
-            className="shadow-sm cursor-pointer hover:shadow-md transition-all hover:border-[#B91C1C]/30"
-            onClick={() => setActivePatient(patient)}
-          >
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="w-11 h-11 rounded-full bg-[#B91C1C]/10 flex items-center justify-center">
-                <User className="h-5 w-5 text-[#B91C1C]" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="font-semibold text-sm truncate">{patient.name}</p>
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Phone className="h-3 w-3" /> {patient.phone}
-                </p>
-              </div>
-              <Button size="sm" variant="outline" className="gap-1 text-xs" onClick={(e) => { e.stopPropagation(); setActivePatient(patient); }}>
-                <MessageSquare className="h-3 w-3" /> Message
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
     </div>
   );
 };

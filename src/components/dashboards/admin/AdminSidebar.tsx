@@ -26,7 +26,6 @@ function getSidebarSections(basePath: string): SidebarSection[] {
     {
       label: 'MANAGEMENT',
       items: [
-        { name: 'Users', icon: Users, path: `${basePath}/users` },
         { name: 'Staff', icon: Briefcase, path: `${basePath}/staff` },
         { name: 'Services', icon: Package, path: `${basePath}/services` },
         { name: 'SMS Messages', icon: MessageSquare, path: `${basePath}/sms`, badge: true },

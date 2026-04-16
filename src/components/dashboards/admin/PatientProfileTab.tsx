@@ -365,41 +365,67 @@ const PatientProfileTab: React.FC = () => {
           </TabsContent>
         </Tabs>
 
-        {/* Edit Patient Modal */}
+        {/* Edit Patient Modal — Square "Edit Customer" style */}
         <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-          <DialogContent className="max-w-md w-[95vw] sm:w-full">
-            <DialogHeader><DialogTitle>Edit Patient Information</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>First Name</Label><Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} /></div>
-                <div><Label>Last Name</Label><Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} /></div>
+          <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
+            <DialogHeader><DialogTitle className="text-lg font-bold text-center">Edit Customer</DialogTitle></DialogHeader>
+            <div className="divide-y">
+              {/* Name */}
+              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600">First Name</Label>
+                <Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} className="h-9" />
               </div>
-              <div><Label>Email</Label><Input type="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Phone</Label><Input value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} /></div>
-                <div><Label>Date of Birth</Label><Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} /></div>
+              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600">Last Name</Label>
+                <Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} className="h-9" />
               </div>
-              <div className="border-t pt-3 space-y-2">
-                <p className="text-sm font-semibold">Home Address</p>
-                <div><Label>Street</Label><Input value={editForm.address} onChange={e => setEditForm(pr => ({ ...pr, address: e.target.value }))} placeholder="123 Main St" /></div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2"><Label>City</Label><Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} /></div>
-                  <div><Label>State</Label><Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value }))} maxLength={2} placeholder="FL" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Label>ZIP</Label><Input value={editForm.zipcode} onChange={e => setEditForm(pr => ({ ...pr, zipcode: e.target.value }))} /></div>
-                  <div><Label>Gate Code</Label><Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Optional" /></div>
-                </div>
+              {/* Birthday */}
+              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600">Birthday</Label>
+                <Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} className="h-9" />
               </div>
-              <div className="border-t pt-3 space-y-2">
-                <p className="text-sm font-semibold">Insurance</p>
-                <div><Label>Provider</Label><Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="e.g. Blue Cross" /></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Label>Member ID</Label><Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} /></div>
-                  <div><Label>Group #</Label><Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} /></div>
+              {/* Address */}
+              <div className="grid grid-cols-[140px_1fr] items-start py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600 mt-2">Address</Label>
+                <div className="space-y-2">
+                  <Input value={editForm.address} onChange={e => setEditForm(pr => ({ ...pr, address: e.target.value }))} placeholder="Street address" className="h-9" />
+                  <Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} placeholder="City" className="h-9" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value }))} placeholder="State" maxLength={2} className="h-9" />
+                    <Input value={editForm.zipcode} onChange={e => setEditForm(pr => ({ ...pr, zipcode: e.target.value }))} placeholder="ZIP" className="h-9" />
+                  </div>
                 </div>
               </div>
-              <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={async () => {
+              {/* Gate Code */}
+              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600">Gate Code</Label>
+                <Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Gate Code" className="h-9" />
+              </div>
+              {/* Phone */}
+              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600">Phone Number</Label>
+                <Input value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} className="h-9" />
+              </div>
+              {/* Email */}
+              <div className="grid grid-cols-[140px_1fr] items-center py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600">Email Address</Label>
+                <Input type="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} className="h-9" />
+              </div>
+              {/* Insurance */}
+              <div className="grid grid-cols-[140px_1fr] items-start py-3 gap-3">
+                <Label className="text-sm font-semibold text-gray-600 mt-2 text-[#B91C1C]">Insurance Courier &amp; Member ID</Label>
+                <div className="space-y-2">
+                  <Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="Insurance Courier & Member ID (Lab Will Bill Insurance)" className="h-9 text-sm" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} placeholder="Member ID" className="h-9" />
+                    <Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} placeholder="Group #" className="h-9" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-4 border-t mt-2">
+              <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
+              <Button className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold" onClick={async () => {
                 const { error } = await supabase.from('tenant_patients').update({
                   first_name: editForm.firstName, last_name: editForm.lastName,
                   email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
@@ -467,99 +493,108 @@ const PatientProfileTab: React.FC = () => {
     );
   }
 
-  // Search view
+  // Search view — Square Customer Directory style
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <User className="h-6 w-6 text-[#B91C1C]" /> Patient Profiles
-        </h1>
-        <p className="text-sm text-muted-foreground">Search for a patient to view their complete history</p>
-      </div>
-
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <div className="relative flex-1 max-w-lg w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by name, email, or phone..."
-            className="pl-10 h-11"
-          />
+    <div className="space-y-4">
+      {/* Header row */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold">Customers</h1>
+          <p className="text-sm text-muted-foreground">{allPatients.length.toLocaleString()} total customers in your directory</p>
         </div>
         <div className="flex items-center gap-2">
-          <p className="text-sm text-muted-foreground whitespace-nowrap">{patients.length} patients</p>
-          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" onClick={() => setCreatePatientOpen(true)}>
-            <UserPlus className="h-4 w-4" /> Add Patient
+          <Button size="sm" className="bg-[#1e293b] hover:bg-[#0f172a] text-white gap-1.5 h-9 text-xs" onClick={() => setCreatePatientOpen(true)}>
+            <UserPlus className="h-3.5 w-3.5" /> Create
           </Button>
         </div>
       </div>
 
-      {/* Filter chips: All / Dormant / Incomplete */}
-      {(() => {
-        const dormantCount = allPatients.filter(p => !patientsWithAppts.has(p.id)).length;
-        const incompleteCount = allPatients.filter(p => !p.address || p.address.trim() === '').length;
-        return (
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setFilter('all')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${filter === 'all' ? 'bg-[#B91C1C] text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
-            >
-              All ({allPatients.length})
-            </button>
-            <button
-              onClick={() => setFilter('dormant')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${filter === 'dormant' ? 'bg-amber-600 text-white' : 'bg-amber-50 hover:bg-amber-100 text-amber-800'}`}
-              title="Patients in the database who have never booked an appointment — your warmest leads."
-            >
-              🔥 Dormant / Never Booked ({dormantCount})
-            </button>
-            <button
-              onClick={() => setFilter('incomplete')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${filter === 'incomplete' ? 'bg-blue-600 text-white' : 'bg-blue-50 hover:bg-blue-100 text-blue-800'}`}
-              title="Patients missing address, city, or ZIP — chart them up on their next call."
-            >
-              📍 Missing Address ({incompleteCount})
-            </button>
-          </div>
-        );
-      })()}
-
-      {patients.length > 0 && (
-        <div className="space-y-2 max-w-lg">
-          {patients.map(p => (
-            <Card key={p.id} className="shadow-sm cursor-pointer hover:shadow-md transition" onClick={() => loadPatientData(p)}>
-              <CardContent className="p-4 flex items-center gap-3">
-                <div className="w-11 h-11 rounded-full bg-[#B91C1C]/10 flex items-center justify-center">
-                  <User className="h-5 w-5 text-[#B91C1C]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold">{p.first_name} {p.last_name}</p>
-                    {!patientsWithAppts.has(p.id) && (
-                      <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">Never booked</Badge>
-                    )}
-                    {(!p.address || p.address.trim() === '') && (
-                      <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">No address</Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    {p.email && <span className="truncate">{p.email}</span>}
-                    {p.phone && <span>{p.phone}</span>}
-                  </div>
-                </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
-              </CardContent>
-            </Card>
-          ))}
+      {/* Search + filter bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="Search..."
+            className="pl-9 h-9 text-sm"
+          />
         </div>
-      )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(() => {
+            const dormantCount = allPatients.filter(p => !patientsWithAppts.has(p.id)).length;
+            const incompleteCount = allPatients.filter(p => !p.address || p.address.trim() === '').length;
+            return (
+              <>
+                <button onClick={() => setFilter('all')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'all' ? 'bg-[#1e293b] text-white border-[#1e293b]' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
+                  All ({allPatients.length})
+                </button>
+                <button onClick={() => setFilter('dormant')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'dormant' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
+                  Never Booked ({dormantCount})
+                </button>
+                <button onClick={() => setFilter('incomplete')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'incomplete' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
+                  Missing Address ({incompleteCount})
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      </div>
 
-      {patients.length === 0 && searchQuery && (
+      {/* Table */}
+      {patients.length > 0 ? (
+        <div className="border rounded-lg overflow-hidden bg-white">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-gray-50/80">
+                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide">Name</th>
+                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden sm:table-cell">Email</th>
+                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden md:table-cell">Phone</th>
+                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden lg:table-cell">Birthday</th>
+                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden lg:table-cell">Address</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patients.map(p => (
+                  <tr key={p.id} className="border-b last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => loadPatientData(p)}>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-blue-700 hover:underline">{p.first_name} {p.last_name}</span>
+                        {!patientsWithAppts.has(p.id) && (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Never booked" />
+                        )}
+                      </div>
+                      {/* Mobile: show email/phone inline */}
+                      <div className="sm:hidden text-xs text-muted-foreground mt-0.5">
+                        {p.email && <span className="truncate block">{p.email}</span>}
+                        {p.phone && <span>{p.phone}</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">
+                      <span className="truncate block max-w-[220px]">{p.email || '—'}</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{p.phone || '—'}</td>
+                    <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">
+                      {p.date_of_birth ? format(new Date(p.date_of_birth + 'T12:00:00'), 'MMM d, yyyy') : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">
+                      <span className="truncate block max-w-[200px]">
+                        {p.address ? `${p.address}${p.city ? `, ${p.city}` : ''}` : '—'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : searchQuery ? (
         <p className="text-muted-foreground text-center py-8">No patients found matching "{searchQuery}"</p>
-      )}
-
-      {patients.length === 0 && !searchQuery && (
+      ) : (
         <div className="flex justify-center py-12">
           <div className="w-8 h-8 border-4 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
         </div>
