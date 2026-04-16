@@ -33,8 +33,10 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
     return appointments.filter(a => a.appointment_date === selectedDateStr && a.status !== 'cancelled');
   }, [appointments, selectedDateStr]);
 
-  const activeAppts = dayAppointments.filter(a => a.status !== 'completed');
-  const completedAppts = dayAppointments.filter(a => a.status === 'completed');
+  const activeAppts = dayAppointments.filter(a => a.status !== 'completed')
+    .sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
+  const completedAppts = dayAppointments.filter(a => a.status === 'completed')
+    .sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

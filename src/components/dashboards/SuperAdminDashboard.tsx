@@ -65,7 +65,7 @@ const SuperAdminDashboard = () => {
         supabase.from('appointments').select('*', { count: 'exact', head: true }).in('invoice_status', ['sent', 'reminded']).eq('is_vip', false),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'cancelled').gte('appointment_date', monthStartStr),
         supabase.from('appointments').select('total_amount, tip_amount, service_type, appointment_date').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
-        supabase.from('appointments').select('*').order('appointment_date', { ascending: false }).limit(10),
+        supabase.from('appointments').select('*').order('appointment_date', { ascending: false }).order('appointment_time', { ascending: true }).limit(10),
         supabase.from('appointments').select('service_type').gte('appointment_date', monthStartStr).not('status', 'eq', 'cancelled'),
       ]);
 

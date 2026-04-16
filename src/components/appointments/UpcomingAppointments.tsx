@@ -24,7 +24,8 @@ const UpcomingAppointments = () => {
       const { data: byId } = await supabase.from('appointments').select('*')
         .eq('patient_id', user.id)
         .in('status', ['scheduled', 'confirmed', 'en_route'])
-        .order('appointment_date', { ascending: true });
+        .order('appointment_date', { ascending: true })
+        .order('appointment_time', { ascending: true });
       if (byId) results = [...byId];
 
       // Also by email
@@ -32,7 +33,8 @@ const UpcomingAppointments = () => {
         const { data: byEmail } = await supabase.from('appointments').select('*')
           .ilike('patient_email', user.email)
           .in('status', ['scheduled', 'confirmed', 'en_route'])
-          .order('appointment_date', { ascending: true });
+          .order('appointment_date', { ascending: true })
+          .order('appointment_time', { ascending: true });
         if (byEmail) {
           const ids = new Set(results.map(a => a.id));
           results = [...results, ...byEmail.filter(a => !ids.has(a.id))];

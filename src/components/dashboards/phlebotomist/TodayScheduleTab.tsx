@@ -58,8 +58,9 @@ const TodayScheduleTab = () => {
           .eq('phlebotomist_id', user.id)
           .like('appointment_date', `${todayStr}%`)
           .not('status', 'in', '("cancelled")')
-          .order('appointment_date', { ascending: true });
-          
+          .order('appointment_date', { ascending: true })
+          .order('appointment_time', { ascending: true });
+
         if (appointmentsError) throw appointmentsError;
         
         if (!appointmentsData || appointmentsData.length === 0) {

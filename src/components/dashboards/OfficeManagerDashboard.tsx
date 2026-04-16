@@ -36,6 +36,7 @@ const OfficeManagerDashboard = () => {
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: false })
+        .order('appointment_time', { ascending: true })
         .limit(200);
 
       if (error) throw error;

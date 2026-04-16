@@ -26,8 +26,9 @@ const PatientAppointmentSection = () => {
           phlebotomist:staff_profiles(first_name, last_name)
         `)
         .eq('patient_id', user.id)
-        .order('appointment_date', { ascending: false });
-      
+        .order('appointment_date', { ascending: false })
+        .order('appointment_time', { ascending: true });
+
       if (error) throw error;
       setAppointments(data || []);
     } catch (error) {

@@ -59,7 +59,8 @@ const CalendarView: React.FC<CalendarViewProps> = ({
         .gte('appointment_date', startDate.toISOString())
         .lte('appointment_date', endDate.toISOString())
         .in('status', filterByStatus)
-        .order('appointment_date', { ascending: true });
+        .order('appointment_date', { ascending: true })
+        .order('appointment_time', { ascending: true });
 
       if (filterByPhlebotomist) {
         query = query.eq('phlebotomist_id', filterByPhlebotomist);
@@ -107,9 +108,9 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   });
 
   // Get appointments for selected day
-  const selectedDayAppointments = appointments?.filter(apt => 
+  const selectedDayAppointments = (appointments?.filter(apt =>
     isSameDay(new Date(apt.appointment_date), selectedDay || new Date())
-  ) || [];
+  ) || []).sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
 
   // Get appointment counts per day
   const appointmentCounts = React.useMemo(() => {

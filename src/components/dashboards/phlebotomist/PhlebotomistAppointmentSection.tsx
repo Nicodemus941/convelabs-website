@@ -32,8 +32,9 @@ const PhlebotomistAppointmentSection = () => {
         .from('appointments')
         .select('*')
         .eq('phlebotomist_id', staffData.id)
-        .order('appointment_date', { ascending: true });
-      
+        .order('appointment_date', { ascending: true })
+        .order('appointment_time', { ascending: true });
+
       if (error) throw error;
       setAppointments(data || []);
     } catch (error) {

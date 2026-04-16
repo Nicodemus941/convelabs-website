@@ -41,8 +41,9 @@ export function useTenantAppointments() {
         notes
       `, { count: 'exact' })
       .eq("tenant_id", currentTenant?.id)
-      .order("appointment_date", { ascending: false });
-    
+      .order("appointment_date", { ascending: false })
+      .order("appointment_time", { ascending: true });
+
     // Apply date filters
     if (startDate) {
       query = query.gte("appointment_date", startDate.toISOString());

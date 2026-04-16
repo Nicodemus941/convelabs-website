@@ -50,7 +50,8 @@ const AdminCalendar: React.FC = () => {
       const { data, error } = await supabase
         .from('appointments')
         .select('*')
-        .order('appointment_date', { ascending: true });
+        .order('appointment_date', { ascending: true })
+        .order('appointment_time', { ascending: true });
 
       if (error) throw error;
 
