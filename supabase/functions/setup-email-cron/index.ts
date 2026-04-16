@@ -80,11 +80,44 @@ serve(async (req: Request) => {
         );
       `);
       
+      // Schedule invoice reminder processing every 15 minutes
+      // Handles 3-stage escalation: gentle reminder (6h) → final warning (11h) → auto-cancel (12h)
+      await connection.queryObject(`
+        SELECT cron.schedule(
+          'process-invoice-reminders',
+          '*/15 * * * *',
+          $$
+          SELECT
+            net.http_post(
+              url:='${supabaseUrl}/functions/v1/process-invoice-reminders',
+              headers:='{"Content-Type": "application/json", "Authorization": "Bearer ${supabaseAnonKey}"}'::jsonb,
+              body:='{}'::jsonb
+            ) as request_id;
+          $$
+        );
+      `);
+
+      // Schedule stale payment check every 6 hours (owner alert, not patient-facing)
+      await connection.queryObject(`
+        SELECT cron.schedule(
+          'check-stale-payments',
+          '0 */6 * * *',
+          $$
+          SELECT
+            net.http_post(
+              url:='${supabaseUrl}/functions/v1/check-stale-payments',
+              headers:='{"Content-Type": "application/json", "Authorization": "Bearer ${supabaseAnonKey}"}'::jsonb,
+              body:='{}'::jsonb
+            ) as request_id;
+          $$
+        );
+      `);
+
       // Return success response
       return new Response(
-        JSON.stringify({ 
-          success: true, 
-          message: "Scheduled email jobs have been set up successfully" 
+        JSON.stringify({
+          success: true,
+          message: "Scheduled email jobs have been set up successfully (including invoice reminders and stale payment checks)"
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
