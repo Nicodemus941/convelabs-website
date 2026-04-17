@@ -44,7 +44,7 @@ const TESTIMONIAL_VIDEOS: TestimonialVideo[] = [
   },
   {
     // Michael Morelli — 970K influencer, $25M entrepreneur
-    videoId: "MORELLI_VIDEO_ID", // TODO: replace with actual YouTube id
+    videoId: "VJ7whL0fzfc",
     pullQuote: "Drove to Tampa to have Nico do my labs. Never going back to a lab.",
     name: "Michael Morelli",
     context: "970K+ followers · Founder, Morellifit & Detox Organics",
