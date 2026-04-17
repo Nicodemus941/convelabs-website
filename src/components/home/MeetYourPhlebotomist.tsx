@@ -30,18 +30,17 @@ const MeetYourPhlebotomist: React.FC = () => {
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
         >
-          <div className="grid md:grid-cols-[minmax(0,280px)_1fr] gap-6 md:gap-10 items-center bg-gradient-to-br from-gray-50 to-white rounded-2xl border border-gray-200 p-6 md:p-8 lg:p-10 shadow-sm">
-            {/* Photo */}
+          <div className="grid md:grid-cols-[minmax(0,320px)_1fr] gap-6 md:gap-10 items-center bg-gradient-to-br from-gray-50 to-white rounded-2xl border border-gray-200 p-6 md:p-8 lg:p-10 shadow-sm">
+            {/* Photo — portrait aspect so the face isn't cropped */}
             <div className="flex justify-center md:justify-start">
-              <div className="relative">
+              <div className="relative w-full max-w-[280px]">
                 <div className="absolute -inset-1 bg-gradient-to-br from-conve-red/20 to-transparent rounded-2xl blur-sm"></div>
                 <img
                   src={FOUNDER_PHOTO}
                   alt="Nico Jean-Baptiste — Founder & Lead Phlebotomist, ConveLabs"
-                  className="relative h-64 w-64 sm:h-72 sm:w-72 object-cover object-top rounded-2xl shadow-lg ring-1 ring-gray-200"
+                  className="relative w-full aspect-[3/4] object-cover object-center rounded-2xl shadow-lg ring-1 ring-gray-200"
                   loading="lazy"
                   onError={(e) => {
-                    // Graceful fallback if photo not uploaded yet
                     (e.currentTarget as HTMLImageElement).style.display = 'none';
                   }}
                 />

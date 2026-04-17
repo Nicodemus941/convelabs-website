@@ -8,13 +8,9 @@ import MeetYourPhlebotomist from "@/components/home/MeetYourPhlebotomist";
 import ComparisonTable from "@/components/home/ComparisonTable";
 import ValueStack from "@/components/home/ValueStack";
 import GuaranteeBanner from "@/components/home/GuaranteeBanner";
-import HealthInsights from "@/components/home/HealthInsights";
 import TrustBanner from "@/components/home/TrustBanner";
 import HowItWorks from "@/components/home/HowItWorks";
-import PricingTransparency from "@/components/home/PricingTransparency";
-import ServicesSection from "@/components/home/ServicesSection";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
-import ServiceAreasMap from "@/components/home/ServiceAreasMap";
 import MembershipCTA from "@/components/home/MembershipCTA";
 import FAQSection from "@/components/home/FAQSection";
 import CallToAction from "@/components/home/CallToAction";
@@ -211,10 +207,6 @@ const Home = () => {
             <ComparisonTable />
             <ValueStack />
             <HowItWorks />
-            <PricingTransparency />
-            <ServicesSection />
-            <HealthInsights />
-            <ServiceAreasMap />
             <MembershipCTA />
             <FAQSection />
             <LeadCapture />
