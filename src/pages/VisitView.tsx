@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   CheckCircle, Calendar, Clock, MapPin, Phone, FileText,
   Loader2, AlertCircle, Download, ExternalLink, ArrowRight, UserPlus,
+  Users, MessageSquare,
 } from 'lucide-react';
 import Header from '@/components/home/Header';
 import Footer from '@/components/home/Footer';
@@ -265,6 +266,67 @@ const VisitView: React.FC = () => {
             </Button>
           </a>
         </div>
+
+        {/* Family member upsell — Hormozi post-purchase offer */}
+        {(() => {
+          const firstName = visit.patient_name?.split(' ')[0] || 'there';
+          const dateStr = formatAppointmentDate(visit.appointment_date);
+          const timeStr = formatAppointmentTime(visit.appointment_time);
+          const smsBody = encodeURIComponent(
+            `Hi, this is ${visit.patient_name || 'a ConveLabs patient'}. I'd like to add a family member to my visit on ${dateStr} at ${timeStr} (${visit.address || 'my address'}). Please send me the $75 add-on payment link. Thanks!`
+          );
+          const smsHref = `sms:+19415279169${/iPad|iPhone|iPod/.test(navigator.userAgent) ? '&' : '?'}body=${smsBody}`;
+          return (
+            <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white mb-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-bl-lg tracking-wide">
+                SAVE $75
+              </div>
+              <CardContent className="p-5">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="h-11 w-11 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                    <Users className="h-5 w-5 text-emerald-600" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-semibold text-gray-900 text-sm">
+                      Bring a family member for just <span className="text-emerald-700">$75</span>
+                    </p>
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      Normally $150 — same visit, same address, no second trip fee. Spouse, parent, kid. One tap to add.
+                    </p>
+                  </div>
+                </div>
+                <ul className="space-y-1.5 text-xs text-gray-700 mb-4 pl-1">
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span>We come out once — blood draw for both of you back-to-back</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span>Separate lab orders + results per person (HIPAA-safe)</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <span>Secure payment link texted back to you in minutes</span>
+                  </li>
+                </ul>
+                <div className="grid grid-cols-2 gap-2">
+                  <a href={smsHref} className="contents">
+                    <Button className="h-11 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white w-full">
+                      <MessageSquare className="h-4 w-4" />
+                      Text to Add
+                    </Button>
+                  </a>
+                  <a href="tel:+19415279169" className="contents">
+                    <Button variant="outline" className="h-11 gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 w-full">
+                      <Phone className="h-4 w-4" />
+                      Call Us
+                    </Button>
+                  </a>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* What to prepare */}
         <Card className="bg-gray-50 border-gray-200 mb-6">
