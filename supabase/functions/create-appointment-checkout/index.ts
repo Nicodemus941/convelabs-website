@@ -76,6 +76,8 @@ Deno.serve(async (req) => {
       locationDetails,
       serviceDetails,
       userId,
+      referralCode = null,
+      referralDiscountCents = 0,
     } = await req.json();
 
     if (!clientAmount || !appointmentDate || !patientDetails) {
@@ -367,7 +369,39 @@ Deno.serve(async (req) => {
       member_tier: serverTier,
       member_tier_claimed: clientMemberTier,
       member_correction_cents: String(priceCorrection),
+      referral_code: referralCode || '',
+      referral_discount_cents: String(referralDiscountCents || 0),
     };
+
+    // ─── LOG UPGRADE EVENTS (INTENT) for ROI dashboard ───────────────
+    // These log at checkout-create time. verify-appointment-checkout
+    // will flip status to 'converted' once Stripe confirms payment.
+    try {
+      if (serverTier !== 'none' && priceCorrection > 0) {
+        await supabaseClient.from('upgrade_events').insert({
+          event_type: 'membership_applied',
+          status: 'intent',
+          patient_email: patientDetails?.email?.toLowerCase() || null,
+          patient_name: `${patientDetails?.firstName || ''} ${patientDetails?.lastName || ''}`.trim() || null,
+          patient_phone: patientDetails?.phone || null,
+          discount_cents: priceCorrection,
+          potential_cents: amount,
+          metadata: { tier: serverTier, service_type: serviceType },
+        });
+      }
+      if (referralCode && referralDiscountCents > 0) {
+        await supabaseClient.from('upgrade_events').insert({
+          event_type: 'promo_applied',
+          status: 'intent',
+          patient_email: patientDetails?.email?.toLowerCase() || null,
+          patient_name: `${patientDetails?.firstName || ''} ${patientDetails?.lastName || ''}`.trim() || null,
+          patient_phone: patientDetails?.phone || null,
+          discount_cents: referralDiscountCents,
+          potential_cents: amount,
+          metadata: { referral_code: referralCode, service_type: serviceType },
+        });
+      }
+    } catch (e) { console.warn('upgrade_events insert failed (non-blocking):', e); }
 
     // Create the checkout session
     // Tag metadata with credit info for Stripe dashboard visibility

@@ -30,6 +30,7 @@ import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
 import HormoziDashboard from "@/components/dashboards/admin/hormozi/HormoziDashboard";
+import UpgradesTab from "@/components/dashboards/admin/UpgradesTab";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -99,7 +100,8 @@ const Dashboard = () => {
           {adminTab === "operations" && <OperationsPanel />}
           {adminTab === "ai-assistant" && <AIOpsAssistant />}
           {adminTab === "hormozi" && <HormoziDashboard />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations", "ai-assistant", "hormozi"].includes(adminTab) && (
+          {adminTab === "upgrades" && <UpgradesTab />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations", "ai-assistant", "hormozi", "upgrades"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>

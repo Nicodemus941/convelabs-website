@@ -10,6 +10,7 @@ import {
   User, Phone, Mail, Calendar, Clock, MapPin, Shield, FileText,
   Search, ArrowLeft, Package, ClipboardList, DollarSign, Stethoscope,
   ChevronRight, Edit3, CalendarPlus, Receipt, MessageSquare, MoreHorizontal, UserPlus, Loader2,
+  Crown,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -34,20 +35,35 @@ const PatientProfileTab: React.FC = () => {
 
   const [allPatients, setAllPatients] = useState<any[]>([]);
   const [patientsWithAppts, setPatientsWithAppts] = useState<Set<string>>(new Set());
-  const [filter, setFilter] = useState<'all' | 'dormant' | 'incomplete'>('all');
+  // Map of user_id -> membership tier label ('member', 'vip', 'concierge').
+  // Used to show the crown icon + tier next to member patients.
+  const [memberTiers, setMemberTiers] = useState<Map<string, string>>(new Map());
+  const [filter, setFilter] = useState<'all' | 'dormant' | 'incomplete' | 'members'>('all');
 
-  // Load all patients + appointment activity on mount
+  // Load all patients + appointment activity + active memberships on mount
   useEffect(() => {
     const loadAll = async () => {
-      const [{ data: pts }, { data: appts }] = await Promise.all([
+      const [{ data: pts }, { data: appts }, { data: mems }] = await Promise.all([
         supabase.from('tenant_patients').select('*').eq('is_active', true).order('first_name', { ascending: true }).limit(1000),
         supabase.from('appointments').select('patient_id').not('patient_id', 'is', null),
+        supabase.from('user_memberships' as any)
+          .select('user_id, status, membership_plans(name)')
+          .eq('status', 'active'),
       ]);
       const activeIds = new Set<string>();
       for (const a of appts || []) if (a.patient_id) activeIds.add(a.patient_id);
+      const tiers = new Map<string, string>();
+      for (const m of (mems as any[]) || []) {
+        const planName = String(m?.membership_plans?.name || '').toLowerCase();
+        let tier = 'member';
+        if (planName.includes('concierge')) tier = 'concierge';
+        else if (planName.includes('vip')) tier = 'vip';
+        if (m.user_id) tiers.set(m.user_id, tier);
+      }
       setAllPatients(pts || []);
       setPatients(pts || []);
       setPatientsWithAppts(activeIds);
+      setMemberTiers(tiers);
     };
     loadAll();
   }, []);
@@ -59,6 +75,8 @@ const PatientProfileTab: React.FC = () => {
       list = list.filter(p => !patientsWithAppts.has(p.id));
     } else if (filter === 'incomplete') {
       list = list.filter(p => !p.address || p.address.trim() === '');
+    } else if (filter === 'members') {
+      list = list.filter(p => p.user_id && memberTiers.has(p.user_id));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -69,7 +87,17 @@ const PatientProfileTab: React.FC = () => {
       );
     }
     setPatients(list);
-  }, [searchQuery, allPatients, filter, patientsWithAppts]);
+  }, [searchQuery, allPatients, filter, patientsWithAppts, memberTiers]);
+
+  // Tier → badge color map (Crown icon next to member names)
+  const tierBadgeClass = (tier: string | undefined) => {
+    switch (tier) {
+      case 'concierge': return 'bg-gradient-to-r from-purple-600 to-pink-500 text-white';
+      case 'vip': return 'bg-gradient-to-r from-amber-500 to-yellow-400 text-white';
+      case 'member': return 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+      default: return 'bg-gray-100 text-gray-600';
+    }
+  };
 
   const loadPatientData = useCallback(async (patient: any) => {
     setSelectedPatient(patient);
@@ -129,7 +157,14 @@ const PatientProfileTab: React.FC = () => {
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold">{p.first_name} {p.last_name}</h1>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-bold">{p.first_name} {p.last_name}</h1>
+                {p.user_id && memberTiers.has(p.user_id) && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide ${tierBadgeClass(memberTiers.get(p.user_id))}`}>
+                    <Crown className="h-3 w-3" /> {memberTiers.get(p.user_id)}
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-muted-foreground">Patient Chart</p>
             </div>
           </div>
@@ -524,11 +559,16 @@ const PatientProfileTab: React.FC = () => {
           {(() => {
             const dormantCount = allPatients.filter(p => !patientsWithAppts.has(p.id)).length;
             const incompleteCount = allPatients.filter(p => !p.address || p.address.trim() === '').length;
+            const membersCount = allPatients.filter(p => p.user_id && memberTiers.has(p.user_id)).length;
             return (
               <>
                 <button onClick={() => setFilter('all')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'all' ? 'bg-[#1e293b] text-white border-[#1e293b]' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
                   All ({allPatients.length})
+                </button>
+                <button onClick={() => setFilter('members')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition inline-flex items-center gap-1 ${filter === 'members' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50 text-emerald-700 border-emerald-300'}`}>
+                  <Crown className="h-3 w-3" /> Members ({membersCount})
                 </button>
                 <button onClick={() => setFilter('dormant')}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'dormant' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
@@ -562,8 +602,16 @@ const PatientProfileTab: React.FC = () => {
                 {patients.map(p => (
                   <tr key={p.id} className="border-b last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => loadPatientData(p)}>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-blue-700 hover:underline">{p.first_name} {p.last_name}</span>
+                        {p.user_id && memberTiers.has(p.user_id) && (
+                          <span
+                            title={`${memberTiers.get(p.user_id)} member`}
+                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${tierBadgeClass(memberTiers.get(p.user_id))}`}
+                          >
+                            <Crown className="h-2.5 w-2.5" /> {memberTiers.get(p.user_id)}
+                          </span>
+                        )}
                         {!patientsWithAppts.has(p.id) && (
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Never booked" />
                         )}

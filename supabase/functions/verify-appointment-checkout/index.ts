@@ -221,6 +221,11 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Compute displayDate up-front (used by both celebration + phleb/owner SMS below)
+      const displayDate = dateOnly ? new Date(dateOnly + 'T12:00:00').toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric',
+      }) : metadata.appointment_date || 'TBD';
+
       // ── Fire the notification trio (fire-and-forget, non-blocking) ──
       // 1. Patient confirmation (email + SMS via send-appointment-confirmation)
       try {
@@ -231,10 +236,61 @@ Deno.serve(async (req) => {
         console.error('Patient confirmation error (non-blocking):', notifErr);
       }
 
+      // ── CELEBRATION EMAIL: fire when a discount was applied ──
+      // Either a membership correction OR a referral/promo code.
+      const memberTier = (metadata.member_tier || 'none') as string;
+      const memberCorrectionCents = parseInt(String(metadata.member_correction_cents || '0')) || 0;
+      const referralCode = metadata.referral_code || '';
+      const referralDiscountCents = parseInt(String(metadata.referral_discount_cents || '0')) || 0;
+      const siteUrl = Deno.env.get('SITE_URL') || 'https://convelabs-website.vercel.app';
+      const viewUrl = newAppt?.view_token ? `${siteUrl}/visit/${newAppt.view_token}` : `${siteUrl}/dashboard`;
+
+      const shouldCelebrate =
+        (memberTier !== 'none' && memberCorrectionCents > 0) ||
+        (referralCode && referralDiscountCents > 0);
+
+      if (shouldCelebrate) {
+        try {
+          const discountType = memberTier !== 'none' && memberCorrectionCents > 0 ? 'membership' : 'promo';
+          const discountCents = discountType === 'membership' ? memberCorrectionCents : referralDiscountCents;
+          await supabaseClient.functions.invoke('send-discount-celebration', {
+            body: {
+              to: metadata.patient_email,
+              patient_name: patientName,
+              discount_cents: discountCents,
+              discount_type: discountType,
+              membership_tier: memberTier !== 'none' ? memberTier : undefined,
+              promo_code: referralCode || undefined,
+              appointment_date: displayDate,
+              appointment_time: metadata.appointment_time,
+              view_url: viewUrl,
+            },
+          });
+        } catch (celebErr) {
+          console.error('Celebration email error (non-blocking):', celebErr);
+        }
+
+        // Flip the intent-logged upgrade_events to converted for ROI accounting
+        try {
+          const targetType = memberTier !== 'none' && memberCorrectionCents > 0
+            ? 'membership_applied'
+            : 'promo_applied';
+          await supabaseClient
+            .from('upgrade_events')
+            .update({
+              status: 'converted',
+              appointment_id: newAppt.id,
+              revenue_cents: (session.amount_total || 0),
+              converted_at: new Date().toISOString(),
+            })
+            .eq('patient_email', (metadata.patient_email || '').toLowerCase())
+            .eq('event_type', targetType)
+            .eq('status', 'intent')
+            .is('appointment_id', null);
+        } catch (e) { console.warn('upgrade_events convert flip failed (non-blocking):', e); }
+      }
+
       // 2. Phleb SMS — so they know they have a new booking on their schedule
-      const displayDate = dateOnly ? new Date(dateOnly + 'T12:00:00').toLocaleDateString('en-US', {
-        weekday: 'short', month: 'short', day: 'numeric',
-      }) : metadata.appointment_date || 'TBD';
       const phlebMsg =
         `[NEW BOOKING] ${patientName || 'Patient'}\n` +
         `${displayDate} @ ${metadata.appointment_time || 'TBD'}\n` +

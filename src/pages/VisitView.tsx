@@ -276,6 +276,22 @@ const VisitView: React.FC = () => {
             `Hi, this is ${visit.patient_name || 'a ConveLabs patient'}. I'd like to add a family member to my visit on ${dateStr} at ${timeStr} (${visit.address || 'my address'}). Please send me the $75 add-on payment link. Thanks!`
           );
           const smsHref = `sms:+19415279169${/iPad|iPhone|iPod/.test(navigator.userAgent) ? '&' : '?'}body=${smsBody}`;
+          const logCompanionIntent = async (channel: 'sms' | 'call') => {
+            try {
+              await supabase.functions.invoke('log-upgrade-event', {
+                body: {
+                  event_type: 'companion_click',
+                  status: 'intent',
+                  patient_email: visit.patient_email,
+                  patient_name: visit.patient_name,
+                  patient_phone: visit.patient_phone,
+                  appointment_id: visit.id,
+                  potential_cents: 7500,
+                  metadata: { channel, source: 'visit_page_upsell_card' },
+                },
+              });
+            } catch (_e) { /* non-blocking */ }
+          };
           return (
             <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white mb-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-bl-lg tracking-wide">
@@ -310,13 +326,13 @@ const VisitView: React.FC = () => {
                   </li>
                 </ul>
                 <div className="grid grid-cols-2 gap-2">
-                  <a href={smsHref} className="contents">
+                  <a href={smsHref} className="contents" onClick={() => logCompanionIntent('sms')}>
                     <Button className="h-11 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white w-full">
                       <MessageSquare className="h-4 w-4" />
                       Text to Add
                     </Button>
                   </a>
-                  <a href="tel:+19415279169" className="contents">
+                  <a href="tel:+19415279169" className="contents" onClick={() => logCompanionIntent('call')}>
                     <Button variant="outline" className="h-11 gap-2 border-emerald-300 text-emerald-700 hover:bg-emerald-50 w-full">
                       <Phone className="h-4 w-4" />
                       Call Us

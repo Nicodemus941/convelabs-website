@@ -6,7 +6,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
-  CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp
+  CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
+  Crown,
 } from 'lucide-react';
 
 type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
@@ -19,6 +20,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
       items: [
         { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
         { name: 'Hormozi Dashboard', icon: TrendingUp, path: `${basePath}/hormozi`, roles: ['super_admin'] },
+        { name: 'Upgrades & ROI', icon: Crown, path: `${basePath}/upgrades`, roles: ['super_admin'] },
         { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
         { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },
         { name: 'Patients', icon: Users, path: `${basePath}/patients` },
