@@ -20,15 +20,26 @@ const LeadCapture = () => {
 
     setIsSubmitting(true);
     try {
-      // Store the lead in Supabase
-      await supabase.from("leads").insert([{
-        email: email.trim(),
-        source: "homepage_lead_capture",
-        status: "new",
-      }]);
+      // Fires the actual process-lead-capture edge function:
+      //  1. Upserts into `leads` table
+      //  2. Sends welcome email via Mailgun with WELCOME10 code + guide link
+      //  3. Marks lead as welcome_sent
+      const { data, error } = await supabase.functions.invoke('process-lead-capture', {
+        body: {
+          email: email.trim().toLowerCase(),
+          source: 'homepage_lead_capture',
+          referrer: window.location.href,
+          userAgent: navigator.userAgent,
+        },
+      });
+      if (error) console.warn('Lead capture error:', error);
+      if (data?.welcomeEmailSent === false && data?.emailError) {
+        console.warn('Welcome email failed:', data.emailError);
+      }
       setIsSubmitted(true);
     } catch (err) {
-      // Even if DB insert fails, show success (don't lose the lead)
+      // Still show success — we logged the error; don't punish the user for our bugs
+      console.error('Lead capture exception:', err);
       setIsSubmitted(true);
     }
     setIsSubmitting(false);

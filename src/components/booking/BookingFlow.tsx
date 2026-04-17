@@ -56,6 +56,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const [isServicesLoading, setIsServicesLoading] = useState(true);
   const [labOrderFiles, setLabOrderFiles] = useState<File[]>([]);
   const [insuranceFile, setInsuranceFile] = useState<File | null>(null);
+  // Membership tier — detected in CheckoutStep via callback. MUST be at
+  // this level so calculateTotal() in handleCheckout applies member pricing.
+  // Prior bug: memberTier was local to CheckoutStep only, so the Stripe
+  // amount was charged at full price even though the UI showed discounted.
+  const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
   // Sub-step within combined steps
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLabOrder, setShowLabOrder] = useState(false);
@@ -167,7 +172,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const breakdown = calculateTotal(visitType, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
-      }, tipAmount, additionalPatientCount);
+      }, tipAmount, additionalPatientCount, memberTier);
 
       // Upload lab order files and track paths
       const labOrderPaths: string[] = [];
@@ -217,6 +222,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         tipAmount: Math.round(tipAmount * 100),
         appointmentDate,
         appointmentTime: data.time,
+        memberTier, // server re-verifies and re-prices if mismatched
         patientDetails: {
           firstName: data.patientDetails.firstName,
           lastName: data.patientDetails.lastName,
@@ -415,6 +421,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   onBack={handleBack}
                   onCheckout={handleCheckout}
                   isProcessing={isProcessing}
+                  onMemberTierDetected={setMemberTier}
                 />
               )}
 

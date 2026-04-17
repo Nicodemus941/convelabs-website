@@ -29,9 +29,16 @@ interface CheckoutStepProps {
   onBack: () => void;
   onCheckout: (tipAmount: number) => void;
   isProcessing: boolean;
+  /**
+   * Notifies the parent (BookingFlow) when membership is detected, so the
+   * Stripe checkout amount can be calculated with the member tier.
+   * Without this callback, members were shown a discounted price but
+   * charged the full price (bug fix, April 2026).
+   */
+  onMemberTierDetected?: (tier: 'none' | 'member' | 'vip' | 'concierge') => void;
 }
 
-const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing }) => {
+const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected }) => {
   const { user } = useAuth();
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
@@ -72,9 +79,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         if (!res?.data) return;
         const plan = (res.data as any).membership_plans;
         const name = plan?.name?.toLowerCase() || '';
-        if (name.includes('concierge')) { setMemberTier('concierge'); setMemberLabel('Concierge'); }
-        else if (name.includes('vip')) { setMemberTier('vip'); setMemberLabel('VIP'); }
-        else if (plan) { setMemberTier('member'); setMemberLabel('Member'); }
+        let detectedTier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+        if (name.includes('concierge')) { detectedTier = 'concierge'; setMemberTier('concierge'); setMemberLabel('Concierge'); }
+        else if (name.includes('vip')) { detectedTier = 'vip'; setMemberTier('vip'); setMemberLabel('VIP'); }
+        else if (plan) { detectedTier = 'member'; setMemberTier('member'); setMemberLabel('Member'); }
+        // CRITICAL: notify parent so the Stripe amount uses the right price
+        if (detectedTier !== 'none') onMemberTierDetected?.(detectedTier);
       })
       .catch(() => {});
   }, []);

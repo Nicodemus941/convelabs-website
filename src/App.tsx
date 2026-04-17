@@ -12,6 +12,7 @@ import Home from '@/pages/Home';
 
 // Lazy-load all non-landing routes to reduce initial bundle
 const About = lazy(() => import('@/pages/About'));
+const BloodWorkGuide = lazy(() => import('@/pages/BloodWorkGuide'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const Appointments = lazy(() => import('@/pages/Appointments'));
 const TenantBookAppointment = lazy(() => import('@/pages/TenantBookAppointment'));
@@ -46,6 +47,7 @@ function App() {
                       <Routes>
                         <Route path="/" element={<Home />} />
                         <Route path="/about" element={<About />} />
+                        <Route path="/blood-work-guide" element={<BloodWorkGuide />} />
                         <Route path="/dashboard/*" element={<Dashboard />} />
                         <Route path="/appointments" element={<Appointments />} />
                         <Route path="/book" element={<BookAppointment />} />

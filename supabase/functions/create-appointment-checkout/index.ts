@@ -6,6 +6,57 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+// ─────────────────────────────────────────────────────────────────────
+// SERVER-SIDE MEMBERSHIP PRICING (source of truth)
+// If the frontend forgets to apply the member discount — OR a malicious
+// client tries to over-claim a tier — this is the line of defense.
+// Mirror src/services/pricing/pricingService.ts TIER_PRICING.
+// ─────────────────────────────────────────────────────────────────────
+type MemberTier = 'none' | 'member' | 'vip' | 'concierge';
+
+const TIER_PRICING: Record<string, Record<MemberTier, number>> = {
+  'dev-testing':          { none: 1,   member: 1,   vip: 1,   concierge: 1 },
+  'mobile':               { none: 150, member: 130, vip: 115, concierge: 99 },
+  'in-office':            { none: 55,  member: 49,  vip: 45,  concierge: 39 },
+  'senior':               { none: 100, member: 85,  vip: 75,  concierge: 65 },
+  'specialty-kit':        { none: 185, member: 165, vip: 150, concierge: 135 },
+  'specialty-kit-genova': { none: 200, member: 180, vip: 165, concierge: 150 },
+  'therapeutic':          { none: 200, member: 180, vip: 165, concierge: 150 },
+};
+
+/**
+ * Verify membership server-side by patient email. Returns the actual
+ * active tier the customer is entitled to, which may be MORE generous
+ * than what the frontend claimed (ex: client forgot to pass memberTier).
+ */
+async function verifyMemberTier(email: string | undefined): Promise<MemberTier> {
+  if (!email) return 'none';
+  try {
+    const { data: tp } = await supabaseClient
+      .from('tenant_patients')
+      .select('user_id')
+      .ilike('email', email)
+      .maybeSingle();
+    if (!tp?.user_id) return 'none';
+
+    const { data: mem } = await supabaseClient
+      .from('user_memberships')
+      .select('*, membership_plans(name)')
+      .eq('user_id', tp.user_id)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (!mem) return 'none';
+
+    const planName = ((mem as any).membership_plans?.name || '').toLowerCase();
+    if (planName.includes('concierge')) return 'concierge';
+    if (planName.includes('vip')) return 'vip';
+    return 'member';
+  } catch (err) {
+    console.warn('verifyMemberTier failed:', err);
+    return 'none';
+  }
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -16,21 +67,47 @@ Deno.serve(async (req) => {
     const {
       serviceType,
       serviceName,
-      amount, // in cents
+      amount: clientAmount, // in cents — WHAT THE CLIENT CLAIMS (don't trust)
       tipAmount = 0, // in cents
       appointmentDate,
       appointmentTime,
+      memberTier: clientMemberTier = 'none',
       patientDetails,
       locationDetails,
       serviceDetails,
       userId,
     } = await req.json();
 
-    if (!amount || !appointmentDate || !patientDetails) {
+    if (!clientAmount || !appointmentDate || !patientDetails) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // ─── SERVER-SIDE MEMBERSHIP VALIDATION ─────────────────────────
+    // If the patient is a member but the frontend didn't apply the
+    // discount (or claimed a lesser tier), we apply the correction
+    // here. Customers should NEVER be charged more than their tier
+    // entitles them to.
+    let amount = clientAmount;
+    let priceCorrection = 0;
+    const serverTier = await verifyMemberTier(patientDetails?.email);
+    const pricing = TIER_PRICING[serviceType];
+
+    if (pricing && serverTier !== 'none') {
+      const baseTierPrice = pricing[clientMemberTier as MemberTier] ?? pricing['none'];
+      const serverTierPrice = pricing[serverTier];
+      // If server tier gives a lower price than what client applied, discount the difference
+      if (serverTierPrice < baseTierPrice) {
+        priceCorrection = (baseTierPrice - serverTierPrice) * 100; // cents
+        amount = Math.max(0, clientAmount - priceCorrection);
+        console.warn(
+          `[member-discount-correction] ${patientDetails.email} serviceType=${serviceType} ` +
+          `clientTier=${clientMemberTier} serverTier=${serverTier} ` +
+          `client=$${clientAmount / 100} server=$${amount / 100} saved=$${priceCorrection / 100}`
+        );
+      }
     }
 
     // Determine the origin for success/cancel URLs
@@ -121,6 +198,10 @@ Deno.serve(async (req) => {
       weekend: String(serviceDetails?.weekend || false),
       additional_notes: (serviceDetails?.additionalNotes || '').substring(0, 500),
       user_id: userId || '',
+      // Membership-related — source of truth is server verification
+      member_tier: serverTier,
+      member_tier_claimed: clientMemberTier,
+      member_correction_cents: String(priceCorrection),
     };
 
     // Create the checkout session

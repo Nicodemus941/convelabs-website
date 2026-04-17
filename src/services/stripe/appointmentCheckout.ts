@@ -7,6 +7,8 @@ export interface AppointmentCheckoutParams {
   tipAmount: number; // in cents
   appointmentDate: string;
   appointmentTime: string;
+  /** Detected member tier — server re-verifies and overrides amount if mismatched */
+  memberTier?: 'none' | 'member' | 'vip' | 'concierge';
   patientDetails: {
     firstName: string;
     lastName: string;
