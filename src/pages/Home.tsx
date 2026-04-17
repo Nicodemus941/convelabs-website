@@ -68,6 +68,10 @@ const Home = () => {
           property="og:description"
           content='"Better than what I got in the NFL." — Licensed mobile phlebotomist. Same-day appointments across Central Florida. On-time or your visit is free.'
         />
+        <meta property="og:image" content="https://www.convelabs.com/og-image.png" />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content="ConveLabs — Mobile Phlebotomy Trusted by NFL Athletes" />
         <meta property="og:url" content="https://convelabs.com/" />
         <meta property="og:site_name" content="ConveLabs" />
         <meta property="og:locale" content="en_US" />
@@ -79,6 +83,8 @@ const Home = () => {
           name="twitter:description"
           content='"Better than what I got in the NFL." — Licensed mobile phlebotomist. Same-day appointments. Central Florida.'
         />
+        <meta name="twitter:image" content="https://www.convelabs.com/og-image.png" />
+        <meta name="twitter:image:alt" content="ConveLabs — Mobile Phlebotomy Trusted by NFL Athletes" />
 
         {/* Schema: MedicalBusiness */}
         <script type="application/ld+json">

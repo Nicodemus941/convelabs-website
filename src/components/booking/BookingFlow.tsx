@@ -202,9 +202,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         }
       }
 
-      const appointmentDate = data.date instanceof Date
-        ? data.date.toISOString()
-        : new Date(data.date).toISOString();
+      // CRITICAL: store the LOCAL calendar date, not a UTC ISO string.
+      //
+      // Prior bug: .toISOString() converted a Date representing "Wed midnight ET"
+      // into "2026-04-17T04:00:00Z" (UTC). When the calendar re-parsed this,
+      // FullCalendar interpreted the UTC timestamp and shifted it to the previous
+      // day (Tuesday) because 4 AM UTC = Tuesday 11 PM ET. Every booking was
+      // showing on the admin/phleb calendar on the wrong day.
+      //
+      // Fix: serialize the date using local Y-M-D components so the string
+      // represents the patient's intended calendar day regardless of timezone.
+      const d = data.date instanceof Date ? data.date : new Date(data.date);
+      const appointmentDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
       // Apply referral discount if present (stored in additionalNotes by CheckoutStep)
       const notes = data.serviceDetails.additionalNotes || '';
