@@ -163,7 +163,7 @@ const Hero = () => {
               <span className="text-white/40">·</span>
               <span>🏈 Trusted by NFL athletes</span>
               <span className="text-white/40">·</span>
-              <span>💪 Endorsed by <span className="font-semibold text-white">@morellifit</span> <span className="text-white/60">(970K)</span></span>
+              <span>💪 Endorsed by <span className="font-semibold text-white">@morellifit</span> <span className="text-white/60">(1M+)</span></span>
               <span className="text-white/40">·</span>
               <span>🛡️ HIPAA Compliant</span>
               <span className="text-white/40">·</span>

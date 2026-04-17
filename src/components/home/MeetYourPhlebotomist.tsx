@@ -11,7 +11,7 @@ import { Shield, Award, Users, CheckCircle2 } from 'lucide-react';
  *
  * Hormozi principle: social proof stack precedes personal photo. By the
  * time the visitor's eyes land on the founder's face, they've already
- * been told he's trusted by NFL athletes, 970K-follower influencers,
+ * been told he's trusted by NFL athletes, 1M+-follower influencers,
  * and 164 five-star reviews. Status signals do the framing.
  *
  * Photo asset: /public/images/team/nico-founder.jpg
@@ -72,7 +72,7 @@ const MeetYourPhlebotomist: React.FC = () => {
                   <Users className="h-4 w-4 text-conve-red mt-0.5 flex-shrink-0" />
                   <p className="text-sm text-gray-700">
                     <span className="font-semibold">Endorsed by fitness entrepreneur Michael Morelli</span> —
-                    970K-follower founder of Morellifit & Detox Organics
+                    1M+ follower founder of Morellifit & Detox Organics
                   </p>
                 </div>
                 <div className="flex items-start gap-2.5">

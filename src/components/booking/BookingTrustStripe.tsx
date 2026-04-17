@@ -52,7 +52,7 @@ const BookingTrustStripe: React.FC = () => {
           <span>💪</span>
           <span>
             Endorsed by <span className="font-semibold text-gray-900">@morellifit</span>
-            <span className="text-gray-500 ml-1">(970K)</span>
+            <span className="text-gray-500 ml-1">(1M+)</span>
           </span>
         </div>
 

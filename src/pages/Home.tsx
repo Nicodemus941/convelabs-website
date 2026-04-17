@@ -48,7 +48,7 @@ const Home = () => {
         <title>Mobile Phlebotomy Trusted by NFL Athletes | Better Than the Lab | ConveLabs FL</title>
         <meta
           name="description"
-          content="Licensed mobile phlebotomist trusted by NFL athletes and fitness influencers (@morellifit, 970K). One-try blood draws at your home, office, or hotel. Same-day service across Central Florida. On-time or your visit is free. In-office from $55, mobile from $150."
+          content="Licensed mobile phlebotomist trusted by NFL athletes and fitness influencers (@morellifit, 1M+). One-try blood draws at your home, office, or hotel. Same-day service across Central Florida. On-time or your visit is free. In-office from $55, mobile from $150."
         />
         <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 

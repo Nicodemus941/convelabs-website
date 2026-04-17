@@ -91,7 +91,7 @@ const welcomeHtml = (email: string) => `
 
     <div class="trust">
       Trusted by NFL athletes (Deiontrez Mount, Titans/Colts/Broncos),
-      fitness entrepreneur Michael Morelli (970K followers),
+      fitness entrepreneur Michael Morelli (1M+ followers),
       and 500+ patients across Central Florida.
     </div>
 

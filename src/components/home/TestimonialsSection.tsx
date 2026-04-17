@@ -9,7 +9,7 @@ import { motion } from "framer-motion";
  * Each video converts a different buyer:
  *
  *   Michelle (real patient)     — fear-reducer for hesitant patient
- *   Morelli (970K influencer)   — premium validator for wellness crowd
+ *   Morelli (1M+ influencer)    — premium validator for wellness crowd
  *   Deiontrez Mount (NFL LB)    — status proof for athletes/performance
  *
  * The NFL quote is the category killer: "Better than what I got in the NFL."
@@ -45,11 +45,11 @@ const TESTIMONIAL_VIDEOS: TestimonialVideo[] = [
     badgeColor: "bg-blue-50 text-blue-700 border-blue-200",
   },
   {
-    // Michael Morelli — 970K influencer, $25M entrepreneur
+    // Michael Morelli — 1M+ influencer, $25M entrepreneur
     videoId: "VJ7whL0fzfc",
     pullQuote: "Drove to Tampa to have Nico do my labs. Never going back to a lab.",
     name: "Michael Morelli",
-    context: "970K+ followers · Founder, Morellifit & Detox Organics",
+    context: "1M+ followers · Founder, Morellifit & Detox Organics",
     badge: "💪 @morellifit",
     badgeColor: "bg-purple-50 text-purple-700 border-purple-200",
   },
