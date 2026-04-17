@@ -13,6 +13,9 @@ import Home from '@/pages/Home';
 // Lazy-load all non-landing routes to reduce initial bundle
 const About = lazy(() => import('@/pages/About'));
 const BloodWorkGuide = lazy(() => import('@/pages/BloodWorkGuide'));
+const RescheduleResponse = lazy(() => import('@/pages/RescheduleResponse'));
+const RescheduleConfirmed = lazy(() => import('@/pages/RescheduleConfirmed').then(m => ({ default: m.RescheduleConfirmed })));
+const RescheduleDeclined = lazy(() => import('@/pages/RescheduleConfirmed').then(m => ({ default: m.RescheduleDeclined })));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const Appointments = lazy(() => import('@/pages/Appointments'));
 const TenantBookAppointment = lazy(() => import('@/pages/TenantBookAppointment'));
@@ -48,6 +51,9 @@ function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/about" element={<About />} />
                         <Route path="/blood-work-guide" element={<BloodWorkGuide />} />
+                        <Route path="/reschedule/confirmed" element={<RescheduleConfirmed />} />
+                        <Route path="/reschedule/declined" element={<RescheduleDeclined />} />
+                        <Route path="/reschedule/:token" element={<RescheduleResponse />} />
                         <Route path="/dashboard/*" element={<Dashboard />} />
                         <Route path="/appointments" element={<Appointments />} />
                         <Route path="/book" element={<BookAppointment />} />
