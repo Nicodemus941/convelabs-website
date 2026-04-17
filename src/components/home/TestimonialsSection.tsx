@@ -30,8 +30,6 @@ interface TestimonialVideo {
   context: string;
   badge?: string;
   badgeColor?: string;
-  /** YouTube Shorts are vertical (9:16) — triggers different aspect ratio so it doesn't letterbox. */
-  vertical?: boolean;
 }
 
 const TESTIMONIAL_VIDEOS: TestimonialVideo[] = [
@@ -54,14 +52,14 @@ const TESTIMONIAL_VIDEOS: TestimonialVideo[] = [
     badgeColor: "bg-purple-50 text-purple-700 border-purple-200",
   },
   {
-    // Christine Payas — real patient authenticity (YouTube Short, vertical 9:16)
+    // Christine Payas — real patient authenticity (YouTube Short)
+    // Note: Short (9:16) letterboxed into 16:9 frame so card heights match the other two.
     videoId: "Q69uYpUzxIc",
     pullQuote: "Painless. The best blood draw I've ever had.",
     name: "Christine Payas",
     context: "Florida Patient · At-home blood draw",
     badge: "🩸 Real Patient",
     badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    vertical: true,
   },
 ];
 
@@ -153,10 +151,11 @@ const TestimonialsSection: React.FC = () => {
               transition={{ duration: 0.6, delay: idx * 0.12 }}
               className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden flex flex-col hover:shadow-xl transition-shadow"
             >
-              {/* Video — aspect ratio honors vertical Shorts (9:16) vs horizontal (16:9) */}
+              {/* Video — ALL cards use 16:9 so heights match. Vertical Shorts letterbox
+                  cleanly inside YouTube's player (black bars on sides — looks intentional). */}
               <div
                 className="relative bg-gray-900 overflow-hidden"
-                style={{ paddingBottom: v.vertical ? '177.78%' : '56.25%' }}
+                style={{ paddingBottom: '56.25%' }}
               >
                 {v.videoId.endsWith('_VIDEO_ID') ? (
                   // Placeholder card until video is uploaded
