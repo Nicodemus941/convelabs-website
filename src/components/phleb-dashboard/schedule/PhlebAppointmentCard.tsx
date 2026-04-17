@@ -7,7 +7,7 @@ import {
   Clock, MapPin, Navigation, MessageSquare, User, Phone, Mail,
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
   Stethoscope, Shield, CalendarClock, DollarSign, Crown, AlertTriangle,
-  Globe, Pencil, FileText,
+  Globe, Pencil, FileText, FlaskConical, HelpCircle,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -263,41 +263,119 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 )}
               </div>
 
-              {/* Lab Order */}
-              {appointment.lab_order_file_path && (
-                <div className="px-4 py-3 border-b">
-                  <p className="text-sm font-semibold text-gray-800 mb-2">Lab Order</p>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5 text-xs"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      const paths = appointment.lab_order_file_path.split(',').map((p: string) => p.trim());
-                      for (const path of paths) {
-                        const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
-                        if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                      }
-                    }}
-                  >
-                    <FileText className="h-3.5 w-3.5" /> View Lab Order
-                  </Button>
+              {/* ═══ Specimen Delivery — WHERE to drop the samples ═══ */}
+              {/* Only relevant for services that require physical delivery — not in-office/partner */}
+              {!['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) && (
+                <div className="px-4 py-3 border-b bg-indigo-50/30">
+                  <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+                    <FlaskConical className="h-3.5 w-3.5 text-indigo-600" />
+                    Specimen Delivery
+                  </p>
+                  {appointment.lab_destination ? (
+                    <div>
+                      <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-0.5">Drop off at</p>
+                      <p className="text-sm font-semibold text-gray-900">{appointment.lab_destination}</p>
+                    </div>
+                  ) : (() => {
+                    // Fallback: scan notes for common "Lab:" / "Deliver to:" patterns
+                    const notes = appointment.notes || '';
+                    const labMatch = notes.match(/(?:Lab|Deliver(?:\s+to)?|Destination|Drop[\s-]?off):\s*([^|]+)/i);
+                    if (labMatch) {
+                      return (
+                        <div>
+                          <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-0.5">Drop off at (from notes)</p>
+                          <p className="text-sm font-semibold text-gray-900">{labMatch[1].trim()}</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2.5">
+                        <HelpCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold">Lab destination not specified</p>
+                          <p className="text-amber-600 mt-0.5">Check with office — call (941) 527-9169 before delivery.</p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
-              {/* Insurance Card */}
-              {appointment.insurance_card_path && (
+              {/* Lab Order files (uploaded requisitions) */}
+              {appointment.lab_order_file_path ? (
                 <div className="px-4 py-3 border-b">
-                  <p className="text-sm font-semibold text-gray-800 mb-2">Insurance Card</p>
-                  <Button size="sm" variant="outline" className="gap-1.5 text-xs"
+                  <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+                    <FileText className="h-3.5 w-3.5 text-gray-500" />
+                    Lab Orders ({appointment.lab_order_file_path.split(',').length})
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {appointment.lab_order_file_path.split(',').map((p: string, i: number) => {
+                      const path = p.trim();
+                      const fileName = path.split('/').pop() || `Lab Order ${i + 1}`;
+                      return (
+                        <Button
+                          key={path + i}
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 text-xs justify-start h-8"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
+                            if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                            else toast.error('Could not load lab order');
+                          }}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          <span className="truncate flex-1 text-left">{fileName.length > 30 ? fileName.slice(0, 30) + '…' : fileName}</span>
+                        </Button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                // Show a "no lab order" hint for services that typically need one
+                !['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) && (
+                  <div className="px-4 py-3 border-b">
+                    <p className="text-sm font-semibold text-gray-800 mb-1.5 flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5 text-gray-500" />
+                      Lab Orders
+                    </p>
+                    <p className="text-xs text-amber-600">
+                      No lab order uploaded. Confirm with patient at visit or call office.
+                    </p>
+                  </div>
+                )
+              )}
+
+              {/* Insurance Card */}
+              {appointment.insurance_card_path ? (
+                <div className="px-4 py-3 border-b">
+                  <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
+                    <Shield className="h-3.5 w-3.5 text-gray-500" />
+                    Insurance Card
+                  </p>
+                  <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
                     onClick={async (e) => {
                       e.stopPropagation();
-                      const { data } = await supabase.storage.from('lab-orders').createSignedUrl(appointment.insurance_card_path, 3600);
+                      const { data } = await supabase.storage.from('lab-orders').createSignedUrl(appointment.insurance_card_path!, 3600);
                       if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                      else toast.error('Could not load insurance card');
                     }}>
-                    <Shield className="h-3.5 w-3.5" /> View Insurance Card
+                    <Shield className="h-3.5 w-3.5" />
+                    <span>View Insurance Card</span>
                   </Button>
                 </div>
+              ) : (
+                // Only warn for services that usually need insurance
+                !['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) && (
+                  <div className="px-4 py-3 border-b">
+                    <p className="text-sm font-semibold text-gray-800 mb-1.5 flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5 text-gray-500" />
+                      Insurance Card
+                    </p>
+                    <p className="text-xs text-gray-500">No insurance card on file — ask patient at visit if required.</p>
+                  </div>
+                )
               )}
 
               {/* Notes */}

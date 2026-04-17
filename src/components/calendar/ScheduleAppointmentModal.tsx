@@ -83,6 +83,10 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [orgEmail, setOrgEmail] = useState('');
   const [overrideSlot, setOverrideSlot] = useState(false);
   const [gateCode, setGateCode] = useState('');
+  // Lab destination — where the phleb should deliver specimens.
+  // Phleb dashboard now surfaces this prominently; manual appointments
+  // without it show a "Check with office" warning to the phleb.
+  const [labDestination, setLabDestination] = useState('');
 
   const resetForm = () => {
     setStep(1);
@@ -348,8 +352,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         invoice_due_at: isWaived ? null : invoiceDueAt,
         payment_status: isWaived ? 'completed' : 'pending',
         gate_code: gateCode || null,
+        lab_destination: labDestination.trim() || null,
         phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
-        notes: [notes, gateCode ? `Gate: ${gateCode}` : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
+        notes: [notes, gateCode ? `Gate: ${gateCode}` : '', labDestination ? `Lab: ${labDestination}` : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
       };
 
       // Only include patient_id if we found one (column is nullable)
@@ -676,6 +681,26 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 <Label>Gate Code</Label>
                 <Input value={gateCode} onChange={e => setGateCode(e.target.value)} placeholder="#1234" />
               </div>
+            </div>
+            <div>
+              <Label>Lab Destination <span className="text-xs text-muted-foreground font-normal">— Where to deliver samples</span></Label>
+              <Input
+                value={labDestination}
+                onChange={e => setLabDestination(e.target.value)}
+                placeholder="e.g. Quest Diagnostics - Orlando, LabCorp - Winter Park"
+                list="common-labs"
+              />
+              <datalist id="common-labs">
+                <option value="Quest Diagnostics - Orlando" />
+                <option value="LabCorp - Orlando" />
+                <option value="LabCorp - Winter Park" />
+                <option value="Quest Diagnostics - Winter Park" />
+                <option value="AdventHealth Lab" />
+                <option value="Orlando Health Lab" />
+              </datalist>
+              <p className="text-xs text-muted-foreground mt-1">
+                Visible to the phleb on their appointment card. Leave blank if patient brings their own requisition.
+              </p>
             </div>
             <div>
               <Label>Notes</Label>

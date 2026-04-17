@@ -14,6 +14,7 @@ export interface PhlebAppointment {
   address: string;
   zipcode: string;
   service_type: string;
+  service_name: string | null;
   notes: string | null;
   total_amount: number;
   tip_amount: number;
@@ -22,6 +23,14 @@ export interface PhlebAppointment {
   invoice_status: string | null;
   is_vip: boolean;
   booking_source: string | null;
+  gate_code: string | null;
+  // Specimen delivery destination — where the phleb should drop off samples.
+  // On manually-created appointments this is often empty; the card falls back
+  // to scanning notes or showing "check with office".
+  lab_destination: string | null;
+  // Uploaded file paths (Supabase Storage → bucket 'lab-orders')
+  lab_order_file_path: string | null;
+  insurance_card_path: string | null;
   patient_id: string | null;
   patient_name: string;
   patient_phone: string | null;
@@ -183,6 +192,7 @@ export function usePhlebotomistAppointments() {
             is_vip: appt.is_vip || false,
             booking_source: appt.booking_source || 'online',
             gate_code: appt.gate_code || null,
+            lab_destination: appt.lab_destination || null,
             lab_order_file_path: labOrderPath,
             insurance_card_path: appt.insurance_card_path || null,
             patient_id: appt.patient_id,
