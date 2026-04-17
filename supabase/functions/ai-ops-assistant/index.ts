@@ -211,6 +211,45 @@ const tools = [
     },
   },
   {
+    name: "update_patient",
+    description:
+      "Update a patient's contact info or address in tenant_patients. Also updates any future appointment records to keep them in sync.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        patient_query: {
+          type: "string",
+          description: "Patient name, email, or phone to find the patient",
+        },
+        address: {
+          type: "string",
+          description: "New street address",
+        },
+        city: {
+          type: "string",
+          description: "New city",
+        },
+        state: {
+          type: "string",
+          description: "New state (2-letter code)",
+        },
+        zipcode: {
+          type: "string",
+          description: "New ZIP code",
+        },
+        email: {
+          type: "string",
+          description: "New email address",
+        },
+        phone: {
+          type: "string",
+          description: "New phone number",
+        },
+      },
+      required: ["patient_query"],
+    },
+  },
+  {
     name: "get_activity_log",
     description:
       "Get recent activity log entries, optionally filtered by type or patient.",
@@ -541,6 +580,99 @@ async function executeTool(
 
       if (error) return { error: error.message };
       return { success: true, appointment: data };
+    }
+
+    case "update_patient": {
+      const { patient_query, address, city, state, zipcode, email, phone } = input;
+
+      // Find the patient by name, email, or phone
+      const { data: patients, error: searchErr } = await supabase
+        .from("tenant_patients")
+        .select("id, first_name, last_name, email, phone, address, city, state, zipcode")
+        .or(
+          `first_name.ilike.%${patient_query}%,last_name.ilike.%${patient_query}%,email.ilike.%${patient_query}%,phone.ilike.%${patient_query}%`
+        )
+        .eq("is_active", true)
+        .limit(5);
+
+      if (searchErr) return { error: searchErr.message };
+      if (!patients || patients.length === 0) return { error: `No patient found matching "${patient_query}"` };
+      if (patients.length > 1) {
+        return {
+          error: `Multiple patients found matching "${patient_query}". Please be more specific.`,
+          matches: patients.map((p: any) => `${p.first_name} ${p.last_name} (${p.email || p.phone || "no contact"})`),
+        };
+      }
+
+      const patient = patients[0];
+      const updates: Record<string, any> = {};
+      if (address !== undefined) updates.address = address;
+      if (city !== undefined) updates.city = city;
+      if (state !== undefined) updates.state = state;
+      if (zipcode !== undefined) updates.zipcode = zipcode;
+      if (email !== undefined) updates.email = email;
+      if (phone !== undefined) updates.phone = phone;
+
+      if (Object.keys(updates).length === 0) {
+        return { error: "No fields to update. Provide at least one of: address, city, state, zipcode, email, phone." };
+      }
+
+      // Update tenant_patients
+      const { error: updateErr } = await supabase
+        .from("tenant_patients")
+        .update(updates)
+        .eq("id", patient.id);
+
+      if (updateErr) return { error: `Failed to update patient: ${updateErr.message}` };
+
+      // Sync future appointments for this patient
+      const apptUpdates: Record<string, any> = {};
+      if (address !== undefined || city !== undefined || state !== undefined || zipcode !== undefined) {
+        const fullAddr = [
+          address || patient.address,
+          city || patient.city,
+          state || patient.state,
+          zipcode || patient.zipcode,
+        ].filter(Boolean).join(", ");
+        apptUpdates.address = fullAddr;
+        apptUpdates.zipcode = zipcode || patient.zipcode;
+      }
+      if (email !== undefined) apptUpdates.patient_email = email;
+      if (phone !== undefined) apptUpdates.patient_phone = phone;
+
+      if (Object.keys(apptUpdates).length > 0) {
+        // Update future appointments by matching patient email or phone
+        const patientEmail = email || patient.email;
+        const patientPhone = phone || patient.phone;
+        const filters: string[] = [];
+        if (patientEmail) filters.push(`patient_email.eq.${patientEmail}`);
+        if (patientPhone) filters.push(`patient_phone.eq.${patientPhone}`);
+        // Also match by patient_id if we have it
+        filters.push(`patient_id.eq.${patient.id}`);
+
+        if (filters.length > 0) {
+          const { count } = await supabase
+            .from("appointments")
+            .update(apptUpdates)
+            .or(filters.join(","))
+            .gte("appointment_date", today)
+            .not("status", "in", '("cancelled","completed","rescheduled")');
+
+          return {
+            success: true,
+            patient: `${patient.first_name} ${patient.last_name}`,
+            fields_updated: Object.keys(updates),
+            future_appointments_synced: count || 0,
+          };
+        }
+      }
+
+      return {
+        success: true,
+        patient: `${patient.first_name} ${patient.last_name}`,
+        fields_updated: Object.keys(updates),
+        future_appointments_synced: 0,
+      };
     }
 
     case "get_activity_log": {
