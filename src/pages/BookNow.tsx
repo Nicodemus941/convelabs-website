@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { analytics } from '@/utils/analytics';
 import { verifyAppointmentCheckout } from '@/services/stripe/appointmentCheckout';
 import BookingFlow from '@/components/booking/BookingFlow';
+import BookingTrustStripe from '@/components/booking/BookingTrustStripe';
 import Header from '@/components/home/Header';
 
 type PageMode = 'booking' | 'verifying' | 'confirmed' | 'cancelled' | 'error';
@@ -98,8 +99,8 @@ const BookNow: React.FC = () => {
   return (
     <>
       <Helmet>
-        <title>Book Appointment - ConveLabs</title>
-        <meta name="description" content="Schedule your at-home lab services with ConveLabs. Book a convenient appointment for mobile phlebotomy services." />
+        <title>Book Your Home Visit | ConveLabs — Trusted by NFL Athletes</title>
+        <meta name="description" content='"Better than what I got in the NFL." — Licensed phlebotomist at your door in 60 minutes. One-try blood draws. On-time or your visit is free. Same-day appointments across Central Florida.' />
       </Helmet>
 
       <Header />
@@ -109,12 +110,21 @@ const BookNow: React.FC = () => {
           {/* Booking flow */}
           {mode === 'booking' && (
             <>
-              <div className="text-center mb-8">
-                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Book Your Appointment</h1>
+              <div className="text-center mb-6 md:mb-8">
+                <p className="text-xs font-semibold tracking-[0.2em] uppercase text-conve-red mb-2">
+                  One-Try Blood Draws · Results in 48 Hours
+                </p>
+                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
+                  Book Your Home Visit
+                </h1>
                 <p className="text-muted-foreground mt-2 max-w-lg mx-auto">
-                  Licensed phlebotomists at your door. Same-day appointments available across Central Florida.
+                  Licensed phlebotomist at your door in 60 minutes. Same-day appointments available across Central Florida.
                 </p>
               </div>
+
+              {/* Trust stripe — NFL quote + Morelli + 164 reviews + HIPAA + guarantee */}
+              <BookingTrustStripe />
+
               <BookingFlow />
             </>
           )}
