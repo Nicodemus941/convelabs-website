@@ -7,7 +7,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { invoiceIds } = await req.json();
+    const { invoiceIds, action } = await req.json();
 
     if (!invoiceIds || !Array.isArray(invoiceIds)) {
       return new Response(JSON.stringify({ error: 'invoiceIds array required' }), {
@@ -19,6 +19,17 @@ Deno.serve(async (req) => {
     const results = [];
     for (const id of invoiceIds) {
       try {
+        // Void the invoice if action is 'void'
+        if (action === 'void') {
+          const voided = await stripe.invoices.voidInvoice(id);
+          results.push({
+            id: voided.id,
+            status: voided.status,
+            voided: true,
+          });
+          continue;
+        }
+
         const invoice = await stripe.invoices.retrieve(id);
         results.push({
           id: invoice.id,

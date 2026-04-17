@@ -65,27 +65,10 @@ Deno.serve(async (req) => {
       alerts.push(`${overdueInvoices.length} unpaid invoice(s) >24h: ${names}`);
     }
 
-    // 4. Send alert SMS if any issues found
-    if (alerts.length > 0 && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-      const message = `ConveLabs System Alert:\n\n${alerts.join('\n')}\n\nCheck dashboard for details.`;
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-      const body = new URLSearchParams({
-        To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
-        Body: message,
-        ...(TWILIO_MESSAGING_SERVICE_SID
-          ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
-          : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
-      });
-
-      await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: body.toString(),
-      });
-      console.log('Alert sent:', alerts);
+    // SMS alerts removed — consolidated into daily-owner-brief (5 AM ET)
+    // This function now runs silently: cleans stale payments and slot holds, logs results.
+    if (alerts.length > 0) {
+      console.log('Stale payment findings:', alerts);
     }
 
     return new Response(JSON.stringify({

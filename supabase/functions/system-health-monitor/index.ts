@@ -133,23 +133,10 @@ Deno.serve(async (req) => {
       issues.push(`${stuckSequences.length} post-visit sequence step(s) stuck in pending`);
     }
 
-    // SEND ALERT if issues found
-    if (issues.length > 0 && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-      const message = `ConveLabs Health Monitor:\n\n${issues.join('\n')}${autoFixed.length > 0 ? '\n\nAuto-fixed:\n' + autoFixed.join('\n') : ''}`;
-
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-      await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
-          Body: message.substring(0, 1500), // SMS limit
-          ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
-        }).toString(),
-      });
+    // SMS alerts removed — consolidated into daily-owner-brief (5 AM ET)
+    // This function now runs silently: detects issues, auto-fixes what it can, logs results.
+    if (issues.length > 0 || autoFixed.length > 0) {
+      console.log('Health monitor findings:', { issues, autoFixed });
     }
 
     return new Response(JSON.stringify({

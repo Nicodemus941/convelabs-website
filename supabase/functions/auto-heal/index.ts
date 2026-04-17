@@ -217,32 +217,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // ── SEND ALERTS TO OWNER ────────────────────────────────────────────
-    if (alerts.length > 0 && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-      const message = `🔧 ConveLabs Auto-Heal Report:\n\n${alerts.join('\n\n')}${
-        healed.length > 0 ? '\n\n✅ Auto-fixed:\n' + healed.join('\n') : ''
-      }`;
-
-      try {
-        const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-        await fetch(twilioUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: new URLSearchParams({
-            To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
-            Body: message.substring(0, 1500),
-            ...(TWILIO_MESSAGING_SERVICE_SID
-              ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
-              : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
-          }).toString(),
-        });
-      } catch (e) {
-        console.error('Alert SMS error:', e);
-      }
-    }
+    // SMS alerts removed — consolidated into daily-owner-brief (5 AM ET)
+    // Auto-heal now runs silently: fixes problems, logs results, no owner interruption.
 
     // Log to console for Supabase logs
     if (healed.length > 0 || alerts.length > 0) {
