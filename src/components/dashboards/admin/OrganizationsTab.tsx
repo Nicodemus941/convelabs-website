@@ -44,13 +44,13 @@ const OrganizationsTab: React.FC = () => {
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase.from('organizations' as any).select('*').order('name');
-    setOrgs((data as Org[]) || []);
+    setOrgs((data as unknown as Org[]) || []);
     setLoading(false);
   }, []);
 
   const fetchInvoices = useCallback(async (orgId: string) => {
     const { data } = await supabase.from('org_invoices' as any).select('*').eq('org_id', orgId).order('created_at', { ascending: false });
-    setInvoices((data as OrgInvoice[]) || []);
+    setInvoices((data as unknown as OrgInvoice[]) || []);
   }, []);
 
   useEffect(() => { fetchOrgs(); }, [fetchOrgs]);

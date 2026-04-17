@@ -65,7 +65,7 @@ const NotesTab: React.FC = () => {
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
-      setActivities((data as ActivityEntry[]) || []);
+      setActivities((data as unknown as ActivityEntry[]) || []);
     } catch (err) {
       console.error('Failed to load activities:', err);
     } finally {

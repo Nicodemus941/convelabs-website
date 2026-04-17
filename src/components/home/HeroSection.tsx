@@ -1,14 +1,14 @@
 
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, type Variants } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Calendar, MapPin } from 'lucide-react';
 
 const HeroSection: React.FC = () => {
   const navigate = useNavigate();
   
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -19,14 +19,14 @@ const HeroSection: React.FC = () => {
     },
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 20 },
     visible: {
       opacity: 1,
       y: 0,
       transition: {
         duration: 0.6,
-        ease: [0.165, 0.84, 0.44, 1],
+        ease: "easeOut",
       },
     },
   };
@@ -99,7 +99,7 @@ const HeroSection: React.FC = () => {
             variants={itemVariants}
             initial={{ opacity: 0, x: 30 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8, delay: 0.3, ease: [0.165, 0.84, 0.44, 1] }}
+            transition={{ duration: 0.8, delay: 0.3, ease: "easeOut" }}
           >
             <motion.img 
               src="/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png" 

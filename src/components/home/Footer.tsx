@@ -18,7 +18,10 @@ const Footer = () => {
           <h3 className="text-lg font-semibold mb-4 text-center">Quick Access</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <button
-              onClick={() => bookingModal?.openModal('footer') || (window.location.href = BOOKING_URL)}
+              onClick={() => {
+                if (bookingModal?.openModal) bookingModal.openModal('footer');
+                else window.location.href = BOOKING_URL;
+              }}
               className="flex flex-col items-center p-4 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors group"
             >
               <CalendarDays className="h-6 w-6 mb-2 text-conve-red" />

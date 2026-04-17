@@ -85,8 +85,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         else if (plan) { detectedTier = 'member'; setMemberTier('member'); setMemberLabel('Member'); }
         // CRITICAL: notify parent so the Stripe amount uses the right price
         if (detectedTier !== 'none') onMemberTierDetected?.(detectedTier);
-      })
-      .catch(() => {});
+      });
   }, []);
 
   // Fetch add-ons for this service type

@@ -1,6 +1,6 @@
 import React from "react";
 import { ArrowRight, Crown, Lock, Activity, Stethoscope, Star } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
 const ServicesSection = () => {
@@ -41,7 +41,7 @@ const ServicesSection = () => {
     }
   ];
 
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
@@ -49,12 +49,12 @@ const ServicesSection = () => {
     },
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 40 },
     visible: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] },
+      transition: { duration: 0.8, ease: "easeOut" },
     },
   };
 

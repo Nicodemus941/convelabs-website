@@ -141,12 +141,12 @@ const PatientRescheduleModal: React.FC<PatientRescheduleModalProps> = ({
         activity_type: 'reschedule',
         description: `Patient rescheduled to ${newDate} at ${newTime}`,
         performed_by: 'patient',
-      }).catch(() => {});
+      }).then(undefined, () => {});
 
       // Notify owner + phlebotomist
       supabase.functions.invoke('send-sms-notification', {
         body: { to: '9415279169', message: `Patient rescheduled appointment to ${newDate} at ${newTime}` },
-      }).catch(() => {});
+      }).then(undefined, () => {});
 
       toast.success('Appointment rescheduled!');
       onRescheduled();

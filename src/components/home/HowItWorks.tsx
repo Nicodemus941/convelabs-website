@@ -2,7 +2,7 @@ import React from "react";
 import { Calendar, Shield, UserCheck, Clock, Star, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 
 
 import { withSource, BOOKING_URL } from '@/lib/constants/urls';
@@ -38,7 +38,7 @@ const HowItWorks = () => {
     details: ["Secure digital access", "Fast results delivery", "No lost samples guarantee"]
   }];
   
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: {
       opacity: 0
     },
@@ -50,7 +50,7 @@ const HowItWorks = () => {
       }
     }
   };
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: {
       opacity: 0,
       y: 40
@@ -60,7 +60,7 @@ const HowItWorks = () => {
       y: 0,
       transition: {
         duration: 0.8,
-        ease: [0.25, 0.46, 0.45, 0.94]
+        ease: "easeOut"
       }
     }
   };

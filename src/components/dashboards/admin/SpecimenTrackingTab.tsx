@@ -38,7 +38,7 @@ const SpecimenTrackingTab: React.FC = () => {
         .select('*')
         .order('delivered_at', { ascending: false });
       if (error) throw error;
-      setSpecimens((data as Specimen[]) || []);
+      setSpecimens((data as unknown as Specimen[]) || []);
     } catch (err) {
       console.error('Failed to fetch specimens:', err);
     } finally {

@@ -110,7 +110,7 @@ const ReferralCard: React.FC = () => {
       let remaining = FREE_VISIT_THRESHOLD;
       const { data: credits } = await supabase.from('referral_credits' as any)
         .select('id, amount').eq('user_id', userId).eq('redeemed', false).order('created_at');
-      for (const credit of (credits || [])) {
+      for (const credit of ((credits as any[]) || [])) {
         if (remaining <= 0) break;
         await supabase.from('referral_credits' as any).update({ redeemed: true, redeemed_at: new Date().toISOString() }).eq('id', credit.id);
         remaining -= credit.amount;

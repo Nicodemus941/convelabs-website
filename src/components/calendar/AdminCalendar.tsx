@@ -272,13 +272,15 @@ const AdminCalendar: React.FC = () => {
       if (error) throw error;
 
       // Log activity
-      await supabase.from('activity_log' as any).insert({
-        patient_id: appt.patient_id || null,
-        activity_type: 'reschedule',
-        description: `Appointment drag-rescheduled to ${newDateStr} at ${newTimeStr}`,
-        performed_by: 'admin',
-        appointment_id: appt.id,
-      }).catch(() => {});
+      try {
+        await supabase.from('activity_log' as any).insert({
+          patient_id: appt.patient_id || null,
+          activity_type: 'reschedule',
+          description: `Appointment drag-rescheduled to ${newDateStr} at ${newTimeStr}`,
+          performed_by: 'admin',
+          appointment_id: appt.id,
+        });
+      } catch { /* non-fatal */ }
 
       toast.success(`${getPatientName(appt)} moved to ${newDateStr} at ${newTimeStr}`);
       fetchAppointments();
@@ -601,13 +603,13 @@ const AdminCalendar: React.FC = () => {
                         address: recurringForm.address || 'TBD',
                         memo: `Recurring: ${occurrences} appointments, ${recurringForm.frequency}`,
                       },
-                    }).catch(err => console.error('Invoice error:', err));
+                    }).then(undefined, (err: any) => console.error('Invoice error:', err));
                   }
 
                   // Notify owner + phlebotomist
                   supabase.functions.invoke('send-sms-notification', {
                     body: { to: '9415279169', message: `Recurring Booking!\n\nPatient: ${recurringForm.patientName}\n${occurrences}x ${svcName} (${recurringForm.frequency})\nTotal: $${recurringForm.waiveFee ? '0 (waived)' : (price * occurrences).toFixed(2)}\nStarting: ${recurringForm.startDate}` },
-                  }).catch(() => {});
+                  }).then(undefined, () => {});
 
                   toast.success(`${created?.length || occurrences} recurring appointments created!`);
                   setRecurringForm({ patientSearch: '', patientName: '', patientEmail: '', patientPhone: '', serviceType: 'mobile', frequency: 'weekly', occurrences: '4', startDate: '', time: '', address: '', notes: '', waiveFee: false });

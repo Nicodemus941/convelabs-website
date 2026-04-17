@@ -150,6 +150,81 @@ export type Database = {
           },
         ]
       }
+      abandoned_bookings: {
+        Row: {
+          created_at: string | null
+          email: string | null
+          id: string
+          phone: string | null
+          recovered: boolean | null
+          recovery_sent: boolean | null
+          selected_date: string | null
+          selected_time: string | null
+          service_type: string | null
+          step_reached: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          phone?: string | null
+          recovered?: boolean | null
+          recovery_sent?: boolean | null
+          selected_date?: string | null
+          selected_time?: string | null
+          service_type?: string | null
+          step_reached?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          phone?: string | null
+          recovered?: boolean | null
+          recovery_sent?: boolean | null
+          selected_date?: string | null
+          selected_time?: string | null
+          service_type?: string | null
+          step_reached?: number | null
+        }
+        Relationships: []
+      }
+      activity_log: {
+        Row: {
+          activity_type: string
+          appointment_id: string | null
+          created_at: string | null
+          created_by_name: string | null
+          description: string
+          id: string
+          metadata: Json | null
+          patient_id: string | null
+          staff_id: string | null
+        }
+        Insert: {
+          activity_type: string
+          appointment_id?: string | null
+          created_at?: string | null
+          created_by_name?: string | null
+          description: string
+          id?: string
+          metadata?: Json | null
+          patient_id?: string | null
+          staff_id?: string | null
+        }
+        Update: {
+          activity_type?: string
+          appointment_id?: string | null
+          created_at?: string | null
+          created_by_name?: string | null
+          description?: string
+          id?: string
+          metadata?: Json | null
+          patient_id?: string | null
+          staff_id?: string | null
+        }
+        Relationships: []
+      }
       add_on_prices: {
         Row: {
           active: boolean | null
@@ -158,6 +233,7 @@ export type Database = {
           id: string
           name: string
           price: number
+          service_types: string[] | null
           updated_at: string | null
         }
         Insert: {
@@ -167,6 +243,7 @@ export type Database = {
           id?: string
           name: string
           price: number
+          service_types?: string[] | null
           updated_at?: string | null
         }
         Update: {
@@ -176,6 +253,7 @@ export type Database = {
           id?: string
           name?: string
           price?: number
+          service_types?: string[] | null
           updated_at?: string | null
         }
         Relationships: []
@@ -488,6 +566,88 @@ export type Database = {
           },
         ]
       }
+      appointment_patients: {
+        Row: {
+          appointment_id: string | null
+          created_at: string | null
+          date_of_birth: string | null
+          email: string | null
+          first_name: string
+          id: string
+          is_primary: boolean | null
+          last_name: string
+          phone: string | null
+        }
+        Insert: {
+          appointment_id?: string | null
+          created_at?: string | null
+          date_of_birth?: string | null
+          email?: string | null
+          first_name: string
+          id?: string
+          is_primary?: boolean | null
+          last_name: string
+          phone?: string | null
+        }
+        Update: {
+          appointment_id?: string | null
+          created_at?: string | null
+          date_of_birth?: string | null
+          email?: string | null
+          first_name?: string
+          id?: string
+          is_primary?: boolean | null
+          last_name?: string
+          phone?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointment_patients_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      appointment_ratings: {
+        Row: {
+          appointment_id: string | null
+          comment: string | null
+          created_at: string | null
+          id: string
+          patient_id: string | null
+          phlebotomist_id: string | null
+          rating: number
+        }
+        Insert: {
+          appointment_id?: string | null
+          comment?: string | null
+          created_at?: string | null
+          id?: string
+          patient_id?: string | null
+          phlebotomist_id?: string | null
+          rating: number
+        }
+        Update: {
+          appointment_id?: string | null
+          comment?: string | null
+          created_at?: string | null
+          id?: string
+          patient_id?: string | null
+          phlebotomist_id?: string | null
+          rating?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointment_ratings_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: true
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       appointment_slots: {
         Row: {
           appointment_id: string | null
@@ -603,6 +763,9 @@ export type Database = {
           appointment_date: string
           appointment_time: string | null
           arrival_time: string | null
+          booked_by_email: string | null
+          booked_by_name: string | null
+          booking_source: string | null
           cancellation_fee: number | null
           cancellation_reason: string | null
           cancelled_at: string | null
@@ -618,28 +781,60 @@ export type Database = {
           eta_minutes: number | null
           extended_hours: boolean | null
           external_booking_id: string | null
+          gate_code: string | null
           id: string
+          insurance_card_path: string | null
+          invoice_due_at: string | null
+          invoice_final_warning_at: string | null
+          invoice_reminder_sent_at: string | null
+          invoice_sent_at: string | null
+          invoice_status: string | null
+          is_vip: boolean | null
+          job_started_at: string | null
           lab_destination: string | null
           lab_order_file_path: string | null
           latitude: number | null
           longitude: number | null
           member_status: string | null
           next_appointment_id: string | null
+          no_show: boolean | null
+          no_show_at: string | null
+          no_show_fee: number | null
           notes: string | null
           original_appointment_id: string | null
-          patient_id: string
+          patient_email: string | null
+          patient_id: string | null
+          patient_name: string | null
+          patient_phone: string | null
           payment_reference: string | null
           payment_status: string | null
+          phlebotomist_eta_minutes: number | null
           phlebotomist_id: string | null
           previous_appointment_id: string | null
+          refund_amount: number | null
+          refund_id: string | null
+          refund_status: string | null
+          refunded_at: string | null
+          reschedule_count: number | null
           rescheduled_at: string | null
           rescheduling_fee: number | null
           route_position: number | null
           service_id: string | null
+          service_name: string | null
+          service_price: number | null
           service_type: string | null
+          specimen_lab_name: string | null
+          specimen_tracking_id: string | null
+          specimens_delivered_at: string | null
           start_time: string | null
           status: string
+          stripe_checkout_session_id: string | null
+          stripe_invoice_id: string | null
+          stripe_invoice_url: string | null
+          stripe_payment_intent_id: string | null
+          surcharge_amount: number | null
           tenant_id: string | null
+          tip_amount: number | null
           total_amount: number | null
           total_price: number | null
           updated_at: string | null
@@ -647,13 +842,6 @@ export type Database = {
           vip_hours: boolean | null
           weekend_service: boolean | null
           zipcode: string
-          invoice_status: string | null
-          invoice_sent_at: string | null
-          invoice_reminder_sent_at: string | null
-          invoice_due_at: string | null
-          is_vip: boolean | null
-          stripe_invoice_id: string | null
-          booking_source: string | null
         }
         Insert: {
           address: string
@@ -664,6 +852,9 @@ export type Database = {
           appointment_date: string
           appointment_time?: string | null
           arrival_time?: string | null
+          booked_by_email?: string | null
+          booked_by_name?: string | null
+          booking_source?: string | null
           cancellation_fee?: number | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
@@ -679,28 +870,60 @@ export type Database = {
           eta_minutes?: number | null
           extended_hours?: boolean | null
           external_booking_id?: string | null
+          gate_code?: string | null
           id?: string
+          insurance_card_path?: string | null
+          invoice_due_at?: string | null
+          invoice_final_warning_at?: string | null
+          invoice_reminder_sent_at?: string | null
+          invoice_sent_at?: string | null
+          invoice_status?: string | null
+          is_vip?: boolean | null
+          job_started_at?: string | null
           lab_destination?: string | null
           lab_order_file_path?: string | null
           latitude?: number | null
           longitude?: number | null
           member_status?: string | null
           next_appointment_id?: string | null
+          no_show?: boolean | null
+          no_show_at?: string | null
+          no_show_fee?: number | null
           notes?: string | null
           original_appointment_id?: string | null
-          patient_id: string
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_name?: string | null
+          patient_phone?: string | null
           payment_reference?: string | null
           payment_status?: string | null
+          phlebotomist_eta_minutes?: number | null
           phlebotomist_id?: string | null
           previous_appointment_id?: string | null
+          refund_amount?: number | null
+          refund_id?: string | null
+          refund_status?: string | null
+          refunded_at?: string | null
+          reschedule_count?: number | null
           rescheduled_at?: string | null
           rescheduling_fee?: number | null
           route_position?: number | null
           service_id?: string | null
+          service_name?: string | null
+          service_price?: number | null
           service_type?: string | null
+          specimen_lab_name?: string | null
+          specimen_tracking_id?: string | null
+          specimens_delivered_at?: string | null
           start_time?: string | null
           status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_invoice_id?: string | null
+          stripe_invoice_url?: string | null
+          stripe_payment_intent_id?: string | null
+          surcharge_amount?: number | null
           tenant_id?: string | null
+          tip_amount?: number | null
           total_amount?: number | null
           total_price?: number | null
           updated_at?: string | null
@@ -708,13 +931,6 @@ export type Database = {
           vip_hours?: boolean | null
           weekend_service?: boolean | null
           zipcode: string
-          invoice_status?: string | null
-          invoice_sent_at?: string | null
-          invoice_reminder_sent_at?: string | null
-          invoice_due_at?: string | null
-          is_vip?: boolean | null
-          stripe_invoice_id?: string | null
-          booking_source?: string | null
         }
         Update: {
           address?: string
@@ -725,6 +941,9 @@ export type Database = {
           appointment_date?: string
           appointment_time?: string | null
           arrival_time?: string | null
+          booked_by_email?: string | null
+          booked_by_name?: string | null
+          booking_source?: string | null
           cancellation_fee?: number | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
@@ -740,28 +959,60 @@ export type Database = {
           eta_minutes?: number | null
           extended_hours?: boolean | null
           external_booking_id?: string | null
+          gate_code?: string | null
           id?: string
+          insurance_card_path?: string | null
+          invoice_due_at?: string | null
+          invoice_final_warning_at?: string | null
+          invoice_reminder_sent_at?: string | null
+          invoice_sent_at?: string | null
+          invoice_status?: string | null
+          is_vip?: boolean | null
+          job_started_at?: string | null
           lab_destination?: string | null
           lab_order_file_path?: string | null
           latitude?: number | null
           longitude?: number | null
           member_status?: string | null
           next_appointment_id?: string | null
+          no_show?: boolean | null
+          no_show_at?: string | null
+          no_show_fee?: number | null
           notes?: string | null
           original_appointment_id?: string | null
-          patient_id?: string
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_name?: string | null
+          patient_phone?: string | null
           payment_reference?: string | null
           payment_status?: string | null
+          phlebotomist_eta_minutes?: number | null
           phlebotomist_id?: string | null
           previous_appointment_id?: string | null
+          refund_amount?: number | null
+          refund_id?: string | null
+          refund_status?: string | null
+          refunded_at?: string | null
+          reschedule_count?: number | null
           rescheduled_at?: string | null
           rescheduling_fee?: number | null
           route_position?: number | null
           service_id?: string | null
+          service_name?: string | null
+          service_price?: number | null
           service_type?: string | null
+          specimen_lab_name?: string | null
+          specimen_tracking_id?: string | null
+          specimens_delivered_at?: string | null
           start_time?: string | null
           status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_invoice_id?: string | null
+          stripe_invoice_url?: string | null
+          stripe_payment_intent_id?: string | null
+          surcharge_amount?: number | null
           tenant_id?: string | null
+          tip_amount?: number | null
           total_amount?: number | null
           total_price?: number | null
           updated_at?: string | null
@@ -769,13 +1020,6 @@ export type Database = {
           vip_hours?: boolean | null
           weekend_service?: boolean | null
           zipcode?: string
-          invoice_status?: string | null
-          invoice_sent_at?: string | null
-          invoice_reminder_sent_at?: string | null
-          invoice_due_at?: string | null
-          is_vip?: boolean | null
-          stripe_invoice_id?: string | null
-          booking_source?: string | null
         }
         Relationships: [
           {
@@ -1122,6 +1366,42 @@ export type Database = {
           sender_type?: string
           session_id?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      chatbot_inquiries: {
+        Row: {
+          answer: string | null
+          booking_step: string | null
+          created_at: string | null
+          id: string
+          page_url: string | null
+          patient_email: string | null
+          patient_name: string | null
+          question: string
+          session_id: string | null
+        }
+        Insert: {
+          answer?: string | null
+          booking_step?: string | null
+          created_at?: string | null
+          id?: string
+          page_url?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          question: string
+          session_id?: string | null
+        }
+        Update: {
+          answer?: string | null
+          booking_step?: string | null
+          created_at?: string | null
+          id?: string
+          page_url?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          question?: string
+          session_id?: string | null
         }
         Relationships: []
       }
@@ -2212,6 +2492,7 @@ export type Database = {
           created_at: string
           id: string
           marketing_emails: boolean | null
+          notification_method: string | null
           service_updates: boolean | null
           updated_at: string
           user_id: string
@@ -2222,6 +2503,7 @@ export type Database = {
           created_at?: string
           id?: string
           marketing_emails?: boolean | null
+          notification_method?: string | null
           service_updates?: boolean | null
           updated_at?: string
           user_id: string
@@ -2232,6 +2514,7 @@ export type Database = {
           created_at?: string
           id?: string
           marketing_emails?: boolean | null
+          notification_method?: string | null
           service_updates?: boolean | null
           updated_at?: string
           user_id?: string
@@ -2268,6 +2551,99 @@ export type Database = {
           subject_template?: string
           text_template?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      error_logs: {
+        Row: {
+          action: string | null
+          component: string | null
+          created_at: string | null
+          error_message: string
+          error_stack: string | null
+          error_type: string
+          id: string
+          payload: Json | null
+          resolved: boolean | null
+          resolved_at: string | null
+          resolved_by: string | null
+          user_email: string | null
+          user_role: string | null
+        }
+        Insert: {
+          action?: string | null
+          component?: string | null
+          created_at?: string | null
+          error_message: string
+          error_stack?: string | null
+          error_type: string
+          id?: string
+          payload?: Json | null
+          resolved?: boolean | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          user_email?: string | null
+          user_role?: string | null
+        }
+        Update: {
+          action?: string | null
+          component?: string | null
+          created_at?: string | null
+          error_message?: string
+          error_stack?: string | null
+          error_type?: string
+          id?: string
+          payload?: Json | null
+          resolved?: boolean | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          user_email?: string | null
+          user_role?: string | null
+        }
+        Relationships: []
+      }
+      family_members: {
+        Row: {
+          created_at: string | null
+          date_of_birth: string | null
+          email: string | null
+          first_name: string
+          id: string
+          insurance_group_number: string | null
+          insurance_member_id: string | null
+          insurance_provider: string | null
+          last_name: string
+          patient_id: string
+          phone: string | null
+          relationship: string
+        }
+        Insert: {
+          created_at?: string | null
+          date_of_birth?: string | null
+          email?: string | null
+          first_name: string
+          id?: string
+          insurance_group_number?: string | null
+          insurance_member_id?: string | null
+          insurance_provider?: string | null
+          last_name: string
+          patient_id: string
+          phone?: string | null
+          relationship?: string
+        }
+        Update: {
+          created_at?: string | null
+          date_of_birth?: string | null
+          email?: string | null
+          first_name?: string
+          id?: string
+          insurance_group_number?: string | null
+          insurance_member_id?: string | null
+          insurance_provider?: string | null
+          last_name?: string
+          patient_id?: string
+          phone?: string | null
+          relationship?: string
         }
         Relationships: []
       }
@@ -2572,119 +2948,6 @@ export type Database = {
             columns: ["franchise_owner_id"]
             isOneToOne: false
             referencedRelation: "franchise_owners"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      franchise_staff: {
-        Row: {
-          created_at: string
-          email: string
-          franchise_owner_id: string
-          full_name: string
-          id: string
-          role: string
-          territory_id: string | null
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          email: string
-          franchise_owner_id: string
-          full_name: string
-          id?: string
-          role: string
-          territory_id?: string | null
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          email?: string
-          franchise_owner_id?: string
-          full_name?: string
-          id?: string
-          role?: string
-          territory_id?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "franchise_staff_franchise_owner_id_fkey"
-            columns: ["franchise_owner_id"]
-            isOneToOne: false
-            referencedRelation: "franchise_owners"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "franchise_staff_territory_id_fkey"
-            columns: ["territory_id"]
-            isOneToOne: false
-            referencedRelation: "territories"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      franchise_staff_invitations: {
-        Row: {
-          accepted_at: string | null
-          created_at: string | null
-          email: string
-          expires_at: string
-          first_name: string | null
-          id: string
-          invitation_token: string
-          invited_by: string
-          last_name: string | null
-          onboarding_completed: boolean | null
-          phone: string | null
-          role: string
-          status: string | null
-          tenant_id: string | null
-          updated_at: string | null
-          user_id: string | null
-        }
-        Insert: {
-          accepted_at?: string | null
-          created_at?: string | null
-          email: string
-          expires_at: string
-          first_name?: string | null
-          id?: string
-          invitation_token: string
-          invited_by: string
-          last_name?: string | null
-          onboarding_completed?: boolean | null
-          phone?: string | null
-          role: string
-          status?: string | null
-          tenant_id?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-        }
-        Update: {
-          accepted_at?: string | null
-          created_at?: string | null
-          email?: string
-          expires_at?: string
-          first_name?: string | null
-          id?: string
-          invitation_token?: string
-          invited_by?: string
-          last_name?: string | null
-          onboarding_completed?: boolean | null
-          phone?: string | null
-          role?: string
-          status?: string | null
-          tenant_id?: string | null
-          updated_at?: string | null
-          user_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "franchise_staff_invitations_tenant_id_fkey"
-            columns: ["tenant_id"]
-            isOneToOne: false
-            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -3608,6 +3871,51 @@ export type Database = {
         }
         Relationships: []
       }
+      leads: {
+        Row: {
+          converted_appointment_id: string | null
+          created_at: string | null
+          discount_code_issued: string | null
+          email: string
+          id: string
+          ip_address: string | null
+          referrer: string | null
+          source: string
+          status: string
+          updated_at: string | null
+          user_agent: string | null
+          welcome_email_sent_at: string | null
+        }
+        Insert: {
+          converted_appointment_id?: string | null
+          created_at?: string | null
+          discount_code_issued?: string | null
+          email: string
+          id?: string
+          ip_address?: string | null
+          referrer?: string | null
+          source?: string
+          status?: string
+          updated_at?: string | null
+          user_agent?: string | null
+          welcome_email_sent_at?: string | null
+        }
+        Update: {
+          converted_appointment_id?: string | null
+          created_at?: string | null
+          discount_code_issued?: string | null
+          email?: string
+          id?: string
+          ip_address?: string | null
+          referrer?: string | null
+          source?: string
+          status?: string
+          updated_at?: string | null
+          user_agent?: string | null
+          welcome_email_sent_at?: string | null
+        }
+        Relationships: []
+      }
       member_location_preferences: {
         Row: {
           allowed_tenant_ids: string[] | null
@@ -3911,6 +4219,68 @@ export type Database = {
         }
         Relationships: []
       }
+      org_invoices: {
+        Row: {
+          amount: number
+          appointment_id: string | null
+          created_at: string | null
+          dunning_paused: boolean
+          dunning_stage: number
+          id: string
+          last_dunning_at: string | null
+          memo: string | null
+          org_id: string
+          paid_at: string | null
+          patient_name: string | null
+          sent_at: string | null
+          service_type: string | null
+          status: string | null
+          stripe_invoice_id: string | null
+        }
+        Insert: {
+          amount: number
+          appointment_id?: string | null
+          created_at?: string | null
+          dunning_paused?: boolean
+          dunning_stage?: number
+          id?: string
+          last_dunning_at?: string | null
+          memo?: string | null
+          org_id: string
+          paid_at?: string | null
+          patient_name?: string | null
+          sent_at?: string | null
+          service_type?: string | null
+          status?: string | null
+          stripe_invoice_id?: string | null
+        }
+        Update: {
+          amount?: number
+          appointment_id?: string | null
+          created_at?: string | null
+          dunning_paused?: boolean
+          dunning_stage?: number
+          id?: string
+          last_dunning_at?: string | null
+          memo?: string | null
+          org_id?: string
+          paid_at?: string | null
+          patient_name?: string | null
+          sent_at?: string | null
+          service_type?: string | null
+          status?: string | null
+          stripe_invoice_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_invoices_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizational_assignments: {
         Row: {
           assigned_manager_id: string | null
@@ -4034,6 +4404,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      organizations: {
+        Row: {
+          billing_address: string | null
+          billing_email: string | null
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          notes: string | null
+        }
+        Insert: {
+          billing_address?: string | null
+          billing_email?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          notes?: string | null
+        }
+        Update: {
+          billing_address?: string | null
+          billing_email?: string | null
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          notes?: string | null
+        }
+        Relationships: []
       }
       page_view_events: {
         Row: {
@@ -4617,6 +5026,45 @@ export type Database = {
           },
         ]
       }
+      post_visit_sequences: {
+        Row: {
+          appointment_id: string
+          created_at: string | null
+          id: string
+          patient_email: string | null
+          patient_id: string | null
+          patient_phone: string | null
+          scheduled_at: string
+          sent_at: string | null
+          status: string | null
+          step: string
+        }
+        Insert: {
+          appointment_id: string
+          created_at?: string | null
+          id?: string
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_phone?: string | null
+          scheduled_at: string
+          sent_at?: string | null
+          status?: string | null
+          step: string
+        }
+        Update: {
+          appointment_id?: string
+          created_at?: string | null
+          id?: string
+          patient_email?: string | null
+          patient_id?: string | null
+          patient_phone?: string | null
+          scheduled_at?: string
+          sent_at?: string | null
+          status?: string | null
+          step?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string | null
@@ -4833,6 +5281,173 @@ export type Database = {
             columns: ["staff_profile_id"]
             isOneToOne: false
             referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      recurring_bookings: {
+        Row: {
+          created_at: string | null
+          frequency_weeks: number
+          id: string
+          is_active: boolean | null
+          next_booking_date: string | null
+          patient_id: string | null
+          preferred_address: string | null
+          preferred_city: string | null
+          preferred_day_of_week: number | null
+          preferred_state: string | null
+          preferred_time: string | null
+          preferred_zip: string | null
+          service_type: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          frequency_weeks?: number
+          id?: string
+          is_active?: boolean | null
+          next_booking_date?: string | null
+          patient_id?: string | null
+          preferred_address?: string | null
+          preferred_city?: string | null
+          preferred_day_of_week?: number | null
+          preferred_state?: string | null
+          preferred_time?: string | null
+          preferred_zip?: string | null
+          service_type: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          frequency_weeks?: number
+          id?: string
+          is_active?: boolean | null
+          next_booking_date?: string | null
+          patient_id?: string | null
+          preferred_address?: string | null
+          preferred_city?: string | null
+          preferred_day_of_week?: number | null
+          preferred_state?: string | null
+          preferred_time?: string | null
+          preferred_zip?: string | null
+          service_type?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      referral_codes: {
+        Row: {
+          active: boolean | null
+          code: string
+          created_at: string | null
+          discount_amount: number | null
+          id: string
+          max_uses: number | null
+          referrer_credit: number | null
+          user_id: string
+          uses: number | null
+        }
+        Insert: {
+          active?: boolean | null
+          code: string
+          created_at?: string | null
+          discount_amount?: number | null
+          id?: string
+          max_uses?: number | null
+          referrer_credit?: number | null
+          user_id: string
+          uses?: number | null
+        }
+        Update: {
+          active?: boolean | null
+          code?: string
+          created_at?: string | null
+          discount_amount?: number | null
+          id?: string
+          max_uses?: number | null
+          referrer_credit?: number | null
+          user_id?: string
+          uses?: number | null
+        }
+        Relationships: []
+      }
+      referral_credits: {
+        Row: {
+          amount: number
+          appointment_id: string | null
+          created_at: string | null
+          description: string | null
+          id: string
+          redeemed: boolean | null
+          redeemed_at: string | null
+          referral_code_id: string | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          amount?: number
+          appointment_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          redeemed?: boolean | null
+          redeemed_at?: string | null
+          referral_code_id?: string | null
+          type?: string
+          user_id: string
+        }
+        Update: {
+          amount?: number
+          appointment_id?: string | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          redeemed?: boolean | null
+          redeemed_at?: string | null
+          referral_code_id?: string | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      referral_redemptions: {
+        Row: {
+          appointment_id: string | null
+          created_at: string | null
+          discount_applied: number | null
+          id: string
+          referral_code_id: string | null
+          referred_email: string | null
+          referred_user_id: string | null
+          referrer_credited: boolean | null
+        }
+        Insert: {
+          appointment_id?: string | null
+          created_at?: string | null
+          discount_applied?: number | null
+          id?: string
+          referral_code_id?: string | null
+          referred_email?: string | null
+          referred_user_id?: string | null
+          referrer_credited?: boolean | null
+        }
+        Update: {
+          appointment_id?: string | null
+          created_at?: string | null
+          discount_applied?: number | null
+          id?: string
+          referral_code_id?: string | null
+          referred_email?: string | null
+          referred_user_id?: string | null
+          referrer_credited?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "referral_redemptions_referral_code_id_fkey"
+            columns: ["referral_code_id"]
+            isOneToOne: false
+            referencedRelation: "referral_codes"
             referencedColumns: ["id"]
           },
         ]
@@ -5779,6 +6394,112 @@ export type Database = {
           },
         ]
       }
+      slot_holds: {
+        Row: {
+          appointment_date: string
+          appointment_time: string
+          created_at: string | null
+          expires_at: string
+          held_by: string
+          id: string
+          released: boolean | null
+        }
+        Insert: {
+          appointment_date: string
+          appointment_time: string
+          created_at?: string | null
+          expires_at?: string
+          held_by: string
+          id?: string
+          released?: boolean | null
+        }
+        Update: {
+          appointment_date?: string
+          appointment_time?: string
+          created_at?: string | null
+          expires_at?: string
+          held_by?: string
+          id?: string
+          released?: boolean | null
+        }
+        Relationships: []
+      }
+      sms_conversations: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_message_at: string | null
+          patient_id: string
+          patient_phone: string
+          staff_phone: string | null
+          staff_profile_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_message_at?: string | null
+          patient_id: string
+          patient_phone: string
+          staff_phone?: string | null
+          staff_profile_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_message_at?: string | null
+          patient_id?: string
+          patient_phone?: string
+          staff_phone?: string | null
+          staff_profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_conversations_staff_profile_id_fkey"
+            columns: ["staff_profile_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sms_messages: {
+        Row: {
+          body: string
+          conversation_id: string
+          created_at: string | null
+          direction: string
+          id: string
+          status: string | null
+          twilio_message_sid: string | null
+        }
+        Insert: {
+          body: string
+          conversation_id: string
+          created_at?: string | null
+          direction: string
+          id?: string
+          status?: string | null
+          twilio_message_sid?: string | null
+        }
+        Update: {
+          body?: string
+          conversation_id?: string
+          created_at?: string | null
+          direction?: string
+          id?: string
+          status?: string | null
+          twilio_message_sid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "sms_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_notifications: {
         Row: {
           appointment_id: string | null
@@ -6004,6 +6725,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      specimen_deliveries: {
+        Row: {
+          appointment_id: string
+          collection_time: string | null
+          created_at: string | null
+          delivered_at: string | null
+          delivered_by: string | null
+          delivery_notes: string | null
+          id: string
+          lab_address: string | null
+          lab_name: string
+          patient_id: string | null
+          patient_name: string | null
+          photo_proof_url: string | null
+          service_type: string | null
+          specimen_id: string
+          status: string | null
+          tube_count: number | null
+          tube_types: string | null
+        }
+        Insert: {
+          appointment_id: string
+          collection_time?: string | null
+          created_at?: string | null
+          delivered_at?: string | null
+          delivered_by?: string | null
+          delivery_notes?: string | null
+          id?: string
+          lab_address?: string | null
+          lab_name: string
+          patient_id?: string | null
+          patient_name?: string | null
+          photo_proof_url?: string | null
+          service_type?: string | null
+          specimen_id: string
+          status?: string | null
+          tube_count?: number | null
+          tube_types?: string | null
+        }
+        Update: {
+          appointment_id?: string
+          collection_time?: string | null
+          created_at?: string | null
+          delivered_at?: string | null
+          delivered_by?: string | null
+          delivery_notes?: string | null
+          id?: string
+          lab_address?: string | null
+          lab_name?: string
+          patient_id?: string | null
+          patient_name?: string | null
+          photo_proof_url?: string | null
+          service_type?: string | null
+          specimen_id?: string
+          status?: string | null
+          tube_count?: number | null
+          tube_types?: string | null
+        }
+        Relationships: []
       }
       staff_audit_logs: {
         Row: {
@@ -6242,12 +7023,29 @@ export type Database = {
           first_name: string | null
           id: string
           invitation_token: string
+          invite_type: string
+          invited_by: string | null
           last_name: string | null
+          location_id: string | null
+          onboarding_completed: boolean
           onboarding_completed_at: string | null
+          onboarding_template_id: string | null
+          pay_rate_cents: number | null
+          phone: string | null
+          referral_bounty_cents: number | null
+          referred_by: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          role: string | null
           sent_at: string
+          signed_offer_url: string | null
           staff_profile_id: string
+          start_date: string | null
           status: string
+          tenant_id: string | null
+          territory_id: string | null
           updated_at: string
+          user_id: string | null
         }
         Insert: {
           accepted_at?: string | null
@@ -6257,12 +7055,29 @@ export type Database = {
           first_name?: string | null
           id?: string
           invitation_token: string
+          invite_type?: string
+          invited_by?: string | null
           last_name?: string | null
+          location_id?: string | null
+          onboarding_completed?: boolean
           onboarding_completed_at?: string | null
+          onboarding_template_id?: string | null
+          pay_rate_cents?: number | null
+          phone?: string | null
+          referral_bounty_cents?: number | null
+          referred_by?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          role?: string | null
           sent_at?: string
+          signed_offer_url?: string | null
           staff_profile_id: string
+          start_date?: string | null
           status?: string
+          tenant_id?: string | null
+          territory_id?: string | null
           updated_at?: string
+          user_id?: string | null
         }
         Update: {
           accepted_at?: string | null
@@ -6272,14 +7087,60 @@ export type Database = {
           first_name?: string | null
           id?: string
           invitation_token?: string
+          invite_type?: string
+          invited_by?: string | null
           last_name?: string | null
+          location_id?: string | null
+          onboarding_completed?: boolean
           onboarding_completed_at?: string | null
+          onboarding_template_id?: string | null
+          pay_rate_cents?: number | null
+          phone?: string | null
+          referral_bounty_cents?: number | null
+          referred_by?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          role?: string | null
           sent_at?: string
+          signed_offer_url?: string | null
           staff_profile_id?: string
+          start_date?: string | null
           status?: string
+          tenant_id?: string | null
+          territory_id?: string | null
           updated_at?: string
+          user_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "staff_invitations_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "franchise_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invitations_referred_by_fkey"
+            columns: ["referred_by"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invitations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invitations_territory_id_fkey"
+            columns: ["territory_id"]
+            isOneToOne: false
+            referencedRelation: "territories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       staff_notifications: {
         Row: {
@@ -6386,122 +7247,13 @@ export type Database = {
         }
         Relationships: []
       }
-      chatbot_inquiries: {
-        Row: {
-          id: string
-          session_id: string | null
-          question: string
-          answer: string | null
-          page_url: string | null
-          patient_email: string | null
-          patient_name: string | null
-          booking_step: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          session_id?: string | null
-          question: string
-          answer?: string | null
-          page_url?: string | null
-          patient_email?: string | null
-          patient_name?: string | null
-          booking_step?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          session_id?: string | null
-          question?: string
-          answer?: string | null
-          page_url?: string | null
-          patient_email?: string | null
-          patient_name?: string | null
-          booking_step?: string | null
-          created_at?: string
-        }
-        Relationships: []
-      }
-      sms_conversations: {
-        Row: {
-          id: string
-          staff_profile_id: string
-          patient_id: string
-          patient_phone: string
-          staff_phone: string | null
-          last_message_at: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          staff_profile_id: string
-          patient_id: string
-          patient_phone: string
-          staff_phone?: string | null
-          last_message_at?: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          staff_profile_id?: string
-          patient_id?: string
-          patient_phone?: string
-          staff_phone?: string | null
-          last_message_at?: string
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sms_conversations_staff_profile_id_fkey"
-            columns: ["staff_profile_id"]
-            isOneToOne: false
-            referencedRelation: "staff_profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      sms_messages: {
-        Row: {
-          id: string
-          conversation_id: string
-          direction: string
-          body: string
-          twilio_message_sid: string | null
-          status: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          conversation_id: string
-          direction: string
-          body: string
-          twilio_message_sid?: string | null
-          status?: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          conversation_id?: string
-          direction?: string
-          body?: string
-          twilio_message_sid?: string | null
-          status?: string
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "sms_messages_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "sms_conversations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       staff_profiles: {
         Row: {
           availability_settings: Json | null
+          bio: string | null
           certification_details: Json | null
+          compliance_cleared_at: string | null
+          compliance_status: string
           created_at: string
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
@@ -6511,15 +7263,20 @@ export type Database = {
           last_review_date: string | null
           pay_rate: number
           phone: string | null
+          photo_url: string | null
           premium_pay_rate: number | null
           specialty: string | null
           tenant_id: string | null
           updated_at: string
           user_id: string | null
+          welcome_bonus_paid_at: string | null
         }
         Insert: {
           availability_settings?: Json | null
+          bio?: string | null
           certification_details?: Json | null
+          compliance_cleared_at?: string | null
+          compliance_status?: string
           created_at?: string
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
@@ -6529,15 +7286,20 @@ export type Database = {
           last_review_date?: string | null
           pay_rate?: number
           phone?: string | null
+          photo_url?: string | null
           premium_pay_rate?: number | null
           specialty?: string | null
           tenant_id?: string | null
           updated_at?: string
           user_id?: string | null
+          welcome_bonus_paid_at?: string | null
         }
         Update: {
           availability_settings?: Json | null
+          bio?: string | null
           certification_details?: Json | null
+          compliance_cleared_at?: string | null
+          compliance_status?: string
           created_at?: string
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
@@ -6547,11 +7309,13 @@ export type Database = {
           last_review_date?: string | null
           pay_rate?: number
           phone?: string | null
+          photo_url?: string | null
           premium_pay_rate?: number | null
           specialty?: string | null
           tenant_id?: string | null
           updated_at?: string
           user_id?: string | null
+          welcome_bonus_paid_at?: string | null
         }
         Relationships: [
           {
@@ -6928,6 +7692,215 @@ export type Database = {
         }
         Relationships: []
       }
+      stripe_qb_mapping: {
+        Row: {
+          active: boolean | null
+          appointment_service_type: string | null
+          created_at: string | null
+          id: string
+          max_amount_cents: number | null
+          metadata_key: string | null
+          metadata_value: string | null
+          min_amount_cents: number | null
+          notes: string | null
+          priority: number | null
+          qb_account_name: string
+          qb_class_name: string | null
+          qb_income_type: string
+          stripe_price_id: string | null
+          stripe_product_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          active?: boolean | null
+          appointment_service_type?: string | null
+          created_at?: string | null
+          id?: string
+          max_amount_cents?: number | null
+          metadata_key?: string | null
+          metadata_value?: string | null
+          min_amount_cents?: number | null
+          notes?: string | null
+          priority?: number | null
+          qb_account_name: string
+          qb_class_name?: string | null
+          qb_income_type: string
+          stripe_price_id?: string | null
+          stripe_product_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          active?: boolean | null
+          appointment_service_type?: string | null
+          created_at?: string | null
+          id?: string
+          max_amount_cents?: number | null
+          metadata_key?: string | null
+          metadata_value?: string | null
+          min_amount_cents?: number | null
+          notes?: string | null
+          priority?: number | null
+          qb_account_name?: string
+          qb_class_name?: string | null
+          qb_income_type?: string
+          stripe_price_id?: string | null
+          stripe_product_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      stripe_qb_payout_log: {
+        Row: {
+          amount_cents: number
+          arrival_date: string | null
+          charge_count: number | null
+          created_at: string | null
+          currency: string | null
+          error_message: string | null
+          id: string
+          payout_date: string
+          qb_deposit_id: string | null
+          raw_stripe_data: Json | null
+          status: string | null
+          stripe_payout_id: string
+          sync_status: string | null
+          synced_at: string | null
+        }
+        Insert: {
+          amount_cents: number
+          arrival_date?: string | null
+          charge_count?: number | null
+          created_at?: string | null
+          currency?: string | null
+          error_message?: string | null
+          id?: string
+          payout_date: string
+          qb_deposit_id?: string | null
+          raw_stripe_data?: Json | null
+          status?: string | null
+          stripe_payout_id: string
+          sync_status?: string | null
+          synced_at?: string | null
+        }
+        Update: {
+          amount_cents?: number
+          arrival_date?: string | null
+          charge_count?: number | null
+          created_at?: string | null
+          currency?: string | null
+          error_message?: string | null
+          id?: string
+          payout_date?: string
+          qb_deposit_id?: string | null
+          raw_stripe_data?: Json | null
+          status?: string | null
+          stripe_payout_id?: string
+          sync_status?: string | null
+          synced_at?: string | null
+        }
+        Relationships: []
+      }
+      stripe_qb_sync_log: {
+        Row: {
+          amount_fee_cents: number
+          amount_gross_cents: number
+          amount_net_cents: number
+          amount_refunded_cents: number | null
+          appointment_id: string | null
+          charge_date: string
+          created_at: string | null
+          currency: string | null
+          error_message: string | null
+          id: string
+          mapping_id: string | null
+          patient_email: string | null
+          patient_name: string | null
+          qb_account_name: string | null
+          qb_class_name: string | null
+          qb_customer_id: string | null
+          qb_income_type: string | null
+          qb_sales_receipt_id: string | null
+          raw_stripe_data: Json | null
+          stripe_balance_transaction_id: string | null
+          stripe_charge_id: string
+          stripe_customer_id: string | null
+          stripe_invoice_id: string | null
+          stripe_payment_intent_id: string | null
+          stripe_payout_id: string | null
+          sync_status: string | null
+          synced_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          amount_fee_cents: number
+          amount_gross_cents: number
+          amount_net_cents: number
+          amount_refunded_cents?: number | null
+          appointment_id?: string | null
+          charge_date: string
+          created_at?: string | null
+          currency?: string | null
+          error_message?: string | null
+          id?: string
+          mapping_id?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          qb_account_name?: string | null
+          qb_class_name?: string | null
+          qb_customer_id?: string | null
+          qb_income_type?: string | null
+          qb_sales_receipt_id?: string | null
+          raw_stripe_data?: Json | null
+          stripe_balance_transaction_id?: string | null
+          stripe_charge_id: string
+          stripe_customer_id?: string | null
+          stripe_invoice_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_payout_id?: string | null
+          sync_status?: string | null
+          synced_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          amount_fee_cents?: number
+          amount_gross_cents?: number
+          amount_net_cents?: number
+          amount_refunded_cents?: number | null
+          appointment_id?: string | null
+          charge_date?: string
+          created_at?: string | null
+          currency?: string | null
+          error_message?: string | null
+          id?: string
+          mapping_id?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          qb_account_name?: string | null
+          qb_class_name?: string | null
+          qb_customer_id?: string | null
+          qb_income_type?: string | null
+          qb_sales_receipt_id?: string | null
+          raw_stripe_data?: Json | null
+          stripe_balance_transaction_id?: string | null
+          stripe_charge_id?: string
+          stripe_customer_id?: string | null
+          stripe_invoice_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_payout_id?: string | null
+          sync_status?: string | null
+          synced_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stripe_qb_sync_log_mapping_id_fkey"
+            columns: ["mapping_id"]
+            isOneToOne: false
+            referencedRelation: "stripe_qb_mapping"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stripe_transactions: {
         Row: {
           amount: number
@@ -7223,55 +8196,97 @@ export type Database = {
       }
       tenant_patients: {
         Row: {
+          address: string | null
+          city: string | null
           created_at: string
           date_of_birth: string | null
           email: string
           first_name: string
+          gate_code: string | null
           id: string
+          insurance_card_path: string | null
+          insurance_group_number: string | null
+          insurance_member_id: string | null
+          insurance_provider: string | null
           is_active: boolean
           last_name: string
           membership_end_date: string | null
           membership_plan_id: string | null
           membership_start_date: string | null
           membership_status: string | null
+          patient_notes: string | null
           phone: string | null
+          preferred_day: string | null
+          preferred_time: string | null
+          referred_by: string | null
+          standing_order_doctor: string | null
+          state: string | null
           tenant_id: string
           updated_at: string
           user_id: string | null
+          zipcode: string | null
         }
         Insert: {
+          address?: string | null
+          city?: string | null
           created_at?: string
           date_of_birth?: string | null
           email: string
           first_name: string
+          gate_code?: string | null
           id?: string
+          insurance_card_path?: string | null
+          insurance_group_number?: string | null
+          insurance_member_id?: string | null
+          insurance_provider?: string | null
           is_active?: boolean
           last_name: string
           membership_end_date?: string | null
           membership_plan_id?: string | null
           membership_start_date?: string | null
           membership_status?: string | null
+          patient_notes?: string | null
           phone?: string | null
+          preferred_day?: string | null
+          preferred_time?: string | null
+          referred_by?: string | null
+          standing_order_doctor?: string | null
+          state?: string | null
           tenant_id: string
           updated_at?: string
           user_id?: string | null
+          zipcode?: string | null
         }
         Update: {
+          address?: string | null
+          city?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string
           first_name?: string
+          gate_code?: string | null
           id?: string
+          insurance_card_path?: string | null
+          insurance_group_number?: string | null
+          insurance_member_id?: string | null
+          insurance_provider?: string | null
           is_active?: boolean
           last_name?: string
           membership_end_date?: string | null
           membership_plan_id?: string | null
           membership_start_date?: string | null
           membership_status?: string | null
+          patient_notes?: string | null
           phone?: string | null
+          preferred_day?: string | null
+          preferred_time?: string | null
+          referred_by?: string | null
+          standing_order_doctor?: string | null
+          state?: string | null
           tenant_id?: string
           updated_at?: string
           user_id?: string | null
+          zipcode?: string | null
         }
         Relationships: [
           {
@@ -7606,6 +8621,45 @@ export type Database = {
           },
         ]
       }
+      terms_agreements: {
+        Row: {
+          agreed_at: string | null
+          booking_id: string | null
+          created_at: string | null
+          id: string
+          ip_address: string | null
+          patient_email: string | null
+          patient_name: string | null
+          terms_version: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          agreed_at?: string | null
+          booking_id?: string | null
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          terms_version?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          agreed_at?: string | null
+          booking_id?: string | null
+          created_at?: string | null
+          id?: string
+          ip_address?: string | null
+          patient_email?: string | null
+          patient_name?: string | null
+          terms_version?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       territories: {
         Row: {
           assigned_at: string | null
@@ -7763,6 +8817,59 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "test_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      time_blocks: {
+        Row: {
+          block_type: string | null
+          created_at: string | null
+          created_by: string | null
+          end_date: string
+          end_time: string | null
+          id: string
+          reason: string | null
+          recurring: boolean | null
+          recurring_day: string | null
+          staff_id: string | null
+          start_date: string
+          start_time: string | null
+        }
+        Insert: {
+          block_type?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          end_date: string
+          end_time?: string | null
+          id?: string
+          reason?: string | null
+          recurring?: boolean | null
+          recurring_day?: string | null
+          staff_id?: string | null
+          start_date: string
+          start_time?: string | null
+        }
+        Update: {
+          block_type?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          end_date?: string
+          end_time?: string | null
+          id?: string
+          reason?: string | null
+          recurring?: boolean | null
+          recurring_day?: string | null
+          staff_id?: string | null
+          start_date?: string
+          start_time?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "time_blocks_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff_profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -8229,6 +9336,56 @@ export type Database = {
           },
         ]
       }
+      visit_bundles: {
+        Row: {
+          amount_paid: number
+          created_at: string | null
+          credits_purchased: number
+          credits_remaining: number
+          discount_percent: number
+          expires_at: string | null
+          id: string
+          initial_appointment_id: string | null
+          patient_email: string
+          patient_id: string | null
+          stripe_checkout_session_id: string | null
+        }
+        Insert: {
+          amount_paid: number
+          created_at?: string | null
+          credits_purchased?: number
+          credits_remaining?: number
+          discount_percent?: number
+          expires_at?: string | null
+          id?: string
+          initial_appointment_id?: string | null
+          patient_email: string
+          patient_id?: string | null
+          stripe_checkout_session_id?: string | null
+        }
+        Update: {
+          amount_paid?: number
+          created_at?: string | null
+          credits_purchased?: number
+          credits_remaining?: number
+          discount_percent?: number
+          expires_at?: string | null
+          id?: string
+          initial_appointment_id?: string | null
+          patient_email?: string
+          patient_id?: string | null
+          stripe_checkout_session_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "visit_bundles_initial_appointment_id_fkey"
+            columns: ["initial_appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       visitor_analyses: {
         Row: {
           analysis_result: Json
@@ -8418,6 +9575,36 @@ export type Database = {
           retry_count?: number | null
           status?: string
           stripe_event_id?: string
+        }
+        Relationships: []
+      }
+      webhook_logs: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          event_type: string
+          id: string
+          payload_summary: Json | null
+          status: string
+          stripe_session_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          event_type: string
+          id?: string
+          payload_summary?: Json | null
+          status?: string
+          stripe_session_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          event_type?: string
+          id?: string
+          payload_summary?: Json | null
+          status?: string
+          stripe_session_id?: string | null
         }
         Relationships: []
       }
