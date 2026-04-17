@@ -17,6 +17,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import RescheduleAppointmentModal from './RescheduleAppointmentModal';
+import CancelAppointmentModal from './CancelAppointmentModal';
+import NoShowAppointmentModal from './NoShowAppointmentModal';
 
 interface AppointmentDetailModalProps {
   appointment: any | null;
@@ -47,6 +49,8 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const [patientData, setPatientData] = useState<any>(null);
   const [showInsurance, setShowInsurance] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
   const [noShowCount, setNoShowCount] = useState(0);
   const [appointmentHistory, setAppointmentHistory] = useState<any[]>([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -217,23 +221,12 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
     onClose();
   };
 
-  const handleCancel = async () => {
-    if (!confirm('Cancel this appointment? This cannot be undone.')) return;
-    await handleStatusChange('cancelled');
+  const handleCancel = () => {
+    setCancelOpen(true);
   };
 
-  const handleNoShow = async () => {
-    if (!confirm(`Mark ${patientName} as a no-show?`)) return;
-    const noShowFee = (appt.total_amount || 0) * 0.5;
-    const { error } = await supabase.from('appointments').update({
-      status: 'cancelled', no_show: true, no_show_at: new Date().toISOString(),
-      no_show_fee: noShowFee, cancellation_reason: `No-show (fee: $${noShowFee.toFixed(2)})`,
-      cancelled_at: new Date().toISOString(),
-    }).eq('id', appt.id);
-    if (error) { toast.error('Failed to mark no-show'); return; }
-    toast.success(`${patientName} marked as no-show.${noShowFee > 0 ? ` $${noShowFee.toFixed(2)} fee logged.` : ''}`);
-    onUpdate();
-    onClose();
+  const handleNoShow = () => {
+    setNoShowOpen(true);
   };
 
   const handleMessage = () => {
@@ -591,6 +584,20 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
       open={rescheduleOpen}
       onClose={() => setRescheduleOpen(false)}
       onRescheduled={() => { onUpdate(); onClose(); }}
+    />
+
+    <CancelAppointmentModal
+      appointment={appt}
+      open={cancelOpen}
+      onClose={() => setCancelOpen(false)}
+      onCancelled={() => { onUpdate(); onClose(); }}
+    />
+
+    <NoShowAppointmentModal
+      appointment={appt}
+      open={noShowOpen}
+      onClose={() => setNoShowOpen(false)}
+      onMarked={() => { onUpdate(); onClose(); }}
     />
     </>
   );

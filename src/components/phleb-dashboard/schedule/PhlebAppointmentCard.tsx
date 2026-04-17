@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +15,7 @@ import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppo
 import OnTheWayDialog from './OnTheWayDialog';
 import PatientEditModal from './PatientEditModal';
 import SpecimenDeliveryModal from './SpecimenDeliveryModal';
+import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
   scheduled: { label: 'Scheduled', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200', borderColor: '#3B82F6' },
@@ -36,9 +37,23 @@ interface Props {
 
 const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, isExpanded, onToggle }) => {
   const [showOnTheWay, setShowOnTheWay] = useState(false);
-  const [showPatientEdit, setShowPatientEdit] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showPatientEdit, setShowPatientEdit] = useState(() => {
+    return sessionStorage.getItem('phleb-editing-patient') === appointment.id;
+  });
   const [showSpecimenDelivery, setShowSpecimenDelivery] = useState(false);
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
+
+  // Persist patient edit modal state so it survives PWA background/reload
+  const openPatientEdit = useCallback(() => {
+    sessionStorage.setItem('phleb-editing-patient', appointment.id);
+    setShowPatientEdit(true);
+  }, [appointment.id]);
+
+  const closePatientEdit = useCallback(() => {
+    sessionStorage.removeItem('phleb-editing-patient');
+    setShowPatientEdit(false);
+  }, []);
 
   const handleNavigate = () => {
     const addr = encodeURIComponent(appointment.address);
@@ -119,7 +134,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3
                       className="font-semibold text-gray-900 truncate cursor-pointer hover:text-[#B91C1C] hover:underline transition-colors"
-                      onClick={(e) => { e.stopPropagation(); setShowPatientEdit(true); }}
+                      onClick={(e) => { e.stopPropagation(); openPatientEdit(); }}
                       title="Click to edit patient details"
                     >{appointment.patient_name}</h3>
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
@@ -348,19 +363,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <CalendarClock className="h-4 w-4" /> Request Reschedule
                 </Button>
                 {['scheduled', 'confirmed'].includes(appointment.status) && (
-                  <Button variant="outline" size="sm" className="w-full gap-2 h-10 border-red-200 text-red-600 hover:bg-red-50" onClick={async (e) => {
+                  <Button variant="outline" size="sm" className="w-full gap-2 h-10 border-red-200 text-red-600 hover:bg-red-50" onClick={(e) => {
                     e.stopPropagation();
-                    const reason = prompt('Cancellation reason (e.g., patient not home):');
-                    if (!reason) return;
-                    await supabase.from('appointments').update({
-                      status: 'cancelled', cancellation_reason: reason, cancelled_at: new Date().toISOString(),
-                    }).eq('id', appointment.id);
-                    // Notify admin
-                    await supabase.functions.invoke('send-sms-notification', {
-                      body: { to: '9415279169', message: `Appointment cancelled by phleb: ${appointment.patient_name}. Reason: ${reason}` },
-                    }).catch(() => {});
-                    toast.success('Appointment cancelled');
-                    onStatusUpdate(appointment.id, 'cancelled');
+                    setShowCancelModal(true);
                   }}>
                     <AlertTriangle className="h-4 w-4" /> Cancel (Patient No-Show)
                   </Button>
@@ -383,7 +388,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
 
       <PatientEditModal
         open={showPatientEdit}
-        onClose={() => setShowPatientEdit(false)}
+        onClose={closePatientEdit}
         patientId={appointment.patient_id}
         patientEmail={appointment.patient_email}
         initialName={appointment.patient_name}
@@ -399,6 +404,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientEmail={appointment.patient_email}
         serviceType={appointment.service_type}
         onDelivered={() => onStatusUpdate(appointment.id, 'specimen_delivered')}
+      />
+
+      <CancelAppointmentModal
+        appointment={appointment}
+        open={showCancelModal}
+        onClose={() => setShowCancelModal(false)}
+        onCancelled={() => onStatusUpdate(appointment.id, 'cancelled')}
+        alsoNotifyAdmin={true}
+        performedBy="phleb"
       />
     </>
   );

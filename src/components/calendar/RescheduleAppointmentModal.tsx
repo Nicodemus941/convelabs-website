@@ -147,33 +147,17 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
         console.error('Activity log error (non-fatal):', logErr);
       }
 
-      // Send notification to patient
-      if (notifyPatient && (patientEmail || patientPhone)) {
+      // Send notification to patient (SMS only — email notification not yet wired)
+      if (notifyPatient && patientPhone) {
         try {
-          // Send SMS notification
-          if (patientPhone) {
-            await supabase.functions.invoke('send-sms-notification', {
-              body: {
-                to: patientPhone,
-                message: `ConveLabs: Your appointment has been rescheduled to ${new Date(newDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} at ${newTime}. ${reason ? `Reason: ${reason}. ` : ''}Questions? Call (941) 527-9169`,
-              },
-            });
-          }
-
-          // Send email notification
-          if (patientEmail) {
-            const displayDate = new Date(newDate + 'T12:00:00').toLocaleDateString('en-US', {
-              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-            });
-            await supabase.functions.invoke('send-password-reset', {
-              // Reuse Mailgun edge function pattern — we'll invoke the custom email below
-            }).catch(() => {}); // Ignore — we'll use a direct approach
-
-            // Use a simple email via the existing infrastructure
-            // The notification is best-effort
-          }
+          await supabase.functions.invoke('send-sms-notification', {
+            body: {
+              to: patientPhone,
+              message: `ConveLabs: Your appointment has been rescheduled to ${new Date(newDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} at ${newTime}. ${reason ? `Reason: ${reason}. ` : ''}Questions? Call (941) 527-9169`,
+            },
+          });
         } catch (notifErr) {
-          console.error('Notification error (non-fatal):', notifErr);
+          console.error('SMS notification error (non-fatal):', notifErr);
         }
       }
 
@@ -262,17 +246,26 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
           </div>
 
           {/* Notify patient */}
-          <div className="flex items-center gap-2">
+          <div className="border rounded-lg p-3 flex items-start gap-3">
             <input
               type="checkbox"
-              id="notify-patient"
+              id="reschedule-notify-patient"
               checked={notifyPatient}
               onChange={e => setNotifyPatient(e.target.checked)}
-              className="rounded border-gray-300"
+              disabled={!patientPhone}
+              className="mt-1 rounded border-gray-300"
             />
-            <label htmlFor="notify-patient" className="text-sm">
-              Notify patient via SMS
-              {patientPhone ? ` (${patientPhone})` : patientEmail ? ` (${patientEmail})` : ' (no contact info)'}
+            <label htmlFor="reschedule-notify-patient" className="text-sm flex-1 cursor-pointer">
+              <div className="font-medium text-gray-900">Notify patient via SMS</div>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {!patientPhone ? (
+                  'No phone number on file — cannot notify'
+                ) : notifyPatient ? (
+                  `Text will be sent to ${patientPhone}`
+                ) : (
+                  <span className="text-amber-600">Patient will NOT be notified — use for corrections you'll relay manually</span>
+                )}
+              </p>
             </label>
           </div>
 
