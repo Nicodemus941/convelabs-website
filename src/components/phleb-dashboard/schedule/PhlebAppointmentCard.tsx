@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
+import { formatAppointmentDate, formatAppointmentTime, dateOnlyToLocalDate } from '@/lib/appointmentDate';
 import {
   Clock, MapPin, Navigation, MessageSquare, User, Phone, Mail,
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
@@ -143,7 +144,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   </div>
                   <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1 flex-wrap">
                     <Clock className="h-3.5 w-3.5" />
-                    <span>{appointment.appointment_time || format(new Date(appointment.appointment_date + 'T00:00:00'), 'h:mm a')}</span>
+                    <span>{appointment.appointment_time || format(dateOnlyToLocalDate(appointment.appointment_date), 'h:mm a')}</span>
                     {/* Payment indicator */}
                     {appointment.payment_status === 'completed' ? (
                       <span className="text-emerald-600" title="Paid"><DollarSign className="h-3.5 w-3.5" /></span>
@@ -194,7 +195,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <Clock className="h-4 w-4 text-muted-foreground" />
                   <div>
                     <p className="font-medium">{appointment.appointment_time || 'Time TBD'}</p>
-                    <p className="text-muted-foreground text-xs">{format(new Date(appointment.appointment_date + 'T00:00:00'), 'EEEE, MMMM d, yyyy')}</p>
+                    <p className="text-muted-foreground text-xs">{formatAppointmentDate(appointment.appointment_date)}</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-2 text-sm">

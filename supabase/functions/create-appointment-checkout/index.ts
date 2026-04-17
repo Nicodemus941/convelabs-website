@@ -85,11 +85,121 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ─── AUDIT LOG: snapshot the client payload BEFORE anything else ───
+    // If anything ends up mismatched downstream, we have proof of what
+    // the patient actually submitted.
+    const dateOnly = String(appointmentDate).slice(0, 10);
+    const rawPayload = {
+      serviceType, serviceName, clientAmount, tipAmount, appointmentDate,
+      appointmentTime, clientMemberTier, patientDetails, locationDetails,
+      serviceDetails, userId,
+    };
+    try {
+      await supabaseClient.from('booking_audit_log').insert({
+        stage: 'checkout_created',
+        patient_email: patientDetails?.email || null,
+        patient_phone: patientDetails?.phone || null,
+        patient_name: `${patientDetails?.firstName || ''} ${patientDetails?.lastName || ''}`.trim() || null,
+        client_appointment_date: appointmentDate,
+        client_appointment_time: appointmentTime,
+        client_service_type: serviceType,
+        server_appointment_date: dateOnly,
+        server_appointment_time: appointmentTime,
+        raw_payload: rawPayload,
+        ip_address: req.headers.get('x-forwarded-for')?.split(',')[0] || null,
+        user_agent: req.headers.get('user-agent') || null,
+      });
+    } catch (e) { console.warn('audit log insert failed (non-blocking):', e); }
+
+    // ─── SERVER-SIDE SLOT-LOCK ENFORCEMENT ─────────────────────────
+    // Prevent double-booking: check if (date, time) is already taken by
+    // an active appointment OR held by an active slot_hold from another
+    // session. If either is true, reject with a clear error BEFORE Stripe.
+    if (appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      // Check for existing scheduled/confirmed appointment on that slot
+      const { data: existingAppts } = await supabaseClient
+        .from('appointments')
+        .select('id, patient_name, appointment_time')
+        .gte('appointment_date', dateOnly)
+        .lte('appointment_date', `${dateOnly}T23:59:59`)
+        .eq('appointment_time', appointmentTime)
+        .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']);
+
+      if (existingAppts && existingAppts.length > 0) {
+        console.warn(`[slot-conflict] ${patientDetails.email} tried to book ${dateOnly} ${appointmentTime} (taken by ${existingAppts[0].patient_name})`);
+        try {
+          await supabaseClient.from('booking_audit_log').insert({
+            stage: 'slot_conflict',
+            patient_email: patientDetails?.email,
+            client_appointment_date: appointmentDate,
+            client_appointment_time: appointmentTime,
+            server_appointment_date: dateOnly,
+            mismatch_detected: true,
+            mismatch_detail: `Slot already booked by existing appointment ${existingAppts[0].id}`,
+            raw_payload: rawPayload,
+          });
+        } catch { /* non-blocking */ }
+        return new Response(
+          JSON.stringify({
+            error: 'slot_unavailable',
+            message: `That time slot (${dateOnly} at ${appointmentTime}) is no longer available. Please pick a different time.`,
+          }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Check for active slot_hold from a different session
+      const clientSessionId = req.headers.get('x-session-id') || `stripe-session-${Date.now()}`;
+      const { data: activeHolds } = await supabaseClient
+        .from('slot_holds')
+        .select('id, held_by, expires_at')
+        .eq('appointment_date', dateOnly)
+        .eq('appointment_time', appointmentTime)
+        .eq('released', false)
+        .gt('expires_at', new Date().toISOString());
+
+      const conflictingHold = (activeHolds || []).find((h: any) => h.held_by !== clientSessionId);
+      if (conflictingHold) {
+        console.warn(`[slot-held] ${patientDetails.email} tried to book ${dateOnly} ${appointmentTime} (held by another session)`);
+        try {
+          await supabaseClient.from('booking_audit_log').insert({
+            stage: 'slot_conflict',
+            patient_email: patientDetails?.email,
+            client_appointment_date: appointmentDate,
+            client_appointment_time: appointmentTime,
+            mismatch_detected: true,
+            mismatch_detail: `Slot held by another session: ${conflictingHold.held_by}`,
+            raw_payload: rawPayload,
+          });
+        } catch { /* non-blocking */ }
+        return new Response(
+          JSON.stringify({
+            error: 'slot_held_by_other',
+            message: `Another patient is currently booking that time slot. Please pick a different time.`,
+          }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Reserve the slot for 15 min (enough for the Stripe checkout flow)
+      try {
+        await supabaseClient.from('slot_holds').insert({
+          appointment_date: dateOnly,
+          appointment_time: appointmentTime,
+          held_by: clientSessionId,
+          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          released: false,
+        });
+      } catch (e) {
+        console.warn('slot_hold insert failed (non-blocking, conflict-allowed):', e);
+      }
+    }
+
     // ─── SERVER-SIDE BLOCKED-DATE CHECK ────────────────────────────
     // Don't take payment for a date that's blocked. The UI greys out
     // blocked dates but race conditions + stale cached bundles + direct
     // API calls can bypass that — so we check here before any money moves.
-    const dateOnly = String(appointmentDate).slice(0, 10);
+    // Note: `dateOnly` was already computed above for the audit log.
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
       const { data: blocks } = await supabaseClient
         .from('time_blocks')

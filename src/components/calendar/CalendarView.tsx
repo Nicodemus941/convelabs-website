@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addDays } from 'date-fns';
+import { formatAppointmentDate, toDateOnly } from '@/lib/appointmentDate';
 import { Clock, MapPin, User, Phone, Mail } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
@@ -108,16 +109,19 @@ const CalendarView: React.FC<CalendarViewProps> = ({
   });
 
   // Get appointments for selected day
-  const selectedDayAppointments = (appointments?.filter(apt =>
-    isSameDay(new Date(apt.appointment_date), selectedDay || new Date())
-  ) || []).sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
+  // Use date-only comparison (not Date objects) to avoid TZ bugs
+  const selectedDayAppointments = (appointments?.filter(apt => {
+    const aptDay = toDateOnly(apt.appointment_date);
+    const selDay = toDateOnly(selectedDay || new Date());
+    return aptDay === selDay;
+  }) || []).sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
 
-  // Get appointment counts per day
+  // Get appointment counts per day (use date-string, not Date object)
   const appointmentCounts = React.useMemo(() => {
     const counts: Record<string, number> = {};
     appointments?.forEach(apt => {
-      const dateKey = format(new Date(apt.appointment_date), 'yyyy-MM-dd');
-      counts[dateKey] = (counts[dateKey] || 0) + 1;
+      const dateKey = toDateOnly(apt.appointment_date);
+      if (dateKey) counts[dateKey] = (counts[dateKey] || 0) + 1;
     });
     return counts;
   }, [appointments]);
@@ -184,7 +188,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
                         <div className="flex items-center gap-4">
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {format(new Date(apt.appointment_date), 'MMM d, yyyy')} at {formatTime(apt.appointment_date, apt.appointment_time)}
+                            {formatAppointmentDate(apt.appointment_date, { month: 'short', day: 'numeric', year: 'numeric' })} at {formatTime(apt.appointment_date, apt.appointment_time)}
                           </span>
                           <span className="flex items-center gap-1">
                             <MapPin className="h-3 w-3" />

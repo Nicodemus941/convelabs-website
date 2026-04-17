@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { format, startOfWeek, startOfMonth } from 'date-fns';
+import { formatAppointmentDate } from '@/lib/appointmentDate';
 import AdminCalendar from "@/components/calendar/AdminCalendar";
 import TodayExecutionView from "@/components/dashboards/admin/TodayExecutionView";
 
@@ -291,7 +292,7 @@ const OfficeManagerDashboard = () => {
                           {contact.phone && <p className="text-[10px] text-muted-foreground flex items-center gap-1"><Phone className="h-3 w-3" />{contact.phone}</p>}
                         </TableCell>
                         <TableCell>
-                          <p className="text-sm">{appt.appointment_date ? format(new Date(appt.appointment_date), 'MMM d, yyyy') : '—'}</p>
+                          <p className="text-sm">{formatAppointmentDate(appt.appointment_date, { month: 'short', day: 'numeric', year: 'numeric' }) || '—'}</p>
                           <p className="text-xs text-muted-foreground">{appt.appointment_time || ''}</p>
                         </TableCell>
                         <TableCell className="text-sm capitalize">{(appt.service_type || '—').replace(/_|-/g, ' ')}</TableCell>
