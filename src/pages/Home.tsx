@@ -5,6 +5,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/home/Header";
 import Hero from "@/components/home/Hero";
 import MeetYourPhlebotomist from "@/components/home/MeetYourPhlebotomist";
+import ComparisonTable from "@/components/home/ComparisonTable";
+import ValueStack from "@/components/home/ValueStack";
 import GuaranteeBanner from "@/components/home/GuaranteeBanner";
 import HealthInsights from "@/components/home/HealthInsights";
 import TrustBanner from "@/components/home/TrustBanner";
@@ -206,6 +208,8 @@ const Home = () => {
             <TestimonialsSection />
             <GuaranteeBanner />
             <TrustBanner />
+            <ComparisonTable />
+            <ValueStack />
             <HowItWorks />
             <PricingTransparency />
             <ServicesSection />
