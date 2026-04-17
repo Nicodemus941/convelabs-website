@@ -135,6 +135,17 @@ export function usePhlebotomistAppointments() {
             patientInsurance = tpData.insurance_provider || null;
             patientInsuranceId = tpData.insurance_member_id || null;
             patientInsuranceGroup = tpData.insurance_group_number || null;
+            // Sync address from tenant_patients if appointment address is missing or placeholder
+            const apptAddr = (appt.address || '').trim().toLowerCase();
+            if (!apptAddr || apptAddr === 'tbd' || apptAddr === 'address pending') {
+              if (tpData.address) {
+                const fullAddr = [tpData.address, tpData.city, tpData.state, tpData.zipcode].filter(Boolean).join(', ');
+                appt.address = fullAddr;
+                appt.zipcode = tpData.zipcode || appt.zipcode;
+                // Also update the appointment record so it stays synced
+                supabase.from('appointments').update({ address: fullAddr, zipcode: tpData.zipcode || appt.zipcode }).eq('id', appt.id).then(() => {});
+              }
+            }
           }
 
           // PRIORITY 3: Parse from notes (oldest fallback)

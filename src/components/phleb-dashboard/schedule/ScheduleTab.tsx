@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { startOfWeek, format, isToday } from 'date-fns';
+import React, { useState, useEffect, useMemo } from 'react';
+import { startOfWeek, format, isToday, parseISO } from 'date-fns';
 import { Calendar, Loader2, RefreshCw, DollarSign, Clock, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
@@ -22,10 +22,27 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
   onRefresh,
   onStatusUpdate,
 }) => {
-  const [selectedDate, setSelectedDate] = useState(new Date());
-  const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
-  const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const saved = sessionStorage.getItem('phleb-selected-date');
+    if (saved) {
+      try { return parseISO(saved); } catch { /* fall through */ }
+    }
+    return new Date();
+  });
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(selectedDate, { weekStartsOn: 1 }));
+  const [expandedCard, setExpandedCard] = useState<string | null>(() => {
+    return sessionStorage.getItem('phleb-expanded-card') || null;
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // Persist navigation state so it survives PWA background/reload
+  useEffect(() => {
+    sessionStorage.setItem('phleb-selected-date', format(selectedDate, 'yyyy-MM-dd'));
+  }, [selectedDate]);
+
+  useEffect(() => {
+    sessionStorage.setItem('phleb-expanded-card', expandedCard || '');
+  }, [expandedCard]);
 
   const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
 

@@ -22,8 +22,16 @@ const DESKTOP_TABS: { id: PhlebTab; label: string; icon: React.ElementType }[] =
 
 const PhlebDashboardShell: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<PhlebTab>('schedule');
+  const [activeTab, setActiveTab] = useState<PhlebTab>(() => {
+    const saved = sessionStorage.getItem('phleb-active-tab');
+    return (saved as PhlebTab) || 'schedule';
+  });
   const [unreadMessages, setUnreadMessages] = useState(0);
+
+  // Persist active tab so it survives PWA background/reload
+  useEffect(() => {
+    sessionStorage.setItem('phleb-active-tab', activeTab);
+  }, [activeTab]);
 
   const {
     appointments,

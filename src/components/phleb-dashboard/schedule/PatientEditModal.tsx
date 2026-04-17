@@ -22,21 +22,52 @@ const PatientEditModal: React.FC<PatientEditModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [tpId, setTpId] = useState<string | null>(null);
 
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [dob, setDob] = useState('');
-  const [street, setStreet] = useState('');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('FL');
-  const [zip, setZip] = useState('');
-  const [insuranceProvider, setInsuranceProvider] = useState('');
-  const [insuranceMemberId, setInsuranceMemberId] = useState('');
-  const [insuranceGroup, setInsuranceGroup] = useState('');
+  // Restore form state from sessionStorage if resuming after PWA reload
+  const savedForm = (() => {
+    try {
+      const raw = sessionStorage.getItem('phleb-patient-edit-form');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+
+  const [firstName, setFirstName] = useState(savedForm?.firstName || '');
+  const [lastName, setLastName] = useState(savedForm?.lastName || '');
+  const [email, setEmail] = useState(savedForm?.email || '');
+  const [phone, setPhone] = useState(savedForm?.phone || '');
+  const [dob, setDob] = useState(savedForm?.dob || '');
+  const [street, setStreet] = useState(savedForm?.street || '');
+  const [city, setCity] = useState(savedForm?.city || '');
+  const [state, setState] = useState(savedForm?.state || 'FL');
+  const [zip, setZip] = useState(savedForm?.zip || '');
+  const [insuranceProvider, setInsuranceProvider] = useState(savedForm?.insuranceProvider || '');
+  const [insuranceMemberId, setInsuranceMemberId] = useState(savedForm?.insuranceMemberId || '');
+  const [insuranceGroup, setInsuranceGroup] = useState(savedForm?.insuranceGroup || '');
+
+  // Persist form state so edits survive PWA background/reload
+  useEffect(() => {
+    if (!open) {
+      sessionStorage.removeItem('phleb-patient-edit-form');
+      return;
+    }
+    if (loading) return;
+    const formData = { firstName, lastName, email, phone, dob, street, city, state, zip, insuranceProvider, insuranceMemberId, insuranceGroup, tpId };
+    sessionStorage.setItem('phleb-patient-edit-form', JSON.stringify(formData));
+  }, [open, loading, firstName, lastName, email, phone, dob, street, city, state, zip, insuranceProvider, insuranceMemberId, insuranceGroup, tpId]);
 
   useEffect(() => {
     if (!open) return;
+
+    // If we have saved form data from a prior session (PWA resumed), skip DB load
+    const hasSavedForm = sessionStorage.getItem('phleb-patient-edit-form');
+    if (hasSavedForm) {
+      try {
+        const f = JSON.parse(hasSavedForm);
+        if (f.tpId) setTpId(f.tpId);
+      } catch { /* ignore */ }
+      setLoading(false);
+      return;
+    }
+
     const load = async () => {
       setLoading(true);
 
@@ -100,6 +131,8 @@ const PatientEditModal: React.FC<PatientEditModalProps> = ({
       }
 
       toast.success('Patient details saved');
+      sessionStorage.removeItem('phleb-patient-edit-form');
+      sessionStorage.removeItem('phleb-editing-patient');
       onClose();
     } catch (err: any) {
       console.error('Save error:', err);
