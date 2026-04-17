@@ -74,18 +74,22 @@ async function isDateBlocked(dateOnly: string): Promise<{ blocked: boolean; reas
 }
 
 function normalizeAppointmentDate(raw: string | null | undefined): string {
-  // Normalize any input (YYYY-MM-DD, full ISO timestamp, etc.) to noon-local-ET
-  // This guarantees the calendar renders the exact stored day regardless of
-  // whether the client sent a date or a timestamp.
   if (!raw) return new Date().toISOString();
   const dateOnly = raw.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return raw;
-  // ET is UTC-4 in EDT (Mar–Nov) / UTC-5 in EST (Nov–Mar).
-  // For simplicity + to avoid Temporal/Intl complexity in Deno, we pin to
-  // noon UTC-4 when we're confident EDT is active (Florida runs EDT most
-  // of the year when ConveLabs operates). Worst case in EST: shows as 11 AM
-  // instead of noon — calendar day unaffected.
   return `${dateOnly}T12:00:00-04:00`;
+}
+
+/**
+ * Generate a URL-safe token for guest-booking view URLs.
+ * 32 chars, base64url (no +, /, =).
+ */
+function generateViewToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+    .substring(0, 32);
 }
 
 Deno.serve(async (req) => {
@@ -166,6 +170,7 @@ Deno.serve(async (req) => {
           appointment_time: metadata.appointment_time || null,
           patient_id: metadata.user_id || null,
           phlebotomist_id: DEFAULT_PHLEB_ID,
+          view_token: generateViewToken(), // guest-view URL key
           patient_name: patientName || null,
           patient_email: metadata.patient_email || null,
           patient_phone: metadata.patient_phone || null,

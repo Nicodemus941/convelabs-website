@@ -223,12 +223,39 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── APOLOGY CREDIT APPLICATION ───────────────────────────────
+    // When a patient has been inconvenienced (double-booking, late
+    // arrival, etc.), credits accrue in apology_credits. Apply any
+    // unredeemed credits to the current checkout automatically.
+    // Hormozi: "The credit you issue in theory but never apply is
+    // worse than no credit at all — it breeds distrust."
+    let apologyCreditApplied = 0;
+    const creditIdsToMark: string[] = [];
+    if (patientDetails?.email) {
+      const { data: credits } = await supabaseClient
+        .from('apology_credits')
+        .select('id, amount_cents')
+        .eq('patient_email', patientDetails.email.toLowerCase())
+        .eq('redeemed', false)
+        .order('created_at', { ascending: true });
+
+      if (credits && credits.length > 0) {
+        for (const c of credits as any[]) {
+          apologyCreditApplied += c.amount_cents || 0;
+          creditIdsToMark.push(c.id);
+        }
+        // Cap at the client amount so we don't go negative
+        apologyCreditApplied = Math.min(apologyCreditApplied, clientAmount);
+        console.log(`[apology-credit] applied $${apologyCreditApplied / 100} for ${patientDetails.email} (${creditIdsToMark.length} credit(s))`);
+      }
+    }
+
     // ─── SERVER-SIDE MEMBERSHIP VALIDATION ─────────────────────────
     // If the patient is a member but the frontend didn't apply the
     // discount (or claimed a lesser tier), we apply the correction
     // here. Customers should NEVER be charged more than their tier
     // entitles them to.
-    let amount = clientAmount;
+    let amount = Math.max(0, clientAmount - apologyCreditApplied);
     let priceCorrection = 0;
     const serverTier = await verifyMemberTier(patientDetails?.email);
     const pricing = TIER_PRICING[serviceType];
@@ -239,7 +266,7 @@ Deno.serve(async (req) => {
       // If server tier gives a lower price than what client applied, discount the difference
       if (serverTierPrice < baseTierPrice) {
         priceCorrection = (baseTierPrice - serverTierPrice) * 100; // cents
-        amount = Math.max(0, clientAmount - priceCorrection);
+        amount = Math.max(0, amount - priceCorrection);
         console.warn(
           `[member-discount-correction] ${patientDetails.email} serviceType=${serviceType} ` +
           `clientTier=${clientMemberTier} serverTier=${serverTier} ` +
@@ -343,6 +370,9 @@ Deno.serve(async (req) => {
     };
 
     // Create the checkout session
+    // Tag metadata with credit info for Stripe dashboard visibility
+    metadata.apology_credit_applied_cents = String(apologyCreditApplied);
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       customer: customerId,
@@ -359,8 +389,26 @@ Deno.serve(async (req) => {
         : `${origin}/book-now?status=cancel`,
     });
 
+    // Mark applied apology credits as redeemed (tied to this session).
+    // If checkout is abandoned, they stay redeemed — but next attempt
+    // will just find them already-used and won't double-apply.
+    if (creditIdsToMark.length > 0) {
+      try {
+        await supabaseClient.from('apology_credits')
+          .update({
+            redeemed: true,
+            redeemed_at: new Date().toISOString(),
+          })
+          .in('id', creditIdsToMark);
+      } catch (e) { console.warn('credit redemption mark failed (non-blocking):', e); }
+    }
+
     return new Response(
-      JSON.stringify({ url: session.url, sessionId: session.id }),
+      JSON.stringify({
+        url: session.url,
+        sessionId: session.id,
+        apologyCreditApplied: apologyCreditApplied / 100,
+      }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err) {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Loader2, AlertCircle, Phone, CheckCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Phone, CheckCircle, UserPlus, Download, ExternalLink } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { analytics } from '@/utils/analytics';
@@ -8,6 +8,7 @@ import { verifyAppointmentCheckout } from '@/services/stripe/appointmentCheckout
 import BookingFlow from '@/components/booking/BookingFlow';
 import BookingTrustStripe from '@/components/booking/BookingTrustStripe';
 import Header from '@/components/home/Header';
+import { useAuth } from '@/contexts/AuthContext';
 
 type PageMode = 'booking' | 'verifying' | 'confirmed' | 'cancelled' | 'error';
 
@@ -21,6 +22,7 @@ interface ConfirmedBooking {
   service_name?: string;
   total_amount?: number;
   tip_amount?: number;
+  view_token?: string;
 }
 
 const BookNow: React.FC = () => {
@@ -38,6 +40,7 @@ const BookNow: React.FC = () => {
     return 'booking';
   });
 
+  const { user } = useAuth();
   const [booking, setBooking] = useState<ConfirmedBooking | null>(null);
   const [verifyError, setVerifyError] = useState('');
 
@@ -214,13 +217,29 @@ const BookNow: React.FC = () => {
                 )}
               </div>
 
+              {/*
+                Post-booking navigation: the classic bug was sending guests
+                to `/dashboard` which bounces them through the login wall.
+                Now we split by auth state:
+                  - Logged in  → go straight to the patient dashboard
+                  - Guest      → go to the tokenized view URL (no login needed)
+              */}
               <div className="flex flex-col sm:flex-row gap-3 mt-4">
-                <Button
-                  onClick={() => window.location.href = '/dashboard'}
-                  className="bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
-                >
-                  Go to Dashboard
-                </Button>
+                {user ? (
+                  <Button
+                    onClick={() => window.location.href = '/dashboard/patient'}
+                    className="bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
+                  >
+                    Go to Dashboard
+                  </Button>
+                ) : booking.view_token ? (
+                  <Button
+                    onClick={() => window.location.href = `/visit/${booking.view_token}`}
+                    className="bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
+                  >
+                    View My Booking
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   onClick={() => { setMode('booking'); window.history.replaceState({}, '', '/book-now'); }}
@@ -229,6 +248,32 @@ const BookNow: React.FC = () => {
                   Book Another
                 </Button>
               </div>
+
+              {/* Guest-only: prompt account creation with email pre-filled */}
+              {!user && booking.patient_email && (
+                <div className="mt-4 bg-gradient-to-br from-conve-red/5 to-white border border-conve-red/20 rounded-xl p-4 text-left">
+                  <div className="flex items-start gap-3">
+                    <div className="h-10 w-10 rounded-full bg-conve-red/10 flex items-center justify-center flex-shrink-0">
+                      <UserPlus className="h-4 w-4 text-conve-red" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm text-gray-900">
+                        Create a free account to track all your visits
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                        Same email you just used. Manage future appointments, view history, upload lab orders.
+                      </p>
+                      <Button
+                        size="sm"
+                        className="bg-conve-red hover:bg-conve-red-dark text-white text-xs"
+                        onClick={() => window.location.href = `/login?signup=1&email=${encodeURIComponent(booking.patient_email || '')}`}
+                      >
+                        Create Account
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Post-Booking Upsells */}
               <div className="w-full space-y-3 mt-6 pt-6 border-t">
@@ -256,7 +301,11 @@ const BookNow: React.FC = () => {
                       <p className="font-semibold text-sm text-emerald-800">Refer a Friend, Both Get $25 Off</p>
                       <p className="text-xs text-emerald-600 mt-1">Share ConveLabs with someone who needs convenient lab work.</p>
                     </div>
-                    <Button size="sm" variant="outline" className="text-xs border-emerald-300 text-emerald-700 flex-shrink-0" onClick={() => window.location.href = '/dashboard'}>
+                    <Button size="sm" variant="outline" className="text-xs border-emerald-300 text-emerald-700 flex-shrink-0" onClick={() => {
+                      if (user) window.location.href = '/dashboard/patient';
+                      else if (booking.view_token) window.location.href = `/visit/${booking.view_token}`;
+                      else window.location.href = `/login?signup=1&email=${encodeURIComponent(booking.patient_email || '')}`;
+                    }}>
                       Get Code
                     </Button>
                   </div>

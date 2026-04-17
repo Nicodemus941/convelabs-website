@@ -112,6 +112,9 @@ async function sendEmail(to: string, subject: string, html: string, text: string
   form.append('html', html);
   form.append('text', text);
   form.append('o:tag', 'double-booking-apology');
+  // Disable Mailgun click-tracking — the tracking redirect was breaking
+  // the reschedule link and sending patients to the landing page.
+  form.append('o:tracking-clicks', 'no');
   try {
     const resp = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
       method: 'POST',
@@ -314,6 +317,7 @@ Deno.serve(async (req) => {
 <p style="font-size:16px;color:#333">We've added a <strong>$25 credit</strong> to your account as an apology — applies to this visit or any future one.</p>
 <p style="font-size:16px;color:#333"><strong>Please pick a new time that works for you:</strong></p>
 <p style="text-align:center;margin:32px 0"><a href="${link}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:600">Pick a new time →</a></p>
+<p style="text-align:center;margin:8px 0 32px;font-size:12px;color:#666;word-break:break-all">Or copy this link:<br><a href="${link}" style="color:#B91C1C;text-decoration:underline">${link}</a></p>
 <p style="font-size:14px;color:#666">Link expires in 48 hours. Questions? Reply to this email or call (941) 527-9169.</p>
 <p style="font-size:13px;color:#999;margin-top:32px">— The ConveLabs Team</p>
 </body></html>`;

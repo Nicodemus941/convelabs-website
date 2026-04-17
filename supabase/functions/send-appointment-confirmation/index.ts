@@ -41,6 +41,8 @@ Deno.serve(async (req) => {
     let isWaived = body.isWaived || totalAmount === 0;
 
     // If appointmentId provided, fetch details from DB
+    let viewToken: string | null = null;
+    let appointmentId: string | null = body.appointmentId || null;
     if (body.appointmentId && (!patientEmail || !appointmentDate)) {
       const supabase = createClient(
         Deno.env.get('SUPABASE_URL') || '',
@@ -62,8 +64,12 @@ Deno.serve(async (req) => {
         address = appt.address || address;
         totalAmount = appt.total_amount ?? totalAmount;
         isWaived = (appt.payment_status === 'completed' && appt.total_amount === 0) || isWaived;
+        viewToken = (appt as any).view_token || null;
       }
     }
+
+    const SITE_URL = Deno.env.get('SITE_URL') || 'https://www.convelabs.com';
+    const visitUrl = viewToken ? `${SITE_URL}/visit/${viewToken}` : `${SITE_URL}/dashboard`;
 
     const firstName = patientName.split(' ')[0] || 'Patient';
 
@@ -113,8 +119,9 @@ Deno.serve(async (req) => {
             <p style="font-size:13px;color:#6b7280;"><strong>What to expect:</strong> A licensed phlebotomist will arrive at your location during your scheduled time window. Please have your lab order and insurance card ready.</p>
             <p style="font-size:13px;color:#6b7280;">Need to reschedule? Call us at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a></p>
             <div style="text-align:center;margin:20px 0;">
-              <a href="https://convelabs.com/dashboard" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
+              <a href="${visitUrl}" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
             </div>
+            <p style="text-align:center;margin:8px 0 20px;font-size:12px;color:#666;word-break:break-all">Or copy this link:<br><a href="${visitUrl}" style="color:#B91C1C;text-decoration:underline">${visitUrl}</a></p>
             <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
           </div>
         </div>`;
@@ -124,6 +131,57 @@ Deno.serve(async (req) => {
         formData.append('to', patientEmail);
         formData.append('subject', `Appointment Confirmed - ${displayDate}`);
         formData.append('html', emailHtml);
+        formData.append('o:tag', 'appointment-confirmation');
+        formData.append('o:tracking-clicks', 'no');
+
+        // ── Attach .ics calendar invite ──────────────────────────────
+        // One-tap "Add to Calendar" from every email client.
+        // Hormozi: every friction-free nudge toward attendance reduces no-shows.
+        try {
+          const dateOnly = (appointmentDate || '').slice(0, 10).replace(/-/g, '');
+          const parseTime = (t: string): [string, string] => {
+            const m = String(t || '09:00 AM').match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+            if (!m) return ['09', '00'];
+            let h = parseInt(m[1], 10);
+            const period = (m[3] || '').toUpperCase();
+            if (period === 'PM' && h !== 12) h += 12;
+            if (period === 'AM' && h === 12) h = 0;
+            return [String(h).padStart(2, '0'), m[2]];
+          };
+          const [h, mm] = parseTime(appointmentTime);
+          // End = +60 min
+          const endMinutes = (parseInt(h, 10) * 60 + parseInt(mm, 10) + 60);
+          const eh = String(Math.floor(endMinutes / 60) % 24).padStart(2, '0');
+          const em = String(endMinutes % 60).padStart(2, '0');
+
+          if (/^\d{8}$/.test(dateOnly)) {
+            const ics = [
+              'BEGIN:VCALENDAR',
+              'VERSION:2.0',
+              'PRODID:-//ConveLabs//EN',
+              'METHOD:PUBLISH',
+              'BEGIN:VEVENT',
+              `UID:${appointmentId || `cl-${Date.now()}`}@convelabs.com`,
+              `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').split('.')[0]}Z`,
+              `DTSTART;TZID=America/New_York:${dateOnly}T${h}${mm}00`,
+              `DTEND;TZID=America/New_York:${dateOnly}T${eh}${em}00`,
+              `SUMMARY:ConveLabs - ${serviceName}`,
+              `LOCATION:${(address || '').replace(/,/g, '\\,').replace(/\n/g, ' ')}`,
+              `DESCRIPTION:Your ConveLabs mobile phlebotomy appointment. Questions? Call (941) 527-9169. View details: ${visitUrl}`,
+              'BEGIN:VALARM',
+              'ACTION:DISPLAY',
+              'DESCRIPTION:ConveLabs visit tomorrow',
+              'TRIGGER:-P1D',
+              'END:VALARM',
+              'END:VEVENT',
+              'END:VCALENDAR',
+            ].join('\r\n');
+            const icsBlob = new Blob([ics], { type: 'text/calendar; charset=utf-8; method=PUBLISH' });
+            formData.append('attachment', icsBlob, `convelabs-visit-${dateOnly}.ics`);
+          }
+        } catch (icsErr) {
+          console.warn('ICS attachment build failed (non-blocking):', icsErr);
+        }
 
         const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
           method: 'POST',

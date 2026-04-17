@@ -87,6 +87,7 @@ async function sendConfirmationEmail(
   form.append('html', html);
   form.append('text', text);
   form.append('o:tag', 'reschedule-confirmation');
+  form.append('o:tracking-clicks', 'no');
 
   try {
     const resp = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
