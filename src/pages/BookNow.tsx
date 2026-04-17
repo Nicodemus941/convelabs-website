@@ -181,7 +181,14 @@ const BookNow: React.FC = () => {
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Date</span>
                     <span className="font-medium">
-                      {new Date(booking.appointment_date).toLocaleDateString('en-US', {
+                      {/*
+                        Bugfix: we used to call `new Date(booking.appointment_date)` which
+                        interprets a UTC timestamp and shifts the display to local TZ.
+                        For "2026-04-24T00:00:00Z" in ET, that rendered "Thursday April 23"
+                        (midnight UTC = 8 PM previous day ET). Now we extract just the
+                        date portion and pin to noon local so display = stored day.
+                      */}
+                      {new Date(booking.appointment_date.slice(0, 10) + 'T12:00:00').toLocaleDateString('en-US', {
                         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                       })}
                     </span>

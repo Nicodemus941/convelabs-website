@@ -85,6 +85,34 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ─── SERVER-SIDE BLOCKED-DATE CHECK ────────────────────────────
+    // Don't take payment for a date that's blocked. The UI greys out
+    // blocked dates but race conditions + stale cached bundles + direct
+    // API calls can bypass that — so we check here before any money moves.
+    const dateOnly = String(appointmentDate).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      const { data: blocks } = await supabaseClient
+        .from('time_blocks')
+        .select('start_date, end_date, reason, block_type')
+        .lte('start_date', dateOnly)
+        .gte('end_date', dateOnly)
+        .eq('block_type', 'office_closure')
+        .limit(1);
+
+      if (blocks && blocks.length > 0) {
+        console.warn(`[blocked-date-rejected] ${patientDetails.email} tried to book ${dateOnly} (reason: ${blocks[0].reason})`);
+        return new Response(
+          JSON.stringify({
+            error: 'date_blocked',
+            message: `Sorry — we're not available on ${dateOnly}${blocks[0].reason ? ` (${blocks[0].reason})` : ''}. Please pick another date.`,
+            blockedDate: dateOnly,
+            reason: blocks[0].reason,
+          }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     // ─── SERVER-SIDE MEMBERSHIP VALIDATION ─────────────────────────
     // If the patient is a member but the frontend didn't apply the
     // discount (or claimed a lesser tier), we apply the correction
