@@ -1,15 +1,35 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Clock, Shield, CheckCircle } from "lucide-react";
-import { motion } from "framer-motion";
+import { ArrowRight, Shield, PlayCircle } from "lucide-react";
+import { motion, type Variants } from "framer-motion";
 import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 import { supabase } from "@/integrations/supabase/client";
+
+/**
+ * HERO — Post-Hormozi / NFL-endorsement Rebuild
+ *
+ * Positioning: not "mobile blood draw" — "better than NFL-grade mobile
+ * medical care at your door." The category-killing testimonial from
+ * Deiontrez Mount (NFL LB, Titans/Colts/Broncos) does the heavy lifting.
+ *
+ * Video loop (muted, silent-autoplay) shows real draw footage so the
+ * service proof is burned in before the visitor reads a single word.
+ * Falls back to a poster image on slow connections or /public path missing.
+ *
+ * Asset placement (populate when ready):
+ *   /public/videos/hero-loop.mp4     — 10-15s silent loop of a real draw
+ *   /public/videos/hero-loop.webm    — WebM fallback (optional)
+ *   /public/images/hero-poster.jpg   — first frame / static fallback
+ */
+
+const HERO_VIDEO_MP4 = "/videos/hero-loop.mp4";
+const HERO_VIDEO_WEBM = "/videos/hero-loop.webm";
+const HERO_POSTER = "/images/hero-poster.jpg";
 
 const Hero = () => {
   const [visitCount, setVisitCount] = useState(500);
 
   useEffect(() => {
-    // Fetch real completed appointment count for social proof
     supabase.from('appointments').select('id', { count: 'exact', head: true })
       .eq('status', 'completed')
       .then(({ count }) => {
@@ -21,156 +41,145 @@ const Hero = () => {
     window.location.href = GHS_BOOKING_PAGE;
   };
 
-  const containerVariants = {
+  const scrollToReviews = () => {
+    const el = document.getElementById('testimonials');
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
-      transition: { when: "beforeChildren", staggerChildren: 0.12 },
+      transition: { when: "beforeChildren", staggerChildren: 0.10 },
     },
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 24 },
     visible: {
       opacity: 1,
       y: 0,
-      transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] },
+      transition: { duration: 0.6, ease: "easeOut" },
     },
   };
 
   return (
-    <section className="relative bg-white overflow-hidden">
-      <div className="absolute inset-0 opacity-[0.02]">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `radial-gradient(circle at 1px 1px, rgba(0,0,0,0.15) 1px, transparent 0)`,
-            backgroundSize: "32px 32px",
-          }}
-        />
+    <section className="relative overflow-hidden bg-black">
+      {/* Video background (silent autoplay loop) */}
+      <div className="absolute inset-0 z-0">
+        <video
+          autoPlay
+          muted
+          loop
+          playsInline
+          poster={HERO_POSTER}
+          className="w-full h-full object-cover opacity-60"
+          aria-hidden="true"
+        >
+          <source src={HERO_VIDEO_WEBM} type="video/webm" />
+          <source src={HERO_VIDEO_MP4} type="video/mp4" />
+        </video>
+        {/* Dark gradient overlay for readability */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-black/80" />
       </div>
 
-      <div className="relative py-16 sm:py-20 md:py-24 lg:py-32">
+      <div className="relative z-10 py-20 sm:py-24 md:py-28 lg:py-32">
         <div className="container mx-auto px-4 max-w-6xl">
           <motion.div
-            className="max-w-3xl mx-auto text-center"
+            className="max-w-4xl mx-auto text-center"
             variants={containerVariants}
             initial="hidden"
             animate="visible"
           >
-            {/* Brand scripture */}
-            <motion.p
-              variants={itemVariants}
-              className="text-xs sm:text-sm tracking-[0.15em] uppercase text-amber-700/60 font-light mb-5 leading-relaxed"
-            >
-              "I pray that you may enjoy good health and that all may go well with you"
-              <span className="text-amber-700/40 text-[0.7em] ml-1">— 3 John 1:2</span>
-            </motion.p>
-
-            {/* Urgency badge */}
+            {/* Category-killer quote badge */}
             <motion.div variants={itemVariants}>
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 rounded-full border border-green-200 mb-6">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full border border-white/20 mb-6">
+                <span className="text-lg">🏈</span>
+                <span className="text-sm font-semibold text-white">
+                  "Better than what I got in the NFL."
                 </span>
-                <span className="text-sm font-semibold text-green-800">
-                  Same-day appointments available
-                </span>
+                <span className="text-xs text-white/70 hidden sm:inline">— Deiontrez Mount, NFL LB</span>
               </div>
             </motion.div>
 
-            {/* H1 */}
+            {/* H1 — the NFL-grade claim */}
             <motion.h1
               variants={itemVariants}
-              className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold leading-tight tracking-tight text-foreground mb-6"
+              className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.05] tracking-tight text-white mb-6"
             >
-              Know You're Healthy{" "}
-              <span className="text-conve-red">— From Your Couch</span>
+              Better Than <span className="text-conve-red">NFL-Grade.</span>
+              <br />
+              At Your Door.
             </motion.h1>
 
             {/* Subtitle */}
             <motion.p
               variants={itemVariants}
-              className="text-lg sm:text-xl md:text-2xl text-muted-foreground max-w-2xl mx-auto mb-4"
+              className="text-lg sm:text-xl md:text-2xl text-white/90 max-w-2xl mx-auto mb-8 leading-relaxed"
             >
-              A licensed phlebotomist at your door in 60 minutes. Results in 48 hours. Backed by our on-time guarantee — or your visit is free.
-            </motion.p>
-
-            {/* Price anchor */}
-            <motion.p
-              variants={itemVariants}
-              className="text-base sm:text-lg font-semibold text-foreground mb-8"
-            >
-              <span className="inline-flex items-center gap-2 bg-green-50 border border-green-200 rounded-full px-4 py-1 text-green-800 text-sm font-semibold">🛡️ On-time or it's free</span>
-              <br className="sm:hidden" />
-              <span className="text-base sm:text-lg mt-2 block">Office from <span className="text-conve-red font-bold">$55</span> · Mobile from <span className="text-conve-red font-bold">$150</span> · Members save up to 25%</span>
+              Licensed phlebotomist at your door in 60 minutes.
+              One-try blood draws. Results in 48 hours.
+              <br className="hidden sm:block" />
+              <span className="inline-flex items-center gap-1.5 mt-2 text-white font-semibold">
+                <Shield className="h-4 w-4 text-green-400" />
+                On-time — or your visit is free.
+              </span>
             </motion.p>
 
             {/* Dual CTA */}
-            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-6">
+            <motion.div
+              variants={itemVariants}
+              className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8"
+            >
               <Button
                 onClick={handleBookNow}
                 size="lg"
-                className="h-14 px-10 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-lg rounded-xl shadow-luxury-red hover:shadow-luxury-red-hover transition-all"
+                className="h-14 px-10 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-lg rounded-xl shadow-luxury-red hover:shadow-luxury-red-hover transition-all w-full sm:w-auto"
               >
-                Book Your Visit — Same-Day Available
+                Book My Home Visit
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button
-                onClick={() => window.location.href = '/pricing'}
+                onClick={scrollToReviews}
                 size="lg"
                 variant="outline"
-                className="h-14 px-8 font-semibold text-lg rounded-xl border-2"
+                className="h-14 px-8 font-semibold text-lg rounded-xl border-2 border-white/30 bg-white/10 backdrop-blur-sm text-white hover:bg-white hover:text-gray-900 w-full sm:w-auto"
               >
-                See How It Works
+                <PlayCircle className="mr-2 h-5 w-5" />
+                Watch Reviews
               </Button>
             </motion.div>
 
-            {/* Social proof counters */}
-            <motion.div variants={itemVariants} className="flex flex-wrap justify-center gap-6 sm:gap-10 mb-8">
-              <div className="text-center">
-                <p className="text-2xl sm:text-3xl font-bold text-foreground">{visitCount.toLocaleString()}+</p>
-                <p className="text-xs text-muted-foreground">Home Visits Completed</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl sm:text-3xl font-bold text-foreground">4.9<span className="text-amber-500">★</span></p>
-                <p className="text-xs text-muted-foreground">Google Rating</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl sm:text-3xl font-bold text-foreground">60min</p>
-                <p className="text-xs text-muted-foreground">Avg. Response</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl sm:text-3xl font-bold text-conve-red">$0</p>
-                <p className="text-xs text-muted-foreground">If We're Late</p>
-              </div>
-            </motion.div>
-
-            {/* Trust signals row */}
+            {/* Compact credibility stripe */}
             <motion.div
               variants={itemVariants}
-              className="flex flex-wrap justify-center gap-x-4 sm:gap-x-6 gap-y-3 text-sm text-muted-foreground"
+              className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-white/80"
             >
-              <div className="flex items-center gap-1.5">
-                <Shield className="h-4 w-4 text-conve-red" />
-                <span>HIPAA Compliant</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <CheckCircle className="h-4 w-4 text-conve-red" />
-                <span>Licensed Phlebotomists</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-conve-red" />
-                <span>Delivery Confirmation Sent</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <CheckCircle className="h-4 w-4 text-conve-red" />
-                <span>{visitCount.toLocaleString()}+ Patients Served</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <Shield className="h-4 w-4 text-conve-red" />
-                <span>Satisfaction Guaranteed</span>
+              <span className="flex items-center gap-1.5">
+                <span className="text-yellow-400">⭐</span>
+                <span className="font-semibold text-white">5.0</span>
+                <span className="text-white/70">(164 reviews)</span>
+              </span>
+              <span className="text-white/40">·</span>
+              <span>🏈 Trusted by NFL athletes</span>
+              <span className="text-white/40">·</span>
+              <span>💪 Endorsed by <span className="font-semibold text-white">@morellifit</span> <span className="text-white/60">(970K)</span></span>
+              <span className="text-white/40">·</span>
+              <span>🛡️ HIPAA Compliant</span>
+              <span className="text-white/40">·</span>
+              <span className="text-white">{visitCount.toLocaleString()}+ home visits</span>
+            </motion.div>
+
+            {/* Live urgency badge */}
+            <motion.div variants={itemVariants} className="mt-8">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/20 backdrop-blur-sm rounded-full border border-green-400/30">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400"></span>
+                </span>
+                <span className="text-sm font-semibold text-green-100">
+                  Same-day appointments available
+                </span>
               </div>
             </motion.div>
           </motion.div>

@@ -4,6 +4,7 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/home/Header";
 import Hero from "@/components/home/Hero";
+import MeetYourPhlebotomist from "@/components/home/MeetYourPhlebotomist";
 import GuaranteeBanner from "@/components/home/GuaranteeBanner";
 import HealthInsights from "@/components/home/HealthInsights";
 import TrustBanner from "@/components/home/TrustBanner";
@@ -46,10 +47,10 @@ const Home = () => {
         <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
         <link rel="canonical" href="https://convelabs.com/" />
 
-        <title>Mobile Blood Draw At Your Home | Same-Day Service Orlando | ConveLabs</title>
+        <title>Mobile Phlebotomy Trusted by NFL Athletes | Better Than the Lab | ConveLabs FL</title>
         <meta
           name="description"
-          content="Licensed phlebotomists come to your home, office, or hotel. Same-day mobile blood draw appointments in Orlando and Central Florida. In-office from $55, mobile from $150. Book online in 30 seconds."
+          content="Licensed mobile phlebotomist trusted by NFL athletes and fitness influencers (@morellifit, 970K). One-try blood draws at your home, office, or hotel. Same-day service across Central Florida. On-time or your visit is free. In-office from $55, mobile from $150."
         />
         <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 
@@ -64,10 +65,10 @@ const Home = () => {
 
         {/* Open Graph */}
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="Mobile Blood Draw At Your Home | ConveLabs Orlando" />
+        <meta property="og:title" content="Mobile Phlebotomy Trusted by NFL Athletes | ConveLabs" />
         <meta
           property="og:description"
-          content="Licensed phlebotomists come to you. Same-day appointments in Orlando & Central Florida. In-office from $55, mobile from $150."
+          content='"Better than what I got in the NFL." — Licensed mobile phlebotomist. Same-day appointments across Central Florida. On-time or your visit is free.'
         />
         <meta property="og:url" content="https://convelabs.com/" />
         <meta property="og:site_name" content="ConveLabs" />
@@ -75,10 +76,10 @@ const Home = () => {
 
         {/* Twitter */}
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Mobile Blood Draw At Your Home | ConveLabs" />
+        <meta name="twitter:title" content="Mobile Phlebotomy Trusted by NFL Athletes | ConveLabs" />
         <meta
           name="twitter:description"
-          content="Licensed phlebotomists come to you. Same-day appointments. In-office from $55, mobile from $150."
+          content='"Better than what I got in the NFL." — Licensed mobile phlebotomist. Same-day appointments. Central Florida.'
         />
 
         {/* Schema: MedicalBusiness */}
@@ -201,12 +202,13 @@ const Home = () => {
         <main>
           <PageTransition>
             <Hero />
+            <MeetYourPhlebotomist />
+            <TestimonialsSection />
             <GuaranteeBanner />
             <TrustBanner />
             <HowItWorks />
             <PricingTransparency />
             <ServicesSection />
-            <TestimonialsSection />
             <HealthInsights />
             <ServiceAreasMap />
             <MembershipCTA />
