@@ -68,6 +68,7 @@ const NoShowAppointmentModal: React.FC<NoShowAppointmentModalProps> = ({
   const handleConfirm = async () => {
     setIsSubmitting(true);
     try {
+      // Cast to any because generated types don't include no_show/no_show_at/no_show_fee yet (columns exist in DB)
       const { error } = await supabase.from('appointments').update({
         status: 'cancelled',
         no_show: true,
@@ -75,7 +76,7 @@ const NoShowAppointmentModal: React.FC<NoShowAppointmentModalProps> = ({
         no_show_fee: fee,
         cancellation_reason: `No-show${applyFee ? ` (fee: $${fee.toFixed(2)})` : ' (fee waived)'}${note ? `. ${note}` : ''}`,
         cancelled_at: new Date().toISOString(),
-      }).eq('id', appt.id);
+      } as any).eq('id', appt.id);
       if (error) throw error;
 
       // Activity log
