@@ -189,11 +189,30 @@ const ResetPassword = () => {
       }
 
       setIsSuccess(true);
-      toast.success("Password updated — redirecting to login…");
-      setTimeout(() => {
-        supabase.auth.signOut().catch(() => {});
-        window.location.href = '/login';
-      }, 2000);
+      toast.success("Password updated — signing you in…");
+
+      // Their session is still valid after the password change. Skip the
+      // unnecessary sign-out + /login bounce. Route straight to the
+      // role-appropriate dashboard so they never see a login form twice.
+      setTimeout(async () => {
+        try {
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          const role = refreshed?.session?.user?.user_metadata?.role
+            || refreshed?.user?.user_metadata?.role;
+          if (role === 'provider') {
+            window.location.href = '/dashboard/provider';
+            return;
+          }
+          if (role) {
+            window.location.href = `/dashboard/${role}`;
+            return;
+          }
+          // No role in metadata — let Dashboard.tsx derive it from org membership
+          window.location.href = '/dashboard';
+        } catch {
+          window.location.href = '/dashboard';
+        }
+      }, 1200);
     } catch (err: any) {
       console.error('[reset-password] submit failed:', err);
       setFormError(err.message || "An unexpected error occurred. Please try again.");

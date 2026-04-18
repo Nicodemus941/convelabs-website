@@ -62,11 +62,11 @@ const UserAuthSection = () => {
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild>
-            <Link to="/login?redirect=/dashboard/concierge_doctor" className="flex items-center gap-2 cursor-pointer">
+            <Link to="/provider" className="flex items-center gap-2 cursor-pointer">
               <Stethoscope className="h-4 w-4 text-purple-600" />
               <div>
                 <div className="font-medium text-sm">Provider Portal</div>
-                <div className="text-xs text-muted-foreground">For concierge doctors</div>
+                <div className="text-xs text-muted-foreground">Partner organizations — SMS sign-in</div>
               </div>
             </Link>
           </DropdownMenuItem>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,17 +54,39 @@ const ProviderDashboard: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (attempt = 1): Promise<void> => {
     try {
-      const { data: session } = await supabase.auth.getSession();
-      const token = session?.session?.access_token;
-      if (!token) throw new Error('No session');
+      // Force-refresh the session so we always use the freshest JWT. This
+      // matters right after verifyOtp / password reset, where the locally
+      // cached token may lag a moment before user_metadata.role is present.
+      let token: string | undefined;
+      try {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        token = refreshed?.session?.access_token;
+      } catch { /* fall through to cached session */ }
+      if (!token) {
+        const { data: session } = await supabase.auth.getSession();
+        token = session?.session?.access_token;
+      }
+      if (!token) {
+        // No session at all — send them back to /provider to log in fresh.
+        navigate('/provider');
+        return;
+      }
       const resp = await fetch(`https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/provider-dashboard-data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       });
       const j = await resp.json();
-      if (!resp.ok) throw new Error(j.error || 'Failed to load');
+      if (!resp.ok) {
+        // Transient auth race after password reset / verifyOtp — retry once
+        // after a short delay so supabase-js has a chance to settle.
+        if (attempt === 1 && (resp.status === 401 || (j?.error || '').toLowerCase().includes('session'))) {
+          await new Promise(r => setTimeout(r, 800));
+          return loadData(2);
+        }
+        throw new Error(j.error || 'Failed to load');
+      }
       setData(j);
       setErr(null);
     } catch (e: any) {
@@ -113,7 +135,9 @@ const ProviderDashboard: React.FC = () => {
   const patientPrice = org.locked_price_cents != null ? `$${(org.locked_price_cents / 100).toFixed(2)}` : '—';
   const orgInvoicePrice = org.org_invoice_price_cents != null ? `$${(org.org_invoice_price_cents / 100).toFixed(2)}` : '—';
 
-  const schedulingWindow = useMemo(() => {
+  // Compute scheduling window inline — no useMemo (it was sitting AFTER early
+  // returns earlier which violated the Rules of Hooks and crashed React #310)
+  const schedulingWindow = (() => {
     const r = org.time_window_rules;
     if (!r || !Array.isArray(r) || r.length === 0) return null;
     const w = r[0];
@@ -125,7 +149,7 @@ const ProviderDashboard: React.FC = () => {
       return `${hr}${period.toLowerCase()}`;
     };
     return `${days} ${fmtHr(w.startHour)}–${fmtHr(w.endHour)}`;
-  }, [org.time_window_rules]);
+  })();
 
   const fmtDateTime = (iso: string, time: string | null) => {
     const d = iso.substring(0, 10);
