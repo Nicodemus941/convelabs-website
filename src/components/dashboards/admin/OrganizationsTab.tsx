@@ -11,7 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   Building2, Plus, Search, RefreshCw, Send, DollarSign, Mail,
-  Phone, User, FileText, Loader2, Download,
+  Phone, User, FileText, Loader2, Download, Pencil, Power,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -19,6 +19,15 @@ interface Org {
   id: string; name: string; contact_name: string | null; contact_email: string | null;
   contact_phone: string | null; billing_email: string | null; billing_address: string | null;
   notes: string | null; is_active: boolean; created_at: string;
+  // Partner-rule fields (added by earlier migrations)
+  portal_enabled?: boolean | null;
+  default_billed_to?: 'patient' | 'org' | null;
+  allow_bill_override?: boolean | null;
+  show_patient_name_on_appointment?: boolean | null;
+  locked_service_type?: string | null;
+  locked_price_cents?: number | null;
+  org_invoice_price_cents?: number | null;
+  member_stacking_rule?: 'lowest_wins' | 'partner_only' | 'org_covers' | null;
 }
 
 interface OrgInvoice {
@@ -36,10 +45,88 @@ const OrganizationsTab: React.FC = () => {
   const [selectedOrg, setSelectedOrg] = useState<Org | null>(null);
   const [showAddOrg, setShowAddOrg] = useState(false);
   const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [showEditOrg, setShowEditOrg] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [orgForm, setOrgForm] = useState({ name: '', contactName: '', contactEmail: '', contactPhone: '', billingEmail: '', billingAddress: '', notes: '' });
   const [invoiceForm, setInvoiceForm] = useState({ patientName: '', serviceType: '', amount: '', memo: '' });
+
+  // Full edit form — covers everything including partner rules
+  const [editForm, setEditForm] = useState({
+    name: '', contactName: '', contactEmail: '', contactPhone: '',
+    billingEmail: '', billingAddress: '', notes: '',
+    isActive: true, portalEnabled: false,
+    defaultBilledTo: 'patient' as 'patient' | 'org',
+    allowBillOverride: true,
+    showPatientNameOnAppointment: true,
+    lockedServiceType: '',
+    lockedPriceDollars: '',
+    orgInvoicePriceDollars: '',
+    memberStackingRule: 'lowest_wins' as 'lowest_wins' | 'partner_only' | 'org_covers',
+  });
+
+  const openEditModal = (org: Org) => {
+    setEditForm({
+      name: org.name || '',
+      contactName: org.contact_name || '',
+      contactEmail: org.contact_email || '',
+      contactPhone: org.contact_phone || '',
+      billingEmail: org.billing_email || '',
+      billingAddress: org.billing_address || '',
+      notes: org.notes || '',
+      isActive: org.is_active ?? true,
+      portalEnabled: org.portal_enabled ?? false,
+      defaultBilledTo: (org.default_billed_to as 'patient' | 'org') || 'patient',
+      allowBillOverride: org.allow_bill_override ?? true,
+      showPatientNameOnAppointment: org.show_patient_name_on_appointment ?? true,
+      lockedServiceType: org.locked_service_type || '',
+      lockedPriceDollars: org.locked_price_cents != null ? (org.locked_price_cents / 100).toFixed(2) : '',
+      orgInvoicePriceDollars: org.org_invoice_price_cents != null ? (org.org_invoice_price_cents / 100).toFixed(2) : '',
+      memberStackingRule: (org.member_stacking_rule as any) || 'lowest_wins',
+    });
+    setShowEditOrg(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedOrg) return;
+    if (!editForm.name.trim()) { toast.error('Organization name required'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        name: editForm.name.trim(),
+        contact_name: editForm.contactName.trim() || null,
+        contact_email: editForm.contactEmail.trim() || null,
+        contact_phone: editForm.contactPhone.trim() || null,
+        billing_email: editForm.billingEmail.trim() || null,
+        billing_address: editForm.billingAddress.trim() || null,
+        notes: editForm.notes.trim() || null,
+        is_active: editForm.isActive,
+        portal_enabled: editForm.portalEnabled,
+        default_billed_to: editForm.defaultBilledTo,
+        allow_bill_override: editForm.allowBillOverride,
+        show_patient_name_on_appointment: editForm.showPatientNameOnAppointment,
+        locked_service_type: editForm.lockedServiceType.trim() || null,
+        locked_price_cents: editForm.lockedPriceDollars ? Math.round(parseFloat(editForm.lockedPriceDollars) * 100) : null,
+        org_invoice_price_cents: editForm.orgInvoicePriceDollars ? Math.round(parseFloat(editForm.orgInvoicePriceDollars) * 100) : null,
+        member_stacking_rule: editForm.memberStackingRule,
+      };
+      const { data, error } = await supabase
+        .from('organizations' as any)
+        .update(payload)
+        .eq('id', selectedOrg.id)
+        .select('*')
+        .single();
+      if (error) throw error;
+      toast.success('Organization updated');
+      setShowEditOrg(false);
+      setSelectedOrg(data as unknown as Org);
+      fetchOrgs();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
@@ -159,12 +246,22 @@ const OrganizationsTab: React.FC = () => {
 
     return (
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <Button variant="ghost" size="sm" onClick={() => setSelectedOrg(null)}>← Back</Button>
-          <div>
-            <h1 className="text-2xl font-bold">{selectedOrg.name}</h1>
-            <p className="text-sm text-muted-foreground">{selectedOrg.contact_email || 'No email'} · {selectedOrg.contact_phone || 'No phone'}</p>
+          <div className="flex-1 min-w-[200px]">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold">{selectedOrg.name}</h1>
+              {selectedOrg.portal_enabled && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[10px]">Portal enabled</Badge>}
+              {!selectedOrg.is_active && <Badge className="bg-gray-200 text-gray-600 hover:bg-gray-200 text-[10px]">Inactive</Badge>}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {selectedOrg.contact_name ? `${selectedOrg.contact_name} · ` : ''}
+              {selectedOrg.contact_email || 'No email'} · {selectedOrg.contact_phone || 'No phone'}
+            </p>
           </div>
+          <Button variant="outline" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5">
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -213,6 +310,131 @@ const OrganizationsTab: React.FC = () => {
             </Table>
           </div>
         )}
+
+        {/* Edit Organization Modal — covers contact info + billing + partner rules */}
+        <Dialog open={showEditOrg} onOpenChange={setShowEditOrg}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader><DialogTitle>Edit {selectedOrg.name}</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              {/* Contact section */}
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Contact</p>
+                <div>
+                  <Label>Organization Name *</Label>
+                  <Input value={editForm.name} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Contact Name</Label>
+                    <Input value={editForm.contactName} onChange={e => setEditForm(p => ({ ...p, contactName: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Contact Phone</Label>
+                    <Input value={editForm.contactPhone} onChange={e => setEditForm(p => ({ ...p, contactPhone: e.target.value }))} placeholder="407-555-1234" />
+                  </div>
+                </div>
+                <div>
+                  <Label>Contact Email</Label>
+                  <Input type="email" value={editForm.contactEmail} onChange={e => setEditForm(p => ({ ...p, contactEmail: e.target.value }))} />
+                </div>
+              </div>
+
+              {/* Billing section */}
+              <div className="space-y-3 pt-2 border-t">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Billing</p>
+                <div>
+                  <Label>Billing Email</Label>
+                  <Input type="email" value={editForm.billingEmail} onChange={e => setEditForm(p => ({ ...p, billingEmail: e.target.value }))} placeholder="Invoices route here when org-billed" />
+                </div>
+                <div>
+                  <Label>Billing Address</Label>
+                  <Input value={editForm.billingAddress} onChange={e => setEditForm(p => ({ ...p, billingAddress: e.target.value }))} />
+                </div>
+              </div>
+
+              {/* Access + Status section */}
+              <div className="space-y-3 pt-2 border-t">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Access &amp; status</p>
+                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                  <div>
+                    <p className="text-sm font-medium">Provider portal</p>
+                    <p className="text-xs text-gray-600">Allow this org's contact to log in at /provider</p>
+                  </div>
+                  <input type="checkbox" checked={editForm.portalEnabled} onChange={e => setEditForm(p => ({ ...p, portalEnabled: e.target.checked }))} className="h-5 w-5" />
+                </div>
+                <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <div>
+                    <p className="text-sm font-medium">Active</p>
+                    <p className="text-xs text-gray-600">Inactive orgs are hidden from most views</p>
+                  </div>
+                  <input type="checkbox" checked={editForm.isActive} onChange={e => setEditForm(p => ({ ...p, isActive: e.target.checked }))} className="h-5 w-5" />
+                </div>
+              </div>
+
+              {/* Partner rules section */}
+              <div className="space-y-3 pt-2 border-t">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Partner rules</p>
+                <div>
+                  <Label>Default billed to</Label>
+                  <select value={editForm.defaultBilledTo} onChange={e => setEditForm(p => ({ ...p, defaultBilledTo: e.target.value as 'patient' | 'org' }))}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm">
+                    <option value="patient">Patient pays</option>
+                    <option value="org">Organization pays</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3">
+                  <div>
+                    <p className="text-sm font-medium">Allow per-visit billing override</p>
+                    <p className="text-xs text-gray-600">Admin can flip bill-payer per appointment</p>
+                  </div>
+                  <input type="checkbox" checked={editForm.allowBillOverride} onChange={e => setEditForm(p => ({ ...p, allowBillOverride: e.target.checked }))} className="h-5 w-5" />
+                </div>
+                <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <div>
+                    <p className="text-sm font-medium">Show patient name on appointment</p>
+                    <p className="text-xs text-gray-600">Disable for trial sites / masked orgs (CAO)</p>
+                  </div>
+                  <input type="checkbox" checked={editForm.showPatientNameOnAppointment} onChange={e => setEditForm(p => ({ ...p, showPatientNameOnAppointment: e.target.checked }))} className="h-5 w-5" />
+                </div>
+                <div>
+                  <Label>Locked service type (optional)</Label>
+                  <Input value={editForm.lockedServiceType} onChange={e => setEditForm(p => ({ ...p, lockedServiceType: e.target.value }))} placeholder="e.g. in-office, specialty-kit, mobile" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Locked price (patient)</Label>
+                    <Input type="number" step="0.01" value={editForm.lockedPriceDollars} onChange={e => setEditForm(p => ({ ...p, lockedPriceDollars: e.target.value }))} placeholder="e.g. 125.00" />
+                  </div>
+                  <div>
+                    <Label>Org invoice price</Label>
+                    <Input type="number" step="0.01" value={editForm.orgInvoicePriceDollars} onChange={e => setEditForm(p => ({ ...p, orgInvoicePriceDollars: e.target.value }))} placeholder="e.g. 55.00" />
+                  </div>
+                </div>
+                <div>
+                  <Label>Member stacking rule</Label>
+                  <select value={editForm.memberStackingRule} onChange={e => setEditForm(p => ({ ...p, memberStackingRule: e.target.value as any }))}
+                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm">
+                    <option value="lowest_wins">Lowest price wins (partner OR member, whichever is cheaper)</option>
+                    <option value="partner_only">Partner price only (ignore member tier)</option>
+                    <option value="org_covers">Org covers (patient pays $0 regardless of membership)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div className="pt-2 border-t">
+                <Label>Notes</Label>
+                <Textarea value={editForm.notes} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))} rows={2} />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setShowEditOrg(false)}>Cancel</Button>
+              <Button className="bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={handleSaveEdit} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save changes'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Add Invoice Modal */}
         <Dialog open={showAddInvoice} onOpenChange={setShowAddInvoice}>
