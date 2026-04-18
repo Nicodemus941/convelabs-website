@@ -16,6 +16,8 @@ import {
 import { Link, useNavigate } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
 import ProviderOnboardingModal from '@/components/provider/ProviderOnboardingModal';
+import CreateLabRequestModal from '@/components/provider/CreateLabRequestModal';
+import { FileHeart, Send, Copy, BellRing } from 'lucide-react';
 
 /**
  * PROVIDER PORTAL DASHBOARD — Phase 1
@@ -45,6 +47,7 @@ interface DashboardData {
   patients: any[];
   invoices: any[];
   team: any[];
+  labRequests: any[];
 }
 
 const ProviderDashboard: React.FC = () => {
@@ -54,6 +57,7 @@ const ProviderDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
+  const [showLabRequest, setShowLabRequest] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false);
   const [showPwPrompt, setShowPwPrompt] = useState(false);
@@ -180,7 +184,7 @@ const ProviderDashboard: React.FC = () => {
     );
   }
 
-  const { org, liveOps, thisMonth, upcoming, patients, invoices, team } = data;
+  const { org, liveOps, thisMonth, upcoming, patients, invoices, team, labRequests = [] } = data;
   const billingLabel = org.default_billed_to === 'org' ? 'Organization pays' : org.default_billed_to === 'patient' ? 'Patient pays' : 'Mixed';
   const patientPrice = org.locked_price_cents != null ? `$${(org.locked_price_cents / 100).toFixed(2)}` : '—';
   const orgInvoicePrice = org.org_invoice_price_cents != null ? `$${(org.org_invoice_price_cents / 100).toFixed(2)}` : '—';
@@ -244,11 +248,17 @@ const ProviderDashboard: React.FC = () => {
               </p>
             </div>
           </div>
-          <Button asChild className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-12 px-6 gap-2 text-[15px] w-full sm:w-auto">
-            <Link to={`/book-now?orgId=${org.id}`}>
-              <Calendar className="h-4 w-4" /> Schedule a new visit
-            </Link>
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <Button onClick={() => setShowLabRequest(true)}
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-12 px-5 gap-2 text-[15px]">
+              <FileHeart className="h-4 w-4" /> Request labs for a patient
+            </Button>
+            <Button asChild variant="outline" className="h-12 px-5 gap-2 text-[15px]">
+              <Link to={`/book-now?orgId=${org.id}`}>
+                <Calendar className="h-4 w-4" /> Schedule a visit
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* ACCOUNT-STATUS NUDGE — only shows if provider has no password yet */}
@@ -282,6 +292,13 @@ const ProviderDashboard: React.FC = () => {
             <LiveOpCard label="Total patients" value={patients.length} detail={`${team.length} team ${team.length === 1 ? 'member' : 'members'}`} icon={<Users className="h-5 w-5 text-emerald-600" />} />
           </div>
         </div>
+
+        {/* LAB REQUESTS */}
+        <LabRequestsSection
+          labRequests={data.labRequests || []}
+          onCreate={() => setShowLabRequest(true)}
+          onRefresh={loadData}
+        />
 
         {/* THIS MONTH */}
         <Card className="shadow-sm">
@@ -489,6 +506,9 @@ const ProviderDashboard: React.FC = () => {
       {/* INVITE MODAL */}
       <InviteTeamMemberDialog open={showInvite} onClose={() => setShowInvite(false)} orgId={org.id} orgName={org.name} onInvited={() => { setShowInvite(false); loadData(); }} />
 
+      {/* CREATE LAB REQUEST MODAL */}
+      <CreateLabRequestModal open={showLabRequest} onClose={() => setShowLabRequest(false)} orgId={org.id} orgName={org.name} onCreated={loadData} />
+
       {/* INLINE "SET A PASSWORD" DIALOG (from the yellow status banner) */}
       <Dialog open={showPwPrompt} onOpenChange={setShowPwPrompt}>
         <DialogContent className="max-w-sm">
@@ -523,6 +543,118 @@ const ProviderDashboard: React.FC = () => {
 };
 
 // ─── Subcomponents ────────────────────────────────────────────────────────
+
+// ─── LAB REQUESTS SECTION ────────────────────────────────────────────
+const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; onRefresh: () => void }> = ({ labRequests, onCreate, onRefresh }) => {
+  const [tab, setTab] = useState<'pending' | 'scheduled' | 'completed'>('pending');
+
+  const groups = {
+    pending: labRequests.filter(r => r.status === 'pending_schedule'),
+    scheduled: labRequests.filter(r => r.status === 'scheduled'),
+    completed: labRequests.filter(r => r.status === 'completed' || r.status === 'cancelled' || r.status === 'expired'),
+  };
+
+  const handleCopyLink = async (accessToken: string) => {
+    const url = `${window.location.origin}/lab-request/${accessToken}`;
+    await navigator.clipboard.writeText(url);
+    toast.success('Link copied — paste to patient');
+  };
+
+  const handleResend = async (requestId: string) => {
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const token = session?.session?.access_token;
+      if (!token) throw new Error('No session');
+      // For Phase 1, 'resend' is the same as re-triggering notifications by simply
+      // asking the user to copy the link manually — full reminder edge fn is Phase 2.
+      toast.info('Use "Copy link" to share directly, or the nightly reminder will fire tomorrow.');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed');
+    }
+  };
+
+  const rows = groups[tab];
+
+  return (
+    <Card className="shadow-sm">
+      <CardHeader className="pb-3 flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2"><FileHeart className="h-4 w-4 text-[#B91C1C]" /> Lab requests</CardTitle>
+          <CardDescription className="text-xs">Patients you've asked to book. Status updates live as they schedule and complete.</CardDescription>
+        </div>
+        <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={onCreate}>
+          <Plus className="h-3.5 w-3.5" /> New request
+        </Button>
+      </CardHeader>
+
+      {/* Tabs */}
+      <div className="px-6 border-b flex gap-1 text-sm">
+        {(['pending', 'scheduled', 'completed'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`py-2 px-3 border-b-2 transition capitalize ${tab === t ? 'border-[#B91C1C] text-[#B91C1C] font-semibold' : 'border-transparent text-gray-500 hover:text-gray-900'}`}>
+            {t} <span className="text-xs text-gray-400">({groups[t].length})</span>
+          </button>
+        ))}
+      </div>
+
+      <CardContent className="p-0">
+        {rows.length === 0 ? (
+          <div className="text-center py-10 px-4">
+            <FileHeart className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+            <p className="text-sm font-medium text-gray-600">
+              {tab === 'pending' && 'No pending requests'}
+              {tab === 'scheduled' && 'Nothing scheduled yet'}
+              {tab === 'completed' && 'No completed requests'}
+            </p>
+            {tab === 'pending' && (
+              <p className="text-xs text-gray-500 mt-1">Click "New request" to send a patient their booking link.</p>
+            )}
+          </div>
+        ) : (
+          <div className="divide-y">
+            {rows.map((r: any) => {
+              const daysLeft = Math.ceil((new Date(r.draw_by_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+              const urgencyColor = daysLeft <= 2 ? 'text-red-700' : daysLeft <= 7 ? 'text-amber-700' : 'text-emerald-700';
+              return (
+                <div key={r.id} className="p-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium truncate">{r.patient_name}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {r.patient_email && <>{r.patient_email} · </>}
+                      {r.patient_phone && <>{r.patient_phone} · </>}
+                      Draw by {format(new Date(r.draw_by_date + 'T12:00:00'), 'EEE MMM d')}
+                      {r.next_doctor_appt_date && <> · Consult {format(new Date(r.next_doctor_appt_date + 'T12:00:00'), 'MMM d')}</>}
+                    </p>
+                    {r.status === 'pending_schedule' && (
+                      <p className={`text-[11px] font-semibold mt-1 ${urgencyColor}`}>
+                        {daysLeft <= 0 ? 'Deadline passed' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
+                        {' · '}
+                        {r.patient_notified_at ? `Notified ${formatDistanceToNow(new Date(r.patient_notified_at), { addSuffix: true })}` : 'Not notified yet'}
+                      </p>
+                    )}
+                    {r.status === 'scheduled' && r.patient_scheduled_at && (
+                      <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+                        ✓ Booked {formatDistanceToNow(new Date(r.patient_scheduled_at), { addSuffix: true })}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <Badge variant="outline" className="text-[10px] capitalize">{r.status.replace(/_/g, ' ')}</Badge>
+                    {r.status === 'pending_schedule' && (
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Copy link" onClick={() => handleCopyLink(r.access_token)}>
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+};
 
 const LiveOpCard: React.FC<{ label: string; value: number; detail: string; icon: React.ReactNode; urgent?: boolean }> = ({ label, value, detail, icon, urgent }) => (
   <Card className={`shadow-sm ${urgent ? 'border-red-300 bg-red-50' : ''}`}>

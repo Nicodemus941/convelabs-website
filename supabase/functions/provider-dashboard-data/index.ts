@@ -172,6 +172,14 @@ Deno.serve(async (req) => {
       billed_to: r.billed_to,
     }));
 
+    // ── LAB REQUESTS (provider-initiated patient bookings) ───────────────
+    const { data: labRequests } = await admin
+      .from('patient_lab_requests')
+      .select('id, patient_name, patient_email, patient_phone, draw_by_date, next_doctor_appt_date, status, appointment_id, patient_notified_at, patient_scheduled_at, created_at, access_token, lab_order_panels, fasting_required')
+      .eq('organization_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
     // ── TEAM ROSTER (other users with this org_id in metadata) ───────────
     const allUsers: any[] = [];
     for (let page = 1; page <= 10; page++) {
@@ -211,6 +219,7 @@ Deno.serve(async (req) => {
       patients,
       invoices,
       team,
+      labRequests: labRequests || [],
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('provider-dashboard-data error:', error);

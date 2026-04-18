@@ -167,6 +167,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                         {readiness.label}
                       </span>
                     )}
+                    {/* Provider-initiated badge — this visit came from a doctor's lab order request */}
+                    {appointment.lab_request_id && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border bg-purple-50 text-purple-700 border-purple-200"
+                        title="This visit was requested by the patient's provider (delegated booking)"
+                      >
+                        Provider-initiated
+                      </span>
+                    )}
                     {/* Series indicator (Sprint 4) */}
                     {appointment.recurrence_total && appointment.recurrence_total > 1 && (
                       <span
