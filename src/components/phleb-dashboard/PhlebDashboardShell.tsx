@@ -39,6 +39,8 @@ const PhlebDashboardShell: React.FC = () => {
     monthDates,
     fetchMonthAppointments,
     updateStatus,
+    isOnline,
+    lastCacheAt,
   } = usePhlebotomistAppointments();
 
   // Listen for new inbound SMS messages
@@ -155,6 +157,8 @@ const PhlebDashboardShell: React.FC = () => {
               monthDates={monthDates}
               onRefresh={() => fetchMonthAppointments()}
               onStatusUpdate={updateStatus}
+              isOnline={isOnline}
+              lastCacheAt={lastCacheAt}
             />
           )}
           {activeTab === 'completed' && (

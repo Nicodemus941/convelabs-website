@@ -9,7 +9,7 @@ import {
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
   Stethoscope, Shield, CalendarClock, DollarSign, Crown, AlertTriangle,
   Globe, Pencil, FileText, FlaskConical, HelpCircle,
-  Route, Utensils, Clock3,
+  Route, Utensils, Clock3, Printer,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -20,6 +20,7 @@ import SpecimenDeliveryModal from './SpecimenDeliveryModal';
 import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal';
 import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
+import TubeLabelModal from './TubeLabelModal';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
@@ -48,6 +49,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   });
   const [showSpecimenDelivery, setShowSpecimenDelivery] = useState(false);
   const [showRunningLate, setShowRunningLate] = useState(false);
+  const [showTubeLabel, setShowTubeLabel] = useState(false);
   const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string }>({ open: false, path: null });
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
@@ -500,6 +502,27 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <WorkflowButton label="On the Way" icon={Truck} targetStatus="en_route" enabledWhen={['scheduled', 'confirmed']} />
                   <WorkflowButton label="Arrive" icon={MapPin} targetStatus="arrived" enabledWhen={['en_route']} />
                   <WorkflowButton label="Begin Job" icon={Play} targetStatus="in_progress" enabledWhen={['arrived']} />
+
+                  {/* Tube Label (NIIMBOT) — available once arrived, highlighted when in_progress */}
+                  <Button
+                    size="sm"
+                    className={`h-16 flex flex-col gap-1 col-span-2 ${
+                      ['arrived', 'in_progress'].includes(appointment.status)
+                        ? (appointment as any).collection_at
+                          ? 'bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                    disabled={!['arrived', 'in_progress', 'specimen_delivered', 'completed'].includes(appointment.status)}
+                    onClick={(e) => { e.stopPropagation(); setShowTubeLabel(true); }}
+                  >
+                    <Printer className="h-4 w-4" />
+                    <span className="text-xs">
+                      {(appointment as any).collection_at
+                        ? 'Tube Label (stamped ✓)'
+                        : 'Tube Label (NIIMBOT)'}
+                    </span>
+                  </Button>
                   {/* Specimen Delivery — only for services that require it (not in-office/partner) */}
                   {!['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) && (
                     <Button
@@ -613,6 +636,16 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientFirstName={appointment.patient_name || 'there'}
         patientPhone={appointment.patient_phone}
         appointmentId={appointment.id}
+      />
+
+      <TubeLabelModal
+        open={showTubeLabel}
+        onClose={() => setShowTubeLabel(false)}
+        appointmentId={appointment.id}
+        patientName={appointment.patient_name}
+        patientDob={appointment.patient_dob}
+        existingCollectionAt={(appointment as any).collection_at || null}
+        onMarked={() => { /* parent will refetch on next update */ }}
       />
     </>
   );

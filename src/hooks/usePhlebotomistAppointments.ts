@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { toast } from '@/components/ui/sonner';
+import { cacheAppointments, readCachedAppointments, subscribeToOnlineStatus } from '@/lib/offlineAppointments';
 
 export type AppointmentStatus = 'scheduled' | 'confirmed' | 'en_route' | 'arrived' | 'in_progress' | 'specimen_delivered' | 'completed' | 'cancelled';
 
@@ -37,6 +38,8 @@ export interface PhlebAppointment {
   ocr_processed_at: string | null;
   // Patient selected "I'll confirm with my doctor" — admin follow-up required
   lab_destination_pending: boolean;
+  // Sprint 3.5: collection timestamp + optional geo-stamp (from TubeLabelModal)
+  collection_at: string | null;
   patient_id: string | null;
   patient_name: string;
   patient_phone: string | null;
@@ -50,6 +53,8 @@ export interface PhlebAppointment {
 export function usePhlebotomistAppointments() {
   const { user } = useAuth();
   const [appointments, setAppointments] = useState<PhlebAppointment[]>([]);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [lastCacheAt, setLastCacheAt] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [monthDates, setMonthDates] = useState<Set<string>>(new Set());
   // Fetch all appointments for the current month for this phlebotomist
@@ -205,6 +210,7 @@ export function usePhlebotomistAppointments() {
             lab_order_ocr_text: appt.lab_order_ocr_text || null,
             lab_order_panels: Array.isArray(appt.lab_order_panels) ? appt.lab_order_panels : null,
             ocr_processed_at: appt.ocr_processed_at || null,
+            collection_at: appt.collection_at || null,
             patient_id: appt.patient_id,
             patient_name: patientName,
             patient_phone: patientPhone,
@@ -218,9 +224,24 @@ export function usePhlebotomistAppointments() {
       );
 
       setAppointments(enriched);
+
+      // Mirror into IndexedDB for offline mode
+      cacheAppointments(enriched).catch(() => { /* non-blocking */ });
     } catch (err) {
       console.error('Error fetching appointments:', err);
-      toast.error('Failed to load appointments');
+      // Attempt offline fallback — if we're offline (or query failed), read cache
+      try {
+        const { rows, lastSync } = await readCachedAppointments<PhlebAppointment>();
+        if (rows.length > 0) {
+          setAppointments(rows);
+          const mins = lastSync ? Math.round((Date.now() - lastSync) / 60_000) : null;
+          toast.info(`Offline mode — showing cached schedule${mins !== null ? ` (${mins} min old)` : ''}`);
+        } else {
+          toast.error('Failed to load appointments and no offline cache available');
+        }
+      } catch {
+        toast.error('Failed to load appointments');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -283,10 +304,22 @@ export function usePhlebotomistAppointments() {
     fetchMonthAppointments();
   }, [fetchMonthAppointments]);
 
+  // Online/offline status subscription — used by the offline banner
+  useEffect(() => {
+    return subscribeToOnlineStatus((online) => setIsOnline(online));
+  }, []);
+
+  // Track last cache time for the "cache age" display
+  useEffect(() => {
+    readCachedAppointments().then(({ lastSync }) => setLastCacheAt(lastSync));
+  }, [appointments.length]);
+
   return {
     appointments,
     isLoading,
     monthDates,
+    isOnline,
+    lastCacheAt,
     fetchMonthAppointments,
     updateStatus,
     getAppointmentsForDate,

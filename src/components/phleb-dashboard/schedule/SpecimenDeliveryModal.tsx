@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Package, Loader2, Send } from 'lucide-react';
+import { Package, Loader2, Send, MapPin, Check } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
+import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
 
 const LABS = [
   { value: 'labcorp', label: 'LabCorp' },
@@ -44,6 +45,36 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Chain-of-custody enhancements (Sprint 3.5)
+  const signatureRef = useRef<SignaturePadHandle>(null);
+  const [geoCapturing, setGeoCapturing] = useState(false);
+  const [geoStamp, setGeoStamp] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
+  const [signatureCaptured, setSignatureCaptured] = useState(false);
+
+  const captureGeo = async () => {
+    setGeoCapturing(true);
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        if (!navigator.geolocation) return reject('Geolocation not available');
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 30_000,
+        });
+      });
+      setGeoStamp({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      });
+      toast.success('Delivery location captured');
+    } catch (e: any) {
+      toast.error('Location permission denied — delivery will record without geo-stamp');
+    } finally {
+      setGeoCapturing(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!specimenId.trim() || !labName) {
       toast.error('Specimen ID and Lab are required');
@@ -74,9 +105,29 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
 
       if (insertError) throw insertError;
 
-      // Update appointment status
+      // Upload signature if present
+      let signaturePath: string | null = null;
+      try {
+        if (signatureRef.current && !signatureRef.current.isEmpty()) {
+          const blob = await signatureRef.current.toBlob();
+          if (blob) {
+            const sigName = `sig_${appointmentId}_${Date.now()}.png`;
+            const { error: sigErr } = await supabase.storage.from('specimen-signatures').upload(sigName, blob, {
+              contentType: 'image/png',
+              upsert: true,
+            });
+            if (!sigErr) signaturePath = sigName;
+            else console.warn('Signature upload failed:', sigErr);
+          }
+        }
+      } catch (e) { console.warn('Signature capture exception:', e); }
+
+      // Update appointment status + chain-of-custody fields
       await supabase.from('appointments').update({
         status: 'specimen_delivered',
+        delivered_at: new Date().toISOString(),
+        ...(geoStamp ? { delivery_location: geoStamp } : {}),
+        ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
       }).eq('id', appointmentId);
 
       // Send SMS notification to patient
@@ -187,6 +238,39 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           <div>
             <Label>Delivery Notes (optional)</Label>
             <Textarea value={deliveryNotes} onChange={e => setDeliveryNotes(e.target.value)} placeholder="Any notes about the delivery..." rows={2} />
+          </div>
+
+          {/* ─── Chain-of-Custody (Sprint 3.5) ──────────────────────── */}
+          <div className="border-t pt-3 space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-600">Chain of Custody (optional)</p>
+
+            {/* Geo-stamp capture */}
+            <div className="flex items-start gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5 h-8 text-xs flex-shrink-0"
+                onClick={captureGeo}
+                disabled={geoCapturing || isSaving}
+              >
+                {geoCapturing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> :
+                  geoStamp ? <Check className="h-3.5 w-3.5 text-emerald-600" /> :
+                    <MapPin className="h-3.5 w-3.5" />}
+                {geoStamp ? 'Location stamped' : 'Stamp delivery location'}
+              </Button>
+              {geoStamp && (
+                <p className="text-[10px] text-gray-500 flex-1 min-w-0 pt-1.5">
+                  {geoStamp.lat.toFixed(5)}, {geoStamp.lng.toFixed(5)} · ±{Math.round(geoStamp.accuracy)}m
+                </p>
+              )}
+            </div>
+
+            {/* Signature pad — lab clerk signs for receipt */}
+            <div>
+              <Label className="text-xs text-gray-600">Receiver signature (lab clerk)</Label>
+              <SignaturePad ref={signatureRef} onChange={(isEmpty) => setSignatureCaptured(!isEmpty)} height={140} />
+            </div>
           </div>
         </div>
 

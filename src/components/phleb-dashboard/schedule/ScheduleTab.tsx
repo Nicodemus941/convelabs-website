@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { startOfWeek, format, isToday, parseISO } from 'date-fns';
-import { Calendar, Loader2, RefreshCw, DollarSign, Clock, MapPin } from 'lucide-react';
+import { Calendar, Loader2, RefreshCw, DollarSign, Clock, MapPin, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import WeekStrip from './WeekStrip';
@@ -13,6 +13,8 @@ interface ScheduleTabProps {
   monthDates: Set<string>;
   onRefresh: () => void;
   onStatusUpdate: (id: string, status: AppointmentStatus) => Promise<boolean>;
+  isOnline?: boolean;
+  lastCacheAt?: number | null;
 }
 
 const ScheduleTab: React.FC<ScheduleTabProps> = ({
@@ -21,6 +23,8 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
   monthDates,
   onRefresh,
   onStatusUpdate,
+  isOnline = true,
+  lastCacheAt = null,
 }) => {
   const [selectedDate, setSelectedDate] = useState(() => {
     const saved = sessionStorage.getItem('phleb-selected-date');
@@ -74,6 +78,22 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+          <WifiOff className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">Offline — showing cached schedule</p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              {lastCacheAt
+                ? `Last sync: ${Math.round((Date.now() - lastCacheAt) / 60_000)} min ago`
+                : 'Cache is local to this device'}
+              . Status updates will queue and retry when signal returns.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Today Summary Banner */}
       {isToday(selectedDate) && todayAppts.length > 0 && (
         <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-xl p-4 shadow-md">
