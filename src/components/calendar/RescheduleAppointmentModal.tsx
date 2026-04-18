@@ -41,6 +41,19 @@ const TIME_SLOTS = [
 
 const AFTER_HOURS_SLOTS = ['5:30 PM', '6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM'];
 
+/**
+ * GRANDFATHERING — NEW PRICING POLICY EFFECTIVE DATE
+ *
+ * Any appointment created BEFORE this timestamp is grandfathered: reschedules
+ * will NOT adjust the total, will NOT trigger a charge/refund, and will NOT
+ * touch the existing invoice. Patients who were already scheduled keep their
+ * original price locked in — moving them between slots is a no-op financially.
+ *
+ * The new pricing rules (after-hours +$50, etc.) only apply to appointments
+ * created on or after this cutoff.
+ */
+const NEW_PRICING_POLICY_EFFECTIVE_AT = '2026-04-18T00:00:00-04:00';
+
 // Today in YYYY-MM-DD (America/New_York) — used as HTML input min
 function todayET(): string {
   const now = new Date();
@@ -156,7 +169,15 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
     || appt?.notes?.match(/Phone:\s*([^|]+)/)?.[1]?.trim()
     || null;
 
-  // Is the NEW time after-hours? Preview surcharge.
+  // Is this appointment grandfathered under the old pricing? (Created before
+  // the new-pricing policy cutoff — no financial changes on reschedule.)
+  const isGrandfathered = useMemo(() => {
+    if (!appt?.created_at) return true; // if we can't tell, be conservative and grandfather
+    return new Date(appt.created_at).getTime() < new Date(NEW_PRICING_POLICY_EFFECTIVE_AT).getTime();
+  }, [appt?.created_at]);
+
+  // Is the NEW time after-hours? Preview surcharge — but ONLY for appointments
+  // created under the new pricing policy. Pre-policy appointments get a $0 delta.
   const { isAfterHoursNew, wasAfterHoursOld, surchargeDelta } = useMemo(() => {
     const parseAfterHours = (t: string) => {
       if (!t) return false;
@@ -169,10 +190,12 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
     const newAH = parseAfterHours(newTime);
     const oldAH = parseAfterHours(String(appt?.appointment_time || ''));
     let delta = 0;
+    // Grandfathered appointments never see a price delta on reschedule
+    if (isGrandfathered) return { isAfterHoursNew: newAH, wasAfterHoursOld: oldAH, surchargeDelta: 0 };
     if (newAH && !oldAH) delta = 50;
     else if (!newAH && oldAH) delta = -50;
     return { isAfterHoursNew: newAH, wasAfterHoursOld: oldAH, surchargeDelta: delta };
-  }, [newTime, appt?.appointment_time]);
+  }, [newTime, appt?.appointment_time, isGrandfathered]);
 
   const handleReschedule = async () => {
     if (!newDate || !newTime) { toast.error('Please select both a new date and time'); return; }
@@ -356,7 +379,9 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
                 );
               })}
             </div>
-            <p className="text-[10px] uppercase tracking-wider font-semibold text-amber-600 mt-2">After Hours (+$50)</p>
+            <p className="text-[10px] uppercase tracking-wider font-semibold text-amber-600 mt-2">
+              After Hours{isGrandfathered ? '' : ' (+$50)'}
+            </p>
             <div className="grid grid-cols-3 gap-1.5 mt-1.5">
               {AFTER_HOURS_SLOTS.map(t => {
                 const unavailable = isSlotUnavailable(t);
@@ -382,6 +407,17 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
               })}
             </div>
           </div>
+
+          {/* Grandfathered notice — pre-policy appointments keep their original total */}
+          {isGrandfathered && (
+            <div className="border rounded-lg p-3 flex items-start gap-2 text-xs bg-blue-50 border-blue-200 text-blue-800">
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">Existing appointment — no financial changes</p>
+                <p className="mt-0.5">This appointment was booked before our new pricing policy took effect. Rescheduling (including into after-hours) will not change the original total, invoice, or payment. New pricing rules only apply to appointments booked going forward.</p>
+              </div>
+            </div>
+          )}
 
           {/* Surcharge preview */}
           {surchargeDelta !== 0 && (

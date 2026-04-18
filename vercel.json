@@ -1,5 +1,5 @@
 {
-  "//": "SPA rewrite must NOT catch real static files. If /assets/Foo-HASH.js goes missing (stale index.html in a user's cache after a new deploy), we want a clean 404 — not a silent rewrite to index.html, which serves HTML with a JS MIME-mismatch error. The negative lookahead excludes /assets/** and common static-file extensions from the SPA fallback.",
+  "//": "First rewrite is an intentional no-op passthrough for /assets/*. Vercel processes rewrites in order and stops at the first match. When the browser requests a stale /assets/Foo-HASH.js that no longer exists after a deploy, the first rule matches and keeps the path as /assets/Foo-HASH.js — Vercel then returns a clean 404 instead of falling through to the SPA catch-all (which would return index.html with text/html and cause a JS MIME-mismatch error).",
   "headers": [
     {
       "source": "/assets/(.*)",
@@ -8,7 +8,14 @@
       ]
     },
     {
-      "source": "/((?!assets/).*)",
+      "source": "/",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Pragma", "value": "no-cache" }
+      ]
+    },
+    {
+      "source": "/index.html",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Pragma", "value": "no-cache" }
@@ -16,19 +23,17 @@
     }
   ],
   "rewrites": [
+    { "source": "/assets/:path*", "destination": "/assets/:path*" },
     {
-      "source": "/((?!assets/|.*\\.(?:js|mjs|css|woff|woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico|map|txt|xml|json|pdf|webmanifest)$).*)",
+      "source": "/(.*)",
       "has": [{ "type": "host", "value": "patients.convelabs.com" }],
       "destination": "/index.html"
     },
     {
-      "source": "/((?!assets/|.*\\.(?:js|mjs|css|woff|woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico|map|txt|xml|json|pdf|webmanifest)$).*)",
+      "source": "/(.*)",
       "has": [{ "type": "host", "value": "staff.convelabs.com" }],
       "destination": "/index.html"
     },
-    {
-      "source": "/((?!assets/|.*\\.(?:js|mjs|css|woff|woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico|map|txt|xml|json|pdf|webmanifest)$).*)",
-      "destination": "/index.html"
-    }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
