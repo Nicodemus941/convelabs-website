@@ -1,6 +1,6 @@
-// Sends 7 tailored announcement-email DRAFTS to info@convelabs.com for Nico's review.
-// Intentionally sent to internal inbox — NOT to the actual partners until approved.
-// Contact names + emails pulled from the organizations table (source of truth).
+// Sends 7 Hormozi-structured announcement-email DRAFTS to info@convelabs.com.
+// Intentionally to internal inbox — NOT to the actual partners until approved.
+// Contact names + emails pulled from the organizations table.
 // Run:  SUPABASE_ANON_KEY=... node scripts/send-partner-drafts.mjs
 
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
@@ -8,8 +8,19 @@ const ANON = process.env.SUPABASE_ANON_KEY || '';
 if (!ANON) { console.error('Set SUPABASE_ANON_KEY env var first'); process.exit(1); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BRAND WRAPPER — every email uses this shell, signed by Nico.
+// HORMOZI EMAIL FRAMEWORK (applied to every draft below)
+//
+//   1. HOOK    — name the partner's specific pain in the FIRST sentence
+//   2. AGITATE — what it costs them if nothing changes
+//   3. STACK   — the solution stack, each line maps a benefit to the partner
+//   4. REVERSE — risk reversal (recollection policy, guarantee in writing)
+//   5. SCARCE  — founding-partner framing (early access, locked-in terms)
+//   6. CTA     — one button, one action, email is pre-filled
+//   7. SIGNOFF — Nico as founder, direct line, not a mass blast
+//
+// Every email ends with ONE CTA (portal link), not a menu of choices.
 // ─────────────────────────────────────────────────────────────────────────────
+
 const brandWrap = (title, body) => `
 <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:640px;margin:0 auto;background:#ffffff;">
   <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);padding:28px 32px;border-radius:12px 12px 0 0;text-align:center;">
@@ -29,251 +40,340 @@ const portalUrlFor = (email) =>
   `https://www.convelabs.com/provider?email=${encodeURIComponent(email)}`;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PLATFORM UPGRADES — the "what's new" block every org gets. Each org-specific
-// email describes WHY it matters for them specifically (above this block), and
-// this block lists the actual features.
+// PROPRIETARY TECH BLOCK — the "one-of-a-kind" positioning the user requested.
+// ConveLabs OCR Technology (not "Claude Vision" — that's an internal detail).
+// Framed as proprietary and unavailable elsewhere. Emphasizes category leadership.
 // ─────────────────────────────────────────────────────────────────────────────
-const PLATFORM_UPGRADES = `
-  <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What's new on the ConveLabs platform</h3>
-  <p style="margin:0 0 10px;">We rebuilt the entire system around one question: <em>how do we save providers and patients time while making lab collection measurably safer?</em> Everything below is live today at <a href="https://www.convelabs.com" style="color:#B91C1C;">convelabs.com</a> and inside your provider portal.</p>
+const TECH_POSITIONING = `
+  <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:12px;padding:18px 20px;margin:18px 0;">
+    <p style="margin:0;font-size:13px;color:#78350f;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">One of a kind, built by us</p>
+    <p style="margin:8px 0 0;font-size:14px;color:#451a03;line-height:1.55;">
+      The ConveLabs platform is the only one of its kind. The automated workflow, the <strong>ConveLabs OCR Technology</strong>, the specimen-tracking chain-of-custody, the billing isolation, and the provider portal are proprietary — built in-house for the specific problems mobile phlebotomy creates. You won't find this stack anywhere else in concierge lab services.
+    </p>
+  </div>
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLATFORM STACK — what every provider gets. Tight bullets, no fluff.
+// ─────────────────────────────────────────────────────────────────────────────
+const PLATFORM_STACK = `
+  <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What's in the stack</h3>
   <ul style="padding-left:20px;margin:10px 0 16px;">
-    <li><strong>Patient online booking (convelabs.com)</strong> — your patients schedule themselves in under 90 seconds. Time-of-day windows, your org's billing rules, and any member discounts are all enforced automatically. No phone tag.</li>
-    <li><strong>AI-powered fasting &amp; urine detection</strong> — our intake uses Claude Vision OCR to read the lab requisition at upload. Fasting-required or urine-required panels are flagged automatically and the patient gets protocol-specific prep instructions <em>before</em> the visit. Fewer redraws, fewer invalid specimens.</li>
-    <li><strong>Insurance capture at booking</strong> — patients photograph front + back of their card during checkout; we store it, attach it to the requisition, and eliminate day-of paperwork.</li>
-    <li><strong>Lab-order uploads</strong> — providers (and patients) upload the signed lab order directly into the portal. Claude Vision reads it and confirms panel match before our phleb arrives.</li>
-    <li><strong>Specimen delivery notifications with tracking IDs</strong> — every specimen gets a unique tracking ID. You receive notifications at collection, pickup, reference-lab delivery, and result ETA — the same tracking experience as a FedEx shipment.</li>
-    <li><strong>Real-time "Collected" vs. "Not Collected" status</strong> — if a patient cancels, reschedules, or something goes sideways at the lab, your portal reflects it instantly. Your team never has to chase us.</li>
-    <li><strong>Transparent recollection policy — in writing</strong>
-      <ul style="padding-left:20px;margin:6px 0;">
-        <li>If <strong>ConveLabs</strong> caused the error, recollection is <strong>100% free</strong>.</li>
-        <li>If the <strong>reference lab</strong> caused the error, recollection is <strong>50% off</strong>.</li>
-      </ul>
-    </li>
+    <li><strong>Patient online booking</strong> — your patients self-schedule in under 90 seconds. Your org's time-of-day rules, billing rules, and member discounts all enforce automatically. No phone tag.</li>
+    <li><strong>Instant payment at booking</strong> — patients (or your org, when you're the bill-payer) pay directly through Stripe the moment they schedule. No invoices chasing payments.</li>
+    <li><strong>ConveLabs OCR Technology</strong> — the instant a lab order is uploaded, our system reads it, flags fasting / urine / glucose tolerance requirements, and sends the patient protocol-specific prep instructions <em>before</em> the visit. Fewer redraws, fewer invalid specimens.</li>
+    <li><strong>Insurance capture at checkout</strong> — patients photograph front + back of their card during booking; we store and attach it to the requisition. Zero day-of paperwork.</li>
+    <li><strong>Specimen tracking IDs</strong> — every specimen gets a unique ID. You get notifications at collection, pickup, reference-lab delivery, and result ETA — same tracking experience as a FedEx shipment.</li>
+    <li><strong>Live "Collected / Not Collected" status</strong> — if a patient cancels, reschedules, or something goes sideways at the lab, your portal reflects it instantly. You never chase us.</li>
+    <li><strong>Billing isolation</strong> — when your org is the bill-payer, invoices route only to your billing email. When patients are the bill-payers, each patient's billing stays scoped to them. No cross-contamination.</li>
     <li><strong>Receipts + accounting sync</strong> — every visit has a downloadable receipt; reconciliation to QuickBooks happens on our side automatically.</li>
-    <li><strong>Billing isolation</strong> — if your org is the bill-payer, invoices go only to your billing email. If patients are the bill-payers, each patient's invoice stays scoped to them. No cross-contamination of billing history between patients.</li>
   </ul>
 `;
 
-const loginBox = (email) => `
-  <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">How to access your provider portal</h3>
-  <p style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:14px;margin:10px 0;">
-    <strong>1.</strong> Go to <a href="${portalUrlFor(email)}" style="color:#B91C1C;">convelabs.com/provider</a> — your email is already pre-filled.<br>
-    <strong>2.</strong> If you already have a password, log in directly.<br>
-    <strong>3.</strong> First time here? Click <em>"Send me a password setup link"</em> and you'll get an email in under a minute. One click, set your password, you're in.
-  </p>
-  <div style="text-align:center;margin:22px 0;">
-    <a href="${portalUrlFor(email)}" style="display:inline-block;background:#B91C1C;color:#fff;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">Open my provider portal →</a>
+// ─────────────────────────────────────────────────────────────────────────────
+// RISK REVERSAL — the recollection guarantee, in writing. Hormozi Rule #1:
+// the biggest value-add is lowering perceived risk.
+// ─────────────────────────────────────────────────────────────────────────────
+const RISK_REVERSAL = `
+  <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:16px 18px;margin:16px 0;">
+    <p style="margin:0;font-size:13px;color:#166534;font-weight:700;">The ConveLabs Recollection Guarantee — in writing</p>
+    <ul style="padding-left:18px;margin:8px 0 0;font-size:13px;color:#14532d;line-height:1.55;">
+      <li>If <strong>ConveLabs</strong> caused the error, recollection is <strong>100% free</strong>.</li>
+      <li>If the <strong>reference lab</strong> caused the error, recollection is <strong>50% off</strong>.</li>
+    </ul>
+    <p style="margin:8px 0 0;font-size:12px;color:#166534;">No other mobile-phlebotomy service in Florida puts this in writing.</p>
+  </div>
+`;
+
+const loginBlock = (email) => `
+  <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">Your portal is ready — 30 seconds to log in</h3>
+  <ol style="padding-left:20px;margin:10px 0 14px;">
+    <li>Visit <a href="${portalUrlFor(email)}" style="color:#B91C1C;">convelabs.com/provider</a> — your email is already filled in.</li>
+    <li>If you have a password, log in.</li>
+    <li>If you don't, click <em>"Send me a password setup link"</em> and you're in within a minute.</li>
+  </ol>
+  <div style="text-align:center;margin:18px 0 6px;">
+    <a href="${portalUrlFor(email)}" style="display:inline-block;background:#B91C1C;color:#fff;padding:15px 38px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">Open my provider portal →</a>
   </div>
 `;
 
 const SIGNOFF = `
-  <p style="margin:22px 0 6px;">If anything is unclear or you'd like a 10-minute walkthrough, reply to this email or call me directly at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a>. I'd genuinely love your feedback — this rebuild was designed for the way you already work.</p>
+  <p style="margin:22px 0 6px;">If you want a 10-minute walkthrough or have any questions, call me directly at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a> or reply to this email. I read and answer everything myself.</p>
   <p style="margin:18px 0 0;">With gratitude,<br>
   <strong>Nicodemme "Nico" Jean-Baptiste</strong><br>
   <em>Founder, ConveLabs Concierge Lab Services</em></p>
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ORGS — contact info from DB; personalization body is hand-authored per org.
+// ORG-SPECIFIC DRAFTS
 // ─────────────────────────────────────────────────────────────────────────────
 const emails = [
-  // ── 1. ARISTOTLE EDUCATION — Dr. Pradip Jamnadas (cardiology / longevity / fasting) ──
+  // ── 1. ARISTOTLE EDUCATION — Sharlene & Bri (Dr. Jamnadas's operations team) ──
   {
     subjectPrefix: '[DRAFT → Aristotle Education]',
-    actualRecipient: 'sdean@aristotleeducation.com (Sharlene Dean, billing) + bjung@aristotleeducation.com (Barry Jung, contact)',
+    actualRecipient: 'sdean@aristotleeducation.com (Sharlene Dean) + Bri',
     portalEmail: 'sdean@aristotleeducation.com',
-    subject: 'Dr. Jamnadas\'s patients now have a scheduling system built around his protocols',
-    html: brandWrap('Welcome to your Aristotle × ConveLabs portal', `
-      <p>Hi Sharlene,</p>
-      <p>Dr. Jamnadas's work — the fasting protocols, the vagus-nerve reset, red-light therapy, personalized supplement panels, the gut biome interventions — <strong>depends entirely on clean, correctly-timed lab data</strong>. When a 72-hour fast is wasted because a draw was missed or mistimed, the whole protocol has to restart. We rebuilt the new ConveLabs platform specifically so that never happens to one of your patients again.</p>
+    subject: 'For Dr. Jamnadas\'s patients — a lab workflow built around his protocols',
+    html: brandWrap('Aristotle × ConveLabs — your portal is ready', `
+      <!-- HOOK -->
+      <p>Hi Sharlene and Bri,</p>
+      <p>Dr. Jamnadas's entire approach — the fasting protocols, the vagus-nerve reset, the red-light interventions, the personalized supplement panels — lives or dies on <strong>clean, correctly-timed lab data</strong>. When a 72-hour fast is burned because a draw got mistimed, the protocol restarts. Patient loses a week. You absorb the rebooking.</p>
 
-      <p><strong>What this means for Aristotle Education specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>We rebuilt the entire ConveLabs system specifically so that failure mode never happens to one of your patients again.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for Aristotle, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>VIP unrestricted scheduling window</strong> — your patients can book <em>any time</em> Monday through Friday during business hours. No tier gates, no morning-only restriction.</li>
-        <li><strong>Flat $185 per specialty-kit collection</strong>, invoiced directly to Aristotle Education (Net 30). Your patients see $0. You can flip individual visits to patient-pay at booking with one toggle.</li>
-        <li><strong>Extended-fast friendly workflow</strong> — the system flags when Dr. Jamnadas's patients are on a prolonged fast and reinforces his protocol (hydration, no supplements, no bulletproof coffee, etc.) in the pre-visit instructions.</li>
-        <li><strong>Team logins for the whole Aristotle office</strong> — Barry, you, and anyone else on the scheduling team gets their own portal login under the organization.</li>
-        <li><strong>Coming soon:</strong> enter a patient's next Aristotle appointment when scheduling their draw, so the lab results land in Dr. Jamnadas's hands <em>before</em> the follow-up consult.</li>
+        <li><strong>VIP unrestricted window</strong> — your patients book any time Monday–Friday during business hours. No tier gates.</li>
+        <li><strong>Flat $185 per specialty-kit collection</strong>, charged directly to Aristotle's Stripe the moment a visit is scheduled. Patients pay $0. You can flip any single visit to patient-pay with one toggle.</li>
+        <li><strong>Extended-fast-safe intake</strong> — when a patient is on one of Dr. Jamnadas's prolonged fasts, the pre-visit instructions reinforce his protocol (hydration only, no supplements, no bulletproof coffee).</li>
+        <li><strong>Team logins</strong> — you, Bri, and anyone else on the Aristotle operations team each get your own portal access under the same org.</li>
+        <li><strong>Coming soon:</strong> enter a patient's next Aristotle consult when scheduling, so results land in Dr. Jamnadas's hands <em>before</em> the follow-up.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('sdean@aristotleeducation.com')}
-      <p>Sharlene, Barry — Aristotle has been one of our most thoughtful partners. Every design decision in this rebuild reflects something your team taught us along the way. Thank you.</p>
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      <!-- SCARCITY / FOUNDING PARTNER -->
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:14px 16px;margin:14px 0;">
+        <p style="margin:0;font-size:13px;color:#7f1d1d;"><strong>Founding-partner pricing locked.</strong> The $185 rate and VIP unrestricted window are grandfathered for Aristotle as a founding partner. Rates go up for new partners; yours don't.</p>
+      </div>
+
+      ${loginBlock('sdean@aristotleeducation.com')}
+      <p>Sharlene, Bri — Aristotle has been one of our most thoughtful partners, and the best design decisions in this rebuild came from watching how your team actually works. Thank you.</p>
       ${SIGNOFF}
     `),
   },
 
-  // ── 2. CLINICAL ASSOCIATES OF ORLANDO — Shawna Martin (clinical research site) ──
+  // ── 2. CLINICAL ASSOCIATES OF ORLANDO — Shawna (clinical research) ──
   {
     subjectPrefix: '[DRAFT → Clinical Associates of Orlando]',
     actualRecipient: 'smartin@clinicalassociatesorlando.com (Shawna Martin)',
     portalEmail: 'smartin@clinicalassociatesorlando.com',
-    subject: 'Trial-grade privacy + chain-of-custody for your participants — your new CAO portal is live',
-    html: brandWrap('Your CAO × ConveLabs portal is ready', `
+    subject: 'Trial-grade privacy + chain-of-custody for your participants',
+    html: brandWrap('CAO × ConveLabs — your portal is ready', `
+      <!-- HOOK -->
       <p>Hi Shawna,</p>
-      <p>Clinical research participants aren't "patients" in the normal sense — they're subjects under IRB-approved protocols, and your sponsors demand specific handling: <strong>de-identification, chain-of-custody, accurate timestamps, and zero cross-patient contamination.</strong> We rebuilt our platform with CAO's exact requirements in mind.</p>
+      <p>Clinical research participants aren't "patients" in the normal sense. They're subjects under IRB-approved protocols, and your sponsors expect <strong>de-identification, chain-of-custody, accurate timestamps, and zero cross-patient contamination</strong> — every single visit.</p>
 
-      <p><strong>What this means for Clinical Associates of Orlando specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>Most mobile lab services aren't built for that standard. Ours is — because we built the whole platform specifically for it.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for CAO, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>Patient-name masking on EVERY surface</strong> — our calendar, phleb dashboard, admin views, and all outbound notifications show a reference ID (not the participant's name) for CAO appointments. Only the super-admin can unmask, and every unmask is audit-logged.</li>
-        <li><strong>$55 per in-office visit</strong>, invoiced directly to CAO with Net 30 terms. Participants see $0. No billing paperwork on their end, ever.</li>
-        <li><strong>Org-scoped billing isolation</strong> — CAO's invoices are routed only to <em>your</em> billing email (smartin@…). Your invoice history is completely walled off from patient-billing history. No cross-contamination, ever.</li>
-        <li><strong>Business-hours Mon–Fri scheduling window</strong> — flexibility for trial protocol windows without weekend complications.</li>
-        <li><strong>Specimen chain-of-custody stamps</strong> — every specimen gets a timestamp, phleb initials, GPS collection point, delivery timestamp, and tracking ID. Sponsor-ready audit trail, automatically.</li>
-        <li><strong>Team logins</strong> — add as many CAO coordinators as you need. Each has their own view.</li>
-        <li><strong>Coming soon:</strong> visit-schedule linking to trial-protocol visit windows, so no participant ever drifts outside their protocol window.</li>
+        <li><strong>Patient-name masking on every surface</strong> — calendar, phleb dashboard, admin views, notifications — all show a reference ID instead of the participant's name. Only super-admin can unmask, and every unmask is audit-logged.</li>
+        <li><strong>$55 per in-office visit</strong>, charged instantly to CAO's Stripe when scheduled. Participants see $0. No invoices, no receivables — paid the moment it's booked.</li>
+        <li><strong>Billing walled off</strong> — CAO's billing history in Stripe is completely isolated from patient-billing history. No cross-contamination ever.</li>
+        <li><strong>Chain-of-custody stamps</strong> — every specimen gets a collection timestamp, phleb initials, GPS collection point, delivery timestamp, and unique tracking ID. Sponsor-ready audit trail, automatically.</li>
+        <li><strong>Business-hours Mon–Fri scheduling</strong> — protocol-window flexibility without weekend complications.</li>
+        <li><strong>Team logins</strong> — add every CAO coordinator; each has their own view.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('smartin@clinicalassociatesorlando.com')}
-      <p>Shawna — clinical research is the hardest compliance environment in lab-collection work, and you've held us to a high bar. Everything above is us trying to earn another year of your trust.</p>
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('smartin@clinicalassociatesorlando.com')}
+      <p>Shawna — clinical research is the hardest compliance environment in lab collection, and you've held us to a high bar. The whole rebuild is us trying to earn another year of your trust.</p>
       ${SIGNOFF}
     `),
   },
 
-  // ── 3. ELITE MEDICAL CONCIERGE — Dr. Monica Sher + Dr. Richard Edwards (internal med / concierge) ──
+  // ── 3. ELITE MEDICAL CONCIERGE — Dr. Monica Sher (driving to SUBSCRIPTION) ──
   {
     subjectPrefix: '[DRAFT → Elite Medical Concierge]',
     actualRecipient: 'elitemedicalconcierge@gmail.com (Dr. Monica Sher)',
     portalEmail: 'elitemedicalconcierge@gmail.com',
-    subject: 'Concierge-grade lab collection for your concierge patients — your portal is ready',
-    html: brandWrap('Welcome to your Elite Medical × ConveLabs portal', `
+    subject: 'Stop reconciling per-visit invoices — one predictable monthly charge instead',
+    html: brandWrap('Elite Medical × ConveLabs — the subscription play', `
+      <!-- HOOK -->
       <p>Hi Dr. Sher,</p>
-      <p>You and Dr. Edwards built Elite Medical Concierge around a simple idea: <strong>your patients deserve medicine that comes to them, on their time, with zero friction.</strong> A concierge internal-medicine practice deserves a concierge lab-collection experience. We rebuilt ours to match.</p>
+      <p>You and Dr. Edwards built Elite Medical Concierge so your patients never wait in a waiting room, never fill out a form twice, never see a bill at the door. You built <strong>frictionless</strong>. The lab-collection step should feel the same — for your patients <em>and</em> for your accounting.</p>
 
-      <p><strong>What this means for Elite Medical Concierge specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>Right now, every visit generates its own invoice. That's fine for a handful per month. But as Elite scales, reconciling 20, 40, 80 individual invoices per month is the kind of slow-bleed overhead that steals time from higher-value work. Here's the clean answer.</p>
+
+      <!-- THE OFFER (subscription) -->
+      <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border-radius:14px;padding:20px 22px;margin:18px 0;">
+        <p style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Founding-partner offer</p>
+        <h2 style="margin:0;font-size:20px;">Elite Medical Monthly Subscription</h2>
+        <p style="margin:10px 0;font-size:14px;line-height:1.6;">One predictable monthly charge to Elite Medical's Stripe. All patient visits included at <strong>$72.25 / visit</strong> — locked in as a founding partner. No per-visit invoicing. No reconciliation. One line item on your books each month, one receipt, full auto-tracking.</p>
+        <ul style="padding-left:20px;margin:10px 0;font-size:13.5px;color:#fef3c7;">
+          <li>Every visit auto-logged to your subscription</li>
+          <li>Live dashboard showing MTD visit count + usage</li>
+          <li>Monthly receipt with patient-level breakdown (masked as needed)</li>
+          <li>Cancel or pause anytime — no lock-in</li>
+          <li>Patients never see a bill — ever</li>
+        </ul>
+      </div>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for Elite Medical, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>$72.25 per mobile visit</strong>, invoiced directly to Elite Medical Concierge (Net 30). Your patients never see a bill at the door.</li>
-        <li><strong>Monthly subscription billing available</strong> — we can also roll your visits into a predictable monthly subscription so there's one invoice to reconcile instead of many. Let me know if you'd like that configured.</li>
-        <li><strong>Mon–Fri 6am–2pm scheduling window</strong> — wide-open for concierge-level flexibility, matching your patients' schedules.</li>
-        <li><strong>Comprehensive panel support</strong> — CBC/CMP, lipid subfractions, thyroid full panel, hormones, hs-CRP, HbA1c, vitamin D, iron studies, cardiac markers. Our phlebotomists are trained on internal-medicine's full spectrum.</li>
-        <li><strong>Team logins</strong> — add your staff plus Dr. Edwards with one click each.</li>
-        <li><strong>Coming soon:</strong> enter the patient's next Elite Medical appointment with you when scheduling, so results are in hand <em>before</em> their follow-up.</li>
+        <li><strong>Mon–Fri 6am–2pm scheduling window</strong> — wide open for concierge-level flexibility, matching your patients' schedules.</li>
+        <li><strong>Full internal-medicine panel support</strong> — CBC/CMP, lipid subfractions, thyroid full, hormones, hs-CRP, HbA1c, vitamin D, iron studies, cardiac markers. Our phlebotomists are drilled on the full spectrum.</li>
+        <li><strong>Team logins for you + Dr. Edwards + staff</strong> — unlimited.</li>
+        <li><strong>Coming soon:</strong> enter a patient's next Elite Medical appointment when scheduling, so results are in hand before the follow-up.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('elitemedicalconcierge@gmail.com')}
-      <p>Dr. Sher — the way you and Dr. Edwards run Elite Medical is the benchmark for how concierge internal medicine should look. This rebuild is our way of matching the standard you hold.</p>
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('elitemedicalconcierge@gmail.com')}
+      <p style="font-size:13px;color:#6b7280;margin-top:8px;text-align:center;">Log in and say the word — I'll set up the monthly subscription for Elite Medical in under 5 minutes, and you'll never reconcile another per-visit invoice.</p>
+      <p>Dr. Sher — the way you and Dr. Edwards run Elite Medical is the benchmark for concierge internal medicine. This subscription is how we match that operational standard on the billing side.</p>
       ${SIGNOFF}
     `),
   },
 
-  // ── 4. LITTLETON CONCIERGE MEDICINE — Dr. Jason Littleton (longevity, wellness, lab-heavy) ──
+  // ── 4. LITTLETON CONCIERGE MEDICINE — Dr. Jason Littleton ──
   {
     subjectPrefix: '[DRAFT → Littleton Concierge Medicine]',
     actualRecipient: 'jasonlittleton@jasonmd.com (Dr. Jason Littleton)',
     portalEmail: 'jasonlittleton@jasonmd.com',
-    subject: 'For the doctor who built his practice around advanced labs — meet your new lab partner',
+    subject: 'For the doctor who built his practice around advanced labs',
     html: brandWrap('Dr. Littleton — your portal is ready', `
+      <!-- HOOK -->
       <p>Hi Dr. Littleton,</p>
-      <p>You literally have a page on jasonmd.com titled <strong>"Advanced Lab Testing."</strong> You wrote <em>WellSpring: The Energy Secrets to Do the Good Life</em>. You host <em>The Concierge Doc Podcast</em>. You tell Fox35 Good Day Orlando viewers that the labs <strong>are</strong> the roadmap. We built the new ConveLabs platform for the doctor who believes exactly that.</p>
+      <p>You literally have a page on jasonmd.com titled <strong>"Advanced Lab Testing."</strong> You wrote <em>WellSpring: The Energy Secrets to Do the Good Life</em>. You host <em>The Concierge Doc Podcast</em>. You tell Fox35 Good Day Orlando viewers that the labs <strong>are</strong> the roadmap.</p>
 
-      <p><strong>What this means for Littleton Concierge Medicine specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>A doctor who believes labs are the roadmap deserves a lab-collection partner whose entire platform is engineered around that belief — not an afterthought. We rebuilt ConveLabs for exactly that kind of practice.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for Littleton Concierge, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>Advanced-panel support from day one</strong> — NMR lipid, insulin resistance panels, hormones (total + free + SHBG), thyroid full panel (TSH/Free T4/Free T3/Reverse T3/TPO/Tg), continuous glucose-monitoring workflow integration, vitamin D, omega-3 index, hs-CRP, homocysteine, ApoB. Our phlebs are drilled on the full longevity/prevention panel mix.</li>
-        <li><strong>Patient-pay at $150 mobile / $55 in-office</strong> by default — your patients get a transparent rate, and if they're also ConveLabs members the system auto-applies whichever rate is lower. No "did I get the discount?" phone calls.</li>
-        <li><strong>Membership upsell at booking</strong> — patients doing ongoing lab work (as yours do) save hundreds per year by joining the ConveLabs membership. We show them the math at checkout so they convert themselves.</li>
-        <li><strong>WellSpring-aligned prep protocol</strong> — extended-fast friendly intake reinforces the lifestyle protocols you're already prescribing.</li>
-        <li><strong>Team logins</strong> — add your concierge staff with one click.</li>
-        <li><strong>Content collaboration invite</strong> — if you'd ever like a ConveLabs segment on the podcast (for instance, "what a mobile lab-draw should actually feel like for a concierge patient"), I'd be honored. No pitch, just open invitation.</li>
-        <li><strong>Coming soon:</strong> enter the patient's next Littleton appointment when scheduling, so results are in your hands <em>before</em> the review consult.</li>
+        <li><strong>Advanced-panel support from day one</strong> — NMR lipid, insulin resistance panels, hormones (total + free + SHBG), thyroid full panel (TSH/Free T4/Free T3/Reverse T3/TPO/Tg), continuous-glucose-monitoring workflow, vitamin D, omega-3 index, hs-CRP, homocysteine, ApoB. Our phlebs are drilled on the full longevity panel mix.</li>
+        <li><strong>$150 mobile draw</strong>, patient-pay. If they're also a ConveLabs member, they automatically get whichever price is lower — no "did I get the discount?" phone calls.</li>
+        <li><strong>Membership upsell at checkout</strong> — patients running ongoing lab work (as yours do) save hundreds per year by joining the ConveLabs membership. We show them the exact savings math at booking so they convert themselves.</li>
+        <li><strong>WellSpring-aligned prep</strong> — extended-fast-friendly intake reinforces the protocols you're already prescribing.</li>
+        <li><strong>Team logins</strong> — add your concierge staff with one click each.</li>
+        <li><strong>Podcast collaboration open door</strong> — if you'd ever like a ConveLabs segment on <em>The Concierge Doc Podcast</em>, I'd be genuinely honored. No pitch. Just open invitation.</li>
+        <li><strong>Coming soon:</strong> enter the patient's next Littleton appointment when scheduling, so results are in your hands before the review consult.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('jasonlittleton@jasonmd.com')}
-      <p>Dr. Littleton — the way you talk about labs on the podcast is the way we built this system. I'd be genuinely honored to earn a share of the collection work from your patients.</p>
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('jasonlittleton@jasonmd.com')}
+      <p>Dr. Littleton — the way you talk about labs on the podcast is the way we built this system. I'd be honored to earn a share of the collection work from your patients.</p>
       ${SIGNOFF}
     `),
   },
 
-  // ── 5. NATURAMED — Dr. Karolina Skrzypek (functional medicine, women's hormones) ──
+  // ── 5. NATURAMED — Dr. Karolina Skrzypek (removed saliva/GI-MAP/4-point) ──
   {
     subjectPrefix: '[DRAFT → NaturaMed / Natura Integrative]',
     actualRecipient: 'team@naturamed.org (Dr. Karolina Skrzypek)',
     portalEmail: 'team@naturamed.org',
     subject: 'Your NaturaMed × ConveLabs portal — built around Nourish to Flourish + AlignHer',
     html: brandWrap('Your NaturaMed portal is live', `
+      <!-- HOOK -->
       <p>Hi Dr. Skrzypek,</p>
-      <p>Functional medicine done well — your <em>Nourish to Flourish</em> program, the AlignHer Foundations (Gut Rebalance / Mood &amp; Hormones / Metabolic Clarity) — depends on <strong>specialty-kit integrity</strong>. DUTCH, GI-MAP, Genova, cortisol curves, organic acids — these aren't "draw and ship" panels. They have strict fasting windows, collection timing, handling requirements, and the data quality varies wildly based on who's doing the collection. We engineered the new ConveLabs platform around those realities.</p>
+      <p>Functional medicine done well — your <em>Nourish to Flourish</em> program, the AlignHer Foundations (Gut Rebalance / Mood &amp; Hormones / Metabolic Clarity) — depends on <strong>specialty-kit integrity</strong>. Strict fasting windows, precise collection timing, careful handling — and the data quality swings wildly with who's doing the collection.</p>
 
-      <p><strong>What this means for NaturaMed specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>When a panel is spoiled, the whole protocol pauses. Your patient doesn't feel progress, and you don't have the data to adjust. We engineered the new ConveLabs platform to protect exactly those moments.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for NaturaMed, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>$85 per specialty-kit collection</strong>, patient-pay by default. You can flip any individual visit to "NaturaMed pays" with one toggle — useful for scholarship patients, program-included collections, or anyone on a special-care plan.</li>
-        <li><strong>Mon–Fri 6–9am morning window</strong>, enforced automatically — ideal for fasting-dependent panels. No accidental non-fasting draws will ever slip through.</li>
-        <li><strong>Specialty-kit trained phlebotomists</strong> — our team is specifically drilled on Genova, DUTCH (including 4-point saliva collection coaching), and GI-MAP protocols. The system labels the visit as a specialty-kit so there's no ambiguity.</li>
-        <li><strong>Urine + saliva + blood collection support</strong> — the platform flags panels requiring patient self-collection (like DUTCH) and pre-schedules the patient's at-home collection timing so it's integrated with the blood draw.</li>
-        <li><strong>AlignHer-aligned intake</strong> — patients tell us which AlignHer protocol they're on so pre-visit instructions match (Gut Rebalance has different prep than Mood &amp; Hormones).</li>
+        <li><strong>$85 per specialty-kit collection</strong>, patient-pay by default. Flip any individual visit to "NaturaMed pays" with one toggle — useful for scholarship patients or program-included collections.</li>
+        <li><strong>Mon–Fri 6–9am morning window</strong>, enforced automatically — ideal for fasting-dependent panels. No accidental non-fasting draws slip through.</li>
+        <li><strong>Specialty-kit trained phlebotomists</strong> — our team is drilled on the specialty-kit formats your protocols use. The system labels the visit clearly so there's no ambiguity about what's being collected.</li>
+        <li><strong>AlignHer-aligned intake</strong> — patients tell us which AlignHer protocol they're on, so pre-visit instructions match (Gut Rebalance has different prep than Mood &amp; Hormones).</li>
         <li><strong>Team logins</strong> — add every NaturaMed coordinator so they can schedule on behalf of patients from their own login.</li>
-        <li><strong>Coming soon:</strong> enter the patient's next NaturaMed follow-up when scheduling, so results are in your hands <em>before</em> the review appointment.</li>
+        <li><strong>Coming soon:</strong> enter the patient's next NaturaMed follow-up when scheduling, so results are in your hands before the review appointment.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('team@naturamed.org')}
-      <p>Dr. Skrzypek — the data-quality standard you hold is the entire reason this rebuild exists. Thank you for trusting us with the collection step of your patients' care.</p>
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('team@naturamed.org')}
+      <p>Dr. Skrzypek — the data-quality standard you hold is the reason this rebuild exists. Thank you for trusting us with the collection step.</p>
       ${SIGNOFF}
     `),
   },
 
-  // ── 6. ND WELLNESS — Justin Cobb + Brantley Hawkins (PT / performance / wellness club) ──
+  // ── 6. ND WELLNESS — Justin Cobb + Brantley Hawkins ──
   {
     subjectPrefix: '[DRAFT → ND Wellness]',
     actualRecipient: 'info@ndwellness.com (Justin Cobb)',
     portalEmail: 'info@ndwellness.com',
-    subject: 'Concierge lab collection for New Dimensions members — your portal is ready',
+    subject: 'Concierge lab collection for your New Dimensions members',
     html: brandWrap('ND Wellness — your portal is ready', `
+      <!-- HOOK -->
       <p>Hi Justin,</p>
-      <p>Your members come to New Dimensions for the full performance stack — PT, recovery, hyperbaric, infrared sauna, acupuncture, and the metabolic/hormonal lab work that ties it all together. A concierge wellness club deserves a concierge lab-draw partner. We rebuilt ours to match the standard you and Brantley hold.</p>
+      <p>Your members come to New Dimensions for the full stack — PT, performance, hyperbaric, infrared sauna, acupuncture, and the metabolic / hormonal lab work that ties it all together.</p>
 
-      <p><strong>What this means for ND Wellness specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>A concierge wellness club deserves a concierge lab-draw partner. Patients whose recovery depends on clean data can't afford a rushed draw, a mistimed fast, or a lost specimen.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for ND Wellness, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>Anytime-during-business-hours booking</strong> — no 6–9am restriction. Your athletes and performance members book around training blocks, not around our schedule.</li>
-        <li><strong>$85 per specialty-kit collection</strong>, patient-pay by default — flip any individual visit to "ND Wellness pays" with one toggle for comped members, onboarding panels, or anything you want to cover in-house.</li>
-        <li><strong>Performance-panel support</strong> — total + free testosterone, thyroid full panel, estradiol, SHBG, DHEA-S, vitamin D, iron/ferritin, CBC/CMP, hs-CRP, HbA1c, lipid subfractions, cortisol AM, omega-3 index. Our phlebs know these.</li>
-        <li><strong>Recovery-panel integration</strong> — for members tracking training adaptation, we can flag a visit as "performance follow-up" with pre-visit instructions that align with your recovery protocols.</li>
-        <li><strong>Team logins for the ND team</strong> — Brantley, coaches, and front-desk can all have their own views.</li>
-        <li><strong>Member linking</strong> — ND Wellness members who are also ConveLabs members automatically get whichever price is lower. No double-counting, no confusion.</li>
-        <li><strong>Coming soon:</strong> enter a member's next ND Wellness visit when scheduling their draw, so their labs are back <em>before</em> the follow-up protocol adjustment.</li>
+        <li><strong>Anytime-during-business-hours booking</strong> — no 6–9am restriction. Athletes and performance clients book around training blocks, not around our schedule.</li>
+        <li><strong>$85 per specialty-kit collection</strong>, patient-pay by default — flip any single visit to "ND Wellness pays" with one toggle for comped members, onboarding panels, or anything you want to cover in-house.</li>
+        <li><strong>Performance-panel support</strong> — total + free testosterone, thyroid full panel, estradiol, SHBG, DHEA-S, vitamin D, iron/ferritin, CBC/CMP, hs-CRP, HbA1c, lipid subfractions, cortisol AM, omega-3 index.</li>
+        <li><strong>Recovery-panel integration</strong> — for members tracking training adaptation, flag a visit as "performance follow-up" and we'll send pre-visit instructions aligned with your recovery protocols.</li>
+        <li><strong>Team logins</strong> — Brantley, coaches, front desk — each gets their own view.</li>
+        <li><strong>Member linking</strong> — ND Wellness members who are also ConveLabs members automatically get whichever price is lower.</li>
+        <li><strong>Coming soon:</strong> enter a member's next ND visit when scheduling the draw, so labs are back before the follow-up protocol adjustment.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('info@ndwellness.com')}
-      <p>Justin, Brantley — the referrals we get from ND Wellness are the best compliment, and this rebuild is us trying to earn them again.</p>
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('info@ndwellness.com')}
+      <p>Justin, Brantley — the referrals we get from ND Wellness are the best compliment this business receives, and this rebuild is us trying to earn them again.</p>
       ${SIGNOFF}
     `),
   },
 
-  // ── 7. THE RESTORATION PLACE — Christelle Renta ARNP (BioTE BHRT clinic) ──
+  // ── 7. THE RESTORATION PLACE — Christelle Renta ARNP (BioTE BHRT) ──
   {
     subjectPrefix: '[DRAFT → The Restoration Place]',
     actualRecipient: 'schedule@trpclinic.com (Christelle Renta ARNP)',
     portalEmail: 'schedule@trpclinic.com',
     subject: 'Smarter HRT lab workflow for your BioTE patients — built around the pellet consult',
     html: brandWrap('A better lab system for your BHRT patients', `
+      <!-- HOOK -->
       <p>Hi Christelle,</p>
-      <p>Hormone replacement therapy lives or dies on two things: <strong>getting the labs drawn in the correct biological window</strong>, and <strong>having the results in hand before the consult.</strong> When either step slips, your BioTE pellet decision gets delayed, the patient loses a week of symptom relief, and your Winter Garden schedule absorbs the hit. We rebuilt ConveLabs to protect both of those moments.</p>
+      <p>Hormone replacement therapy lives or dies on two things: <strong>getting labs drawn in the correct biological window</strong>, and <strong>having results in hand before the consult</strong>.</p>
 
-      <p><strong>What this means for The Restoration Place specifically:</strong></p>
+      <!-- AGITATE -->
+      <p>When either step slips, your BioTE pellet decision gets delayed, the patient loses a week of symptom relief, and your Winter Garden schedule absorbs the hit. We rebuilt ConveLabs to protect both of those moments.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for The Restoration Place, specifically</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
         <li><strong>6–9am biological-window enforced automatically</strong> — for AM cortisol and morning-sensitive hormone panels, your patients literally cannot book outside the right window. The system explains why and offers the next compliant slot.</li>
-        <li><strong>Full HRT panel support</strong> — estradiol, total + free T, SHBG, DHEA-S, AM cortisol, TSH + full thyroid, CBC/CMP, lipid subfractions, HbA1c, PSA for male pellet patients. Our phlebotomists are trained on BHRT's exact panel mix.</li>
-        <li><strong>$125 flat patient-pay rate</strong> — and if your patient is also a ConveLabs member, they automatically get whichever rate is lower. No phone calls asking "did I get the discount?"</li>
-        <li><strong>Membership upsell at checkout</strong> — BHRT patients are long-term lab users. The system shows them the exact membership savings math at booking so they convert themselves and save money on ongoing labs.</li>
-        <li><strong>Your admin team can be added</strong> — give your front-desk staff their own portal logins so they can schedule on behalf of patients.</li>
+        <li><strong>Full BHRT panel support</strong> — estradiol, total + free T, SHBG, DHEA-S, AM cortisol, TSH + full thyroid, CBC/CMP, lipid subfractions, HbA1c, PSA for male pellet patients. Our phlebotomists are drilled on BioTE's exact panel mix.</li>
+        <li><strong>$125 flat patient-pay rate</strong> — if your patient is also a ConveLabs member, they automatically get whichever rate is lower.</li>
+        <li><strong>Membership upsell at checkout</strong> — BHRT patients are long-term lab users. The system shows them the exact savings math at booking so they convert themselves.</li>
+        <li><strong>Your admin team can be added</strong> — unlimited front-desk logins.</li>
         <li><strong>BioTE-aligned prep</strong> — pellet-follow-up patients get protocol-specific pre-visit instructions around supplementation, hydration, and timing.</li>
-        <li><strong>Coming soon:</strong> enter the patient's next pellet consult with you when scheduling, so results are ready <em>before</em> they walk in for the pellet decision.</li>
+        <li><strong>Coming soon:</strong> enter the patient's next pellet consult when scheduling, so results are ready before they walk in for the pellet decision.</li>
       </ul>
 
-      ${PLATFORM_UPGRADES}
-      ${loginBox('schedule@trpclinic.com')}
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('schedule@trpclinic.com')}
       <p>Christelle — the work your team does in Winter Garden matters to a lot of people. This rebuild is our way of matching the standard you hold yourselves to.</p>
       ${SIGNOFF}
     `),
   },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Send each draft to info@convelabs.com wrapped with a DRAFT PREVIEW banner
-// ─────────────────────────────────────────────────────────────────────────────
 async function send(one) {
   const subject = `${one.subjectPrefix} ${one.subject}`;
   const banner = `
@@ -298,4 +398,4 @@ for (const e of emails) {
   await send(e);
   await new Promise(r => setTimeout(r, 900));
 }
-console.log(`\nAll ${emails.length} drafts sent to info@convelabs.com.`);
+console.log(`\nAll ${emails.length} Hormozi-structured drafts sent to info@convelabs.com.`);
