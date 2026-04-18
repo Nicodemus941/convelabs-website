@@ -57,9 +57,17 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Build a direct link that goes to our app with the token as a query param
-    // This avoids the Supabase verify redirect and the hash token lock contention
-    const resetLink = `https://convelabs.com/reset-password?token=${encodeURIComponent(hashedToken || '')}&email=${encodeURIComponent(email.trim())}&type=recovery`;
+    // Build a direct link that goes to our app with the token as a query param.
+    // We skip Supabase's /auth/v1/verify redirect + hash-based flow entirely —
+    // the hash flow was fragile (race between client auto-detect + token
+    // consumption). Direct ?token= flow uses verifyOtp() atomically with zero
+    // polling.
+    //
+    // If hashed_token is missing for any reason, fall back to the actionLink
+    // so the link doesn't become a dead URL.
+    const resetLink = hashedToken
+      ? `https://www.convelabs.com/reset-password?token=${encodeURIComponent(hashedToken)}&email=${encodeURIComponent(email.trim())}&type=recovery`
+      : actionLink;
 
     // Step 2: Get patient name
     const { data: tp } = await supabase
@@ -82,8 +90,9 @@ Deno.serve(async (req) => {
         <p>Hi ${firstName},</p>
         <p>We received a request to reset your ConveLabs password. Click the button below to create a new password:</p>
         <div style="text-align:center;margin:24px 0;">
-          <a href="${actionLink}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Reset My Password</a>
+          <a href="${resetLink}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Reset My Password</a>
         </div>
+        <p style="text-align:center;margin:8px 0 20px;font-size:12px;color:#666;word-break:break-all">Or copy this link:<br><a href="${resetLink}" style="color:#B91C1C;text-decoration:underline">${resetLink}</a></p>
         <p style="font-size:13px;color:#6b7280;">This link expires in 1 hour. If you did not request this, ignore this email.</p>
         <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
       </div>
@@ -94,6 +103,11 @@ Deno.serve(async (req) => {
     formData.append('to', email.trim());
     formData.append('subject', 'Reset Your ConveLabs Password');
     formData.append('html', emailHtml);
+    // Don't let Mailgun wrap the reset link in a tracking redirect —
+    // that doubles the link-lifetime problem (Mailgun's redirect + Supabase's
+    // token expiry) and sometimes corrupts the encoded token.
+    formData.append('o:tracking-clicks', 'no');
+    formData.append('o:tag', 'password-reset');
 
     const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
       method: 'POST',
