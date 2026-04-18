@@ -31,6 +31,12 @@ export interface PhlebAppointment {
   // Uploaded file paths (Supabase Storage → bucket 'lab-orders')
   lab_order_file_path: string | null;
   insurance_card_path: string | null;
+  // OCR-extracted content from the lab order (populated by ocr-lab-order edge fn)
+  lab_order_ocr_text: string | null;
+  lab_order_panels: string[] | null;
+  ocr_processed_at: string | null;
+  // Patient selected "I'll confirm with my doctor" — admin follow-up required
+  lab_destination_pending: boolean;
   patient_id: string | null;
   patient_name: string;
   patient_phone: string | null;
@@ -193,8 +199,12 @@ export function usePhlebotomistAppointments() {
             booking_source: appt.booking_source || 'online',
             gate_code: appt.gate_code || null,
             lab_destination: appt.lab_destination || null,
+            lab_destination_pending: !!appt.lab_destination_pending,
             lab_order_file_path: labOrderPath,
             insurance_card_path: appt.insurance_card_path || null,
+            lab_order_ocr_text: appt.lab_order_ocr_text || null,
+            lab_order_panels: Array.isArray(appt.lab_order_panels) ? appt.lab_order_panels : null,
+            ocr_processed_at: appt.ocr_processed_at || null,
             patient_id: appt.patient_id,
             patient_name: patientName,
             patient_phone: patientPhone,

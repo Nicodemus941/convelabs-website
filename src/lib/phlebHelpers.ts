@@ -76,16 +76,41 @@ export function computeReadiness(appointment: {
 /**
  * Returns a fasting warning string if the service looks like it requires fasting,
  * or null if not. This is a best-effort heuristic — always defer to the lab order.
+ *
+ * Reads from multiple signals, strongest first:
+ *   1. lab_order_panels (structured, from OCR)
+ *   2. lab_order_ocr_text (OCR text)
+ *   3. service_name / service_type / notes (legacy text fields)
  */
 export function detectFastingRequirement(appointment: {
   service_name?: string | null;
   service_type?: string | null;
   notes?: string | null;
+  lab_order_ocr_text?: string | null;
+  lab_order_panels?: string[] | any;
 }): { required: boolean; reason?: string } {
+  // Strongest signal: structured panels extracted by OCR
+  if (Array.isArray(appointment.lab_order_panels)) {
+    const lower = (appointment.lab_order_panels as string[]).map(p => String(p).toLowerCase());
+    const panels = [
+      { match: (s: string) => /lipid|cholesterol/.test(s), label: 'Lipid Panel' },
+      { match: (s: string) => /\bcmp\b|comprehensive\s*metabolic/.test(s), label: 'CMP' },
+      { match: (s: string) => /\bbmp\b|basic\s*metabolic/.test(s), label: 'BMP' },
+      { match: (s: string) => /\bglucose\b/.test(s), label: 'Glucose' },
+      { match: (s: string) => /fasting\s*insulin/.test(s), label: 'Fasting Insulin' },
+    ];
+    for (const p of panels) {
+      if (lower.some(p.match)) {
+        return { required: true, reason: `${p.label} detected in lab order — typically requires fasting` };
+      }
+    }
+  }
+
   const haystack = [
     appointment.service_name || '',
     appointment.service_type || '',
     appointment.notes || '',
+    appointment.lab_order_ocr_text || '', // include OCR'd text
   ].join(' ').toLowerCase();
 
   if (/\bfasting\b|\bfasted\b|\bnpo\b/.test(haystack)) {
@@ -149,7 +174,31 @@ function buildMapsUrl(query: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 4. DELAY MESSAGE TEMPLATES
+// 4. PANEL BADGES (from OCR)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns a cleaned, deduped list of panels to show as chips on the phleb card.
+ * Caps at 8 so the card doesn't become a wall of text.
+ */
+export function extractPanelBadges(labOrderPanels: any): string[] {
+  if (!Array.isArray(labOrderPanels)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of labOrderPanels) {
+    const clean = String(raw).trim().substring(0, 40);
+    if (!clean) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5. DELAY MESSAGE TEMPLATES
 // ─────────────────────────────────────────────────────────────
 
 export function buildDelayMessage(patientFirstName: string, delayMinutes: number): string {

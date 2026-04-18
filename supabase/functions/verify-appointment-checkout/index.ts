@@ -201,6 +201,7 @@ Deno.serve(async (req) => {
           lab_order_file_path: firstLabFile || null,
           insurance_card_path: metadata.insurance_card_path || null,
           lab_destination: metadata.lab_destination || null,
+          lab_destination_pending: metadata.lab_destination_pending === 'true',
         }])
         .select()
         .single();
@@ -229,6 +230,25 @@ Deno.serve(async (req) => {
           JSON.stringify({ status: 'processing' }),
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
+      }
+
+      // ── Trigger OCR on the uploaded lab order (fire-and-forget) ──
+      // Phleb card uses the extracted text for fasting banners + panel chips.
+      if (firstLabFile) {
+        try {
+          supabaseClient.functions.invoke('ocr-lab-order', {
+            body: { appointmentId: newAppt.id },
+          }).catch((e) => console.warn('[ocr] trigger failed (non-blocking):', e));
+        } catch (e) { console.warn('[ocr] invoke exception:', e); }
+      }
+
+      // ── Admin ping if destination is pending doctor confirmation ──
+      if (metadata.lab_destination_pending === 'true') {
+        try {
+          await sendSMS(OWNER_PHONE,
+            `📞 Destination pending: ${patientName} booked ${dateOnly} but needs follow-up to confirm which lab. Call: ${metadata.patient_phone || metadata.patient_email}`,
+          );
+        } catch (e) { console.warn('admin ping failed:', e); }
       }
 
       // Compute displayDate up-front (used by both celebration + phleb/owner SMS below)

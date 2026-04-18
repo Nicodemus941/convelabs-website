@@ -227,7 +227,21 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // Lab destination — where the specimen gets delivered after draw.
       // Collected by LabDestinationSelector into form data.labOrder.labDestination
       // but previously NEVER forwarded to the backend. Fixing that data leak now.
-      const labDestination = (data as any)?.labOrder?.labDestination || null;
+      //
+      // Normalize the raw form value (machine-friendly slug like 'labcorp') into
+      // a human-readable label ('LabCorp') so the phleb dashboard renders
+      // something meaningful instead of 'labcorp'.
+      const rawDest = (data as any)?.labOrder?.labDestination || null;
+      const labDestinationPending = rawDest === 'pending-doctor-confirmation';
+      const labDestination = labDestinationPending ? null : ({
+        'labcorp': 'LabCorp',
+        'quest': 'Quest Diagnostics',
+        'adventhealth': 'AdventHealth',
+        'orlando-health': 'Orlando Health',
+        'genova': 'Genova Diagnostics',
+        'ups': 'UPS',
+        'fedex': 'FedEx',
+      } as Record<string, string>)[rawDest] || rawDest || null;
 
       const result = await createAppointmentCheckoutSession({
         serviceType: visitType,
@@ -270,6 +284,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         labOrderFilePaths: labOrderPaths,
         insuranceCardPath: insurancePath,
         labDestination,
+        labDestinationPending,
       } as any);
 
       if (result.error) {

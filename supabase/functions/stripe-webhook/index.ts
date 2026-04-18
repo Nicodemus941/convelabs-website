@@ -599,6 +599,7 @@ async function handleAppointmentPayment(session: any) {
           return match ? match[1].trim() : null;
         })(),
         lab_destination: metadata.lab_destination || null,
+        lab_destination_pending: metadata.lab_destination_pending === 'true',
         notes: [
           // Strip the file paths from notes (they're stored in their own columns)
           (metadata.additional_notes || '').replace(/Lab orders?:\s*[^|]+\|?\s*/g, '').replace(/Insurance:\s*[^|]+\|?\s*/g, '').trim(),
@@ -623,6 +624,16 @@ async function handleAppointmentPayment(session: any) {
     }
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
+
+    // Fire OCR on the uploaded lab order (fire-and-forget) so the fasting
+    // banner + panel chips render for image/PDF uploads too.
+    if (appointment.lab_order_file_path) {
+      try {
+        supabase.functions.invoke('ocr-lab-order', {
+          body: { appointmentId: appointment.id },
+        }).catch((e) => console.warn('[ocr] trigger failed (non-blocking):', e));
+      } catch (e) { console.warn('[ocr] invoke exception:', e); }
+    }
 
     // Create visit bundle record if the booking included a bundle purchase
     try {

@@ -20,7 +20,7 @@ import SpecimenDeliveryModal from './SpecimenDeliveryModal';
 import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal';
 import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
-import { computeReadiness, detectFastingRequirement, buildLabRouteUrl } from '@/lib/phlebHelpers';
+import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
   scheduled: { label: 'Scheduled', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200', borderColor: '#3B82F6' },
@@ -53,10 +53,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
 
   // Pre-flight readiness: does this visit have everything the phleb needs?
   const readiness = computeReadiness(appointment as any);
-  // Fasting requirement heuristic
+  // Fasting requirement heuristic (now enriched with OCR text + detected panels)
   const fasting = detectFastingRequirement(appointment as any);
   // Lab route URL (for "Route to Lab" button in Specimen Delivery section)
   const labRouteUrl = buildLabRouteUrl(appointment.lab_destination, appointment.zipcode);
+  // Detected panels from OCR — shown as chips on the card
+  const panelBadges = extractPanelBadges((appointment as any).lab_order_panels);
 
   // Persist patient edit modal state so it survives PWA background/reload
   const openPatientEdit = useCallback(() => {
@@ -354,6 +356,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                         </Button>
                       )}
                     </div>
+                  ) : (appointment as any).lab_destination_pending ? (
+                    <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2.5">
+                      <HelpCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold">Patient asked us to call them</p>
+                        <p className="text-amber-600 mt-0.5">They'll confirm lab with their doctor. Admin is following up — do NOT deliver without confirming destination.</p>
+                      </div>
+                    </div>
                   ) : (() => {
                     // Fallback: scan notes for common "Lab:" / "Deliver to:" patterns
                     const notes = appointment.notes || '';
@@ -407,6 +417,29 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       );
                     })}
                   </div>
+
+                  {/* Detected panel chips (from OCR) — gives phleb an at-a-glance view
+                      of what's being drawn without opening the file. */}
+                  {panelBadges.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">
+                        Detected panels
+                        {(appointment as any).ocr_processed_at && (
+                          <span className="text-gray-400 normal-case lowercase"> · auto-read from file</span>
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {panelBadges.map((p) => (
+                          <span
+                            key={p}
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                          >
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 // Show a "no lab order" hint for services that typically need one

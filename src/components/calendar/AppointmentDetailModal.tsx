@@ -491,7 +491,10 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
                 const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
                 const { error: updateErr } = await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
                 if (updateErr) { toast.error('Failed to link file'); return; }
-                toast.success('Lab order uploaded');
+                // Fire OCR in the background so fasting banner / panel chips refresh
+                supabase.functions.invoke('ocr-lab-order', { body: { appointmentId: appt.id } })
+                  .catch((err) => console.warn('[ocr] trigger failed:', err));
+                toast.success('Lab order uploaded (OCR running)');
                 onUpdate();
                 e.target.value = '';
               }}

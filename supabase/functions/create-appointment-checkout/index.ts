@@ -82,7 +82,23 @@ Deno.serve(async (req) => {
       labOrderFilePaths = [],
       insuranceCardPath = null,
       labDestination = null,
+      labDestinationPending = false,
     } = await req.json();
+
+    // ─── SERVER-SIDE: destination required for mobile visits ────────
+    // Hormozi rule: "Never fulfill on ambiguity you could have resolved at intake."
+    // The UI already enforces this, but keep the server as the source of truth —
+    // client bypass attempts get rejected here.
+    const DEST_REQUIRED_SERVICES = new Set(['mobile', 'senior', 'therapeutic', 'specialty-kit', 'specialty-kit-genova']);
+    if (DEST_REQUIRED_SERVICES.has(serviceType) && !labDestination && !labDestinationPending) {
+      return new Response(
+        JSON.stringify({
+          error: 'destination_required',
+          message: 'Please select a lab destination for specimen delivery, or choose "I\'ll confirm with my doctor" so we can follow up.',
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     if (!clientAmount || !appointmentDate || !patientDetails) {
       return new Response(
@@ -379,6 +395,7 @@ Deno.serve(async (req) => {
       lab_order_file_paths: Array.isArray(labOrderFilePaths) ? labOrderFilePaths.slice(0, 10).join(',').substring(0, 500) : '',
       insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',
       lab_destination: labDestination ? String(labDestination).substring(0, 50) : '',
+      lab_destination_pending: labDestinationPending ? 'true' : 'false',
     };
 
     // ─── LOG UPGRADE EVENTS (INTENT) for ROI dashboard ───────────────
