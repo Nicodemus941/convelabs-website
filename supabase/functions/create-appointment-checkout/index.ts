@@ -83,6 +83,11 @@ Deno.serve(async (req) => {
       insuranceCardPath = null,
       labDestination = null,
       labDestinationPending = false,
+      // Optional: redeem specific referral credits on THIS booking
+      redeemReferralCreditIds = [],
+      // Optional: bundle an annual membership subscription with this booking
+      // Shape: { planName: 'Regular' | 'VIP' | 'Concierge', annualPriceCents: number, agreementId: string }
+      subscribeToMembership = null,
     } = await req.json();
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
@@ -359,6 +364,49 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── REFERRAL CREDIT REDEMPTION ─────────────────────────────────
+    // Admin or patient can opt-in to apply referral credits to this booking.
+    // We verify the credits belong to this patient (by user_id or email match)
+    // and are unredeemed, then subtract from the amount + mark redeemed.
+    let referralCreditApplied = 0;
+    const referralCreditIdsToMark: string[] = [];
+    if (Array.isArray(redeemReferralCreditIds) && redeemReferralCreditIds.length > 0 && patientDetails?.email) {
+      try {
+        const { data: tp } = await supabaseClient
+          .from('tenant_patients')
+          .select('user_id')
+          .ilike('email', patientDetails.email)
+          .maybeSingle();
+        const uid = (tp as any)?.user_id;
+        if (uid) {
+          const { data: credits } = await supabaseClient
+            .from('referral_credits')
+            .select('id, amount, user_id, redeemed')
+            .in('id', redeemReferralCreditIds as string[])
+            .eq('user_id', uid)
+            .eq('redeemed', false);
+
+          for (const c of (credits || []) as any[]) {
+            const cents = Math.round(Number(c.amount || 0) * 100);
+            if (cents > 0 && amount > 0) {
+              const use = Math.min(cents, amount);
+              referralCreditApplied += use;
+              amount = Math.max(0, amount - use);
+              referralCreditIdsToMark.push(c.id);
+            }
+          }
+          console.log(`[referral-credit] ${patientDetails.email} applied $${referralCreditApplied / 100} from ${referralCreditIdsToMark.length} credit(s)`);
+        }
+      } catch (e) { console.warn('referral redemption failed (non-blocking):', e); }
+    }
+
+    // ─── STAMP benefit_first_used_at for refund lockout ─────────────
+    // The moment a patient uses ANY member benefit (discount or referral),
+    // their 30-day refund window auto-closes. Done via a separate update
+    // below after Stripe session creation so we don't stamp on abandoned
+    // checkouts. Flag is captured here for the post-session block.
+    const willUseMemberBenefit = serverTier !== 'none' && priceCorrection > 0;
+
     // Determine the origin for success/cancel URLs
     const origin = req.headers.get('origin') || 'https://convelabs-website.vercel.app';
 
@@ -493,15 +541,42 @@ Deno.serve(async (req) => {
     // Create the checkout session
     // Tag metadata with credit info for Stripe dashboard visibility
     metadata.apology_credit_applied_cents = String(apologyCreditApplied);
+    metadata.referral_credit_applied_cents = String(referralCreditApplied);
+    metadata.redeemed_referral_credit_ids = referralCreditIdsToMark.join(',').substring(0, 500);
+    metadata.member_benefit_used = willUseMemberBenefit ? 'true' : 'false';
+
+    // ─── BUNDLE-SUBSCRIBE: optional membership + this visit, one Stripe session ──
+    // Hormozi's "anchor flip" — patient already pulling out wallet for a draw,
+    // bundle the annual membership in. They save on THIS visit (hook) + get
+    // the annual benefits. Uses Stripe subscription mode with mixed line items.
+    let sessionMode: 'payment' | 'subscription' = 'payment';
+    if (subscribeToMembership && subscribeToMembership.annualPriceCents && subscribeToMembership.planName) {
+      sessionMode = 'subscription';
+      lineItems.push({
+        price_data: {
+          currency: 'usd',
+          recurring: { interval: 'year' },
+          product_data: {
+            name: `ConveLabs ${subscribeToMembership.planName} Annual Membership`,
+            description: `${subscribeToMembership.planName} tier — ${String(subscribeToMembership.planName).toLowerCase().includes('concierge') ? 'anytime booking + same-day + dedicated phleb' : String(subscribeToMembership.planName).toLowerCase().includes('vip') ? 'extended morning + Saturday access + referral bonuses' : 'morning + Saturday access + discounted family add-ons'}. Billed once a year.`,
+          },
+          unit_amount: subscribeToMembership.annualPriceCents,
+        },
+        quantity: 1,
+      });
+      metadata.bundled_subscription_plan = subscribeToMembership.planName;
+      metadata.bundled_subscription_cents = String(subscribeToMembership.annualPriceCents);
+      if (subscribeToMembership.agreementId) {
+        metadata.agreement_id = subscribeToMembership.agreementId;
+      }
+    }
 
     const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
+      mode: sessionMode,
       customer: customerId,
       line_items: lineItems,
       metadata,
-      payment_intent_data: {
-        metadata,
-      },
+      ...(sessionMode === 'payment' ? { payment_intent_data: { metadata } } : { subscription_data: { metadata } }),
       success_url: metadata.service_type === 'membership'
         ? `${origin}/dashboard/patient?membership=success`
         : `${origin}/book-now?status=success&session_id={CHECKOUT_SESSION_ID}`,
@@ -522,6 +597,49 @@ Deno.serve(async (req) => {
           })
           .in('id', creditIdsToMark);
       } catch (e) { console.warn('credit redemption mark failed (non-blocking):', e); }
+    }
+
+    // Mark referral credits redeemed (same abandonment semantics — accepted)
+    if (referralCreditIdsToMark.length > 0) {
+      try {
+        await supabaseClient.from('referral_credits')
+          .update({
+            redeemed: true,
+            redeemed_at: new Date().toISOString(),
+          })
+          .in('id', referralCreditIdsToMark);
+      } catch (e) { console.warn('referral credit mark failed (non-blocking):', e); }
+    }
+
+    // Stamp benefit_first_used_at on the patient's active membership, locking
+    // their 30-day refund window. Only stamps the FIRST time — subsequent
+    // benefits don't re-stamp (preserves the original redemption timestamp).
+    if (willUseMemberBenefit || referralCreditApplied > 0) {
+      try {
+        const { data: tp } = await supabaseClient
+          .from('tenant_patients').select('user_id').ilike('email', patientDetails.email).maybeSingle();
+        const uid = (tp as any)?.user_id;
+        if (uid) {
+          const nowIso = new Date().toISOString();
+          // Only stamps if currently null (first-use only)
+          await supabaseClient
+            .from('user_memberships')
+            .update({
+              benefit_first_used_at: nowIso,
+              benefit_usage_count: (await supabaseClient.from('user_memberships').select('benefit_usage_count').eq('user_id', uid).eq('status', 'active').maybeSingle())?.data?.benefit_usage_count + 1 || 1,
+              total_savings_cents: (priceCorrection + referralCreditApplied),
+            })
+            .eq('user_id', uid)
+            .eq('status', 'active')
+            .is('benefit_first_used_at', null);
+          // Also mirror to the agreement for refund audit
+          await supabaseClient
+            .from('membership_agreements' as any)
+            .update({ benefit_first_used_at: nowIso })
+            .eq('user_email', patientDetails.email.toLowerCase())
+            .is('benefit_first_used_at', null);
+        }
+      } catch (e) { console.warn('benefit stamp failed (non-blocking):', e); }
     }
 
     return new Response(

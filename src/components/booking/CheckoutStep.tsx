@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import { useFormContext } from 'react-hook-form';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
+import SubscribeAtCheckoutCard from './SubscribeAtCheckoutCard';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -36,9 +37,21 @@ interface CheckoutStepProps {
    * charged the full price (bug fix, April 2026).
    */
   onMemberTierDetected?: (tier: 'none' | 'member' | 'vip' | 'concierge') => void;
+  /**
+   * Called when the patient subscribes to a membership inline at checkout.
+   * Parent (BookingFlow) forwards this to create-appointment-checkout's
+   * subscribeToMembership param so Stripe bundles the membership + visit
+   * into one subscription session.
+   */
+  onBundledSubscription?: (payload: {
+    planName: 'Regular' | 'VIP' | 'Concierge';
+    annualPriceCents: number;
+    agreementId: string;
+    memberTierAfter: 'member' | 'vip' | 'concierge';
+  } | null) => void;
 }
 
-const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected }) => {
+const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected, onBundledSubscription }) => {
   const { user } = useAuth();
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
@@ -50,6 +63,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [addOns, setAddOns] = useState<any[]>([]);
   const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  const [bundledSubscription, setBundledSubscription] = useState<{
+    planName: 'Regular' | 'VIP' | 'Concierge';
+    annualPriceCents: number;
+    agreementId: string;
+    memberTierAfter: 'member' | 'vip' | 'concierge';
+  } | null>(null);
   const [memberLabel, setMemberLabel] = useState('');
   const [bundleEnabled, setBundleEnabled] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
@@ -284,18 +303,48 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
-        {/* Membership upsell for non-members */}
-        {memberTier === 'none' && breakdown.servicePrice >= 100 && (
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4 space-y-2">
-            <p className="font-semibold text-sm text-amber-900">💰 Save ${(breakdown.servicePrice - (breakdown.servicePrice * 0.87)).toFixed(0)} on this visit</p>
-            <p className="text-xs text-amber-700">
-              You're paying <span className="font-bold">${breakdown.servicePrice.toFixed(0)}</span>. Members pay <span className="font-bold">${(breakdown.servicePrice * 0.87).toFixed(0)}</span>.
-              Join for <span className="font-bold">$99/year</span> and save on every visit.
-            </p>
-            <Button type="button" variant="outline" size="sm" className="text-xs border-amber-300 text-amber-800 hover:bg-amber-100"
-              onClick={() => window.open('/pricing', '_blank')}>
-              View Membership Plans →
-            </Button>
+        {/* Inline Hormozi upsell — non-members only, and only if no bundle already picked */}
+        {memberTier === 'none' && !bundledSubscription && breakdown.servicePrice >= 50 && (
+          <SubscribeAtCheckoutCard
+            patientEmail={String(watch('patientDetails.email') || '')}
+            patientName={`${watch('patientDetails.firstName') || ''} ${watch('patientDetails.lastName') || ''}`.trim()}
+            serviceType={String(watch('serviceDetails.visitType') || 'mobile')}
+            serviceBaseCents={Math.round(breakdown.servicePrice * 100)}
+            onSubscribed={(payload) => {
+              setBundledSubscription(payload);
+              onBundledSubscription?.(payload);
+              // Also update the local memberTier preview so the price display flips
+              setMemberTier(payload.memberTierAfter);
+            }}
+          />
+        )}
+
+        {/* Bundled-subscription confirmation card */}
+        {bundledSubscription && (
+          <div className="bg-gradient-to-r from-emerald-50 to-white border-2 border-emerald-300 rounded-xl p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <p className="text-sm font-bold text-emerald-800">
+                  ✨ {bundledSubscription.planName} membership added
+                </p>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  +${(bundledSubscription.annualPriceCents / 100).toFixed(2)}/yr charged once at checkout. Today's visit is automatically discounted.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-xs text-gray-500 hover:text-red-600"
+                onClick={() => {
+                  setBundledSubscription(null);
+                  onBundledSubscription?.(null);
+                  setMemberTier('none');
+                }}
+              >
+                Remove
+              </Button>
+            </div>
           </div>
         )}
 

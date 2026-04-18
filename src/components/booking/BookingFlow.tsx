@@ -61,6 +61,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // Prior bug: memberTier was local to CheckoutStep only, so the Stripe
   // amount was charged at full price even though the UI showed discounted.
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  // Bundled membership subscription (if patient picked "Add VIP" at checkout).
+  // When present, BookingFlow forwards it to create-appointment-checkout so
+  // Stripe creates a subscription session that combines the visit + annual fee.
+  const [bundledSubscription, setBundledSubscription] = useState<{
+    planName: 'Regular' | 'VIP' | 'Concierge';
+    annualPriceCents: number;
+    agreementId: string;
+    memberTierAfter: 'member' | 'vip' | 'concierge';
+  } | null>(null);
   // Sub-step within combined steps
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLabOrder, setShowLabOrder] = useState(false);
@@ -291,6 +300,13 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         insuranceCardPath: insurancePath,
         labDestination,
         labDestinationPending,
+        // Bundled membership subscription (Hormozi anchor-flip upsell — one
+        // Stripe session for visit + annual fee)
+        subscribeToMembership: bundledSubscription ? {
+          planName: bundledSubscription.planName,
+          annualPriceCents: bundledSubscription.annualPriceCents,
+          agreementId: bundledSubscription.agreementId,
+        } : null,
       } as any);
 
       if (result.error) {
@@ -464,6 +480,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   onCheckout={handleCheckout}
                   isProcessing={isProcessing}
                   onMemberTierDetected={setMemberTier}
+                  onBundledSubscription={setBundledSubscription}
                 />
               )}
 

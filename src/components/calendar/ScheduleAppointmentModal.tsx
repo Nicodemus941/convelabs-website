@@ -64,6 +64,12 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [showResults, setShowResults] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<PatientResult | null>(null);
 
+  // Sprint: auto-apply member benefits in admin flow
+  const [detectedTier, setDetectedTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  const [referralCredits, setReferralCredits] = useState<Array<{ id: string; amount_cents: number; description: string | null }>>([]);
+  const [referralModalOpen, setReferralModalOpen] = useState(false);
+  const [redeemReferralIds, setRedeemReferralIds] = useState<string[]>([]);
+
   // Form state
   const [patientName, setPatientName] = useState('');
   const [patientEmail, setPatientEmail] = useState('');
@@ -139,6 +145,43 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setPatientPhone(p.phone || '');
     setPatientSearch(`${p.first_name} ${p.last_name}`.trim());
     setShowResults(false);
+
+    // Sprint: auto-detect member tier + pull referral credit balance
+    try {
+      const { data: tp } = await supabase
+        .from('tenant_patients').select('user_id').eq('id', p.id).maybeSingle();
+      const uid = (tp as any)?.user_id;
+      if (uid) {
+        // Active membership?
+        const { data: mem } = await supabase
+          .from('user_memberships' as any)
+          .select('membership_plans(name)')
+          .eq('user_id', uid).eq('status', 'active').maybeSingle();
+        const planName = String((mem as any)?.membership_plans?.name || '').toLowerCase();
+        let tier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+        if (planName.includes('concierge')) tier = 'concierge';
+        else if (planName.includes('vip')) tier = 'vip';
+        else if (planName.includes('regular') || planName.includes('member')) tier = 'member';
+        setDetectedTier(tier);
+
+        // Unredeemed referral credits?
+        const { data: credits } = await supabase
+          .from('referral_credits' as any)
+          .select('id, amount, description')
+          .eq('user_id', uid)
+          .eq('redeemed', false);
+        const mapped = (credits || []).map((c: any) => ({
+          id: c.id,
+          amount_cents: Math.round(Number(c.amount || 0) * 100),
+          description: c.description || null,
+        })).filter((c: any) => c.amount_cents > 0);
+        setReferralCredits(mapped);
+        // If any credits exist, auto-open the "ask patient" modal
+        if (mapped.length > 0) {
+          setReferralModalOpen(true);
+        }
+      }
+    } catch (e) { console.warn('[admin-booking] tier/credit lookup failed (non-blocking):', e); }
 
     // Hydrate from three sources, priority order:
     //   (1) tenant_patients — the canonical patient profile. Holds address,
@@ -279,7 +322,19 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       // Calculate price with surcharges + discount
       const svc = SERVICE_TYPES.find(s => s.value === serviceType);
-      const basePrice = svc?.price || 150;
+      // AUTO-APPLY member tier pricing — admin doesn't have to remember discounts
+      const MEMBER_TIER_PRICING: Record<string, Record<string, number>> = {
+        'mobile':               { member: 130, vip: 115, concierge: 99 },
+        'in-office':            { member: 49,  vip: 45,  concierge: 39 },
+        'senior':               { member: 85,  vip: 75,  concierge: 65 },
+        'specialty-kit':        { member: 165, vip: 150, concierge: 135 },
+        'specialty-kit-genova': { member: 180, vip: 165, concierge: 150 },
+        'therapeutic':          { member: 180, vip: 165, concierge: 150 },
+      };
+      const listPrice = svc?.price || 150;
+      const tierPrice = detectedTier !== 'none' ? (MEMBER_TIER_PRICING[serviceType]?.[detectedTier] || listPrice) : listPrice;
+      const basePrice = tierPrice;
+      const memberSavings = detectedTier !== 'none' ? (listPrice - tierPrice) : 0;
 
       // Auto-detect surcharges
       const EXTENDED_CITIES = ['lake nona','celebration','kissimmee','sanford','eustis','clermont','montverde','deltona','geneva','tavares','mount dora','leesburg','groveland','mascotte','minneola','daytona beach','deland','debary','orange city'];
@@ -303,6 +358,18 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       let finalPrice = basePrice + surchargeTotal;
       let discountNote = surchargeItems.join(', ');
+      if (memberSavings > 0) {
+        discountNote += (discountNote ? ' | ' : '') + `${detectedTier.toUpperCase()} member — saved $${memberSavings.toFixed(2)}`;
+      }
+
+      // Apply any referral credits the admin redeemed via the pop-up modal
+      const referralCreditApplied = redeemReferralIds.length > 0
+        ? referralCredits.filter(c => redeemReferralIds.includes(c.id)).reduce((s, c) => s + c.amount_cents, 0) / 100
+        : 0;
+      if (referralCreditApplied > 0) {
+        finalPrice = Math.max(0, finalPrice - referralCreditApplied);
+        discountNote += (discountNote ? ' | ' : '') + `Referral credit -$${referralCreditApplied.toFixed(2)}`;
+      }
 
       if (discountType === 'waive') { finalPrice = 0; discountNote = 'Fee waived'; }
       else if (discountType === 'custom' && discountValue) {
@@ -477,8 +544,34 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
           });
       }
 
+      // Mark any redeemed referral credits as used + stamp benefit_first_used_at if tier > none
+      if (redeemReferralIds.length > 0) {
+        try {
+          await supabase.from('referral_credits' as any)
+            .update({ redeemed: true, redeemed_at: new Date().toISOString() })
+            .in('id', redeemReferralIds);
+        } catch (e) { console.warn('credit mark failed:', e); }
+      }
+      if (detectedTier !== 'none' || redeemReferralIds.length > 0) {
+        try {
+          const { data: tp } = await supabase
+            .from('tenant_patients').select('user_id').ilike('email', patientEmail).maybeSingle();
+          const uid = (tp as any)?.user_id;
+          if (uid) {
+            const nowIso = new Date().toISOString();
+            await supabase.from('user_memberships' as any)
+              .update({ benefit_first_used_at: nowIso })
+              .eq('user_id', uid).eq('status', 'active').is('benefit_first_used_at', null);
+            await supabase.from('membership_agreements' as any)
+              .update({ benefit_first_used_at: nowIso })
+              .eq('user_email', patientEmail.toLowerCase())
+              .is('benefit_first_used_at', null);
+          }
+        } catch (e) { console.warn('benefit stamp failed:', e); }
+      }
+
       const statusMsg = isWaived ? ' (Fee waived)' : isVip ? ' (VIP)' : ' Invoice sent to patient.';
-      toast.success(`Appointment scheduled!${statusMsg}`);
+      toast.success(`Appointment scheduled!${statusMsg}${memberSavings > 0 ? ` (${detectedTier.toUpperCase()} saved $${memberSavings.toFixed(2)})` : ''}`);
       handleClose();
       onCreated();
     } catch (err: any) {
@@ -492,6 +585,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full p-4 sm:p-6">
         <DialogHeader>
@@ -907,6 +1001,56 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Referral-credit redemption modal — fires when patient has unredeemed credits */}
+    <Dialog open={referralModalOpen} onOpenChange={setReferralModalOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="text-2xl">🎁</span>
+            {patientName.split(' ')[0] || 'This patient'} has referral credits
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">
+            Ask the patient: <strong className="text-gray-900">&quot;You have ${(referralCredits.reduce((s, c) => s + c.amount_cents, 0) / 100).toFixed(2)} in referral credits. Would you like to redeem them on today&apos;s visit?&quot;</strong>
+          </p>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-1.5">
+            {referralCredits.map((c) => (
+              <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={redeemReferralIds.includes(c.id)}
+                  onChange={(e) => {
+                    setRedeemReferralIds(prev =>
+                      e.target.checked ? [...prev, c.id] : prev.filter(id => id !== c.id)
+                    );
+                  }}
+                  className="rounded"
+                />
+                <span className="text-sm flex-1">
+                  <strong className="text-emerald-800">${(c.amount_cents / 100).toFixed(2)}</strong>
+                  {c.description && <span className="text-emerald-700 ml-1">— {c.description}</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => { setRedeemReferralIds([]); setReferralModalOpen(false); }}>
+              Don&apos;t apply (save for later)
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => setReferralModalOpen(false)}
+              disabled={redeemReferralIds.length === 0}
+            >
+              Apply ${(referralCredits.filter(c => redeemReferralIds.includes(c.id)).reduce((s, c) => s + c.amount_cents, 0) / 100).toFixed(2)} to this visit
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 };
 
