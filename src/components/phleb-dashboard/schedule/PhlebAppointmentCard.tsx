@@ -9,6 +9,7 @@ import {
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
   Stethoscope, Shield, CalendarClock, DollarSign, Crown, AlertTriangle,
   Globe, Pencil, FileText, FlaskConical, HelpCircle,
+  Route, Utensils, Clock3,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -17,6 +18,9 @@ import OnTheWayDialog from './OnTheWayDialog';
 import PatientEditModal from './PatientEditModal';
 import SpecimenDeliveryModal from './SpecimenDeliveryModal';
 import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal';
+import LabOrderViewerModal from './LabOrderViewerModal';
+import RunningLateModal from './RunningLateModal';
+import { computeReadiness, detectFastingRequirement, buildLabRouteUrl } from '@/lib/phlebHelpers';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
   scheduled: { label: 'Scheduled', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200', borderColor: '#3B82F6' },
@@ -43,7 +47,16 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
     return sessionStorage.getItem('phleb-editing-patient') === appointment.id;
   });
   const [showSpecimenDelivery, setShowSpecimenDelivery] = useState(false);
+  const [showRunningLate, setShowRunningLate] = useState(false);
+  const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string }>({ open: false, path: null });
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
+
+  // Pre-flight readiness: does this visit have everything the phleb needs?
+  const readiness = computeReadiness(appointment as any);
+  // Fasting requirement heuristic
+  const fasting = detectFastingRequirement(appointment as any);
+  // Lab route URL (for "Route to Lab" button in Specimen Delivery section)
+  const labRouteUrl = buildLabRouteUrl(appointment.lab_destination, appointment.zipcode);
 
   // Persist patient edit modal state so it survives PWA background/reload
   const openPatientEdit = useCallback(() => {
@@ -141,6 +154,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
+                    {/* Pre-flight readiness pill — only for delivery visits */}
+                    {readiness.status !== 'na' && (
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${readiness.colorClass}`}
+                        title={readiness.reasons.length > 0 ? readiness.reasons.join(' · ') : 'All pre-visit checks passed'}
+                      >
+                        {readiness.label}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1 flex-wrap">
                     <Clock className="h-3.5 w-3.5" />
@@ -175,7 +197,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               {isExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground ml-2" /> : <ChevronRight className="h-5 w-5 text-muted-foreground ml-2" />}
             </div>
 
-            {/* Navigate / Message */}
+            {/* Navigate / Message / Running Late */}
             <div className="flex gap-2 mt-3">
               <Button size="sm" className="flex-1 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 h-9" onClick={(e) => { e.stopPropagation(); handleNavigate(); }}>
                 <Navigation className="h-3.5 w-3.5" /> Navigate
@@ -183,12 +205,54 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               <Button size="sm" variant="outline" className="flex-1 gap-1.5 h-9 border-gray-200" onClick={(e) => { e.stopPropagation(); handleMessage(); }}>
                 <MessageSquare className="h-3.5 w-3.5" /> Message
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 h-9 border-amber-300 text-amber-700 hover:bg-amber-50 px-2.5"
+                title="Notify patient I'm running late"
+                onClick={(e) => { e.stopPropagation(); setShowRunningLate(true); }}
+              >
+                <Clock3 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Late</span>
+              </Button>
             </div>
           </div>
 
           {/* Expanded Detail */}
           {isExpanded && (
             <div className="border-t bg-white">
+              {/* Fasting warning — first thing phleb sees when expanded */}
+              {fasting.required && (
+                <div className="px-4 py-3 bg-red-50 border-b-2 border-red-200 flex items-start gap-2">
+                  <Utensils className="h-4 w-4 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-red-800">FASTING REQUIRED</p>
+                    <p className="text-xs text-red-700">
+                      {fasting.reason}. Confirm patient fasted 8–12 hrs. Water only.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Readiness detail banner (show reasons when BLOCKED or CHECK) */}
+              {(readiness.status === 'blocked' || readiness.status === 'warning') && (
+                <div className={`px-4 py-3 border-b-2 flex items-start gap-2 ${
+                  readiness.status === 'blocked' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+                }`}>
+                  <AlertTriangle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${
+                    readiness.status === 'blocked' ? 'text-red-600' : 'text-amber-600'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-bold ${readiness.status === 'blocked' ? 'text-red-800' : 'text-amber-800'}`}>
+                      {readiness.status === 'blocked' ? 'Do NOT depart yet' : 'Double-check before departing'}
+                    </p>
+                    <ul className={`text-xs mt-0.5 ${readiness.status === 'blocked' ? 'text-red-700' : 'text-amber-700'}`}>
+                      {readiness.reasons.map(r => <li key={r}>• {r}</li>)}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
               {/* Date & Address */}
               <div className="px-4 py-3 space-y-2 border-b">
                 <div className="flex items-center gap-2 text-sm">
@@ -273,9 +337,22 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     Specimen Delivery
                   </p>
                   {appointment.lab_destination ? (
-                    <div>
-                      <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-0.5">Drop off at</p>
-                      <p className="text-sm font-semibold text-gray-900">{appointment.lab_destination}</p>
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-0.5">Drop off at</p>
+                        <p className="text-sm font-semibold text-gray-900">{appointment.lab_destination}</p>
+                      </div>
+                      {labRouteUrl && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="w-full gap-1.5 h-8 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                          onClick={(e) => { e.stopPropagation(); window.open(labRouteUrl, '_blank'); }}
+                        >
+                          <Route className="h-3.5 w-3.5" />
+                          Route to nearest {appointment.lab_destination}
+                        </Button>
+                      )}
                     </div>
                   ) : (() => {
                     // Fallback: scan notes for common "Lab:" / "Deliver to:" patterns
@@ -319,11 +396,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                           size="sm"
                           variant="outline"
                           className="gap-1.5 text-xs justify-start h-8"
-                          onClick={async (e) => {
+                          onClick={(e) => {
                             e.stopPropagation();
-                            const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
-                            if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                            else toast.error('Could not load lab order');
+                            setLabOrderViewer({ open: true, path, name: fileName });
                           }}
                         >
                           <FileText className="h-3.5 w-3.5" />
@@ -356,11 +431,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     Insurance Card
                   </p>
                   <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      const { data } = await supabase.storage.from('lab-orders').createSignedUrl(appointment.insurance_card_path!, 3600);
-                      if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                      else toast.error('Could not load insurance card');
+                      setLabOrderViewer({ open: true, path: appointment.insurance_card_path!, name: 'Insurance Card' });
                     }}>
                     <Shield className="h-3.5 w-3.5" />
                     <span>View Insurance Card</span>
@@ -492,6 +565,21 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         onCancelled={() => onStatusUpdate(appointment.id, 'cancelled')}
         alsoNotifyAdmin={true}
         performedBy="phleb"
+      />
+
+      <LabOrderViewerModal
+        open={labOrderViewer.open}
+        onClose={() => setLabOrderViewer({ open: false, path: null })}
+        filePath={labOrderViewer.path}
+        fileName={labOrderViewer.name}
+      />
+
+      <RunningLateModal
+        open={showRunningLate}
+        onClose={() => setShowRunningLate(false)}
+        patientFirstName={appointment.patient_name || 'there'}
+        patientPhone={appointment.patient_phone}
+        appointmentId={appointment.id}
       />
     </>
   );
