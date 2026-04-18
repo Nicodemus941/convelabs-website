@@ -98,7 +98,7 @@ const loginBlock = (email) => `
 `;
 
 const SIGNOFF = `
-  <p style="margin:22px 0 6px;">If you want a 10-minute walkthrough or have any questions, call me directly at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a> or reply to this email. I read and answer everything myself.</p>
+  <p style="margin:22px 0 6px;">If you want a 10-minute walkthrough or have any questions, email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or call me directly at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a>. I read and answer everything myself. <em>(This draft comes from a no-reply address, so please use <strong>info@convelabs.com</strong> — not the "reply" button.)</em></p>
   <p style="margin:18px 0 0;">With gratitude,<br>
   <strong>Nicodemme "Nico" Jean-Baptiste</strong><br>
   <em>Founder, ConveLabs Concierge Lab Services</em></p>
@@ -297,8 +297,29 @@ const emails = [
       ${PLATFORM_STACK}
       ${RISK_REVERSAL}
 
+      <!-- DUAL-PATH ENROLLMENT: email buttons + dashboard enrollment -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">Two ways to enroll — pick what's easier</h3>
+
+      <p style="margin:0 0 8px;font-size:14px;color:#374151;"><strong>Path 1 — from this email:</strong> click a plan below and it opens a pre-filled email to info@convelabs.com. I'll see it and wire up your subscription in under 5 minutes.</p>
+
+      <!-- 3 enrollment buttons (mailto, since this email is from a no-reply address) -->
+      <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:6px 0;margin:12px 0;">
+        <tr>
+          <td style="width:33%;text-align:center;">
+            <a href="mailto:info@convelabs.com?subject=Enroll%20Elite%20Medical%20in%20Starter%2010&body=Hi%20Nico%2C%0A%0APlease%20enroll%20Elite%20Medical%20Concierge%20in%20the%20Starter%2010%20plan%20(%24650%2Fmo%2C%2010%20visits%20included).%0A%0AName%3A%20%0ABilling%20card%20on%20file%3A%20Yes%20%2F%20No%0A%0AThanks%2C%0ADr.%20Monica%20Sher" style="display:block;background:#f1f5f9;color:#0f172a;border:1.5px solid #cbd5e1;padding:12px 8px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Enroll in Starter 10<br><span style="font-size:11px;font-weight:500;color:#475569;">$650 / month</span></a>
+          </td>
+          <td style="width:33%;text-align:center;">
+            <a href="mailto:info@convelabs.com?subject=Enroll%20Elite%20Medical%20in%20Monthly%20Flex&body=Hi%20Nico%2C%0A%0APlease%20enroll%20Elite%20Medical%20Concierge%20in%20the%20Monthly%20Flex%20plan%20(%2472.25%2Fvisit%2C%20unlimited%20volume%2C%20no%20commitment).%0A%0AThanks%2C%0ADr.%20Monica%20Sher" style="display:block;background:#fff;color:#111827;border:1.5px solid #e5e7eb;padding:12px 8px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Enroll in Monthly Flex<br><span style="font-size:11px;font-weight:500;color:#6b7280;">$72.25 / visit</span></a>
+          </td>
+          <td style="width:33%;text-align:center;">
+            <a href="mailto:info@convelabs.com?subject=Enroll%20Elite%20Medical%20in%20Annual%20Partner&body=Hi%20Nico%2C%0A%0APlease%20enroll%20Elite%20Medical%20Concierge%20in%20the%20Annual%20Partner%20plan%20(%2460.20%2Fvisit%2C%2012-month%20commitment%2C%20priority%20scheduling).%0A%0AThanks%2C%0ADr.%20Monica%20Sher" style="display:block;background:#B91C1C;color:#fff;border:1.5px solid #7F1D1D;padding:12px 8px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Enroll in Annual Partner<br><span style="font-size:11px;font-weight:500;color:#fecaca;">$60.20 / visit · best value</span></a>
+          </td>
+        </tr>
+      </table>
+
+      <p style="margin:14px 0 8px;font-size:14px;color:#374151;"><strong>Path 2 — from your provider portal:</strong> log in with the button above, click <em>Subscription Plans</em> in your dashboard, and enroll in any tier directly. Your org's Stripe card on file gets charged automatically at the right cadence.</p>
+
       ${loginBlock('elitemedicalconcierge@gmail.com')}
-      <p style="font-size:13.5px;color:#6b7280;margin-top:8px;text-align:center;">Log in and reply to this email with <strong>"Starter"</strong>, <strong>"Monthly"</strong>, or <strong>"Annual"</strong> — I'll set up Elite Medical's subscription in under 5 minutes, and you'll never reconcile another per-visit invoice.</p>
       <p>Dr. Sher — the way you and Dr. Edwards run Elite Medical is the benchmark for concierge internal medicine. This subscription is how we match that operational standard on the billing side.</p>
       ${SIGNOFF}
     `),
