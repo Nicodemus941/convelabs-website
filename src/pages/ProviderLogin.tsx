@@ -12,20 +12,28 @@ import { Loader2, Shield, ArrowRight, AlertCircle, CheckCircle, MessageSquare, M
  *
  * Three paths, in order of friction (least → most):
  *
- *   1. HAS PASSWORD: email + password → /dashboard
+ *   1. SMS SIGN-IN (primary, passwordless): "Text me a code" → Supabase's
+ *      native phone OTP (configured Twilio provider) sends a 6-digit code to
+ *      the phone on file (organizations.contact_phone). Enter code → session
+ *      created directly by Supabase. No password needed, ever. Same tab
+ *      start-to-finish.
  *
- *   2. SMS OTP RESET (preferred): "Text me a code" → 6-digit code to phone on
- *      file (organizations.contact_phone). Enter code → set new password →
- *      auto-login via magic link. Same tab the whole way.
+ *   2. EMAIL + PASSWORD: traditional login for partners who prefer it or
+ *      have set one.
  *
- *   3. EMAIL RESET FALLBACK: "Email me a reset link" → sent to inbox.
- *      Kept for partners without a phone on file or who prefer email.
+ *   3. EMAIL LINK FALLBACK: "Email me a reset link" for partners with no
+ *      phone on file, or as a secondary path.
  *
- * Email is pre-filled from `?email=xxx` so partners arriving from announcement
- * emails have nothing to type.
+ * Email is pre-filled from `?email=xxx` in announcement emails.
+ *
+ * IMPLEMENTATION NOTE: we don't expose phone numbers to the client. Two
+ * edge functions (provider-otp-send / provider-otp-verify) wrap Supabase's
+ * native phone auth so the email → phone mapping stays server-side. The
+ * client then calls supabase.auth.setSession(...) with the tokens returned
+ * by verify, identical to any other Supabase sign-in.
  */
 
-type View = 'login' | 'reset-method' | 'sms-code-entry' | 'sms-set-password' | 'email-sent';
+type View = 'login' | 'method-choice' | 'sms-code-entry' | 'email-sent';
 
 const ProviderLogin: React.FC = () => {
   const [params] = useSearchParams();
@@ -38,10 +46,6 @@ const ProviderLogin: React.FC = () => {
 
   const [phoneHint, setPhoneHint] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
-  const [resetToken, setResetToken] = useState<string | null>(null);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [remainingAttempts, setRemainingAttempts] = useState<number | null>(null);
   const [resendCountdown, setResendCountdown] = useState(0);
 
   // Pre-fill org name from email (public lookup, portal-enabled orgs only)
@@ -80,84 +84,62 @@ const ProviderLogin: React.FC = () => {
     }
   };
 
+  // STEP 1 — ask server to trigger SMS via Supabase native phone auth
   const handleSendSmsCode = async () => {
     setError(null); setLoading(true);
     try {
-      const { data, error: err } = await supabase.functions.invoke('send-sms-otp', { body: { email: email.trim() } });
+      const { data, error: err } = await supabase.functions.invoke('provider-otp-send', { body: { email: email.trim() } });
       if (err) throw err;
       if (data?.delivery === 'sms' && data?.phone_hint) {
         setPhoneHint(data.phone_hint);
         setView('sms-code-entry');
         setResendCountdown(30);
       } else if (data?.delivery === 'rate_limited') {
-        setError('Too many code requests. Please try again in an hour, or use email reset instead.');
+        setError('Too many code requests. Please try again in an hour, or use email sign-in instead.');
       } else {
-        setView('reset-method');
-        setError('No phone number on file for this account. Please use email reset below.');
+        setView('method-choice');
+        setError('No phone number on file for this account. Please use email + password, or email link instead.');
       }
     } catch (err: any) {
-      setError(err?.message || 'Could not send code. Please try email reset instead.');
+      setError(err?.message || 'Could not send code.');
     } finally {
       setLoading(false);
     }
   };
 
+  // STEP 2 — verify code through server wrapper, set session with returned tokens
   const handleVerifyCode = async (codeOverride?: string) => {
     const codeToVerify = codeOverride ?? otpCode;
     if (!/^\d{6}$/.test(codeToVerify)) { setError('Enter the 6-digit code'); return; }
     setError(null); setLoading(true);
     try {
-      const { data, error: err } = await supabase.functions.invoke('verify-sms-otp', { body: { email: email.trim(), code: codeToVerify } });
-      if (err) {
-        const resp = (err as any)?.context?.body || (err as any)?.response;
-        if (resp?.remaining_attempts !== undefined) setRemainingAttempts(resp.remaining_attempts);
-        throw err;
+      const { data, error: err } = await supabase.functions.invoke('provider-otp-verify', {
+        body: { email: email.trim(), code: codeToVerify },
+      });
+      if (err) throw err;
+      if (!data?.access_token || !data?.refresh_token) {
+        throw new Error(data?.error || 'Invalid or expired code');
       }
-      if (data?.reset_token) {
-        setResetToken(data.reset_token);
-        setView('sms-set-password');
-      } else {
-        throw new Error(data?.error || 'Verification failed');
-      }
+      // Hand the tokens to supabase-js — this populates auth state + persists session
+      const { error: setErr } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      });
+      if (setErr) throw setErr;
+      window.location.href = '/dashboard';
     } catch (err: any) {
-      setError(err?.message || 'Incorrect code.');
-    } finally {
+      setError(err?.message || 'Incorrect or expired code.');
       setLoading(false);
     }
   };
 
-  // Auto-verify when 6 digits entered (OTP codes auto-fill from SMS on mobile)
+  // Auto-verify when 6 digits entered (iOS/Android SMS auto-fill works)
   useEffect(() => {
     if (view === 'sms-code-entry' && otpCode.length === 6 && /^\d{6}$/.test(otpCode)) {
       handleVerifyCode(otpCode);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otpCode, view]);
-
-  const handleSetNewPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
-    if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
-    if (!resetToken) { setError('Reset token missing. Please start over.'); setView('reset-method'); return; }
-    setError(null); setLoading(true);
-    try {
-      const { data, error: err } = await supabase.functions.invoke('reset-password-with-sms-token', {
-        body: { email: email.trim(), reset_token: resetToken, new_password: newPassword },
-      });
-      if (err) throw err;
-      if (data?.redirect_url) {
-        window.location.href = data.redirect_url;
-      } else {
-        setError('Password saved. Please log in.');
-        setView('login');
-        setPassword(newPassword);
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to set password.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleEmailReset = async () => {
     setError(null); setLoading(true);
@@ -190,9 +172,8 @@ const ProviderLogin: React.FC = () => {
             </CardTitle>
             <CardDescription>
               {view === 'login' && (orgName ? `Sign in to manage your patients, schedule visits, and view every result.` : `Log in to your organization's portal.`)}
-              {view === 'reset-method' && `How would you like to verify it's you?`}
+              {view === 'method-choice' && `How would you like to verify it's you?`}
               {view === 'sms-code-entry' && `Enter the 6-digit code we texted to ${phoneHint ?? 'your phone'}.`}
-              {view === 'sms-set-password' && `Last step — create your new password.`}
               {view === 'email-sent' && `We sent a reset link to your inbox.`}
             </CardDescription>
           </CardHeader>
@@ -201,7 +182,7 @@ const ProviderLogin: React.FC = () => {
             {error && (
               <div className="flex items-start gap-2 p-3 text-sm bg-red-50 text-red-700 rounded-lg border border-red-200 mb-4">
                 <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                <span>{error}{remainingAttempts !== null && ` (${remainingAttempts} attempts left)`}</span>
+                <span>{error}</span>
               </div>
             )}
 
@@ -234,14 +215,14 @@ const ProviderLogin: React.FC = () => {
                   <p className="text-xs text-center text-gray-500">First time here, or forgot your password?</p>
                   <Button type="button" variant="outline" className="w-full"
                     disabled={loading || !email || !email.includes('@')}
-                    onClick={() => { setError(null); setView('reset-method'); }}>
+                    onClick={() => { setError(null); setView('method-choice'); }}>
                     Reset my password
                   </Button>
                 </div>
               </form>
             )}
 
-            {view === 'reset-method' && (
+            {view === 'method-choice' && (
               <div className="space-y-3">
                 <Button onClick={handleSendSmsCode} disabled={loading}
                   className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-12 gap-2 text-[15px]">
@@ -284,7 +265,7 @@ const ProviderLogin: React.FC = () => {
                   {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying…</> : <>Verify <ArrowRight className="h-4 w-4" /></>}
                 </Button>
                 <div className="flex items-center justify-between text-xs">
-                  <button type="button" onClick={() => { setError(null); setView('reset-method'); setOtpCode(''); }}
+                  <button type="button" onClick={() => { setError(null); setView('method-choice'); setOtpCode(''); }}
                     className="text-gray-500 hover:underline">← Try a different way</button>
                   <button type="button" onClick={handleSendSmsCode}
                     disabled={loading || resendCountdown > 0}
@@ -293,31 +274,6 @@ const ProviderLogin: React.FC = () => {
                   </button>
                 </div>
               </div>
-            )}
-
-            {view === 'sms-set-password' && (
-              <form onSubmit={handleSetNewPassword} className="space-y-4">
-                <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
-                  <CheckCircle className="h-4 w-4 flex-shrink-0" />
-                  <span>Phone verified. Set your new password below.</span>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-pw">New password</Label>
-                  <Input id="new-pw" type="password" value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="At least 8 characters" minLength={8} required autoFocus autoComplete="new-password" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirm-pw">Confirm password</Label>
-                  <Input id="confirm-pw" type="password" value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Type it again" minLength={8} required autoComplete="new-password" />
-                </div>
-                <Button type="submit" disabled={loading || !newPassword || newPassword !== confirmPassword}
-                  className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11 gap-1.5">
-                  {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <>Save and sign in <ArrowRight className="h-4 w-4" /></>}
-                </Button>
-              </form>
             )}
 
             {view === 'email-sent' && (
