@@ -501,6 +501,84 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         <Separator />
 
+        {/* Lab Destination — where phleb drops the specimen */}
+        <div className="px-5 py-4 space-y-2">
+          <p className="text-sm font-bold text-gray-900">Specimen Delivery Destination</p>
+          <p className="text-xs text-gray-500">Where the phleb should drop the drawn specimen.</p>
+          <select
+            className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
+            value={appt.lab_destination || ''}
+            onChange={async (e) => {
+              const val = e.target.value || null;
+              const { error } = await supabase.from('appointments').update({ lab_destination: val }).eq('id', appt.id);
+              if (error) { toast.error('Failed to save destination'); return; }
+              toast.success(val ? `Destination set to ${val}` : 'Destination cleared');
+              onUpdate();
+            }}
+          >
+            <option value="">— Not set —</option>
+            <option value="LabCorp">LabCorp</option>
+            <option value="Quest Diagnostics">Quest Diagnostics</option>
+            <option value="AdventHealth">AdventHealth</option>
+            <option value="Orlando Health">Orlando Health</option>
+            <option value="Genova Diagnostics">Genova Diagnostics (ship)</option>
+            <option value="UPS">UPS (specialty kit)</option>
+            <option value="FedEx">FedEx (specialty kit)</option>
+            <option value="Other">Other (see notes)</option>
+          </select>
+          {!appt.lab_destination && (
+            <p className="text-xs text-amber-600 flex items-center gap-1.5">
+              <AlertTriangle className="h-3 w-3" />
+              No destination set — phleb will not know where to deliver.
+            </p>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* Insurance Card upload (admin can attach retroactively) */}
+        <div className="px-5 py-4 space-y-3">
+          <p className="text-sm font-bold text-gray-900">Insurance Card</p>
+          {appt.insurance_card_path ? (
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start h-8" onClick={async () => {
+              const { data } = await supabase.storage.from('lab-orders').createSignedUrl(appt.insurance_card_path, 3600);
+              if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+              else toast.error('Could not load file');
+            }}>
+              <Shield className="h-3.5 w-3.5" /> View Insurance Card
+              <ExternalLink className="h-3 w-3 ml-auto" />
+            </Button>
+          ) : (
+            <p className="text-xs text-gray-400">No insurance card on file</p>
+          )}
+          <label className="cursor-pointer">
+            <div className="border border-dashed border-gray-200 hover:border-blue-300 rounded-lg p-3 text-center transition-colors">
+              <Upload className="h-4 w-4 mx-auto text-gray-400 mb-1" />
+              <p className="text-xs text-gray-500">Upload insurance card</p>
+            </div>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.heic"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                toast.info(`Uploading ${file.name}...`);
+                const fileName = `insurance_${appt.id}_${Date.now()}_${file.name}`;
+                const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
+                if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
+                const { error: updateErr } = await supabase.from('appointments').update({ insurance_card_path: fileName }).eq('id', appt.id);
+                if (updateErr) { toast.error('Failed to link file'); return; }
+                toast.success('Insurance card uploaded');
+                onUpdate();
+                e.target.value = '';
+              }}
+            />
+          </label>
+        </div>
+
+        <Separator />
+
         {/* Appointment History */}
         {appointmentHistory.length > 0 && (
           <div className="px-5 py-4 space-y-3">

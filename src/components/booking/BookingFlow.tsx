@@ -224,6 +224,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const bundleCount = parseInt(String((data as any).bundleCount || 0), 10) || 0;
       const finalSubtotal = Math.max(breakdown.subtotal - referralDiscount + bundleExtra, 0);
 
+      // Lab destination — where the specimen gets delivered after draw.
+      // Collected by LabDestinationSelector into form data.labOrder.labDestination
+      // but previously NEVER forwarded to the backend. Fixing that data leak now.
+      const labDestination = (data as any)?.labOrder?.labDestination || null;
+
       const result = await createAppointmentCheckoutSession({
         serviceType: visitType,
         serviceName: service?.name || 'Blood Draw Service',
@@ -253,12 +258,19 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           weekend: data.serviceDetails.weekend,
           additionalNotes: [
             data.serviceDetails.additionalNotes,
+            // Keep lab-order/insurance in notes as a legacy breadcrumb so the
+            // regex path in stripe-webhook still works for older clients.
+            // But the real source of truth is the first-class fields below.
             labOrderPaths.length > 0 ? `Lab orders: ${labOrderPaths.join(', ')}` : '',
             insurancePath ? `Insurance: ${insurancePath}` : '',
             bundleCount > 0 ? `BundleCount: ${bundleCount}` : '',
           ].filter(Boolean).join(' | '),
         },
-      });
+        // First-class attachment fields (new — bypass the notes-stuffing pattern)
+        labOrderFilePaths: labOrderPaths,
+        insuranceCardPath: insurancePath,
+        labDestination,
+      } as any);
 
       if (result.error) {
         toast.error(result.error);

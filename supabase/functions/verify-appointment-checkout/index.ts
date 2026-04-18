@@ -163,6 +163,12 @@ Deno.serve(async (req) => {
         blockedReason = check.reason;
       }
 
+      // Read first-class attachment fields from Stripe metadata. Before this fix,
+      // only the webhook regex-extracted lab file paths from notes, and ONLY if
+      // the webhook fired. The verify-fallback path dropped them silently — which
+      // is why 56/57 recent bookings lost the lab file.
+      const firstLabFile = String(metadata.lab_order_file_paths || '').split(',')[0]?.trim() || null;
+
       const { data: newAppt, error: insertError } = await supabaseClient
         .from('appointments')
         .insert([{
@@ -191,6 +197,10 @@ Deno.serve(async (req) => {
             blockedFlag ? `⚠️ DATE WAS BLOCKED: ${blockedReason} — needs reschedule` : null,
           ].filter(Boolean).join(' | ') || null,
           weekend_service: metadata.weekend === 'true',
+          // First-class attachment fields — the whole reason we're here
+          lab_order_file_path: firstLabFile || null,
+          insurance_card_path: metadata.insurance_card_path || null,
+          lab_destination: metadata.lab_destination || null,
         }])
         .select()
         .single();

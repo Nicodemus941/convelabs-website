@@ -583,16 +583,22 @@ async function handleAppointmentPayment(session: any) {
         service_type: metadata.service_type || 'mobile',
         service_name: metadata.service_name || 'Blood Draw',
         gate_code: metadata.gate_code || null,
+        // Prefer first-class metadata fields (new post-2026-04-18 bookings).
+        // Fall back to regex parsing of additional_notes for older bookings.
         lab_order_file_path: (() => {
+          const firstClass = String(metadata.lab_order_file_paths || '').split(',')[0]?.trim();
+          if (firstClass) return firstClass;
           const notes = metadata.additional_notes || '';
           const match = notes.match(/Lab orders?:\s*([^|]+)/);
           return match ? match[1].trim() : null;
         })(),
         insurance_card_path: (() => {
+          if (metadata.insurance_card_path) return String(metadata.insurance_card_path);
           const notes = metadata.additional_notes || '';
           const match = notes.match(/Insurance:\s*([^|]+)/);
           return match ? match[1].trim() : null;
         })(),
+        lab_destination: metadata.lab_destination || null,
         notes: [
           // Strip the file paths from notes (they're stored in their own columns)
           (metadata.additional_notes || '').replace(/Lab orders?:\s*[^|]+\|?\s*/g, '').replace(/Insurance:\s*[^|]+\|?\s*/g, '').trim(),

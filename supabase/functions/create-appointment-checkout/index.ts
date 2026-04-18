@@ -78,6 +78,10 @@ Deno.serve(async (req) => {
       userId,
       referralCode = null,
       referralDiscountCents = 0,
+      // New first-class attachment fields (replaces notes-stuffing pattern)
+      labOrderFilePaths = [],
+      insuranceCardPath = null,
+      labDestination = null,
     } = await req.json();
 
     if (!clientAmount || !appointmentDate || !patientDetails) {
@@ -371,6 +375,10 @@ Deno.serve(async (req) => {
       member_correction_cents: String(priceCorrection),
       referral_code: referralCode || '',
       referral_discount_cents: String(referralDiscountCents || 0),
+      // First-class attachment metadata — stripe metadata values must be strings
+      lab_order_file_paths: Array.isArray(labOrderFilePaths) ? labOrderFilePaths.slice(0, 10).join(',').substring(0, 500) : '',
+      insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',
+      lab_destination: labDestination ? String(labDestination).substring(0, 50) : '',
     };
 
     // ─── LOG UPGRADE EVENTS (INTENT) for ROI dashboard ───────────────
