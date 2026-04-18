@@ -21,6 +21,7 @@ const BlogPost = lazy(() => import('../pages/BlogPost'));
 const FAQ = lazy(() => import('../pages/FAQ'));
 const B2BPartnerships = lazy(() => import('../pages/B2BPartnerships'));
 const BookNow = lazy(() => import('../pages/BookNow'));
+const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 
 const Corporate = lazy(() => import('../pages/Corporate'));
 const CorporateCheckout = lazy(() => import('../pages/CorporateCheckout'));
@@ -58,6 +59,7 @@ export const routes = [
   <Route key="corporate-billing" path="/corporate-billing" element={<CorporateBilling />} />,
   <Route key="corporate-invite" path="/corporate-invite/:token" element={<CorporateInviteAccept />} />,
   <Route key="login" path="/login" element={<Login />} />,
+  <Route key="provider" path="/provider" element={<ProviderLogin />} />,
   <Route key="signup" path="/signup" element={<Signup />} />,
   <Route key="forgot-password" path="/forgot-password" element={<ForgotPassword />} />,
   <Route key="reset-password" path="/reset-password" element={<ResetPassword />} />,
