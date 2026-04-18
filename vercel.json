@@ -1,7 +1,14 @@
 {
+  "//": "SPA rewrite must NOT catch real static files. If /assets/Foo-HASH.js goes missing (stale index.html in a user's cache after a new deploy), we want a clean 404 — not a silent rewrite to index.html, which serves HTML with a JS MIME-mismatch error. The negative lookahead excludes /assets/** and common static-file extensions from the SPA fallback.",
   "headers": [
     {
-      "source": "/(.*)",
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/((?!assets/).*)",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Pragma", "value": "no-cache" }
@@ -10,15 +17,18 @@
   ],
   "rewrites": [
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|.*\\.(?:js|mjs|css|woff|woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico|map|txt|xml|json|pdf|webmanifest)$).*)",
       "has": [{ "type": "host", "value": "patients.convelabs.com" }],
       "destination": "/index.html"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|.*\\.(?:js|mjs|css|woff|woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico|map|txt|xml|json|pdf|webmanifest)$).*)",
       "has": [{ "type": "host", "value": "staff.convelabs.com" }],
       "destination": "/index.html"
     },
-    { "source": "/(.*)", "destination": "/index.html" }
+    {
+      "source": "/((?!assets/|.*\\.(?:js|mjs|css|woff|woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico|map|txt|xml|json|pdf|webmanifest)$).*)",
+      "destination": "/index.html"
+    }
   ]
 }
