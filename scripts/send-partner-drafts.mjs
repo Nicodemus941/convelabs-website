@@ -244,7 +244,13 @@ const emails = [
               <h3 style="margin:0;color:#111827;font-size:17px;">Monthly Flex</h3>
               <p style="margin:6px 0 10px;font-size:13px;color:#6b7280;">Unlimited volume. No commitment. Cancel anytime.</p>
               <p style="margin:0;font-size:26px;font-weight:800;color:#111827;">$72.25<span style="font-size:13px;font-weight:500;color:#6b7280;"> / visit</span></p>
-              <p style="margin:4px 0 12px;font-size:12px;color:#6b7280;">Auto-charged at month-end based on actual usage</p>
+              <p style="margin:4px 0 8px;font-size:12px;color:#6b7280;">Auto-charged at month-end, pure usage.</p>
+              <div style="background:#f8fafc;border-radius:8px;padding:10px 12px;margin:0 0 12px;font-size:12px;line-height:1.5;color:#334155;">
+                <strong>Typical Elite volume:</strong><br>
+                10 visits/mo = <strong>$722/mo</strong><br>
+                20 visits/mo = <strong>$1,445/mo</strong><br>
+                40 visits/mo = <strong>$2,890/mo</strong>
+              </div>
               <ul style="padding-left:18px;margin:0;font-size:13px;color:#374151;line-height:1.55;">
                 <li>One consolidated monthly statement</li>
                 <li>Live MTD usage dashboard</li>
@@ -258,14 +264,21 @@ const emails = [
             <td style="width:50%;vertical-align:top;background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border:1.5px solid #7F1D1D;border-radius:14px;padding:18px;">
               <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Option C · Best value</p>
               <h3 style="margin:0;color:#fff;font-size:17px;">Annual Partner</h3>
-              <p style="margin:6px 0 10px;font-size:13px;color:#fecaca;">Unlimited volume. 12-month partnership.</p>
+              <p style="margin:6px 0 10px;font-size:13px;color:#fecaca;">12-month partnership, usage-based, rate locked.</p>
               <p style="margin:0;font-size:26px;font-weight:800;color:#fff;">$60.20<span style="font-size:13px;font-weight:500;color:#fecaca;"> / visit</span></p>
-              <p style="margin:4px 0 12px;font-size:12px;color:#fef3c7;font-weight:600;">Save $12.05 / visit · effectively 2 months free</p>
+              <p style="margin:4px 0 8px;font-size:12px;color:#fef3c7;font-weight:600;">Save $12.05 / visit · effectively 2 months free</p>
+              <div style="background:rgba(255,255,255,0.12);border-radius:8px;padding:10px 12px;margin:0 0 12px;font-size:12px;line-height:1.5;color:#fef3c7;">
+                <strong>Typical Elite volume:</strong><br>
+                10 visits/mo = <strong>$602/mo</strong> · $7,224/yr<br>
+                20 visits/mo = <strong>$1,204/mo</strong> · $14,448/yr<br>
+                40 visits/mo = <strong>$2,408/mo</strong> · $28,896/yr<br>
+                <span style="opacity:.85;">Monthly minimum: $602 (≈10 visits). Billed monthly on actual use.</span>
+              </div>
               <ul style="padding-left:18px;margin:0;font-size:13px;color:#fef3c7;line-height:1.55;">
                 <li><strong>Priority scheduling</strong> — Elite visits slot first</li>
                 <li><strong>Dedicated phleb when available</strong> — same face</li>
                 <li><strong>Rush turnaround</strong> on request, no surcharge</li>
-                <li>Rate locked as long as active</li>
+                <li>Rate locked all 12 months</li>
                 <li>Cancel mid-year with 60-day notice</li>
               </ul>
             </td>
