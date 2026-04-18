@@ -147,7 +147,11 @@ const emails = [
     `),
   },
 
-  // ── 2. CLINICAL ASSOCIATES OF ORLANDO — Shawna (clinical research) ──
+  // ── 2. CLINICAL ASSOCIATES OF ORLANDO — Shawna (clinical research, draw-only) ──
+  // NOTE: CAO uses the DOCTOR'S office service only — we draw, they handle the rest.
+  // No patient online booking (CAO coordinators schedule via provider portal).
+  // No deliveries, no labeling, no OCR, no insurance capture, no tracking IDs.
+  // Generic PLATFORM_STACK + TECH_POSITIONING intentionally NOT included here.
   {
     subjectPrefix: '[DRAFT → Clinical Associates of Orlando]',
     actualRecipient: 'smartin@clinicalassociatesorlando.com (Shawna Martin)',
@@ -156,24 +160,31 @@ const emails = [
     html: brandWrap('CAO × ConveLabs — your portal is ready', `
       <!-- HOOK -->
       <p>Hi Shawna,</p>
-      <p>Clinical research participants aren't "patients" in the normal sense. They're subjects under IRB-approved protocols, and your sponsors expect <strong>de-identification, chain-of-custody, accurate timestamps, and zero cross-patient contamination</strong> — every single visit.</p>
+      <p>Clinical research participants aren't "patients" in the normal sense. They're subjects under IRB-approved protocols, and your sponsors expect <strong>de-identification, accurate timestamps, and zero cross-participant contamination</strong> — every single visit.</p>
 
       <!-- AGITATE -->
-      <p>Most mobile lab services aren't built for that standard. Ours is — because we built the whole platform specifically for it.</p>
+      <p>Most mobile lab services aren't built for that standard. Ours is — because we built the whole platform specifically for it. And because your workflow is draw-only (we handle the venipuncture, you handle everything else), we stripped away the patient-facing layers most orgs want, keeping only what actually serves CAO.</p>
 
-      <!-- STACK -->
-      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for CAO, specifically</h3>
+      <!-- STACK — CAO-specific only -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What's in your stack (draw-only service)</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>Patient-name masking on every surface</strong> — calendar, phleb dashboard, admin views, notifications — all show a reference ID instead of the participant's name. Only super-admin can unmask, and every unmask is audit-logged.</li>
-        <li><strong>$55 per in-office visit</strong>, charged instantly to CAO's Stripe when scheduled. Participants see $0. No invoices, no receivables — paid the moment it's booked.</li>
-        <li><strong>Billing walled off</strong> — CAO's billing history in Stripe is completely isolated from patient-billing history. No cross-contamination ever.</li>
-        <li><strong>Chain-of-custody stamps</strong> — every specimen gets a collection timestamp, phleb initials, GPS collection point, delivery timestamp, and unique tracking ID. Sponsor-ready audit trail, automatically.</li>
-        <li><strong>Business-hours Mon–Fri scheduling</strong> — protocol-window flexibility without weekend complications.</li>
-        <li><strong>Team logins</strong> — add every CAO coordinator; each has their own view.</li>
+        <li><strong>CAO coordinators schedule via your provider portal</strong> — participants do NOT self-schedule. You control every appointment: date, time, participant, reference ID. Patient-facing online booking is disabled for CAO by design.</li>
+        <li><strong>Patient-name masking on every surface</strong> — calendar, phleb dashboard, admin views, notifications — all show a reference ID instead of the participant's name. Only super-admin can unmask, and every unmask is audit-logged for HIPAA + sponsor compliance.</li>
+        <li><strong>$55 per in-office draw</strong>, charged instantly to CAO's Stripe the moment you schedule. Participants pay $0, ever. No invoices, no receivables, no chasing — paid at booking.</li>
+        <li><strong>Billing walled off</strong> — CAO's billing history in Stripe is completely isolated from any patient-billing history. A CAO invoice can never accidentally reveal a different CAO participant's info, and patient customers can never see CAO's invoices.</li>
+        <li><strong>Draw chain-of-custody</strong> — every draw gets a collection timestamp, phleb initials, and the GPS point of the office where it was drawn. You get a sponsor-ready audit log automatically — no deliveries, no pickup tracking, just the clean draw record CAO needs.</li>
+        <li><strong>Business-hours Mon–Fri scheduling</strong> — protocol-window flexibility, no weekend complications.</li>
+        <li><strong>Team logins for every coordinator</strong> — each has their own portal view scoped only to CAO data.</li>
       </ul>
 
-      ${TECH_POSITIONING}
-      ${PLATFORM_STACK}
+      <!-- Tech positioning tailored for CAO (no OCR/delivery framing) -->
+      <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:12px;padding:18px 20px;margin:18px 0;">
+        <p style="margin:0;font-size:13px;color:#78350f;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">One of a kind, built by us</p>
+        <p style="margin:8px 0 0;font-size:14px;color:#451a03;line-height:1.55;">
+          The patient-name masking, the org-scoped billing isolation, the unmask audit-log, and the sponsor-ready draw chain-of-custody are all proprietary to ConveLabs — built specifically for clinical-research sites like yours. You won't find this stack anywhere else in mobile phlebotomy.
+        </p>
+      </div>
+
       ${RISK_REVERSAL}
 
       ${loginBlock('smartin@clinicalassociatesorlando.com')}
@@ -183,37 +194,76 @@ const emails = [
   },
 
   // ── 3. ELITE MEDICAL CONCIERGE — Dr. Monica Sher (driving to SUBSCRIPTION) ──
+  // Monthly + Annual tiers with Hormozi price anchoring: annual saves 2 months
+  // via effectively a 16.7% discount, presented as "get 2 months free."
   {
     subjectPrefix: '[DRAFT → Elite Medical Concierge]',
     actualRecipient: 'elitemedicalconcierge@gmail.com (Dr. Monica Sher)',
     portalEmail: 'elitemedicalconcierge@gmail.com',
-    subject: 'Stop reconciling per-visit invoices — one predictable monthly charge instead',
-    html: brandWrap('Elite Medical × ConveLabs — the subscription play', `
+    subject: 'Two ways to stop reconciling per-visit invoices — pick monthly or annual',
+    html: brandWrap('Elite Medical × ConveLabs — the subscription offer', `
       <!-- HOOK -->
       <p>Hi Dr. Sher,</p>
       <p>You and Dr. Edwards built Elite Medical Concierge so your patients never wait in a waiting room, never fill out a form twice, never see a bill at the door. You built <strong>frictionless</strong>. The lab-collection step should feel the same — for your patients <em>and</em> for your accounting.</p>
 
       <!-- AGITATE -->
-      <p>Right now, every visit generates its own invoice. That's fine for a handful per month. But as Elite scales, reconciling 20, 40, 80 individual invoices per month is the kind of slow-bleed overhead that steals time from higher-value work. Here's the clean answer.</p>
+      <p>Right now, every visit we do for Elite generates its own invoice. Fine at low volume. Painful at scale. As you grow, reconciling dozens of per-visit invoices is the exact kind of slow-bleed admin overhead that steals time from higher-value work.</p>
+      <p>Two clean answers below. Pick the one that fits your operation.</p>
 
-      <!-- THE OFFER (subscription) -->
-      <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border-radius:14px;padding:20px 22px;margin:18px 0;">
-        <p style="margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Founding-partner offer</p>
-        <h2 style="margin:0;font-size:20px;">Elite Medical Monthly Subscription</h2>
-        <p style="margin:10px 0;font-size:14px;line-height:1.6;">One predictable monthly charge to Elite Medical's Stripe. All patient visits included at <strong>$72.25 / visit</strong> — locked in as a founding partner. No per-visit invoicing. No reconciliation. One line item on your books each month, one receipt, full auto-tracking.</p>
-        <ul style="padding-left:20px;margin:10px 0;font-size:13.5px;color:#fef3c7;">
-          <li>Every visit auto-logged to your subscription</li>
-          <li>Live dashboard showing MTD visit count + usage</li>
-          <li>Monthly receipt with patient-level breakdown (masked as needed)</li>
-          <li>Cancel or pause anytime — no lock-in</li>
-          <li>Patients never see a bill — ever</li>
-        </ul>
+      <!-- TIERED OFFER — MONTHLY vs ANNUAL side by side -->
+      <div style="margin:18px 0;">
+        <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:8px 0;">
+          <tr>
+            <!-- MONTHLY -->
+            <td style="width:50%;vertical-align:top;background:#ffffff;border:1.5px solid #e5e7eb;border-radius:14px;padding:18px;">
+              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:700;">Option A</p>
+              <h3 style="margin:0;color:#111827;font-size:17px;">Monthly Flex</h3>
+              <p style="margin:6px 0 10px;font-size:13px;color:#6b7280;">No commitment. Cancel anytime.</p>
+              <p style="margin:0;font-size:26px;font-weight:800;color:#111827;">$72.25<span style="font-size:13px;font-weight:500;color:#6b7280;"> / visit</span></p>
+              <p style="margin:4px 0 12px;font-size:12px;color:#6b7280;">Auto-charged to card on file at month-end</p>
+              <ul style="padding-left:18px;margin:0;font-size:13px;color:#374151;line-height:1.55;">
+                <li>One consolidated monthly statement</li>
+                <li>Live MTD usage dashboard</li>
+                <li>Per-patient breakdown (HIPAA-scoped)</li>
+                <li>Cancel or pause anytime</li>
+                <li>Patients never see a bill</li>
+              </ul>
+            </td>
+
+            <!-- ANNUAL (highlighted) -->
+            <td style="width:50%;vertical-align:top;background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border:1.5px solid #7F1D1D;border-radius:14px;padding:18px;position:relative;">
+              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Option B · Best value</p>
+              <h3 style="margin:0;color:#fff;font-size:17px;">Annual Partner</h3>
+              <p style="margin:6px 0 10px;font-size:13px;color:#fecaca;">12-month partnership, grandfathered rate.</p>
+              <p style="margin:0;font-size:26px;font-weight:800;color:#fff;">$60.20<span style="font-size:13px;font-weight:500;color:#fecaca;"> / visit</span></p>
+              <p style="margin:4px 0 12px;font-size:12px;color:#fef3c7;font-weight:600;">Save $12.05 / visit · effectively 2 months free</p>
+              <ul style="padding-left:18px;margin:0;font-size:13px;color:#fef3c7;line-height:1.55;">
+                <li>Everything in Monthly Flex, plus:</li>
+                <li><strong>Priority scheduling</strong> — Elite visits slot first</li>
+                <li><strong>Dedicated phleb when available</strong> — same face, every time</li>
+                <li><strong>Rush turnaround</strong> on request, no surcharge</li>
+                <li>Rate locked as long as contract is active</li>
+                <li>Cancel mid-year with 60-day notice</li>
+              </ul>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- PRICE MATH — Hormozi: show the exact dollar impact -->
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px 16px;margin:14px 0;">
+        <p style="margin:0 0 6px;font-size:13px;color:#166534;font-weight:700;">The math (real numbers)</p>
+        <p style="margin:0;font-size:13px;color:#14532d;line-height:1.6;">
+          At <strong>20 visits/month</strong>: Monthly Flex = $1,445/mo · Annual Partner = $1,204/mo → <strong>save $2,892/yr</strong>.<br>
+          At <strong>40 visits/month</strong>: Monthly Flex = $2,890/mo · Annual Partner = $2,408/mo → <strong>save $5,784/yr</strong>.<br>
+          At <strong>80 visits/month</strong>: Monthly Flex = $5,780/mo · Annual Partner = $4,816/mo → <strong>save $11,568/yr</strong>.
+        </p>
       </div>
 
       <!-- STACK -->
-      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for Elite Medical, specifically</h3>
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What's in both plans</h3>
       <ul style="padding-left:20px;margin:10px 0 16px;">
-        <li><strong>Mon–Fri 6am–2pm scheduling window</strong> — wide open for concierge-level flexibility, matching your patients' schedules.</li>
+        <li><strong>Mon–Fri 6am–2pm scheduling window</strong> — wide open, matching your patients' schedules.</li>
         <li><strong>Full internal-medicine panel support</strong> — CBC/CMP, lipid subfractions, thyroid full, hormones, hs-CRP, HbA1c, vitamin D, iron studies, cardiac markers. Our phlebotomists are drilled on the full spectrum.</li>
         <li><strong>Team logins for you + Dr. Edwards + staff</strong> — unlimited.</li>
         <li><strong>Coming soon:</strong> enter a patient's next Elite Medical appointment when scheduling, so results are in hand before the follow-up.</li>
@@ -224,7 +274,7 @@ const emails = [
       ${RISK_REVERSAL}
 
       ${loginBlock('elitemedicalconcierge@gmail.com')}
-      <p style="font-size:13px;color:#6b7280;margin-top:8px;text-align:center;">Log in and say the word — I'll set up the monthly subscription for Elite Medical in under 5 minutes, and you'll never reconcile another per-visit invoice.</p>
+      <p style="font-size:13.5px;color:#6b7280;margin-top:8px;text-align:center;">Log in and reply to this email with <strong>"Monthly"</strong> or <strong>"Annual"</strong> — I'll set up Elite Medical's subscription in under 5 minutes, and you'll never reconcile another per-visit invoice.</p>
       <p>Dr. Sher — the way you and Dr. Edwards run Elite Medical is the benchmark for concierge internal medicine. This subscription is how we match that operational standard on the billing side.</p>
       ${SIGNOFF}
     `),
