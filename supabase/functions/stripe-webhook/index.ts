@@ -394,6 +394,25 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     }
 
     console.log(`Created membership for user ${userId} with plan ${planId}`);
+
+    // Link the signed agreement to the now-active membership (Sprint: membership agreements)
+    // Agreement row was written BEFORE checkout; we find it by metadata.agreement_id
+    // that the client passed through create-checkout-session → Stripe metadata.
+    const agreementId = session.metadata?.agreement_id;
+    if (agreementId) {
+      try {
+        await supabaseClient.from('membership_agreements' as any).update({
+          user_membership_id: (membership as any)?.id || null,
+          stripe_subscription_id: subscriptionId,
+          stripe_checkout_session_id: session.id,
+        }).eq('id', agreementId);
+        console.log(`Linked agreement ${agreementId} to membership ${(membership as any)?.id}`);
+      } catch (e) {
+        console.warn('[agreement link] non-blocking failure:', e);
+      }
+    } else {
+      console.warn(`No agreement_id in metadata for ${customerEmail} — consider rejecting unsigned subscriptions in the future`);
+    }
     
     // If this is a Supernova member with a selected add-on, create the add-on entry
     if (isSupernovaMember && selectedAddOnId) {

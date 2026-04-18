@@ -1,144 +1,218 @@
+import React, { useState } from 'react';
+import { Check, X, Crown, Sparkles, Shield, Clock, Calendar as CalIcon, Users, Gift, Loader2, ArrowRight, AlertTriangle, Heart, Star } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import Header from '@/components/home/Header';
+import Footer from '@/components/home/Footer';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import MembershipAgreementDialog from '@/components/membership/MembershipAgreementDialog';
 
-import React from "react";
-import { Check, ArrowRight, Percent, Star, Calendar } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import Header from "@/components/home/Header";
-import Footer from "@/components/home/Footer";
-import { useBookingModalSafe } from "@/contexts/BookingModalContext";
-import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
-import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
+/**
+ * PRICING PAGE — Hormozi-structured 4-tier annual offer.
+ *
+ * Annual-only billing. Booking windows tier the scarce morning fasting slots.
+ * Every tier shows what's NOT included (honest positioning builds trust).
+ *
+ * Flow:
+ *   1. Patient picks a tier → MembershipAgreementDialog opens
+ *   2. Patient reviews terms + no-refund-after-30-days policy + signs
+ *   3. Agreement row written to membership_agreements (audit trail)
+ *   4. Stripe Checkout (annual subscription) opens
+ *   5. stripe-webhook links the signed agreement → activated user_memberships row
+ */
 
-const PAY_PER_VISIT = [
-  { service: "Office Visit (Standard)", price: "$55" },
-  { service: "Mobile Blood Draw (At Home)", price: "$150" },
-  { service: "Senior Blood Draw (65+)", price: "$100" },
-  { service: "Specialty Collection Kit", price: "$185" },
-  { service: "Genova Diagnostics Kit", price: "$200" },
-  { service: "Therapeutic Phlebotomy", price: "$200" },
-  { service: "Additional Patient (same location)", price: "$75" },
-  { service: "STAT / Same-Day Surcharge", price: "+$100" },
-  { service: "Extended Area Surcharge", price: "+$75" },
-];
+interface Tier {
+  key: 'none' | 'member' | 'vip' | 'concierge';
+  name: string;
+  planName: string;  // matches membership_plans.name
+  annualPrice: number | null;  // dollars
+  tagline: string;
+  highlight?: string;
+  ctaLabel: string;
+  color: string;
+  gradient: string;
+  features: {
+    label: string;
+    value: string | boolean;
+    highlight?: boolean;
+  }[];
+}
 
-const MEMBERSHIP_TIERS = [
+const TIERS: Tier[] = [
   {
-    name: "Member",
-    annual: 99,
-    badge: null,
-    color: "border-blue-200",
-    badgeColor: "",
-    mobilePrice: "$130",
-    officePrice: "$49",
-    seniorPrice: "$85",
-    addlPatient: "$55",
+    key: 'none',
+    name: 'Pay-As-You-Go',
+    planName: '',
+    annualPrice: null,
+    tagline: 'Book when slots open to the public',
+    ctaLabel: 'Book a visit',
+    color: 'border-gray-200',
+    gradient: 'from-gray-50 to-white',
     features: [
-      "Mobile visits: $130 (save $20)",
-      "Office visits: $49 (save $6)",
-      "Senior visits: $85 (save $15)",
-      "Weekend appointments (Sat 6 AM - 9:30 AM)",
-      "Online patient portal access",
+      { label: 'Fasting booking window', value: 'Mon–Fri 6–9am only' },
+      { label: 'Non-fasting booking window', value: 'Mon–Fri 9am–12pm only' },
+      { label: 'Saturday access', value: false },
+      { label: 'Advance booking window', value: '7 days' },
+      { label: 'Same-day booking', value: false },
+      { label: 'Family add-on (same visit)', value: '$75' },
+      { label: 'Referral bonuses', value: false },
+      { label: 'Results retrieval', value: '$25 / retrieval' },
+      { label: 'Reschedule fee', value: '$25' },
+      { label: 'Patient portal access', value: true },
     ],
   },
   {
-    name: "VIP",
-    annual: 199,
-    badge: "Most Popular",
-    color: "border-conve-red",
-    badgeColor: "bg-conve-red",
-    mobilePrice: "$115",
-    officePrice: "$45",
-    seniorPrice: "$75",
-    addlPatient: "$45",
+    key: 'member',
+    name: 'Regular',
+    planName: 'Regular',
+    annualPrice: 99,
+    tagline: 'Morning lab access whenever you need it',
+    ctaLabel: 'Become a Regular Member',
+    color: 'border-emerald-200',
+    gradient: 'from-emerald-50 to-white',
     features: [
-      "Mobile visits: $115 (save $35)",
-      "Office visits: $45 (save $10)",
-      "Senior visits: $75 (save $25)",
-      "Weekend appointments (Sat 6 AM - 9:30 AM)",
-      "Priority same-day scheduling",
-      "Family add-ons at $45 each",
-      "Extended hours availability",
+      { label: 'Fasting booking window', value: 'Mon–Fri 6–9am', highlight: true },
+      { label: 'Non-fasting booking window', value: 'Mon–Fri 6am–12pm', highlight: true },
+      { label: 'Saturday access', value: '6–9am', highlight: true },
+      { label: 'Advance booking window', value: '14 days' },
+      { label: 'Same-day booking', value: false },
+      { label: 'Family add-on (same visit)', value: '$60 (20% off)', highlight: true },
+      { label: 'Referral bonuses', value: '$10 off per referral', highlight: true },
+      { label: 'Results retrieval', value: 'Complimentary', highlight: true },
+      { label: 'Reschedule fee', value: 'Waived', highlight: true },
+      { label: 'Patient portal access', value: true },
+      { label: 'Pause membership', value: '1 month / yr' },
     ],
   },
   {
-    name: "Concierge",
-    annual: 399,
-    badge: "Best Value",
-    color: "border-amber-400",
-    badgeColor: "bg-amber-500",
-    mobilePrice: "$99",
-    officePrice: "$39",
-    seniorPrice: "$65",
-    addlPatient: "$35",
+    key: 'vip',
+    name: 'VIP',
+    planName: 'VIP',
+    annualPrice: 199,
+    tagline: 'Priority slots + family discounts',
+    highlight: 'Most Popular',
+    ctaLabel: 'Go VIP',
+    color: 'border-[#B91C1C] ring-2 ring-[#B91C1C]/20',
+    gradient: 'from-red-50 to-white',
     features: [
-      "Mobile visits: $99 (save $51)",
-      "Office visits: $39 (save $16)",
-      "Senior visits: $65 (save $35)",
-      "Weekend & extended hours",
-      "Dedicated phlebotomist",
-      "Same-day guaranteed",
-      "NDA available for VIP clients",
-      "Family add-ons at $35 each",
-      "Concierge phone support",
+      { label: 'Fasting booking window', value: 'Mon–Fri 6–9am' },
+      { label: 'Non-fasting booking window', value: 'Mon–Fri 6am–2pm', highlight: true },
+      { label: 'Saturday access', value: '6am–11am', highlight: true },
+      { label: 'Advance booking window', value: '30 days', highlight: true },
+      { label: 'Same-day booking', value: false },
+      { label: 'Family add-on (same visit)', value: '$45 (40% off)', highlight: true },
+      { label: 'Referral bonuses', value: '$25 + friend gets 15% off', highlight: true },
+      { label: 'Results retrieval', value: 'Complimentary' },
+      { label: 'Reschedule fee', value: 'Waived' },
+      { label: 'Patient portal access', value: true },
+      { label: 'Pause membership', value: '2 months / yr' },
+    ],
+  },
+  {
+    key: 'concierge',
+    name: 'Concierge',
+    planName: 'Concierge',
+    annualPrice: 399,
+    tagline: 'Your own phleb, anytime, zero friction',
+    highlight: 'Best Value',
+    ctaLabel: 'Become Concierge',
+    color: 'border-amber-400 ring-2 ring-amber-200',
+    gradient: 'from-amber-50 to-white',
+    features: [
+      { label: 'Fasting booking window', value: 'Anytime (6am–8pm)', highlight: true },
+      { label: 'Non-fasting booking window', value: 'Anytime (6am–8pm)', highlight: true },
+      { label: 'Saturday access', value: 'Full hours + Sunday by request', highlight: true },
+      { label: 'Advance booking window', value: '60 days', highlight: true },
+      { label: 'Same-day booking', value: 'Guaranteed', highlight: true },
+      { label: 'Family add-on (same visit)', value: 'FREE for 2 family members', highlight: true },
+      { label: 'Referral bonuses', value: '$50 + friend gets 20% off (auto-applied)', highlight: true },
+      { label: 'Results retrieval', value: 'Complimentary + phleb delivers to MD', highlight: true },
+      { label: 'Reschedule fee', value: 'Waived' },
+      { label: 'Patient portal access', value: true },
+      { label: 'Dedicated phlebotomist', value: 'Same phleb every visit', highlight: true },
+      { label: 'NDA / discretion', value: 'Available on request', highlight: true },
+      { label: 'Travel — labs at any ConveLabs city', value: true, highlight: true },
+      { label: 'Pause membership', value: '3 months / yr' },
     ],
   },
 ];
 
-const FAQS = [
-  { q: "What does the membership fee cover?", a: "The membership is a low annual fee ($99-$399) that unlocks discounted per-visit pricing on every service, plus access to weekend appointments which are member-exclusive. You pay per visit at the discounted rate — no credits or prepayment required." },
-  { q: "Can non-members still book appointments?", a: "Absolutely. Non-members can book any service at standard rates (office from $55, mobile from $150). However, weekend appointments are member-exclusive." },
-  { q: "How quickly does the membership pay for itself?", a: "The $99 Member tier pays for itself in just 5 mobile visits ($20 saved per visit). VIP pays for itself in 6 visits. Most patients recoup their fee within the first few appointments." },
-  { q: "How does the family add-on work?", a: "VIP and Concierge members can add family members for $45 or $35 per additional patient at the same location — significantly less than booking separate visits." },
-  { q: "Can I cancel my membership?", a: "Yes. Memberships are billed annually. If you cancel, you keep your benefits until the end of your billing period." },
-  { q: "What makes Concierge worth $399/year?", a: "Concierge members pay just $99 per mobile visit (vs $150 standard), get a dedicated phlebotomist, guaranteed same-day availability, NDA options, and concierge phone support. If you book 8+ visits per year, it saves over $400." },
+const FAQ = [
+  { q: 'How is the annual fee billed?', a: 'One charge, once a year, to the card on file. You keep all benefits for 12 months. Renewal is automatic — you\'ll get an email reminder 30 days before.' },
+  { q: 'What\'s your refund policy?', a: 'Full refund within the first 30 days — no questions. After 30 days the annual fee is non-refundable (we\'ve already reserved your priority slots for the year). You can pause up to 3 months/year to match your schedule.' },
+  { q: 'Can I cancel anytime?', a: 'Yes. Log in to your dashboard → My Recurring Plans → Cancel. Your benefits continue until the end of your billing year. We won\'t charge again.' },
+  { q: 'What if a member benefit isn\'t delivered?', a: 'Concierge members get the "Concierge Promise" — if any visit isn\'t 5-star, your entire annual fee is refunded AND the next 3 visits are free. Regular and VIP members get same-day credit for any documented service failure.' },
+  { q: 'Can I upgrade mid-year?', a: 'Yes — you pay the prorated difference. E.g. Regular → VIP upgrades at month 6 costs about $50. Downgrades take effect at next renewal.' },
+  { q: 'Do non-members ever lose access?', a: 'No. Non-members can always book Mon–Fri mornings. Memberships just expand your window and remove fees — you\'re never locked out.' },
 ];
 
-const Pricing = () => {
-  const bookingModal = useBookingModalSafe();
+const Pricing: React.FC = () => {
   const { user } = useAuth();
-  const [subscribing, setSubscribing] = React.useState<string | null>(null);
+  const [selectedTier, setSelectedTier] = useState<Tier | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const PLAN_PRICES: Record<string, number> = { 'Member': 99, 'VIP': 199, 'Concierge': 399 };
+  const handleSubscribe = async (tier: Tier, agreementMeta: { agreementVersion: string; agreementSha: string }) => {
+    if (!user) {
+      toast.info('Log in to subscribe.');
+      window.location.href = `/login?redirect=${encodeURIComponent('/pricing')}`;
+      return;
+    }
+    if (!tier.planName || !tier.annualPrice) {
+      window.location.href = '/book-now';
+      return;
+    }
 
-  const handleSubscribe = async (planName: string) => {
-    if (!user) { window.location.href = '/signup'; return; }
-
-    setSubscribing(planName);
+    setSubmitting(true);
     try {
-      const price = PLAN_PRICES[planName] || 99;
+      // 1. Write the signed agreement row BEFORE Stripe checkout (legal paper trail)
+      const { data: agreement, error: agrErr } = await supabase
+        .from('membership_agreements' as any)
+        .insert({
+          user_id: user.id,
+          user_email: user.email,
+          user_name: [user.firstName, user.lastName].filter(Boolean).join(' ') || null,
+          plan_name: tier.planName,
+          plan_annual_price_cents: tier.annualPrice * 100,
+          billing_frequency: 'annual',
+          agreement_version: agreementMeta.agreementVersion,
+          agreement_text_sha256: agreementMeta.agreementSha,
+          user_agent: navigator.userAgent,
+          // ip_address captured server-side when Stripe webhook processes completion
+        })
+        .select()
+        .single();
+      if (agrErr) throw agrErr;
 
-      const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
+      // 2. Look up membership_plans.id to pass to create-checkout-session
+      const { data: plan, error: planErr } = await supabase
+        .from('membership_plans' as any)
+        .select('id')
+        .eq('name', tier.planName)
+        .maybeSingle();
+      if (planErr || !plan) throw planErr || new Error(`Plan ${tier.planName} not found`);
+
+      // 3. Create Stripe subscription (annual)
+      const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: {
-          serviceType: 'membership',
-          serviceName: `ConveLabs ${planName} Membership (Annual)`,
-          amount: price * 100,
-          tipAmount: 0,
-          appointmentDate: new Date().toISOString().split('T')[0],
-          appointmentTime: '',
-          patientDetails: {
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || '',
+          planId: (plan as any).id,
+          billingFrequency: 'annual',
+          userId: user.id,
+          metadata: {
+            agreement_id: (agreement as any).id,
+            agreement_version: agreementMeta.agreementVersion,
           },
-          locationDetails: { address: '', city: '', state: 'FL', zipCode: '' },
-          serviceDetails: { additionalNotes: `Membership: ${planName} Annual $${price}` },
         },
       });
-
       if (error) throw error;
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error('No checkout URL returned');
-      }
+      if (!data?.url) throw new Error('No checkout URL returned');
+      window.location.href = data.url;
     } catch (err: any) {
-      console.error('Subscribe error:', err);
+      console.error('[pricing] subscribe failed:', err);
       toast.error(err.message || 'Failed to start checkout. Please try again.');
-    } finally {
-      setSubscribing(null);
+      setSubmitting(false);
     }
   };
 
@@ -147,93 +221,134 @@ const Pricing = () => {
       <Header />
 
       {/* Hero */}
-      <section className="py-16 md:py-24 bg-gradient-to-b from-gray-50 to-background">
+      <section className="py-16 md:py-20 bg-gradient-to-b from-gray-50 to-background">
         <div className="container mx-auto px-4 text-center max-w-3xl">
-          <div className="inline-flex items-center gap-2 bg-green-50 border border-green-200 rounded-full px-4 py-2 mb-6">
-            <Percent className="h-4 w-4 text-green-600" />
-            <span className="text-sm font-semibold text-green-800">Members save up to 25% on every visit</span>
+          <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 py-2 mb-5">
+            <Sparkles className="h-4 w-4 text-amber-700" />
+            <span className="text-sm font-semibold text-amber-800">
+              Founding Member pricing — lock today's rates forever
+            </span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">Simple, Transparent Pricing</h1>
+          <h1 className="text-4xl md:text-5xl font-bold mb-4">Pick the morning that fits your life.</h1>
           <p className="text-lg text-muted-foreground">
-            No hidden fees. No credits to track. Pay per visit, or join a membership for discounts and weekend access.
+            Annual memberships unlock earlier mornings, Saturday access, lower family-add-on pricing,
+            referral rewards, and more. Billed once a year — full refund for 30 days.
           </p>
         </div>
       </section>
 
-      {/* Pay-Per-Visit */}
-      <section className="py-12 md:py-16">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <h2 className="text-2xl md:text-3xl font-bold text-center mb-2">Pay-Per-Visit Pricing</h2>
-          <p className="text-muted-foreground text-center mb-8">No commitment required. Book anytime Monday - Friday.</p>
-          <Card>
-            <CardContent className="p-0">
-              <div className="divide-y">
-                {PAY_PER_VISIT.map((item) => (
-                  <div key={item.service} className="flex items-center justify-between px-6 py-4 hover:bg-muted/30 transition-colors">
-                    <span className="font-medium">{item.service}</span>
-                    <span className="font-bold text-lg">{item.price}</span>
+      {/* 4-Tier Grid */}
+      <section className="py-12">
+        <div className="container mx-auto px-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-7xl mx-auto">
+            {TIERS.map((tier) => (
+              <Card key={tier.key} className={`border-2 ${tier.color} bg-gradient-to-b ${tier.gradient} relative flex flex-col`}>
+                {tier.highlight && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#B91C1C] text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide">
+                    {tier.highlight}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-          <div className="text-center mt-6">
-            <Button onClick={() => bookingModal?.openModal('pricing_ppv')} size="lg" className="bg-conve-red hover:bg-conve-red-dark text-white rounded-xl px-8">
-              <Calendar className="mr-2 h-5 w-5" /> Book Now — No Membership Required
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* Membership */}
-      <section id="membership" className="py-12 md:py-16 bg-gray-50">
-        <div className="container mx-auto px-4 max-w-5xl">
-          <div className="text-center mb-10">
-            <h2 className="text-2xl md:text-3xl font-bold mb-2">Membership Plans</h2>
-            <p className="text-muted-foreground">Annual membership for discounts on every visit + exclusive weekend appointments.</p>
-          </div>
-          <div className="grid md:grid-cols-3 gap-6">
-            {MEMBERSHIP_TIERS.map((tier) => (
-              <Card key={tier.name} className={`relative border-2 ${tier.color} overflow-hidden`}>
-                {tier.badge && (
-                  <div className={`absolute top-0 left-0 right-0 ${tier.badgeColor} text-white text-center text-xs font-bold py-1.5`}>{tier.badge}</div>
                 )}
-                <CardContent className={`p-6 ${tier.badge ? 'pt-10' : ''}`}>
-                  <h3 className="text-xl font-bold">{tier.name}</h3>
-                  <div className="mt-3 flex items-baseline gap-1">
-                    <span className="text-4xl font-bold">${tier.annual}</span>
-                    <span className="text-muted-foreground">/year</span>
+                <CardContent className="p-5 flex flex-col flex-1">
+                  {/* Icon + name */}
+                  <div className="flex items-center gap-2 mb-1">
+                    {tier.key === 'concierge' && <Crown className="h-5 w-5 text-amber-500" />}
+                    {tier.key === 'vip' && <Star className="h-5 w-5 text-[#B91C1C]" />}
+                    {tier.key === 'member' && <Sparkles className="h-5 w-5 text-emerald-600" />}
+                    {tier.key === 'none' && <Heart className="h-5 w-5 text-gray-500" />}
+                    <h3 className="text-xl font-bold">{tier.name}</h3>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">That's ${Math.round(tier.annual / 12)}/month billed annually</p>
-                  <div className="mt-3 inline-flex items-center gap-1 bg-green-100 text-green-800 text-sm font-bold px-3 py-1 rounded-full">
-                    <Percent className="h-3.5 w-3.5" /> Mobile from {tier.mobilePrice}
+                  <p className="text-xs text-muted-foreground mb-3">{tier.tagline}</p>
+
+                  {/* Price */}
+                  <div className="mb-4">
+                    {tier.annualPrice ? (
+                      <>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-3xl font-bold">${tier.annualPrice}</span>
+                          <span className="text-xs text-muted-foreground">/year</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          That's ~${Math.round(tier.annualPrice / 12)}/mo · billed annually
+                        </p>
+                      </>
+                    ) : (
+                      <div className="text-3xl font-bold">Free</div>
+                    )}
                   </div>
-                  <div className="mt-5 space-y-3">
+
+                  {/* Feature list */}
+                  <div className="flex-1 space-y-2 mb-4">
                     {tier.features.map((f) => (
-                      <div key={f} className="flex items-start gap-2.5">
-                        <Check className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                        <span className="text-sm">{f}</span>
+                      <div key={f.label} className="flex items-start gap-2 text-xs">
+                        {typeof f.value === 'boolean' ? (
+                          f.value ? (
+                            <Check className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? 'text-emerald-600' : 'text-gray-500'}`} />
+                          ) : (
+                            <X className="h-3.5 w-3.5 text-gray-300 flex-shrink-0 mt-0.5" />
+                          )
+                        ) : (
+                          <Check className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? 'text-emerald-600' : 'text-gray-400'}`} />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <div className={`${f.highlight ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
+                            {typeof f.value === 'string' ? (
+                              <>
+                                <span className="text-gray-500">{f.label}: </span>
+                                <span>{f.value}</span>
+                              </>
+                            ) : f.value ? (
+                              f.label
+                            ) : (
+                              <span className="text-gray-400">{f.label}</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <Button className={`w-full mt-6 rounded-xl ${tier.badge ? 'bg-conve-red hover:bg-conve-red-dark text-white' : ''}`} variant={tier.badge ? 'default' : 'outline'}
-                    disabled={subscribing === tier.name}
-                    onClick={() => handleSubscribe(tier.name)}>
-                    {subscribing === tier.name ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Processing...</> : <>Get {tier.name} <ArrowRight className="ml-2 h-4 w-4" /></>}
+
+                  {/* CTA */}
+                  <Button
+                    className={`w-full ${
+                      tier.key === 'concierge'
+                        ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                        : tier.key === 'vip'
+                        ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
+                        : tier.key === 'member'
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : 'bg-gray-800 hover:bg-gray-900 text-white'
+                    }`}
+                    onClick={() => {
+                      if (tier.key === 'none') {
+                        window.location.href = '/book-now';
+                      } else {
+                        setSelectedTier(tier);
+                      }
+                    }}
+                    disabled={submitting}
+                  >
+                    {tier.ctaLabel}
+                    <ArrowRight className="h-4 w-4 ml-1" />
                   </Button>
                 </CardContent>
               </Card>
             ))}
           </div>
-          <div className="mt-8 text-center">
-            <Card className="inline-block">
-              <CardContent className="py-4 px-6">
-                <p className="text-sm font-medium mb-2">Mobile blood draw pricing comparison:</p>
-                <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
-                  <span className="text-muted-foreground">Non-member: <span className="line-through">$150</span></span>
-                  <span className="text-blue-600 font-bold">Member: $130</span>
-                  <span className="text-conve-red font-bold">VIP: $115</span>
-                  <span className="text-amber-600 font-bold">Concierge: $99</span>
+
+          {/* Concierge Promise callout */}
+          <div className="max-w-3xl mx-auto mt-12">
+            <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-white">
+              <CardContent className="p-6 flex items-start gap-4">
+                <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <Shield className="h-6 w-6 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-amber-900 mb-1">The Concierge Promise</h3>
+                  <p className="text-sm text-amber-900">
+                    If <strong>any visit</strong> during your Concierge year isn't 5-star, we refund your
+                    entire annual fee AND your next 3 visits are complimentary. No arbitration. No fine print.
+                    This is what premium should mean.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -241,63 +356,55 @@ const Pricing = () => {
         </div>
       </section>
 
-      {/* Why Membership */}
-      <section className="py-12 md:py-16">
-        <div className="container mx-auto px-4 max-w-4xl">
-          <h2 className="text-2xl md:text-3xl font-bold text-center mb-8">Why Become a Member?</h2>
-          <div className="grid md:grid-cols-3 gap-6">
-            <Card className="text-center p-6">
-              <Percent className="h-10 w-10 text-conve-red mx-auto mb-3" />
-              <h3 className="font-bold mb-2">Save on Every Visit</h3>
-              <p className="text-sm text-muted-foreground">15-25% off every service, every time. No credits, no complexity.</p>
-            </Card>
-            <Card className="text-center p-6">
-              <Calendar className="h-10 w-10 text-conve-red mx-auto mb-3" />
-              <h3 className="font-bold mb-2">Weekend Access</h3>
-              <p className="text-sm text-muted-foreground">Book Saturday appointments (6 AM - 9:30 AM). Members only.</p>
-            </Card>
-            <Card className="text-center p-6">
-              <Star className="h-10 w-10 text-conve-red mx-auto mb-3" />
-              <h3 className="font-bold mb-2">Priority Scheduling</h3>
-              <p className="text-sm text-muted-foreground">Get first access to same-day slots and preferred time windows.</p>
-            </Card>
+      {/* 30-Day Refund + Terms anchor */}
+      <section className="py-8 bg-gray-50 border-y">
+        <div className="container mx-auto px-4 max-w-3xl">
+          <div className="flex items-start gap-3 text-sm text-gray-700">
+            <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-1">Refund policy — read before you subscribe:</p>
+              <p>
+                <strong>First 30 days:</strong> full refund, no questions.{' '}
+                <strong>After 30 days:</strong> annual fees are non-refundable (we reserve your priority
+                slots for the year). You can still <strong>pause</strong> your plan — up to 3 months/year
+                depending on tier. Full terms shown when you subscribe.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
       {/* FAQ */}
-      <section className="py-12 md:py-16 bg-gray-50">
+      <section className="py-12">
         <div className="container mx-auto px-4 max-w-3xl">
-          <h2 className="text-2xl md:text-3xl font-bold text-center mb-8">Frequently Asked Questions</h2>
-          <Accordion type="single" collapsible className="space-y-3">
-            {FAQS.map((faq, i) => (
-              <AccordionItem key={i} value={`faq-${i}`} className="border rounded-xl px-5 data-[state=open]:bg-white">
-                <AccordionTrigger className="text-left text-base font-medium hover:no-underline py-4">{faq.q}</AccordionTrigger>
-                <AccordionContent className="text-muted-foreground text-sm leading-relaxed pb-4">{faq.a}</AccordionContent>
+          <h2 className="text-2xl md:text-3xl font-bold text-center mb-6">Common questions</h2>
+          <Accordion type="single" collapsible>
+            {FAQ.map((item, i) => (
+              <AccordionItem key={i} value={`q${i}`}>
+                <AccordionTrigger className="text-left">{item.q}</AccordionTrigger>
+                <AccordionContent>{item.a}</AccordionContent>
               </AccordionItem>
             ))}
           </Accordion>
         </div>
       </section>
 
-      {/* Final CTA */}
-      <section className="py-16 bg-conve-red text-white">
-        <div className="container mx-auto px-4 text-center max-w-2xl">
-          <h2 className="text-3xl font-bold mb-4">Ready to Get Started?</h2>
-          <p className="text-lg opacity-90 mb-8">Book a visit now or join a membership to save on every appointment.</p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button onClick={() => bookingModal?.openModal('pricing_cta')} size="lg" className="h-14 px-8 bg-white text-conve-red hover:bg-gray-100 font-semibold text-lg rounded-xl">
-              Book Now <ArrowRight className="ml-2 h-5 w-5" />
-            </Button>
-            <Button onClick={() => window.location.href = '/signup'} size="lg" variant="outline" className="h-14 px-8 border-2 border-white text-white hover:bg-white/10 font-semibold text-lg rounded-xl">
-              Join Membership
-            </Button>
-          </div>
-          <p className="text-sm opacity-75 mt-6">Or call <a href="tel:+19415279169" className="underline font-semibold">(941) 527-9169</a></p>
-        </div>
-      </section>
-
       <Footer />
+
+      {/* Agreement dialog — must sign before Stripe checkout opens */}
+      {selectedTier && (
+        <MembershipAgreementDialog
+          open={!!selectedTier}
+          onClose={() => setSelectedTier(null)}
+          tier={{
+            name: selectedTier.name,
+            planName: selectedTier.planName,
+            annualPrice: selectedTier.annualPrice || 0,
+          }}
+          onAgreed={(meta) => handleSubscribe(selectedTier, meta)}
+          submitting={submitting}
+        />
+      )}
     </div>
   );
 };

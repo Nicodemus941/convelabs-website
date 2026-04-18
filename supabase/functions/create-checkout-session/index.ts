@@ -331,7 +331,11 @@ Deno.serve(async (req) => {
           promotion_locked_price: isSupernovaMember && billingFrequency === 'annual' && !isEssentialCare ? amount.toString() : null,
           selected_add_on_id: selectedAddOn?.id || null,
           is_upgrade: isUpgrade ? 'true' : 'false',
-          is_essential_care: isEssentialCare ? 'true' : 'false'
+          is_essential_care: isEssentialCare ? 'true' : 'false',
+          // Signed membership_agreements row id — stripe-webhook uses this to
+          // link the agreement to the activated membership after checkout.
+          agreement_id: (requestBody?.metadata?.agreement_id as string) || null,
+          agreement_version: (requestBody?.metadata?.agreement_version as string) || null
         },
       };
 
