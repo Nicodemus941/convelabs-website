@@ -11,10 +11,11 @@ import { toast } from 'sonner';
 import {
   Loader2, Building2, Calendar, FileText, DollarSign, Users, LogOut,
   Phone, Mail, ShieldCheck, Plus, ExternalLink, Clock, AlertCircle,
-  TrendingUp, UserPlus, Download, CheckCircle2,
+  TrendingUp, UserPlus, Download, CheckCircle2, KeyRound,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
+import ProviderOnboardingModal from '@/components/provider/ProviderOnboardingModal';
 
 /**
  * PROVIDER PORTAL DASHBOARD — Phase 1
@@ -53,6 +54,46 @@ const ProviderDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false);
+  const [showPwPrompt, setShowPwPrompt] = useState(false);
+  const [newPw, setNewPw] = useState('');
+  const [newPwConfirm, setNewPwConfirm] = useState('');
+
+  // Onboarding gate + password-status check. Reads fresh metadata from
+  // Supabase (not the cached useAuth user) so it reflects the latest state.
+  //   - onboarded_at missing → show blocking onboarding modal
+  //   - onboarded_at set but password_set flag missing → show dismissible
+  //     yellow banner "Set a password to skip SMS next time"
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user: supaUser } } = await supabase.auth.getUser();
+        const meta = supaUser?.user_metadata || {};
+        if (meta.role !== 'provider') return;
+        if (!meta.onboarded_at) setShowOnboarding(true);
+        else if (!meta.password_set) setNeedsPasswordSetup(true);
+      } catch { /* non-blocking */ }
+    })();
+  }, []);
+
+  const handleInlinePasswordSet = async () => {
+    if (newPw.length < 8) { toast.error('Password must be at least 8 characters'); return; }
+    if (newPw !== newPwConfirm) { toast.error('Passwords do not match'); return; }
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: newPw,
+        data: { password_set: true },
+      });
+      if (error) throw error;
+      toast.success('Password saved. You can now sign in with email + password.');
+      setShowPwPrompt(false);
+      setNeedsPasswordSetup(false);
+      setNewPw(''); setNewPwConfirm('');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save password');
+    }
+  };
 
   const loadData = async (attempt = 1): Promise<void> => {
     try {
@@ -200,6 +241,27 @@ const ProviderDashboard: React.FC = () => {
             </Link>
           </Button>
         </div>
+
+        {/* ACCOUNT-STATUS NUDGE — only shows if provider has no password yet */}
+        {needsPasswordSetup && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <KeyRound className="h-5 w-5 text-amber-600 flex-shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-amber-900">You're signed in with SMS only</p>
+                <p className="text-xs text-amber-700">Set a password and you can sign in without the phone next time.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button size="sm" variant="outline" className="border-amber-300" onClick={() => setNeedsPasswordSetup(false)}>
+                Dismiss
+              </Button>
+              <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white gap-1" onClick={() => setShowPwPrompt(true)}>
+                <KeyRound className="h-3.5 w-3.5" /> Set password
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* LIVE OPS */}
         <div>
@@ -417,6 +479,36 @@ const ProviderDashboard: React.FC = () => {
 
       {/* INVITE MODAL */}
       <InviteTeamMemberDialog open={showInvite} onClose={() => setShowInvite(false)} orgId={org.id} orgName={org.name} onInvited={() => { setShowInvite(false); loadData(); }} />
+
+      {/* INLINE "SET A PASSWORD" DIALOG (from the yellow status banner) */}
+      <Dialog open={showPwPrompt} onOpenChange={setShowPwPrompt}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5 text-[#B91C1C]" /> Set a password</DialogTitle></DialogHeader>
+          <div className="space-y-3 pt-2">
+            <p className="text-sm text-gray-600">Once set, you can sign in with email + password instead of waiting for an SMS code.</p>
+            <div><Label>New password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" minLength={8} autoFocus /></div>
+            <div><Label>Confirm</Label><Input type="password" value={newPwConfirm} onChange={e => setNewPwConfirm(e.target.value)} placeholder="Type it again" minLength={8} /></div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowPwPrompt(false)}>Cancel</Button>
+            <Button onClick={handleInlinePasswordSet} disabled={newPw.length < 8 || newPw !== newPwConfirm} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">Save password</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* FIRST-LOGIN ONBOARDING (blocks dashboard until complete) */}
+      <ProviderOnboardingModal
+        open={showOnboarding}
+        orgName={org.name}
+        phoneHint={org.contact_phone ? `***-***-${String(org.contact_phone).replace(/\D/g, '').slice(-4)}` : null}
+        defaultName={org.contact_name || user?.firstName || ''}
+        onComplete={() => {
+          setShowOnboarding(false);
+          // Refresh session so the new metadata (full_name, onboarded_at) is in the JWT
+          supabase.auth.refreshSession().catch(() => {});
+          loadData();
+        }}
+      />
     </div>
   );
 };
