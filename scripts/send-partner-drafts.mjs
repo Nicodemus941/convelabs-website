@@ -200,7 +200,7 @@ const emails = [
     subjectPrefix: '[DRAFT → Elite Medical Concierge]',
     actualRecipient: 'elitemedicalconcierge@gmail.com (Dr. Monica Sher)',
     portalEmail: 'elitemedicalconcierge@gmail.com',
-    subject: 'Two ways to stop reconciling per-visit invoices — pick monthly or annual',
+    subject: 'Three ways to stop reconciling per-visit invoices — pick the plan that fits',
     html: brandWrap('Elite Medical × ConveLabs — the subscription offer', `
       <!-- HOOK -->
       <p>Hi Dr. Sher,</p>
@@ -208,41 +208,64 @@ const emails = [
 
       <!-- AGITATE -->
       <p>Right now, every visit we do for Elite generates its own invoice. Fine at low volume. Painful at scale. As you grow, reconciling dozens of per-visit invoices is the exact kind of slow-bleed admin overhead that steals time from higher-value work.</p>
-      <p>Two clean answers below. Pick the one that fits your operation.</p>
+      <p>Three clean options below — sized for different volumes. Pick the one that fits your operation.</p>
 
-      <!-- TIERED OFFER — MONTHLY vs ANNUAL side by side -->
+      <!-- TIERED OFFER — STARTER 10 · MONTHLY FLEX · ANNUAL PARTNER -->
       <div style="margin:18px 0;">
+        <!-- STARTER 10 -->
+        <div style="background:#f8fafc;border:1.5px solid #cbd5e1;border-radius:14px;padding:18px;margin-bottom:10px;">
+          <table cellpadding="0" cellspacing="0" style="width:100%;">
+            <tr>
+              <td style="vertical-align:top;">
+                <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#475569;font-weight:700;">Option A · Starter</p>
+                <h3 style="margin:0;color:#0f172a;font-size:18px;">Starter 10</h3>
+                <p style="margin:6px 0 0;font-size:13px;color:#475569;">Month-to-month. Cancel anytime. Best if you do ~10 visits/month.</p>
+              </td>
+              <td style="vertical-align:top;text-align:right;white-space:nowrap;">
+                <p style="margin:0;font-size:24px;font-weight:800;color:#0f172a;">$650<span style="font-size:13px;font-weight:500;color:#475569;"> / month</span></p>
+                <p style="margin:2px 0 0;font-size:12px;color:#475569;">= $65 / visit · <strong>save $7.25 vs Flex</strong></p>
+              </td>
+            </tr>
+          </table>
+          <ul style="padding-left:18px;margin:12px 0 0;font-size:13px;color:#334155;line-height:1.55;">
+            <li><strong>10 visits/month included</strong> — flat $650 charged to Elite's Stripe at month start</li>
+            <li>Overage above 10 visits → $72.25 / visit (Monthly Flex rate)</li>
+            <li>Unused visits expire at month-end (encourages steady utilization)</li>
+            <li>Everything in the platform stack — same service, smaller bucket</li>
+          </ul>
+        </div>
+
+        <!-- MONTHLY FLEX + ANNUAL PARTNER side-by-side -->
         <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:8px 0;">
           <tr>
-            <!-- MONTHLY -->
+            <!-- MONTHLY FLEX -->
             <td style="width:50%;vertical-align:top;background:#ffffff;border:1.5px solid #e5e7eb;border-radius:14px;padding:18px;">
-              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:700;">Option A</p>
+              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:700;">Option B · Flexible</p>
               <h3 style="margin:0;color:#111827;font-size:17px;">Monthly Flex</h3>
-              <p style="margin:6px 0 10px;font-size:13px;color:#6b7280;">No commitment. Cancel anytime.</p>
+              <p style="margin:6px 0 10px;font-size:13px;color:#6b7280;">Unlimited volume. No commitment. Cancel anytime.</p>
               <p style="margin:0;font-size:26px;font-weight:800;color:#111827;">$72.25<span style="font-size:13px;font-weight:500;color:#6b7280;"> / visit</span></p>
-              <p style="margin:4px 0 12px;font-size:12px;color:#6b7280;">Auto-charged to card on file at month-end</p>
+              <p style="margin:4px 0 12px;font-size:12px;color:#6b7280;">Auto-charged at month-end based on actual usage</p>
               <ul style="padding-left:18px;margin:0;font-size:13px;color:#374151;line-height:1.55;">
                 <li>One consolidated monthly statement</li>
                 <li>Live MTD usage dashboard</li>
                 <li>Per-patient breakdown (HIPAA-scoped)</li>
-                <li>Cancel or pause anytime</li>
+                <li>No visit cap — scale freely</li>
                 <li>Patients never see a bill</li>
               </ul>
             </td>
 
-            <!-- ANNUAL (highlighted) -->
-            <td style="width:50%;vertical-align:top;background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border:1.5px solid #7F1D1D;border-radius:14px;padding:18px;position:relative;">
-              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Option B · Best value</p>
+            <!-- ANNUAL PARTNER (highlighted) -->
+            <td style="width:50%;vertical-align:top;background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border:1.5px solid #7F1D1D;border-radius:14px;padding:18px;">
+              <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Option C · Best value</p>
               <h3 style="margin:0;color:#fff;font-size:17px;">Annual Partner</h3>
-              <p style="margin:6px 0 10px;font-size:13px;color:#fecaca;">12-month partnership, grandfathered rate.</p>
+              <p style="margin:6px 0 10px;font-size:13px;color:#fecaca;">Unlimited volume. 12-month partnership.</p>
               <p style="margin:0;font-size:26px;font-weight:800;color:#fff;">$60.20<span style="font-size:13px;font-weight:500;color:#fecaca;"> / visit</span></p>
               <p style="margin:4px 0 12px;font-size:12px;color:#fef3c7;font-weight:600;">Save $12.05 / visit · effectively 2 months free</p>
               <ul style="padding-left:18px;margin:0;font-size:13px;color:#fef3c7;line-height:1.55;">
-                <li>Everything in Monthly Flex, plus:</li>
                 <li><strong>Priority scheduling</strong> — Elite visits slot first</li>
-                <li><strong>Dedicated phleb when available</strong> — same face, every time</li>
+                <li><strong>Dedicated phleb when available</strong> — same face</li>
                 <li><strong>Rush turnaround</strong> on request, no surcharge</li>
-                <li>Rate locked as long as contract is active</li>
+                <li>Rate locked as long as active</li>
                 <li>Cancel mid-year with 60-day notice</li>
               </ul>
             </td>
@@ -250,10 +273,11 @@ const emails = [
         </table>
       </div>
 
-      <!-- PRICE MATH — Hormozi: show the exact dollar impact -->
+      <!-- PRICE MATH — Hormozi: show the exact dollar impact at each volume -->
       <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px 16px;margin:14px 0;">
         <p style="margin:0 0 6px;font-size:13px;color:#166534;font-weight:700;">The math (real numbers)</p>
         <p style="margin:0;font-size:13px;color:#14532d;line-height:1.6;">
+          At <strong>10 visits/month</strong>: Monthly Flex = $722.50/mo · Starter 10 = $650/mo → <strong>save $870/yr</strong>.<br>
           At <strong>20 visits/month</strong>: Monthly Flex = $1,445/mo · Annual Partner = $1,204/mo → <strong>save $2,892/yr</strong>.<br>
           At <strong>40 visits/month</strong>: Monthly Flex = $2,890/mo · Annual Partner = $2,408/mo → <strong>save $5,784/yr</strong>.<br>
           At <strong>80 visits/month</strong>: Monthly Flex = $5,780/mo · Annual Partner = $4,816/mo → <strong>save $11,568/yr</strong>.
@@ -274,7 +298,7 @@ const emails = [
       ${RISK_REVERSAL}
 
       ${loginBlock('elitemedicalconcierge@gmail.com')}
-      <p style="font-size:13.5px;color:#6b7280;margin-top:8px;text-align:center;">Log in and reply to this email with <strong>"Monthly"</strong> or <strong>"Annual"</strong> — I'll set up Elite Medical's subscription in under 5 minutes, and you'll never reconcile another per-visit invoice.</p>
+      <p style="font-size:13.5px;color:#6b7280;margin-top:8px;text-align:center;">Log in and reply to this email with <strong>"Starter"</strong>, <strong>"Monthly"</strong>, or <strong>"Annual"</strong> — I'll set up Elite Medical's subscription in under 5 minutes, and you'll never reconcile another per-visit invoice.</p>
       <p>Dr. Sher — the way you and Dr. Edwards run Elite Medical is the benchmark for concierge internal medicine. This subscription is how we match that operational standard on the billing side.</p>
       ${SIGNOFF}
     `),
