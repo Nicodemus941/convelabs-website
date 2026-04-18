@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { isBookingAllowed, normalizeTime, type MemberTier } from '@/lib/bookingWindows';
+import { getMemberTier } from '@/lib/memberBenefits';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
@@ -99,7 +101,17 @@ interface DateTimeSelectionStepProps {
   considerDistance?: boolean;
 }
 
-// All windows (fasting + general — 6:00 AM - 5:00 PM)
+// Operational hours (Hormozi tiered membership):
+//   Non-member:      Mon-Fri 6-9am (fasting) + 9am-12pm (non-fasting). No Saturday.
+//   Regular Member:  Mon-Fri 6am-12pm + Saturday 6-9am.
+//   VIP:             Mon-Fri 6am-2pm + Saturday 6-11am.
+//   Concierge:       any day 6am-8pm + Sunday by request.
+// After-hours (5:30-8pm) is Concierge-only in-window. Non-Concierge requests
+// go through the after-hours toggle with a $50 surcharge for VIP, rejected
+// for lower tiers server-side.
+//
+// allDayWindows shows ALL possible slots the app renders; disallowed slots
+// are visually greyed out per tier (see `disabledByTier` below).
 const allDayWindows = [
   { time: "6:00 AM", label: "6:00 - 6:30 AM" },
   { time: "6:30 AM", label: "6:30 - 7:00 AM" },
@@ -117,23 +129,18 @@ const allDayWindows = [
   { time: "12:30 PM", label: "12:30 - 1:00 PM" },
   { time: "1:00 PM", label: "1:00 - 1:30 PM" },
   { time: "1:30 PM", label: "1:30 - 2:00 PM" },
-  { time: "2:00 PM", label: "2:00 - 2:30 PM" },
-  { time: "2:30 PM", label: "2:30 - 3:00 PM" },
-  { time: "3:00 PM", label: "3:00 - 3:30 PM" },
-  { time: "3:30 PM", label: "3:30 - 4:00 PM" },
-  { time: "4:00 PM", label: "4:00 - 4:30 PM" },
-  { time: "4:30 PM", label: "4:30 - 5:00 PM" },
-  { time: "5:00 PM", label: "5:00 - 5:30 PM" },
 ];
 
-// Routine blood draws — 9:00 AM - 5:00 PM
+// Routine blood draws — now match non-fasting member window (9am-12pm)
 const routineWindows = allDayWindows.filter(w => {
   const hour = parseInt(w.time);
   const isPM = w.time.includes('PM');
   const hour24 = isPM && hour !== 12 ? hour + 12 : (!isPM && hour === 12 ? 0 : hour);
-  return hour24 >= 9;
+  return hour24 >= 9 && hour24 < 12;
 });
 
+// Saturday — VIP gets 6am-11am, Regular gets 6-9am. Show up to 10:30 start
+// (11am end) and the tier-disable logic handles the rest.
 const weekendWindows = [
   { time: "6:00 AM", label: "6:00 - 6:30 AM" },
   { time: "6:30 AM", label: "6:30 - 7:00 AM" },
@@ -142,6 +149,9 @@ const weekendWindows = [
   { time: "8:00 AM", label: "8:00 - 8:30 AM" },
   { time: "8:30 AM", label: "8:30 - 9:00 AM" },
   { time: "9:00 AM", label: "9:00 - 9:30 AM" },
+  { time: "9:30 AM", label: "9:30 - 10:00 AM" },
+  { time: "10:00 AM", label: "10:00 - 10:30 AM" },
+  { time: "10:30 AM", label: "10:30 - 11:00 AM" },
 ];
 
 // After-hours windows (5:30 PM - 8:00 PM) — only shown when user requests it
@@ -162,7 +172,19 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const methods = useFormContext<BookingFormValues>();
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");
+  const patientEmail = methods.watch("patientDetails.email");
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // Tier detection — queries user_memberships when email changes.
+  // Default 'none' (non-member rules) for unknown patients.
+  const [patientTier, setPatientTier] = useState<MemberTier>('none');
+  useEffect(() => {
+    if (!patientEmail) { setPatientTier('none'); return; }
+    let cancelled = false;
+    getMemberTier(String(patientEmail)).then(({ tier }) => {
+      if (!cancelled) setPatientTier(tier);
+    });
+    return () => { cancelled = true; };
+  }, [patientEmail]);
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [loadingSlots, setLoadingSlots] = useState(false);
 
@@ -569,12 +591,34 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         // Same-day: disable past slots + enforce 90-min lead time
                         const slotMinutes = timeToMinutes(window.time);
                         const isPastOrTooSoon = isSameDay && slotMinutes < nowMinutes + SAME_DAY_LEAD_MINUTES;
-                        const isUnavailable = isBooked || isHeldByOther || isPastOrTooSoon;
+
+                        // Tier-aware window enforcement: does this slot fit the
+                        // patient's tier rules for the selected date? Uses the
+                        // same server-side rules (bookingWindows.ts). Slots
+                        // outside tier window are shown disabled with the reason
+                        // on hover + an upgrade CTA surfaced below the grid.
+                        let tierDisabled = false;
+                        let tierReason: string | undefined;
+                        if (selectedDate) {
+                          const hhmm = normalizeTime(window.time);
+                          if (hhmm) {
+                            const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+                            // Heuristic: slots before 9am assumed fasting
+                            const isFasting = hhmm < '09:00';
+                            const check = isBookingAllowed({ tier: patientTier, dateIso, time: window.time, isFasting });
+                            if (!check.allowed) {
+                              tierDisabled = true;
+                              tierReason = check.upgradeCTA?.message || check.reason || 'Not available in your tier';
+                            }
+                          }
+                        }
+                        const isUnavailable = isBooked || isHeldByOther || isPastOrTooSoon || tierDisabled;
 
                         return (
                           <button
                             key={window.time}
                             type="button"
+                            title={tierDisabled ? tierReason : isBooked ? 'Already booked' : isHeldByOther ? 'Being booked by someone else' : isPastOrTooSoon ? 'Too soon for same-day' : ''}
                             className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all ${
                               isUnavailable
                                 ? 'bg-gray-50 text-gray-300 line-through cursor-not-allowed border-gray-100'
@@ -659,7 +703,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                               Hide
                             </button>
                           </div>
-                          <p className="text-xs text-amber-700">After-hours appointments (5:30 PM - 8:00 PM) include an additional $50 surcharge. Subject to availability.</p>
+                          <p className="text-xs text-amber-700">After-hours (5:30 PM – 8:00 PM) is <strong>Concierge-included</strong>. VIP members can request after-hours with a $50 surcharge. Regular + non-members: please pick a weekday morning slot.</p>
                         </div>
                       )}
                     </div>
@@ -669,16 +713,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     {isStat
                       ? "Next available within operating hours (+$100)"
                       : isSunday
-                      ? "We are closed on Sundays"
+                      ? "Sundays — Concierge members only (on request). Non-Concierge patients: pick a weekday."
                       : isWeekend
-                      ? "Limited Saturday hours (6 AM - 9:30 AM)"
+                      ? "Saturday — Regular members 6–9 AM · VIP 6–11 AM · Concierge full hours. Non-members: weekday booking only."
                       : isSameDay
-                      ? "Same-day booking (+$100 surcharge) · 90-min lead time"
+                      ? "Same-day booking (+$100 surcharge) · 90-min lead time · Concierge only"
                       : isRoutine
-                      ? "Routine draw hours: 9 AM - 5:00 PM"
+                      ? "Routine non-fasting hours: 9 AM – 12 PM"
                       : showAfterHours
-                      ? "Showing all hours including after-hours (6 AM - 8 PM)"
-                      : "Available: Mon-Fri 6 AM - 5:30 PM"}
+                      ? "After-hours (5:30 PM – 8 PM) — Concierge in-window, VIP on request (+$50)"
+                      : "Mon–Fri 6 AM – 1:30 PM · fasting slots 6–9 AM · non-fasting 9 AM–12 PM for non-members"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
