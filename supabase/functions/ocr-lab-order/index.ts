@@ -65,10 +65,10 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ text: string; panels: string[] } | null> {
+async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ text: string; panels: string[] } | { error: string }> {
   if (!ANTHROPIC_API_KEY) {
     console.error('[ocr] ANTHROPIC_API_KEY not set');
-    return null;
+    return { error: 'ANTHROPIC_API_KEY not configured on edge function' };
   }
 
   // Claude accepts PDFs via its native document source format (beta)
@@ -78,7 +78,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 
   const body = {
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-sonnet-4-5',
     max_tokens: 1500,
     messages: [{
       role: 'user',
@@ -110,7 +110,6 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
         'Content-Type': 'application/json',
         'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'pdfs-2024-09-25',
       },
       body: JSON.stringify(body),
     });
@@ -118,7 +117,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
     if (!resp.ok) {
       const errTxt = await resp.text();
       console.error('[ocr] anthropic error', resp.status, errTxt.substring(0, 300));
-      return null;
+      return { error: `Anthropic API ${resp.status}: ${errTxt.substring(0, 200)}` };
     }
 
     const json = await resp.json();
@@ -134,9 +133,9 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
     } catch {
       return { text: content.substring(0, 8000), panels: [] };
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error('[ocr] request exception', e);
-    return null;
+    return { error: `Exception: ${e?.message || String(e)}` };
   }
 }
 
@@ -200,8 +199,14 @@ Deno.serve(async (req) => {
     const base64 = bytesToBase64(downloaded.data);
     const result = await runClaudeVisionOcr(base64, downloaded.mediaType);
 
-    if (!result) {
-      return new Response(JSON.stringify({ error: 'OCR engine failed' }), {
+    if (!result || 'error' in result) {
+      return new Response(JSON.stringify({
+        error: 'OCR engine failed',
+        detail: (result as any)?.error || 'unknown',
+        filePath,
+        mediaType: downloaded.mediaType,
+        sizeBytes: downloaded.data.byteLength,
+      }), {
         status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
