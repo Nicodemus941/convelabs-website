@@ -10,6 +10,7 @@ import { toast } from "@/components/ui/sonner";
 import UpcomingAppointments from "@/components/appointments/UpcomingAppointments";
 import AppointmentHistory from "@/components/appointments/AppointmentHistory";
 import ReferralCard from "@/components/patient/ReferralCard";
+import MyRecurringPlans from "@/components/patient/MyRecurringPlans";
 
 const PLANS = [
   { name: 'Member', price: 99, color: 'border-blue-200', badge: '', mobile: '$130', save: '$20', features: ['Mobile visits: $130 (save $20)', 'Weekend appointments', 'Patient portal'] },
@@ -189,6 +190,11 @@ const PatientDashboard = () => {
       {/* ===== REFERRAL CARD — Above the fold ===== */}
       <div className="mb-6">
         <ReferralCard />
+      </div>
+
+      {/* ===== MY RECURRING PLANS (only renders if patient has any) ===== */}
+      <div className="mb-6">
+        <MyRecurringPlans />
       </div>
 
       {/* ===== MAIN CONTENT ===== */}

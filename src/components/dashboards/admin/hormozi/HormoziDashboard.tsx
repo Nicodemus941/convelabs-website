@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useHormoziData, MARGIN_TARGET_PCT } from '@/hooks/useHormoziData';
 import DataHealthCard from './DataHealthCard';
+import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -322,6 +323,7 @@ const HormoziDashboard: React.FC = () => {
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Needs Attention</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
           <DataHealthCard />
+          <ActiveSubscriptionsCard />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card>

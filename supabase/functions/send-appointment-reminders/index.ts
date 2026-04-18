@@ -91,6 +91,11 @@ Deno.serve(async (req) => {
         });
 
         const hasLabOrder = !!appt.lab_order_file_path;
+        // Sprint 4 Tier 3: if this visit is part of a recurring subscription
+        // (not a prepaid bundle), append the "reply SKIP" self-service hint.
+        // Bundles are prepaid — skipping doesn't save the patient money, so
+        // the SKIP instruction would be misleading for those.
+        const isSubscription = !!appt.recurrence_group_id && !appt.visit_bundle_id;
 
         // Send SMS reminder
         if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER && patientPhone) {
@@ -100,9 +105,13 @@ Deno.serve(async (req) => {
           } else {
             const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
 
-            const smsBody = hasLabOrder
+            const baseBody = hasLabOrder
               ? `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Your lab order is on file — we're all set! Please have a sterile, well-lit area ready and wear a short-sleeved shirt. See you soon!`
               : `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have your lab order and insurance card ready. If you'd like to upload them now, visit convelabs.com/dashboard. Prepare a sterile, well-lit area. See you soon!`;
+
+            const smsBody = isSubscription
+              ? `${baseBody}\n\nThis is a recurring visit. Need to push it? Log in at convelabs.com/dashboard and tap "Skip next" — or reply CALL to talk to us.`
+              : baseBody;
 
             const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
             const formData = new URLSearchParams();
