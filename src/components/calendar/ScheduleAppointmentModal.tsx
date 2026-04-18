@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar, ArrowRight, Loader2, Crown, Search, UserPlus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import AddressAutocomplete from '@/components/ui/address-autocomplete';
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -646,7 +647,15 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                   </button>
                 )}
               </div>
-              <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" />
+              <AddressAutocomplete
+                value={address}
+                onChange={(v) => setAddress(v)}
+                onPlaceSelected={(place) => {
+                  const full = [place.address, place.city, place.state, place.zipCode].filter(Boolean).join(', ');
+                  setAddress(full || place.address);
+                }}
+                placeholder="Start typing — Google suggests"
+              />
               {lookupStatus === 'found' && (
                 <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 mt-1">
                   ✓ Loaded saved address from patient profile.

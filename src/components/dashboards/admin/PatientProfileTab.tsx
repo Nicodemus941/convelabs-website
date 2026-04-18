@@ -15,6 +15,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import AddressAutocomplete from '@/components/ui/address-autocomplete';
 
 const PatientProfileTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -423,7 +424,15 @@ const PatientProfileTab: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start py-3 gap-1 sm:gap-3">
                 <Label className="text-sm font-semibold text-gray-600 sm:mt-2">Address</Label>
                 <div className="space-y-2">
-                  <Input value={editForm.address} onChange={e => setEditForm(pr => ({ ...pr, address: e.target.value }))} placeholder="Street address" className="h-9" />
+                  <AddressAutocomplete
+                    value={editForm.address}
+                    onChange={v => setEditForm(pr => ({ ...pr, address: v }))}
+                    onPlaceSelected={(place) => {
+                      setEditForm(pr => ({ ...pr, address: place.address, city: place.city || pr.city, state: place.state || pr.state, zipcode: place.zipCode || pr.zipcode }));
+                    }}
+                    placeholder="Start typing address — Google suggestions"
+                    className="h-9"
+                  />
                   <Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} placeholder="City" className="h-9" />
                   <div className="grid grid-cols-2 gap-2">
                     <Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value }))} placeholder="State" maxLength={2} className="h-9" />
@@ -668,7 +677,23 @@ const PatientProfileTab: React.FC = () => {
             <div className="border-t pt-3">
               <p className="text-sm font-semibold mb-2">Address</p>
               <div className="space-y-3">
-                <div><Label>Street</Label><Input value={newPatient.address} onChange={e => setNewPatient(p => ({ ...p, address: e.target.value }))} placeholder="123 Main St" /></div>
+                <div>
+                  <Label>Street</Label>
+                  <AddressAutocomplete
+                    value={newPatient.address}
+                    onChange={v => setNewPatient(p => ({ ...p, address: v }))}
+                    onPlaceSelected={(place) => {
+                      setNewPatient(p => ({
+                        ...p,
+                        address: place.address,
+                        city: place.city || p.city,
+                        state: place.state || p.state,
+                        zipcode: place.zipCode || p.zipcode,
+                      }));
+                    }}
+                    placeholder="Start typing address — Google will suggest"
+                  />
+                </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div><Label>City</Label><Input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))} placeholder="Orlando" /></div>
                   <div><Label>State</Label><Input value={newPatient.state} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))} /></div>
