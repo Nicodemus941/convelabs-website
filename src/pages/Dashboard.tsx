@@ -8,6 +8,8 @@ import PatientDashboard from "@/components/dashboards/PatientDashboard";
 import PhlebotomistDashboard from "@/components/dashboards/PhlebotomistDashboard";
 import OfficeManagerDashboard from "@/components/dashboards/OfficeManagerDashboard";
 import ConciergeDoctorDashboard from "@/components/dashboards/ConciergeDoctorDashboard";
+import ProviderDashboard from "@/components/dashboards/ProviderDashboard";
+import { supabase } from "@/integrations/supabase/client";
 import RoleProtectedRoute from "@/components/auth/RoleProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import UserManagementTab from "@/components/dashboards/admin/UserManagementTab";
@@ -45,15 +47,43 @@ const Dashboard = () => {
   const role = pathParts[0];
   const adminTab = pathParts[1];
 
-  // If no role parameter but user exists, redirect to role-specific dashboard
+  // Redirect to role-specific dashboard. Deterministic role derivation:
+  //   1. If user.role is already set, use it
+  //   2. Otherwise, check if their email matches a portal_enabled active org
+  //      (single source of truth — if they're a portal contact, they're a provider)
+  //   3. Only if neither: default to patient
+  //
+  // This prevents the "org-contact landed on patient dashboard" bug — the role
+  // is derived from actual data, not from whatever default was stamped at signup.
   useEffect(() => {
-    if (!role && user && user.role) {
-      navigate(`/dashboard/${user.role}`, { replace: true });
-    } else if (!role && user && !user.role) {
-      // Fallback: if user has no role in metadata, check staff_profiles
-      // Default to patient if nothing found
+    if (role || !user) return;
+
+    (async () => {
+      if (user.role) {
+        navigate(`/dashboard/${user.role}`, { replace: true });
+        return;
+      }
+      // No role in metadata — check org membership
+      if (user.email) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('id')
+          .or(`billing_email.eq.${user.email},contact_email.eq.${user.email}`)
+          .eq('portal_enabled', true)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (org) {
+          // Stamp the role on the auth user so future logins skip this branch
+          try {
+            await supabase.auth.updateUser({ data: { role: 'provider' } });
+          } catch { /* non-blocking */ }
+          navigate('/dashboard/provider', { replace: true });
+          return;
+        }
+      }
+      // No role, not an org contact — default to patient
       navigate('/dashboard/patient', { replace: true });
-    }
+    })();
   }, [role, user, navigate]);
 
   // Wait for auth to finish loading before redirecting
@@ -147,6 +177,12 @@ const Dashboard = () => {
             <ConciergeDoctorDashboard />
           </RoleProtectedRoute>
         );
+      case "provider":
+        return (
+          <RoleProtectedRoute allowedRoles={["super_admin", "provider"]}>
+            <ProviderDashboard />
+          </RoleProtectedRoute>
+        );
       default:
         // If no role is provided or invalid role, check user role
         console.log("No valid role found, defaulting to user role:", user.role);
@@ -161,6 +197,11 @@ const Dashboard = () => {
         <PhlebotomistDashboard />
       </RoleProtectedRoute>
     );
+  }
+
+  // Provider portal has its own branded header — no DashboardWrapper
+  if (userRole === "provider") {
+    return renderDashboard();
   }
 
   // Admin roles use AdminLayout (sidebar) — skip DashboardWrapper Header/Footer

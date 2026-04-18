@@ -1,5 +1,5 @@
 
-export type UserRole = 'admin' | 'super_admin' | 'patient' | 'phlebotomist' | 'concierge_doctor' | 'franchise_owner' | 'staff' | 'office_manager';
+export type UserRole = 'admin' | 'super_admin' | 'patient' | 'phlebotomist' | 'concierge_doctor' | 'franchise_owner' | 'staff' | 'office_manager' | 'provider';
 
 export interface User {
   id: string;

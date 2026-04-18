@@ -59,14 +59,21 @@ Deno.serve(async (req) => {
       const phone = normalizePhone(o.contact_phone);
       const existing = allUsers.find((u: any) => u.email?.toLowerCase() === email);
 
+      // Standard metadata block for every portal user — role is explicit + deterministic
+      const userMetadata = {
+        role: 'provider',
+        org_id: o.id,
+        org_name: o.name,
+        source: 'portal_backfill',
+      };
+
       if (!existing) {
-        // Create user with email + phone + confirmed flags
         const { data: created, error: createErr } = await supabase.auth.admin.createUser({
           email,
           phone,
           email_confirm: true,
           phone_confirm: true,
-          user_metadata: { org_id: o.id, org_name: o.name, source: 'portal_backfill' },
+          user_metadata: userMetadata,
         });
         if (createErr) {
           report.push({ org: o.name, email, action: 'create_failed', detail: createErr.message });
@@ -74,21 +81,34 @@ Deno.serve(async (req) => {
           report.push({ org: o.name, email, action: 'created', detail: `user_id=${created?.user?.id}` });
         }
       } else {
-        // Ensure phone is set + confirmed on the existing user
+        // Ensure phone linked + role stamped
         const currentPhone = (existing as any).phone || '';
         const currentPhoneDigits = currentPhone.replace(/\D/g, '');
         const targetDigits = phone.replace(/\D/g, '');
-        if (currentPhoneDigits === targetDigits && (existing as any).phone_confirmed_at) {
+        const currentRole = (existing as any).user_metadata?.role;
+
+        const phoneOK = currentPhoneDigits === targetDigits && (existing as any).phone_confirmed_at;
+        const roleOK = currentRole === 'provider';
+
+        if (phoneOK && roleOK) {
           report.push({ org: o.name, email, action: 'already_linked' });
         } else {
-          const { error: updErr } = await supabase.auth.admin.updateUserById(existing.id, {
-            phone,
-            phone_confirm: true,
-          });
+          const updatePayload: any = {
+            // Merge existing metadata so we don't blow away other fields
+            user_metadata: { ...(existing as any).user_metadata, ...userMetadata },
+          };
+          if (!phoneOK) {
+            updatePayload.phone = phone;
+            updatePayload.phone_confirm = true;
+          }
+          const { error: updErr } = await supabase.auth.admin.updateUserById(existing.id, updatePayload);
           if (updErr) {
             report.push({ org: o.name, email, action: 'update_failed', detail: updErr.message });
           } else {
-            report.push({ org: o.name, email, action: 'phone_linked' });
+            report.push({
+              org: o.name, email,
+              action: phoneOK ? 'role_set' : (roleOK ? 'phone_linked' : 'phone+role_set'),
+            });
           }
         }
       }
