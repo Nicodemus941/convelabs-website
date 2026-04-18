@@ -86,6 +86,31 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [discountValue, setDiscountValue] = useState('');
   const [invoiceMemo, setInvoiceMemo] = useState('');
   const [orgBilling, setOrgBilling] = useState(false);
+
+  // Sprint: load all partner organizations with their rules so admin picks
+  // from a dropdown instead of typing org name. Auto-applies time windows,
+  // default billing mode, locked service type, masking flag.
+  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>('');
+  const selectedOrg = organizations.find(o => o.id === selectedOrgId);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('id, name, billing_email, default_billed_to, show_patient_name_on_appointment, time_window_rules, locked_service_type, locked_price_cents, org_invoice_price_cents, member_stacking_rule')
+        .eq('is_active', true)
+        .order('name');
+      setOrganizations((data as any) || []);
+    })();
+  }, []);
+  // When admin picks an org, auto-populate the fields + flip org-billing flag
+  useEffect(() => {
+    if (!selectedOrg) return;
+    setOrgName(selectedOrg.name);
+    setOrgEmail(selectedOrg.billing_email || '');
+    if (selectedOrg.default_billed_to === 'org') setOrgBilling(true);
+    if (selectedOrg.locked_service_type) setServiceType(selectedOrg.locked_service_type);
+  }, [selectedOrg]);
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [overrideSlot, setOverrideSlot] = useState(false);
@@ -423,6 +448,15 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         lab_destination: labDestination.trim() || null,
         phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
         notes: [notes, gateCode ? `Gate: ${gateCode}` : '', labDestination ? `Lab: ${labDestination}` : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
+        // Partner linkage (if admin picked an org from the dropdown)
+        ...(selectedOrg ? {
+          organization_id: selectedOrg.id,
+          billed_to: selectedOrg.default_billed_to || 'patient',
+          patient_name_masked: selectedOrg.show_patient_name_on_appointment === false,
+          org_reference_id: selectedOrg.show_patient_name_on_appointment === false
+            ? `${String(selectedOrg.name).toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4)}-${Date.now().toString().slice(-6)}`
+            : null,
+        } : {}),
       };
 
       // Only include patient_id if we found one (column is nullable)
@@ -919,22 +953,64 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               )}
             </div>
 
-            {/* Org Billing */}
+            {/* Partner organization picker — auto-applies rules */}
             <div className="border-t pt-3">
-              <div className="flex items-start gap-3">
-                <Checkbox id="org-billing" checked={orgBilling} onCheckedChange={(c) => setOrgBilling(c === true)} className="mt-1" />
-                <label htmlFor="org-billing" className="text-sm cursor-pointer">
-                  <span className="font-medium">Bill to Organization</span>
-                  <p className="text-xs text-muted-foreground">Invoice sent to the organization.</p>
-                </label>
-              </div>
-              {orgBilling && (
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  <Input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Org name" />
-                  <Input type="email" value={orgEmail} onChange={e => setOrgEmail(e.target.value)} placeholder="billing@org.com" />
+              <Label className="text-sm font-medium">Partner Organization <span className="text-muted-foreground font-normal">(if applicable)</span></Label>
+              <Select value={selectedOrgId || '__none__'} onValueChange={(v) => setSelectedOrgId(v === '__none__' ? '' : v)}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="No organization — standard patient booking" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None — standard patient booking</SelectItem>
+                  {organizations.map(o => (
+                    <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedOrg && (
+                <div className="mt-2 rounded-lg border p-3 bg-blue-50 border-blue-200 text-xs space-y-1">
+                  {Array.isArray(selectedOrg.time_window_rules) && selectedOrg.time_window_rules.length > 0 && (
+                    <p className="text-blue-900">
+                      <strong>⏰ Allowed times:</strong>{' '}
+                      {selectedOrg.time_window_rules.map((r: any, i: number) => (
+                        <span key={i} className="inline-block mr-2">
+                          {r.label || `${r.startHour}:00 – ${r.endHour}:00`}
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                  <p className="text-blue-900">
+                    <strong>💰 Billed to:</strong>{' '}
+                    {selectedOrg.default_billed_to === 'org'
+                      ? `${selectedOrg.name} ($${((selectedOrg.org_invoice_price_cents || 0) / 100).toFixed(2)}/visit)`
+                      : `Patient${selectedOrg.locked_price_cents ? ` ($${(selectedOrg.locked_price_cents / 100).toFixed(2)})` : ''}`}
+                  </p>
+                  {selectedOrg.show_patient_name_on_appointment === false && (
+                    <p className="text-blue-900"><strong>🔒 Privacy:</strong> Patient name will be masked in admin/phleb views.</p>
+                  )}
+                  {selectedOrg.member_stacking_rule === 'lowest_wins' && (
+                    <p className="text-blue-900"><strong>🎁 Stacking:</strong> Member tier wins if cheaper than partner rate.</p>
+                  )}
                 </div>
               )}
             </div>
+
+            {/* Fallback: manual org billing (when no partner dropdown row exists) */}
+            {!selectedOrg && (
+              <div className="border-t pt-3">
+                <div className="flex items-start gap-3">
+                  <Checkbox id="org-billing" checked={orgBilling} onCheckedChange={(c) => setOrgBilling(c === true)} className="mt-1" />
+                  <label htmlFor="org-billing" className="text-sm cursor-pointer">
+                    <span className="font-medium">Bill manually to an organization</span>
+                    <p className="text-xs text-muted-foreground">Use if no partner row exists for this customer yet.</p>
+                  </label>
+                </div>
+                {orgBilling && (
+                  <div className="grid grid-cols-2 gap-3 mt-2">
+                    <Input value={orgName} onChange={e => setOrgName(e.target.value)} placeholder="Org name" />
+                    <Input type="email" value={orgEmail} onChange={e => setOrgEmail(e.target.value)} placeholder="billing@org.com" />
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <Label className="text-xs">Invoice Memo (optional)</Label>
@@ -943,7 +1019,32 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
-              <Button onClick={() => setStep(3)} disabled={!canGoToStep3}>Next: Review <ArrowRight className="ml-1 h-4 w-4" /></Button>
+              <Button onClick={() => {
+                // Partner time-window guard: reject advance if admin picked an org
+                // and the time is outside the org's allowed window.
+                if (selectedOrg && Array.isArray(selectedOrg.time_window_rules) && time && date) {
+                  let hh = 0, mm = 0;
+                  if (time.includes('AM') || time.includes('PM')) {
+                    const [tp, period] = time.split(' ');
+                    const [h, m] = tp.split(':').map(Number);
+                    hh = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
+                    mm = m || 0;
+                  } else {
+                    [hh, mm] = time.split(':').map(Number);
+                  }
+                  const hour = hh + mm / 60;
+                  const dow = new Date(date + 'T12:00:00').getDay();
+                  const inWindow = (selectedOrg.time_window_rules as any[]).some((r: any) =>
+                    r.dayOfWeek.includes(dow) && hour >= r.startHour && hour < r.endHour
+                  );
+                  if (!inWindow) {
+                    const wins = (selectedOrg.time_window_rules as any[]).map((r: any) => r.label || `${r.startHour}-${r.endHour}`).join(' · ');
+                    toast.error(`${selectedOrg.name} only allows bookings: ${wins}. Pick a time in range or change org.`);
+                    return;
+                  }
+                }
+                setStep(3);
+              }} disabled={!canGoToStep3}>Next: Review <ArrowRight className="ml-1 h-4 w-4" /></Button>
             </div>
           </div>
         )}

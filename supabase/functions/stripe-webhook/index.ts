@@ -758,6 +758,13 @@ async function handleAppointmentPayment(session: any) {
         })(),
         lab_destination: metadata.lab_destination || null,
         lab_destination_pending: metadata.lab_destination_pending === 'true',
+        // Partner / organization linkage
+        organization_id: metadata.organization_id || null,
+        billed_to: metadata.billed_to || 'patient',
+        patient_name_masked: metadata.patient_name_masked === 'true',
+        org_reference_id: metadata.organization_id && metadata.patient_name_masked === 'true'
+          ? `${String(metadata.organization_name || 'ORG').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4)}-${Date.now().toString().slice(-6)}`
+          : null,
         notes: [
           // Strip the file paths from notes (they're stored in their own columns)
           (metadata.additional_notes || '').replace(/Lab orders?:\s*[^|]+\|?\s*/g, '').replace(/Insurance:\s*[^|]+\|?\s*/g, '').trim(),

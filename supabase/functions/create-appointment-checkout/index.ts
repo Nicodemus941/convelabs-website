@@ -88,6 +88,9 @@ Deno.serve(async (req) => {
       // Optional: bundle an annual membership subscription with this booking
       // Shape: { planName: 'Regular' | 'VIP' | 'Concierge', annualPriceCents: number, agreementId: string }
       subscribeToMembership = null,
+      // Partner/org linkage — applies partner time-window rules, pricing floor,
+      // billing mode (patient vs org), and patient-name masking
+      organizationId = null,
     } = await req.json();
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
@@ -339,6 +342,62 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── PARTNER ORGANIZATION ENFORCEMENT ──────────────────────────
+    // If a partner org is specified (patient referred from Aristotle, CAO,
+    // NaturaMed, etc.), load their rules and apply:
+    //   - Time window: reject if outside the org's allowed hours
+    //   - Locked price: floor at partner rate (unless stacking rule lets
+    //     member tier win)
+    //   - Billed-to: flag appointment for org-invoice instead of patient-pay
+    //   - Patient name masking: for CAO, replace display name with reference ID
+    let partnerOrg: any = null;
+    let effectivePatientPaysCents = clientAmount;
+    if (organizationId) {
+      const { data: org } = await supabaseClient
+        .from('organizations')
+        .select('*')
+        .eq('id', organizationId)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (!org) {
+        return new Response(JSON.stringify({ error: 'Partner organization not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      partnerOrg = org;
+
+      // Time-window enforcement from org rules
+      if (appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly) && Array.isArray(org.time_window_rules)) {
+        let hh = 0, mm = 0;
+        const t = String(appointmentTime);
+        if (t.includes('AM') || t.includes('PM')) {
+          const [tp, period] = t.split(' ');
+          const [h, m] = tp.split(':').map(Number);
+          hh = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
+          mm = m || 0;
+        } else {
+          [hh, mm] = t.split(':').map(Number);
+        }
+        const hourFloat = hh + (mm / 60);
+        const dow = new Date(dateOnly + 'T12:00:00').getDay();
+
+        const rules = org.time_window_rules as Array<{ dayOfWeek: number[]; startHour: number; endHour: number; label?: string }>;
+        const inWindow = rules.some(r => {
+          if (!r.dayOfWeek.includes(dow)) return false;
+          return hourFloat >= r.startHour && hourFloat < r.endHour;
+        });
+        if (!inWindow) {
+          const ruleDescs = rules.map(r => r.label || `${r.startHour}-${r.endHour}`).join(' · ');
+          return new Response(JSON.stringify({
+            error: 'outside_partner_window',
+            message: `${org.name} only books patients during: ${ruleDescs}. Please pick a time in that range.`,
+            organization: org.name,
+            allowed_windows: rules,
+          }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+    }
+
     // ─── SERVER-SIDE MEMBERSHIP VALIDATION ─────────────────────────
     // If the patient is a member but the frontend didn't apply the
     // discount (or claimed a lesser tier), we apply the correction
@@ -361,6 +420,38 @@ Deno.serve(async (req) => {
           `clientTier=${clientMemberTier} serverTier=${serverTier} ` +
           `client=$${clientAmount / 100} server=$${amount / 100} saved=$${priceCorrection / 100}`
         );
+      }
+    }
+
+    // ─── PARTNER PRICING OVERRIDE ──────────────────────────────────
+    // Applied AFTER member tier correction, per the org's stacking rule:
+    //   lowest_wins  — min(partner floor, member tier price) — Restoration Place
+    //   partner_only — force partner floor, ignore tier — NaturaMed, ND Wellness
+    //   org_covers   — patient pays $0; org invoiced separately — CAO, Elite, Aristotle
+    //   none         — no partner rule applies
+    if (partnerOrg) {
+      const rule = String(partnerOrg.member_stacking_rule || 'none');
+      const partnerPatientCents = partnerOrg.locked_price_cents != null ? Number(partnerOrg.locked_price_cents) : null;
+
+      if (rule === 'org_covers') {
+        // Patient pays nothing at booking — org gets invoiced separately
+        console.log(`[partner] ${partnerOrg.name} covers patient cost — setting amount to 0`);
+        amount = 0;
+      }
+      else if (rule === 'partner_only' && partnerPatientCents != null) {
+        // Partner price overrides everything
+        console.log(`[partner] ${partnerOrg.name} partner_only — forcing $${partnerPatientCents / 100}`);
+        amount = partnerPatientCents;
+      }
+      else if (rule === 'lowest_wins' && partnerPatientCents != null) {
+        // Take whichever is lower — partner floor OR member tier
+        const prior = amount;
+        amount = Math.min(amount, partnerPatientCents);
+        if (amount < prior) {
+          console.log(`[partner] ${partnerOrg.name} lowest_wins — $${prior/100} → $${amount/100}`);
+        } else {
+          console.log(`[partner] ${partnerOrg.name} lowest_wins — member tier already cheaper ($${amount/100})`);
+        }
       }
     }
 
@@ -544,6 +635,16 @@ Deno.serve(async (req) => {
     metadata.referral_credit_applied_cents = String(referralCreditApplied);
     metadata.redeemed_referral_credit_ids = referralCreditIdsToMark.join(',').substring(0, 500);
     metadata.member_benefit_used = willUseMemberBenefit ? 'true' : 'false';
+
+    // Partner linkage — webhook + verify use these to stamp organization_id +
+    // billed_to + patient_name_masked on the appointment row
+    if (partnerOrg) {
+      metadata.organization_id = partnerOrg.id;
+      metadata.organization_name = String(partnerOrg.name).substring(0, 80);
+      metadata.billed_to = partnerOrg.default_billed_to || 'patient';
+      metadata.patient_name_masked = partnerOrg.show_patient_name_on_appointment === false ? 'true' : 'false';
+      metadata.org_invoice_price_cents = String(partnerOrg.org_invoice_price_cents || 0);
+    }
 
     // ─── BUNDLE-SUBSCRIBE: optional membership + this visit, one Stripe session ──
     // Hormozi's "anchor flip" — patient already pulling out wallet for a draw,

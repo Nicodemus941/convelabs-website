@@ -202,6 +202,13 @@ Deno.serve(async (req) => {
           insurance_card_path: metadata.insurance_card_path || null,
           lab_destination: metadata.lab_destination || null,
           lab_destination_pending: metadata.lab_destination_pending === 'true',
+          // Partner/org linkage (if booking came from a provider)
+          organization_id: metadata.organization_id || null,
+          billed_to: metadata.billed_to || 'patient',
+          patient_name_masked: metadata.patient_name_masked === 'true',
+          org_reference_id: metadata.organization_id && metadata.patient_name_masked === 'true'
+            ? `${String(metadata.organization_name || 'ORG').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4)}-${Date.now().toString().slice(-6)}`
+            : null,
         }])
         .select()
         .single();
