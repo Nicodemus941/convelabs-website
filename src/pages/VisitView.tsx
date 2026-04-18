@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   CheckCircle, Calendar, Clock, MapPin, Phone, FileText,
   Loader2, AlertCircle, Download, ExternalLink, ArrowRight, UserPlus,
-  Users, MessageSquare,
+  Users, MessageSquare, Repeat,
 } from 'lucide-react';
 import Header from '@/components/home/Header';
 import Footer from '@/components/home/Footer';
@@ -48,6 +48,11 @@ interface Visit {
   patient_phone: string;
   gate_code: string | null;
   notes: string | null;
+  // Sprint 4: series info (if this visit is part of a recurring series)
+  recurrence_group_id?: string | null;
+  recurrence_sequence?: number | null;
+  recurrence_total?: number | null;
+  visit_bundle_id?: string | null;
 }
 
 const VisitView: React.FC = () => {
@@ -66,7 +71,7 @@ const VisitView: React.FC = () => {
       try {
         const { data, error: fetchError } = await supabase
           .from('appointments')
-          .select('id, view_token, appointment_date, appointment_time, service_type, service_name, status, address, zipcode, total_amount, tip_amount, patient_name, patient_email, patient_phone, gate_code, notes')
+          .select('id, view_token, appointment_date, appointment_time, service_type, service_name, status, address, zipcode, total_amount, tip_amount, patient_name, patient_email, patient_phone, gate_code, notes, recurrence_group_id, recurrence_sequence, recurrence_total, visit_bundle_id')
           .eq('view_token', token)
           .maybeSingle();
         if (fetchError) throw fetchError;
@@ -205,6 +210,28 @@ const VisitView: React.FC = () => {
           </h1>
           <p className="text-muted-foreground">Hi {visit.patient_name?.split(' ')[0] || 'there'} — here are your details.</p>
         </div>
+
+        {/* Recurring series indicator (Sprint 4) */}
+        {visit.recurrence_total && visit.recurrence_total > 1 && (
+          <Card className={`mb-4 border ${visit.visit_bundle_id ? 'bg-emerald-50 border-emerald-200' : 'bg-indigo-50 border-indigo-200'}`}>
+            <CardContent className="p-4 flex items-start gap-3">
+              <div className={`h-9 w-9 rounded-full flex items-center justify-center flex-shrink-0 ${visit.visit_bundle_id ? 'bg-emerald-100' : 'bg-indigo-100'}`}>
+                <Repeat className={`h-4 w-4 ${visit.visit_bundle_id ? 'text-emerald-700' : 'text-indigo-700'}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-semibold ${visit.visit_bundle_id ? 'text-emerald-900' : 'text-indigo-900'}`}>
+                  Visit {visit.recurrence_sequence} of {visit.recurrence_total}
+                  {visit.visit_bundle_id && <span className="text-xs font-medium ml-1">· Prepaid bundle</span>}
+                </p>
+                <p className={`text-xs mt-0.5 ${visit.visit_bundle_id ? 'text-emerald-700' : 'text-indigo-700'}`}>
+                  {visit.visit_bundle_id
+                    ? `This visit is covered by your prepaid package — nothing due today.`
+                    : `Part of your recurring appointment series with ConveLabs.`}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Primary card */}
         <Card className="shadow-md border-gray-200 mb-4">

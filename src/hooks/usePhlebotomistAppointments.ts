@@ -40,6 +40,11 @@ export interface PhlebAppointment {
   lab_destination_pending: boolean;
   // Sprint 3.5: collection timestamp + optional geo-stamp (from TubeLabelModal)
   collection_at: string | null;
+  // Sprint 4: recurring series linkage (prepaid bundles or per-visit)
+  recurrence_group_id: string | null;
+  recurrence_sequence: number | null;
+  recurrence_total: number | null;
+  visit_bundle_id: string | null;
   patient_id: string | null;
   patient_name: string;
   patient_phone: string | null;
@@ -211,6 +216,10 @@ export function usePhlebotomistAppointments() {
             lab_order_panels: Array.isArray(appt.lab_order_panels) ? appt.lab_order_panels : null,
             ocr_processed_at: appt.ocr_processed_at || null,
             collection_at: appt.collection_at || null,
+            recurrence_group_id: appt.recurrence_group_id || null,
+            recurrence_sequence: appt.recurrence_sequence ?? null,
+            recurrence_total: appt.recurrence_total ?? null,
+            visit_bundle_id: appt.visit_bundle_id || null,
             patient_id: appt.patient_id,
             patient_name: patientName,
             patient_phone: patientPhone,

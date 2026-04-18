@@ -254,12 +254,45 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Payment badge */}
-        <div className="px-5 pt-4">
+        {/* Payment + Series badges */}
+        <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
           <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${paymentCfg.className}`}>
             <span>{paymentCfg.icon}</span>
             {appt.total_amount > 0 ? `$${((appt.total_amount || 0) + (appt.tip_amount || 0)).toFixed(2)} ${paymentCfg.label.toLowerCase()}` : paymentCfg.label}
           </div>
+          {/* Sprint 4: recurring-series badge + cancel-series button */}
+          {appt.recurrence_group_id && appt.recurrence_total > 1 && (
+            <>
+              <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${appt.visit_bundle_id ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200'}`}>
+                🔁 Visit {appt.recurrence_sequence}/{appt.recurrence_total}{appt.visit_bundle_id ? ' · prepaid' : ''}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] border-red-200 text-red-600 hover:bg-red-50"
+                onClick={async () => {
+                  const remaining = appt.recurrence_total - (appt.recurrence_sequence || 1) + 1;
+                  if (!confirm(`Cancel ALL ${remaining} remaining visit(s) in this series?`)) return;
+                  const { error } = await supabase
+                    .from('appointments')
+                    .update({ status: 'cancelled' })
+                    .eq('recurrence_group_id', appt.recurrence_group_id)
+                    .in('status', ['scheduled', 'confirmed']);
+                  if (error) { toast.error(error.message); return; }
+                  if (appt.visit_bundle_id) {
+                    try {
+                      await supabase.from('visit_bundles' as any).update({ credits_remaining: 0 }).eq('id', appt.visit_bundle_id);
+                    } catch (e) { console.warn('bundle zero-out failed:', e); }
+                  }
+                  toast.success(`Series cancelled. ${appt.visit_bundle_id ? 'Bundle frozen — issue refund in Stripe if needed.' : 'Future invoices won\u2019t be sent.'}`);
+                  onUpdate();
+                  onClose();
+                }}
+              >
+                Cancel entire series
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Patient name + contact */}

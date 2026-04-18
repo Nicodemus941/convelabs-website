@@ -72,6 +72,10 @@ Deno.serve(async (req) => {
       if (metadata.type === 'appointment_payment') {
         await handleAppointmentPayment(session);
       }
+      // Handle bundle (prepaid recurring series) payments
+      else if (metadata.type === 'bundle_payment') {
+        await handleBundlePayment(session);
+      }
       // Handle credit pack purchases
       else if (metadata.type === 'credit_pack') {
         await handleCreditPackPurchase(session);
@@ -154,6 +158,73 @@ Deno.serve(async (req) => {
 });
 
 // Handle credit pack purchases
+/**
+ * Handle a prepaid bundle (recurring series) payment.
+ * Sprint 4: when admin creates a recurring series with paymentMode=prepaid_bundle,
+ * the patient is handed a Stripe checkout for the discounted total. This handler
+ * runs when that checkout completes — marks the bundle + all linked appointments
+ * as paid, and pings the owner.
+ */
+async function handleBundlePayment(session: any) {
+  const metadata = session.metadata || {};
+  const bundleId = metadata.bundle_id;
+  if (!bundleId) {
+    console.warn('[bundle_payment] no bundle_id in metadata');
+    return;
+  }
+
+  const paidAmount = (session.amount_total || 0) / 100;
+
+  // Mark the bundle paid by stamping amount_paid + making sure the session id matches
+  try {
+    await supabaseClient
+      .from('visit_bundles' as any)
+      .update({
+        amount_paid: paidAmount,
+        stripe_checkout_session_id: session.id,
+      })
+      .eq('id', bundleId);
+  } catch (e) {
+    console.error('[bundle_payment] failed to update bundle:', e);
+  }
+
+  // Every appointment linked to this bundle is now prepaid — mark payment_status completed
+  try {
+    const { data: updated } = await supabaseClient
+      .from('appointments')
+      .update({ payment_status: 'completed', invoice_status: 'not_required' })
+      .eq('visit_bundle_id', bundleId)
+      .select('id');
+    console.log(`[bundle_payment] marked ${updated?.length || 0} appointments paid`);
+  } catch (e) {
+    console.error('[bundle_payment] failed to flip appointment payment_status:', e);
+  }
+
+  // Owner SMS
+  try {
+    const ownerPhone = Deno.env.get('OWNER_PHONE') || '9415279169';
+    const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+    const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+    const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
+    if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          To: ownerPhone.startsWith('+') ? ownerPhone : `+1${ownerPhone.replace(/\D/g, '')}`,
+          Body: `💰 Bundle PREPAID: $${paidAmount.toFixed(2)} — ${metadata.patient_name || metadata.patient_email || '(unknown)'} · ${metadata.occurrences || '?'} visits starting ${metadata.start_date || 'TBD'}`,
+          From: TWILIO_FROM,
+        }).toString(),
+      });
+    }
+  } catch (e) {
+    console.warn('[bundle_payment] owner SMS non-blocking fail:', e);
+  }
+}
+
 async function handleCreditPackPurchase(session: any) {
   try {
     const { metadata, customer_details, id: checkout_id, payment_intent } = session;

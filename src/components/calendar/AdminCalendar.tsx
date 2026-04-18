@@ -36,9 +36,12 @@ const AdminCalendar: React.FC = () => {
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [recurringModalOpen, setRecurringModalOpen] = useState(false);
   const [blockForm, setBlockForm] = useState({ startDate: '', endDate: '', reason: '', blockType: 'office_closure' });
+  // Sprint 4 defaults — bundle pricing & % off baked in here so the UI + handler
+  // agree on the math without duplication.
+  const BUNDLE_DISCOUNT_PCT = 15;
   const [recurringForm, setRecurringForm] = useState({
     patientSearch: '', patientName: '', patientEmail: '', patientPhone: '',
-    serviceType: 'mobile', frequency: 'weekly', occurrences: '4',
+    serviceType: 'mobile', frequency: 'weekly', occurrences: '4', paymentMode: 'per_visit' as 'per_visit' | 'prepaid_bundle',
     startDate: '', time: '', address: '', notes: '', waiveFee: false,
   });
   const [isBlockSubmitting, setIsBlockSubmitting] = useState(false);
@@ -506,6 +509,35 @@ const AdminCalendar: React.FC = () => {
             </div>
 
             {/* Preview */}
+            {/* Payment Mode — per-visit invoice vs. prepaid bundle (Sprint 4) */}
+            <div className="border rounded-lg p-3 bg-gray-50">
+              <Label className="text-xs uppercase tracking-wider text-gray-600 font-semibold">Payment</Label>
+              <div className="grid grid-cols-2 gap-2 mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => setRecurringForm(p => ({ ...p, paymentMode: 'per_visit' }))}
+                  className={`px-3 py-2 rounded-md text-xs font-medium border transition text-left ${recurringForm.paymentMode === 'per_visit' ? 'bg-white border-[#B91C1C] text-[#B91C1C]' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'}`}
+                >
+                  <div className="font-semibold">Invoice per visit</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5 font-normal">Full price each visit</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecurringForm(p => ({ ...p, paymentMode: 'prepaid_bundle' }))}
+                  className={`px-3 py-2 rounded-md text-xs font-medium border transition text-left ${recurringForm.paymentMode === 'prepaid_bundle' ? 'bg-white border-emerald-600 text-emerald-700' : 'bg-white border-gray-200 text-gray-700 hover:border-gray-300'}`}
+                  disabled={recurringForm.waiveFee}
+                >
+                  <div className="font-semibold">Prepaid bundle · {BUNDLE_DISCOUNT_PCT}% off</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5 font-normal">Single upfront charge</div>
+                </button>
+              </div>
+              {recurringForm.paymentMode === 'prepaid_bundle' && !recurringForm.waiveFee && (
+                <p className="text-[11px] text-emerald-700 mt-2 leading-relaxed">
+                  Patient gets a single Stripe checkout for the whole series. Near-100% show rate (sunk-cost psychology) and cash lands Day 1.
+                </p>
+              )}
+            </div>
+
             {recurringForm.startDate && recurringForm.time && (
               <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1">
                 <p className="font-semibold">Preview: {recurringForm.occurrences} appointments</p>
@@ -513,7 +545,19 @@ const AdminCalendar: React.FC = () => {
                   {recurringForm.frequency === 'weekly' ? 'Every week' : recurringForm.frequency === 'biweekly' ? 'Every 2 weeks' : recurringForm.frequency === 'monthly' ? 'Every month' : 'Every 2 months'}
                   {' '}starting {recurringForm.startDate} at {recurringForm.time}
                 </p>
-                {!recurringForm.waiveFee && (
+                {!recurringForm.waiveFee && recurringForm.paymentMode === 'prepaid_bundle' && (
+                  <p className="mt-1 font-medium text-emerald-700">
+                    {(() => {
+                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
+                      const p = prices[recurringForm.serviceType] || 150;
+                      const n = parseInt(recurringForm.occurrences || '1');
+                      const full = p * n;
+                      const disc = full * (BUNDLE_DISCOUNT_PCT / 100);
+                      return `Prepaid: $${(full - disc).toFixed(2)} (saves $${disc.toFixed(2)} vs $${full.toFixed(2)} list)`;
+                    })()}
+                  </p>
+                )}
+                {!recurringForm.waiveFee && recurringForm.paymentMode === 'per_visit' && (
                   <p className="font-medium text-[#B91C1C]">
                     Total: ${(() => {
                       const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
@@ -546,6 +590,31 @@ const AdminCalendar: React.FC = () => {
                     if (period === 'AM' && hours === 12) hours = 0;
                   }
 
+                  // Sprint 4: generate a shared recurrence_group_id for the whole series
+                  // (client-side UUID so every row in the batch can reference it pre-insert).
+                  const recurrenceGroupId = crypto.randomUUID();
+                  const isPrepaid = recurringForm.paymentMode === 'prepaid_bundle' && !recurringForm.waiveFee;
+                  const bundleDiscountPct = BUNDLE_DISCOUNT_PCT;
+                  // Per-visit price for a prepaid series: bundle discount spread evenly
+                  const perVisitPrepaid = isPrepaid ? price * (1 - bundleDiscountPct / 100) : price;
+
+                  // If prepaid, create the visit_bundles row NOW so we can link each appointment
+                  // via visit_bundle_id. Stripe session created later and attached after.
+                  let bundleId: string | null = null;
+                  if (isPrepaid) {
+                    const totalAmount = price * occurrences * (1 - bundleDiscountPct / 100);
+                    const { data: bundle, error: bundleErr } = await supabase.from('visit_bundles').insert({
+                      patient_email: recurringForm.patientEmail || null,
+                      credits_purchased: occurrences,
+                      credits_remaining: occurrences,
+                      discount_percent: bundleDiscountPct,
+                      amount_paid: totalAmount,
+                      // stripe_checkout_session_id populated after checkout session created
+                    } as any).select().single();
+                    if (bundleErr) throw bundleErr;
+                    bundleId = (bundle as any)?.id || null;
+                  }
+
                   const appointmentsToCreate = [];
                   let currentDate = new Date(recurringForm.startDate + 'T12:00:00');
 
@@ -564,14 +633,20 @@ const AdminCalendar: React.FC = () => {
                       status: 'scheduled',
                       address: recurringForm.address || 'TBD',
                       zipcode: '32801',
-                      total_amount: recurringForm.waiveFee ? 0 : price,
-                      service_price: recurringForm.waiveFee ? 0 : price,
+                      total_amount: recurringForm.waiveFee ? 0 : (isPrepaid ? perVisitPrepaid : price),
+                      service_price: recurringForm.waiveFee ? 0 : (isPrepaid ? perVisitPrepaid : price),
                       duration_minutes: recurringForm.serviceType === 'therapeutic' ? 75 : 60,
                       booking_source: 'manual',
-                      invoice_status: recurringForm.waiveFee ? 'not_required' : 'sent',
-                      payment_status: recurringForm.waiveFee ? 'completed' : 'pending',
+                      // If prepaid, individual appointments should NOT be invoiced — bundle covers them
+                      invoice_status: recurringForm.waiveFee || isPrepaid ? 'not_required' : 'sent',
+                      payment_status: recurringForm.waiveFee || isPrepaid ? 'completed' : 'pending',
                       phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164', // TODO: dynamic staff selection when team scales
-                      notes: `Recurring ${recurringForm.frequency} (${i + 1}/${occurrences})`,
+                      notes: `Recurring ${recurringForm.frequency} (${i + 1}/${occurrences})${isPrepaid ? ' — prepaid bundle' : ''}`,
+                      // Sprint 4: link every appointment in the series
+                      recurrence_group_id: recurrenceGroupId,
+                      recurrence_sequence: i + 1,
+                      recurrence_total: occurrences,
+                      ...(bundleId ? { visit_bundle_id: bundleId } : {}),
                     });
 
                     // Advance date
@@ -587,8 +662,36 @@ const AdminCalendar: React.FC = () => {
                   const { data: created, error } = await supabase.from('appointments').insert(appointmentsToCreate).select();
                   if (error) throw error;
 
-                  // Send invoice for total if not waived
-                  if (!recurringForm.waiveFee && recurringForm.patientEmail) {
+                  // Bundle prepaid — one Stripe checkout for the whole series
+                  if (isPrepaid && recurringForm.patientEmail && bundleId) {
+                    try {
+                      const totalAmount = price * occurrences * (1 - bundleDiscountPct / 100);
+                      const { data: checkoutRes, error: checkoutErr } = await supabase.functions.invoke('create-bundle-checkout', {
+                        body: {
+                          bundleId,
+                          patientEmail: recurringForm.patientEmail,
+                          patientName: recurringForm.patientName,
+                          serviceName: `${svcName} x${occurrences} (${recurringForm.frequency}, ${bundleDiscountPct}% off)`,
+                          amountCents: Math.round(totalAmount * 100),
+                          occurrences,
+                          startDate: recurringForm.startDate,
+                        },
+                      });
+                      if (checkoutErr) throw checkoutErr;
+                      const url = (checkoutRes as any)?.url;
+                      if (url) {
+                        toast.success('Bundle checkout link ready — opening for patient…');
+                        window.open(url, '_blank');
+                      } else {
+                        toast.warning('Series created; bundle checkout link failed. Send manually.');
+                      }
+                    } catch (bundleErr: any) {
+                      console.error('Bundle checkout error:', bundleErr);
+                      toast.warning('Series created; bundle checkout failed. Send invoice manually.');
+                    }
+                  }
+                  // Per-visit — invoice the first appointment's total amount (keeps legacy flow)
+                  else if (!recurringForm.waiveFee && recurringForm.patientEmail) {
                     const totalAmount = price * occurrences;
                     await supabase.functions.invoke('send-appointment-invoice', {
                       body: {
@@ -606,13 +709,14 @@ const AdminCalendar: React.FC = () => {
                     }).then(undefined, (err: any) => console.error('Invoice error:', err));
                   }
 
-                  // Notify owner + phlebotomist
+                  // Notify owner
+                  const modeLabel = isPrepaid ? `PREPAID $${(price * occurrences * (1 - bundleDiscountPct / 100)).toFixed(2)} (${bundleDiscountPct}% off)` : recurringForm.waiveFee ? '0 (waived)' : `$${(price * occurrences).toFixed(2)} per-visit`;
                   supabase.functions.invoke('send-sms-notification', {
-                    body: { to: '9415279169', message: `Recurring Booking!\n\nPatient: ${recurringForm.patientName}\n${occurrences}x ${svcName} (${recurringForm.frequency})\nTotal: $${recurringForm.waiveFee ? '0 (waived)' : (price * occurrences).toFixed(2)}\nStarting: ${recurringForm.startDate}` },
+                    body: { to: '9415279169', message: `Recurring Booking!\n\nPatient: ${recurringForm.patientName}\n${occurrences}x ${svcName} (${recurringForm.frequency})\n${modeLabel}\nStarting: ${recurringForm.startDate}` },
                   }).then(undefined, () => {});
 
                   toast.success(`${created?.length || occurrences} recurring appointments created!`);
-                  setRecurringForm({ patientSearch: '', patientName: '', patientEmail: '', patientPhone: '', serviceType: 'mobile', frequency: 'weekly', occurrences: '4', startDate: '', time: '', address: '', notes: '', waiveFee: false });
+                  setRecurringForm({ patientSearch: '', patientName: '', patientEmail: '', patientPhone: '', serviceType: 'mobile', frequency: 'weekly', occurrences: '4', startDate: '', time: '', address: '', notes: '', waiveFee: false, paymentMode: 'per_visit' });
                   setRecurringModalOpen(false);
                   fetchAppointments();
                 } catch (err: any) {

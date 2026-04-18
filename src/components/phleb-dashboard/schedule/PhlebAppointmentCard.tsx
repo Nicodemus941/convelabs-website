@@ -9,7 +9,7 @@ import {
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
   Stethoscope, Shield, CalendarClock, DollarSign, Crown, AlertTriangle,
   Globe, Pencil, FileText, FlaskConical, HelpCircle,
-  Route, Utensils, Clock3, Printer,
+  Route, Utensils, Clock3, Printer, Repeat,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -165,6 +165,17 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                         title={readiness.reasons.length > 0 ? readiness.reasons.join(' · ') : 'All pre-visit checks passed'}
                       >
                         {readiness.label}
+                      </span>
+                    )}
+                    {/* Series indicator (Sprint 4) */}
+                    {appointment.recurrence_total && appointment.recurrence_total > 1 && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${appointment.visit_bundle_id ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-indigo-50 text-indigo-700 border-indigo-200'}`}
+                        title={appointment.visit_bundle_id ? 'Prepaid bundle — no invoice at this visit' : 'Recurring series — invoice per visit'}
+                      >
+                        <Repeat className="h-2.5 w-2.5" />
+                        {appointment.recurrence_sequence}/{appointment.recurrence_total}
+                        {appointment.visit_bundle_id ? ' · prepaid' : ''}
                       </span>
                     )}
                   </div>
