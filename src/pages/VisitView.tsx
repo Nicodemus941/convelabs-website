@@ -7,8 +7,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   CheckCircle, Calendar, Clock, MapPin, Phone, FileText,
   Loader2, AlertCircle, Download, ExternalLink, ArrowRight, UserPlus,
-  Users, MessageSquare, Repeat,
+  Users, MessageSquare, Repeat, Sparkles,
 } from 'lucide-react';
+import SubscribeSeriesModal from '@/components/visit/SubscribeSeriesModal';
 import Header from '@/components/home/Header';
 import Footer from '@/components/home/Footer';
 import { formatAppointmentDate, formatAppointmentTime, formatAppointmentDateTime } from '@/lib/appointmentDate';
@@ -60,6 +61,7 @@ const VisitView: React.FC = () => {
   const [visit, setVisit] = useState<Visit | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -294,6 +296,51 @@ const VisitView: React.FC = () => {
           </a>
         </div>
 
+        {/* Subscribe & save CTA — only for one-off visits (not already in a series) */}
+        {!visit.recurrence_group_id && (
+          <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-white mb-6 relative overflow-hidden">
+            <div className="absolute top-0 right-0 bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-bl-lg tracking-wide">
+              SAVE 15%
+            </div>
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="h-11 w-11 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-gray-900 text-sm">
+                    Need this on a schedule? <span className="text-emerald-700">Save 15% on every visit.</span>
+                  </p>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    Auto-scheduled monthly, quarterly, or on your cadence. Pause or cancel anytime — you're not locked in.
+                  </p>
+                </div>
+              </div>
+              <ul className="space-y-1.5 text-xs text-gray-700 mb-4 pl-1">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <span>15% off your current price — automatically, every visit</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <span>Same phleb, same address, same prep — we handle the calendar</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <span>Pause, skip, or cancel with one text — no commitment</span>
+                </li>
+              </ul>
+              <Button
+                className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                onClick={() => setSubscribeOpen(true)}
+              >
+                <Sparkles className="h-4 w-4" />
+                Subscribe &amp; save 15%
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Family member upsell — Hormozi post-purchase offer */}
         {(() => {
           const firstName = visit.patient_name?.split(' ')[0] || 'there';
@@ -425,6 +472,13 @@ const VisitView: React.FC = () => {
       </div>
 
       <Footer />
+
+      {/* Subscribe modal — Tier 3 */}
+      <SubscribeSeriesModal
+        open={subscribeOpen}
+        onClose={() => setSubscribeOpen(false)}
+        visit={visit}
+      />
     </>
   );
 };

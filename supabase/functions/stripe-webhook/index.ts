@@ -76,6 +76,10 @@ Deno.serve(async (req) => {
       else if (metadata.type === 'bundle_payment') {
         await handleBundlePayment(session);
       }
+      // Handle subscription (patient recurring plan) checkout completion
+      else if (metadata.type === 'subscription_payment') {
+        await handleSubscriptionCheckoutComplete(session);
+      }
       // Handle credit pack purchases
       else if (metadata.type === 'credit_pack') {
         await handleCreditPackPurchase(session);
@@ -461,28 +465,92 @@ async function handleSubscriptionUpdate(subscription: any) {
 async function handleSubscriptionCancellation(subscription: any) {
   try {
     const subscriptionId = subscription.id;
-    
-    // Mark membership as canceled
+
+    // Check if this cancellation is for a recurring_bookings row (Tier 3 patient subscription)
+    // before we try to mark a membership — these two systems share the subscription webhook.
+    const { data: recurring } = await supabaseClient
+      .from('recurring_bookings' as any)
+      .select('id, patient_email')
+      .eq('stripe_subscription_id', subscriptionId)
+      .maybeSingle();
+
+    if (recurring) {
+      await supabaseClient.from('recurring_bookings' as any).update({
+        is_active: false,
+        cancelled_at: new Date().toISOString(),
+      }).eq('id', (recurring as any).id);
+      console.log(`[subscription.deleted] cancelled recurring_booking ${(recurring as any).id} (${(recurring as any).patient_email})`);
+      return recurring;
+    }
+
+    // Otherwise, legacy path — mark membership as canceled
     const { data, error } = await supabaseClient
       .from('user_memberships')
-      .update({ 
+      .update({
         status: 'canceled',
         updated_at: new Date().toISOString()
       })
       .eq('stripe_subscription_id', subscriptionId)
       .select()
       .single();
-    
+
     if (error) {
-      console.error('Error marking membership as canceled:', error);
-      throw error;
+      // Not a membership either — probably unrelated. Log and move on.
+      console.warn(`[subscription.deleted] no match for ${subscriptionId}:`, error.message);
+      return null;
     }
-    
+
     console.log(`Marked subscription ${subscriptionId} as canceled`);
     return data;
   } catch (error) {
     console.error('Error handling subscription cancellation:', error);
     throw error;
+  }
+}
+
+/**
+ * Tier 3: recurring plan checkout completed. Flip the draft recurring_bookings
+ * row to is_active=true and stamp the subscription id for future lifecycle events.
+ */
+async function handleSubscriptionCheckoutComplete(session: any) {
+  const metadata = session.metadata || {};
+  const recurringBookingId = metadata.recurring_booking_id;
+  if (!recurringBookingId) {
+    console.warn('[subscription_payment] no recurring_booking_id in metadata');
+    return;
+  }
+
+  try {
+    await supabaseClient.from('recurring_bookings' as any).update({
+      is_active: true,
+      stripe_subscription_id: session.subscription || null,
+    }).eq('id', recurringBookingId);
+
+    console.log(`[subscription_payment] activated recurring_booking ${recurringBookingId} (sub: ${session.subscription})`);
+
+    // Owner SMS — confirm the subscription is live
+    try {
+      const ownerPhone = Deno.env.get('OWNER_PHONE') || '9415279169';
+      const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+      const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+      const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
+      if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            To: ownerPhone.startsWith('+') ? ownerPhone : `+1${ownerPhone.replace(/\D/g, '')}`,
+            Body: `💰 RECURRING PLAN ACTIVE: ${metadata.patient_name || metadata.patient_email || '(unknown)'} — every ${metadata.frequency_weeks || '?'}w`,
+            From: TWILIO_FROM,
+          }).toString(),
+        });
+      }
+    } catch (e) { console.warn('[subscription_payment] owner SMS non-blocking:', e); }
+  } catch (e) {
+    console.error('[subscription_payment] activation failed:', e);
   }
 }
 

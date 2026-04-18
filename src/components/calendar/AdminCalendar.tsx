@@ -14,7 +14,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AppointmentDetailModal from './AppointmentDetailModal';
 import ScheduleAppointmentModal from './ScheduleAppointmentModal';
+import SeriesConflictModal, { type Resolution } from './SeriesConflictModal';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
+import { detectSeriesConflicts, type Conflict, type ProposedSlot } from '@/lib/seriesConflicts';
 import './calendar-styles.css';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -50,6 +52,10 @@ const AdminCalendar: React.FC = () => {
   });
   const [isBlockSubmitting, setIsBlockSubmitting] = useState(false);
   const [isRecurringSubmitting, setIsRecurringSubmitting] = useState(false);
+  // Sprint 4: series conflict detection state
+  const [conflictModalOpen, setConflictModalOpen] = useState(false);
+  const [detectedConflicts, setDetectedConflicts] = useState<Conflict[]>([]);
+  const [pendingSlots, setPendingSlots] = useState<ProposedSlot[]>([]);
 
   // Sprint 4 — patient autocomplete for the recurring modal
   const [patientResults, setPatientResults] = useState<Array<{ id: string; first_name: string; last_name: string; email: string | null; phone: string | null; address: string | null; city: string | null; state: string | null; zipcode: string | null; }>>([]);
@@ -67,6 +73,182 @@ const AdminCalendar: React.FC = () => {
       setPatientResults((data as any) || []);
     } catch (e) { console.warn('patient search failed:', e); }
   }, []);
+
+  /**
+   * Compute the proposed slot list from the recurring form state.
+   * Pure function — no side effects. Used both for conflict detection
+   * pre-flight AND as the starting slot list that the conflict modal
+   * operates on.
+   */
+  const computeProposedSlots = useCallback((): ProposedSlot[] => {
+    const occurrences = parseInt(recurringForm.occurrences || '1');
+    const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30, bimonthly: 60 };
+    const daysBetween = freqDays[recurringForm.frequency] || 7;
+
+    let currentDate = new Date(recurringForm.startDate + 'T12:00:00');
+    if (
+      recurringForm.dayOfWeek !== null &&
+      ['weekly', 'biweekly'].includes(recurringForm.frequency)
+    ) {
+      while (currentDate.getDay() !== recurringForm.dayOfWeek) {
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+    }
+    const endDateCap = recurringForm.endDate
+      ? new Date(recurringForm.endDate + 'T23:59:59')
+      : null;
+
+    const slots: ProposedSlot[] = [];
+    for (let i = 0; i < occurrences; i++) {
+      if (endDateCap && currentDate > endDateCap) break;
+      const dateIso = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
+      slots.push({ dateIso, time: recurringForm.time, sequence: i + 1 });
+      if (recurringForm.frequency === 'monthly') currentDate.setMonth(currentDate.getMonth() + 1);
+      else if (recurringForm.frequency === 'bimonthly') currentDate.setMonth(currentDate.getMonth() + 2);
+      else currentDate.setDate(currentDate.getDate() + daysBetween);
+    }
+    return slots;
+  }, [recurringForm]);
+
+  /**
+   * Performs the full recurring-series creation: inserts N appointments,
+   * links them via recurrence_group_id, optionally creates a visit_bundles
+   * row + Stripe bundle checkout, fires owner SMS, resets the form.
+   *
+   * Takes a pre-validated list of slots (from either the direct submit
+   * path OR the conflict-resolution modal) instead of re-computing them.
+   * Re-indexes sequence 1..N so "Visit 3 of 4" reads correctly after
+   * any skipped dates drop out.
+   */
+  const createSeriesWithSlots = useCallback(async (slots: { dateIso: string; time: string }[]) => {
+    if (slots.length === 0) {
+      toast.error('No valid dates remaining after resolution.');
+      return;
+    }
+    const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
+    const serviceNames: Record<string, string> = { mobile: 'Mobile Blood Draw', 'in-office': 'Office Visit', senior: 'Senior Blood Draw', therapeutic: 'Therapeutic Phlebotomy' };
+    const price = prices[recurringForm.serviceType] || 150;
+    const svcName = serviceNames[recurringForm.serviceType] || 'Blood Draw';
+
+    const recurrenceGroupId = crypto.randomUUID();
+    const isPrepaid = recurringForm.paymentMode === 'prepaid_bundle' && !recurringForm.waiveFee;
+    const bundleDiscountPct = BUNDLE_DISCOUNT_PCT;
+    const perVisitPrepaid = isPrepaid ? price * (1 - bundleDiscountPct / 100) : price;
+    const effectiveOccurrences = slots.length;
+
+    // Bundle row (if prepaid)
+    let bundleId: string | null = null;
+    if (isPrepaid) {
+      const totalAmount = price * effectiveOccurrences * (1 - bundleDiscountPct / 100);
+      const { data: bundle, error: bundleErr } = await supabase.from('visit_bundles').insert({
+        patient_email: recurringForm.patientEmail || null,
+        credits_purchased: effectiveOccurrences,
+        credits_remaining: effectiveOccurrences,
+        discount_percent: bundleDiscountPct,
+        amount_paid: totalAmount,
+      } as any).select().single();
+      if (bundleErr) throw bundleErr;
+      bundleId = (bundle as any)?.id || null;
+    }
+
+    // Build appointments from resolved slots (sequence re-indexed 1..N)
+    const appointmentsToCreate = slots.map((slot, idx) => {
+      // Parse the slot's specific time (conflict resolutions may change per-date)
+      let hours = 0, minutes = 0;
+      if (slot.time.includes('AM') || slot.time.includes('PM')) {
+        const [tStr, period] = slot.time.split(' ');
+        [hours, minutes] = tStr.split(':').map(Number);
+        if (period === 'PM' && hours !== 12) hours += 12;
+        if (period === 'AM' && hours === 12) hours = 0;
+      }
+      const apptDateTime = `${slot.dateIso}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+      return {
+        appointment_date: apptDateTime,
+        appointment_time: slot.time,
+        patient_name: recurringForm.patientName,
+        patient_email: recurringForm.patientEmail || null,
+        patient_phone: recurringForm.patientPhone || null,
+        service_type: recurringForm.serviceType,
+        service_name: svcName,
+        status: 'scheduled',
+        address: recurringForm.address || 'TBD',
+        zipcode: '32801',
+        total_amount: recurringForm.waiveFee ? 0 : (isPrepaid ? perVisitPrepaid : price),
+        service_price: recurringForm.waiveFee ? 0 : (isPrepaid ? perVisitPrepaid : price),
+        duration_minutes: recurringForm.serviceType === 'therapeutic' ? 75 : 60,
+        booking_source: 'manual',
+        invoice_status: recurringForm.waiveFee || isPrepaid ? 'not_required' : 'sent',
+        payment_status: recurringForm.waiveFee || isPrepaid ? 'completed' : 'pending',
+        phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
+        notes: `Recurring ${recurringForm.frequency} (${idx + 1}/${effectiveOccurrences})${isPrepaid ? ' — prepaid bundle' : ''}`,
+        recurrence_group_id: recurrenceGroupId,
+        recurrence_sequence: idx + 1,
+        recurrence_total: effectiveOccurrences,
+        ...(bundleId ? { visit_bundle_id: bundleId } : {}),
+      };
+    });
+
+    const { data: created, error } = await supabase.from('appointments').insert(appointmentsToCreate).select();
+    if (error) throw error;
+
+    // Bundle checkout
+    if (isPrepaid && recurringForm.patientEmail && bundleId) {
+      try {
+        const totalAmount = price * effectiveOccurrences * (1 - bundleDiscountPct / 100);
+        const { data: checkoutRes } = await supabase.functions.invoke('create-bundle-checkout', {
+          body: {
+            bundleId,
+            patientEmail: recurringForm.patientEmail,
+            patientName: recurringForm.patientName,
+            serviceName: `${svcName} x${effectiveOccurrences} (${recurringForm.frequency}, ${bundleDiscountPct}% off)`,
+            amountCents: Math.round(totalAmount * 100),
+            occurrences: effectiveOccurrences,
+            startDate: slots[0]?.dateIso,
+          },
+        });
+        const url = (checkoutRes as any)?.url;
+        if (url) {
+          toast.success('Bundle checkout link ready — opening for patient…');
+          window.open(url, '_blank');
+        } else {
+          toast.warning('Series created; bundle checkout link failed. Send manually.');
+        }
+      } catch (bundleErr: any) {
+        console.error('Bundle checkout error:', bundleErr);
+        toast.warning('Series created; bundle checkout failed. Send invoice manually.');
+      }
+    }
+    // Per-visit invoice
+    else if (!recurringForm.waiveFee && recurringForm.patientEmail) {
+      const totalAmount = price * effectiveOccurrences;
+      await supabase.functions.invoke('send-appointment-invoice', {
+        body: {
+          appointmentId: created?.[0]?.id,
+          patientName: recurringForm.patientName,
+          patientEmail: recurringForm.patientEmail,
+          serviceType: recurringForm.serviceType,
+          serviceName: `${svcName} (${effectiveOccurrences}x ${recurringForm.frequency})`,
+          servicePrice: totalAmount,
+          appointmentDate: slots[0]?.dateIso,
+          appointmentTime: slots[0]?.time,
+          address: recurringForm.address || 'TBD',
+          memo: `Recurring: ${effectiveOccurrences} appointments, ${recurringForm.frequency}`,
+        },
+      }).then(undefined, (err: any) => console.error('Invoice error:', err));
+    }
+
+    // Owner SMS
+    const modeLabel = isPrepaid ? `PREPAID $${(price * effectiveOccurrences * (1 - bundleDiscountPct / 100)).toFixed(2)} (${bundleDiscountPct}% off)` : recurringForm.waiveFee ? '0 (waived)' : `$${(price * effectiveOccurrences).toFixed(2)} per-visit`;
+    supabase.functions.invoke('send-sms-notification', {
+      body: { to: '9415279169', message: `Recurring Booking!\n\nPatient: ${recurringForm.patientName}\n${effectiveOccurrences}x ${svcName} (${recurringForm.frequency})\n${modeLabel}\nStarting: ${slots[0]?.dateIso}${recurringForm.endDate ? `\nEnds by: ${recurringForm.endDate}` : ''}` },
+    }).then(undefined, () => {});
+
+    toast.success(`${created?.length || effectiveOccurrences} recurring appointments created!`);
+    setRecurringForm({ patientSearch: '', patientName: '', patientEmail: '', patientPhone: '', serviceType: 'mobile', frequency: 'weekly', occurrences: '4', startDate: '', endDate: '', time: '', address: '', notes: '', waiveFee: false, paymentMode: 'per_visit', dayOfWeek: null });
+    setRecurringModalOpen(false);
+    fetchAppointments();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recurringForm]);
 
   const fetchAppointments = useCallback(async () => {
     setLoading(true);
@@ -587,7 +769,22 @@ const AdminCalendar: React.FC = () => {
             )}
 
             <div className="grid grid-cols-3 gap-3">
-              <div><Label>Start Date *</Label><Input type="date" value={recurringForm.startDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setRecurringForm(p => ({ ...p, startDate: e.target.value }))} /></div>
+              <div>
+                <Label>Start Date *</Label>
+                <div className="relative">
+                  <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <Input
+                    type="date"
+                    value={recurringForm.startDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setRecurringForm(p => ({ ...p, startDate: e.target.value }))}
+                    className="pl-9 cursor-pointer"
+                    onClick={(e) => {
+                      try { (e.currentTarget as any).showPicker?.(); } catch {}
+                    }}
+                  />
+                </div>
+              </div>
               <div>
                 <Label>Time *</Label>
                 <Select value={recurringForm.time} onValueChange={v => setRecurringForm(p => ({ ...p, time: v }))}>
@@ -604,12 +801,17 @@ const AdminCalendar: React.FC = () => {
             {/* End date — optional cap; series stops at the earlier of endDate OR occurrences */}
             <div>
               <Label>End Date <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input
-                type="date"
-                value={recurringForm.endDate}
-                min={recurringForm.startDate || new Date().toISOString().slice(0, 10)}
-                onChange={e => setRecurringForm(p => ({ ...p, endDate: e.target.value }))}
-              />
+              <div className="relative">
+                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                <Input
+                  type="date"
+                  value={recurringForm.endDate}
+                  min={recurringForm.startDate || new Date().toISOString().slice(0, 10)}
+                  onChange={e => setRecurringForm(p => ({ ...p, endDate: e.target.value }))}
+                  className="pl-9 cursor-pointer"
+                  onClick={(e) => { try { (e.currentTarget as any).showPicker?.(); } catch {} }}
+                />
+              </div>
               <p className="text-[11px] text-gray-500 mt-1">
                 Series stops at the earlier of end date OR # occurrences. Leave blank to honor the count only.
               </p>
@@ -697,197 +899,26 @@ const AdminCalendar: React.FC = () => {
               onClick={async () => {
                 setIsRecurringSubmitting(true);
                 try {
-                  const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
-                  const serviceNames: Record<string, string> = { mobile: 'Mobile Blood Draw', 'in-office': 'Office Visit', senior: 'Senior Blood Draw', therapeutic: 'Therapeutic Phlebotomy' };
-                  const price = prices[recurringForm.serviceType] || 150;
-                  const svcName = serviceNames[recurringForm.serviceType] || 'Blood Draw';
-                  const occurrences = parseInt(recurringForm.occurrences || '1');
-                  const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30, bimonthly: 60 };
-                  const daysBetween = freqDays[recurringForm.frequency] || 7;
-
-                  // Parse time
-                  let hours = 0, minutes = 0;
-                  if (recurringForm.time.includes('AM') || recurringForm.time.includes('PM')) {
-                    const [tStr, period] = recurringForm.time.split(' ');
-                    [hours, minutes] = tStr.split(':').map(Number);
-                    if (period === 'PM' && hours !== 12) hours += 12;
-                    if (period === 'AM' && hours === 12) hours = 0;
+                  // 1. Compute what dates + times we WANT to book
+                  const proposed = computeProposedSlots();
+                  if (proposed.length === 0) {
+                    toast.error('No valid dates given the start/end/occurrences combination.');
+                    setIsRecurringSubmitting(false);
+                    return;
                   }
 
-                  // Sprint 4: generate a shared recurrence_group_id for the whole series
-                  // (client-side UUID so every row in the batch can reference it pre-insert).
-                  const recurrenceGroupId = crypto.randomUUID();
-                  const isPrepaid = recurringForm.paymentMode === 'prepaid_bundle' && !recurringForm.waiveFee;
-                  const bundleDiscountPct = BUNDLE_DISCOUNT_PCT;
-                  // Per-visit price for a prepaid series: bundle discount spread evenly
-                  const perVisitPrepaid = isPrepaid ? price * (1 - bundleDiscountPct / 100) : price;
-
-                  // Pre-compute actual occurrence count — either the requested count OR
-                  // capped by the end date, whichever comes first. Needed BEFORE we create
-                  // the bundle so credits_purchased matches the real visit count.
-                  const effectiveOccurrences = (() => {
-                    if (!recurringForm.endDate) return occurrences;
-                    const endCap = new Date(recurringForm.endDate + 'T23:59:59');
-                    let cursor = new Date(recurringForm.startDate + 'T12:00:00');
-                    // Apply the same day-of-week snap as the real loop uses
-                    if (recurringForm.dayOfWeek !== null && ['weekly', 'biweekly'].includes(recurringForm.frequency)) {
-                      while (cursor.getDay() !== recurringForm.dayOfWeek) {
-                        cursor.setDate(cursor.getDate() + 1);
-                      }
-                    }
-                    let count = 0;
-                    for (let i = 0; i < occurrences; i++) {
-                      if (cursor > endCap) break;
-                      count++;
-                      if (recurringForm.frequency === 'monthly') cursor.setMonth(cursor.getMonth() + 1);
-                      else if (recurringForm.frequency === 'bimonthly') cursor.setMonth(cursor.getMonth() + 2);
-                      else cursor.setDate(cursor.getDate() + daysBetween);
-                    }
-                    return Math.max(count, 1);
-                  })();
-                  if (effectiveOccurrences < occurrences) {
-                    console.log(`[recurring] end date caps series: ${occurrences} requested → ${effectiveOccurrences} actual`);
+                  // 2. Pre-flight: any conflicts (holidays, existing appts, slot holds, office closures)?
+                  const conflicts = await detectSeriesConflicts(proposed);
+                  if (conflicts.length > 0) {
+                    setDetectedConflicts(conflicts);
+                    setPendingSlots(proposed);
+                    setConflictModalOpen(true);
+                    setIsRecurringSubmitting(false);
+                    return;  // Admin resolves via SeriesConflictModal
                   }
 
-                  // If prepaid, create the visit_bundles row NOW so we can link each appointment
-                  // via visit_bundle_id. Stripe session created later and attached after.
-                  let bundleId: string | null = null;
-                  if (isPrepaid) {
-                    const totalAmount = price * effectiveOccurrences * (1 - bundleDiscountPct / 100);
-                    const { data: bundle, error: bundleErr } = await supabase.from('visit_bundles').insert({
-                      patient_email: recurringForm.patientEmail || null,
-                      credits_purchased: effectiveOccurrences,
-                      credits_remaining: effectiveOccurrences,
-                      discount_percent: bundleDiscountPct,
-                      amount_paid: totalAmount,
-                      // stripe_checkout_session_id populated after checkout session created
-                    } as any).select().single();
-                    if (bundleErr) throw bundleErr;
-                    bundleId = (bundle as any)?.id || null;
-                  }
-
-                  const appointmentsToCreate = [];
-                  let currentDate = new Date(recurringForm.startDate + 'T12:00:00');
-                  // If the user picked a day-of-week, snap the FIRST visit to the next
-                  // occurrence of that weekday on/after startDate. Subsequent visits
-                  // keep the interval (weekly/biweekly) so they naturally land on the
-                  // same weekday. Only applies to weekly/biweekly frequencies.
-                  if (
-                    recurringForm.dayOfWeek !== null &&
-                    ['weekly', 'biweekly'].includes(recurringForm.frequency)
-                  ) {
-                    while (currentDate.getDay() !== recurringForm.dayOfWeek) {
-                      currentDate.setDate(currentDate.getDate() + 1);
-                    }
-                  }
-                  // End date cap — series stops at the earlier of endDate or occurrences
-                  const endDateCap = recurringForm.endDate
-                    ? new Date(recurringForm.endDate + 'T23:59:59')
-                    : null;
-
-                  for (let i = 0; i < effectiveOccurrences; i++) {
-                    // Safety rail (should already be accounted for by effectiveOccurrences)
-                    if (endDateCap && currentDate > endDateCap) break;
-                    const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
-                    const apptDateTime = `${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
-
-                    appointmentsToCreate.push({
-                      appointment_date: apptDateTime,
-                      appointment_time: recurringForm.time,
-                      patient_name: recurringForm.patientName,
-                      patient_email: recurringForm.patientEmail || null,
-                      patient_phone: recurringForm.patientPhone || null,
-                      service_type: recurringForm.serviceType,
-                      service_name: svcName,
-                      status: 'scheduled',
-                      address: recurringForm.address || 'TBD',
-                      zipcode: '32801',
-                      total_amount: recurringForm.waiveFee ? 0 : (isPrepaid ? perVisitPrepaid : price),
-                      service_price: recurringForm.waiveFee ? 0 : (isPrepaid ? perVisitPrepaid : price),
-                      duration_minutes: recurringForm.serviceType === 'therapeutic' ? 75 : 60,
-                      booking_source: 'manual',
-                      // If prepaid, individual appointments should NOT be invoiced — bundle covers them
-                      invoice_status: recurringForm.waiveFee || isPrepaid ? 'not_required' : 'sent',
-                      payment_status: recurringForm.waiveFee || isPrepaid ? 'completed' : 'pending',
-                      phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164', // TODO: dynamic staff selection when team scales
-                      notes: `Recurring ${recurringForm.frequency} (${i + 1}/${occurrences})${isPrepaid ? ' — prepaid bundle' : ''}`,
-                      // Sprint 4: link every appointment in the series
-                      recurrence_group_id: recurrenceGroupId,
-                      recurrence_sequence: i + 1,
-                      recurrence_total: effectiveOccurrences,
-                      ...(bundleId ? { visit_bundle_id: bundleId } : {}),
-                    });
-
-                    // Advance date
-                    if (recurringForm.frequency === 'monthly') {
-                      currentDate.setMonth(currentDate.getMonth() + 1);
-                    } else if (recurringForm.frequency === 'bimonthly') {
-                      currentDate.setMonth(currentDate.getMonth() + 2);
-                    } else {
-                      currentDate.setDate(currentDate.getDate() + daysBetween);
-                    }
-                  }
-
-                  const { data: created, error } = await supabase.from('appointments').insert(appointmentsToCreate).select();
-                  if (error) throw error;
-
-                  // Bundle prepaid — one Stripe checkout for the whole series
-                  if (isPrepaid && recurringForm.patientEmail && bundleId) {
-                    try {
-                      const totalAmount = price * effectiveOccurrences * (1 - bundleDiscountPct / 100);
-                      const { data: checkoutRes, error: checkoutErr } = await supabase.functions.invoke('create-bundle-checkout', {
-                        body: {
-                          bundleId,
-                          patientEmail: recurringForm.patientEmail,
-                          patientName: recurringForm.patientName,
-                          serviceName: `${svcName} x${effectiveOccurrences} (${recurringForm.frequency}, ${bundleDiscountPct}% off)`,
-                          amountCents: Math.round(totalAmount * 100),
-                          occurrences: effectiveOccurrences,
-                          startDate: recurringForm.startDate,
-                        },
-                      });
-                      if (checkoutErr) throw checkoutErr;
-                      const url = (checkoutRes as any)?.url;
-                      if (url) {
-                        toast.success('Bundle checkout link ready — opening for patient…');
-                        window.open(url, '_blank');
-                      } else {
-                        toast.warning('Series created; bundle checkout link failed. Send manually.');
-                      }
-                    } catch (bundleErr: any) {
-                      console.error('Bundle checkout error:', bundleErr);
-                      toast.warning('Series created; bundle checkout failed. Send invoice manually.');
-                    }
-                  }
-                  // Per-visit — invoice the first appointment's total amount (keeps legacy flow)
-                  else if (!recurringForm.waiveFee && recurringForm.patientEmail) {
-                    const totalAmount = price * effectiveOccurrences;
-                    await supabase.functions.invoke('send-appointment-invoice', {
-                      body: {
-                        appointmentId: created?.[0]?.id,
-                        patientName: recurringForm.patientName,
-                        patientEmail: recurringForm.patientEmail,
-                        serviceType: recurringForm.serviceType,
-                        serviceName: `${svcName} (${effectiveOccurrences}x ${recurringForm.frequency})`,
-                        servicePrice: totalAmount,
-                        appointmentDate: recurringForm.startDate,
-                        appointmentTime: recurringForm.time,
-                        address: recurringForm.address || 'TBD',
-                        memo: `Recurring: ${effectiveOccurrences} appointments, ${recurringForm.frequency}`,
-                      },
-                    }).then(undefined, (err: any) => console.error('Invoice error:', err));
-                  }
-
-                  // Notify owner
-                  const modeLabel = isPrepaid ? `PREPAID $${(price * effectiveOccurrences * (1 - bundleDiscountPct / 100)).toFixed(2)} (${bundleDiscountPct}% off)` : recurringForm.waiveFee ? '0 (waived)' : `$${(price * effectiveOccurrences).toFixed(2)} per-visit`;
-                  supabase.functions.invoke('send-sms-notification', {
-                    body: { to: '9415279169', message: `Recurring Booking!\n\nPatient: ${recurringForm.patientName}\n${effectiveOccurrences}x ${svcName} (${recurringForm.frequency})\n${modeLabel}\nStarting: ${recurringForm.startDate}${recurringForm.endDate ? `\nEnds by: ${recurringForm.endDate}` : ''}` },
-                  }).then(undefined, () => {});
-
-                  toast.success(`${created?.length || effectiveOccurrences} recurring appointments created!${effectiveOccurrences < occurrences ? ` (capped by end date)` : ''}`);
-                  setRecurringForm({ patientSearch: '', patientName: '', patientEmail: '', patientPhone: '', serviceType: 'mobile', frequency: 'weekly', occurrences: '4', startDate: '', endDate: '', time: '', address: '', notes: '', waiveFee: false, paymentMode: 'per_visit', dayOfWeek: null });
-                  setRecurringModalOpen(false);
-                  fetchAppointments();
+                  // 3. Clean sail — proceed with insert
+                  await createSeriesWithSlots(proposed.map(s => ({ dateIso: s.dateIso, time: s.time })));
                 } catch (err: any) {
                   toast.error(err.message || 'Failed to create recurring appointments');
                 } finally {
@@ -899,6 +930,31 @@ const AdminCalendar: React.FC = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Series conflict modal — fires when pre-flight finds conflicts */}
+      <SeriesConflictModal
+        open={conflictModalOpen}
+        onClose={() => { setConflictModalOpen(false); setDetectedConflicts([]); setPendingSlots([]); }}
+        conflicts={detectedConflicts}
+        originalSlots={pendingSlots}
+        onResolve={async (resolutions: Resolution[]) => {
+          setConflictModalOpen(false);
+          setIsRecurringSubmitting(true);
+          try {
+            const finalSlots = resolutions
+              .filter(r => r.type !== 'skip')
+              .map(r => ({ dateIso: r.dateIso, time: (r as any).time }));
+            await createSeriesWithSlots(finalSlots);
+          } catch (err: any) {
+            toast.error(err.message || 'Failed to create recurring appointments');
+          } finally {
+            setIsRecurringSubmitting(false);
+            setDetectedConflicts([]);
+            setPendingSlots([]);
+          }
+        }}
+      />
+
     </div>
   );
 };
