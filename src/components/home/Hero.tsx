@@ -91,17 +91,6 @@ const Hero = () => {
             initial="hidden"
             animate="visible"
           >
-            {/* Category-killer quote badge */}
-            <motion.div variants={itemVariants}>
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-sm rounded-full border border-white/20 mb-6">
-                <span className="text-lg">🏈</span>
-                <span className="text-sm font-semibold text-white">
-                  "Better than what I got in the NFL."
-                </span>
-                <span className="text-xs text-white/70 hidden sm:inline">— Deiontrez Mount, NFL LB</span>
-              </div>
-            </motion.div>
-
             {/* H1 — the NFL-grade claim */}
             <motion.h1
               variants={itemVariants}
