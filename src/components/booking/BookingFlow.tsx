@@ -174,9 +174,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         weekend: data.serviceDetails.weekend,
       }, tipAmount, additionalPatientCount, memberTier);
 
-      // Upload lab order files and track paths
-      const labOrderPaths: string[] = [];
+      // Lab orders: prefer paths already uploaded by LabOrderUploadStep
+      // (upload-on-drop). Fall back to uploading now if anything slipped through
+      // (e.g., if the early upload failed and only a File is in state).
+      const alreadyUploadedPaths: string[] = ((data as any)?.labOrder?.uploadedPaths || []) as string[];
+      const labOrderPaths: string[] = [...alreadyUploadedPaths];
+      const uploadedNames = new Set(alreadyUploadedPaths.map(p => p.split('/').pop()?.replace(/^laborder_\d+_/, '')));
       for (const file of labOrderFiles) {
+        // Skip files that were already uploaded during the upload step
+        if (uploadedNames.has(file.name)) continue;
         const fileName = `laborder_${Date.now()}_${file.name}`;
         const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
         if (uploadErr) console.error('Lab order upload error:', uploadErr);

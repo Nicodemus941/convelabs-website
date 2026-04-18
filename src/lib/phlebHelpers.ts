@@ -198,7 +198,106 @@ export function extractPanelBadges(labOrderPanels: any): string[] {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 5. DELAY MESSAGE TEMPLATES
+// 5. PRE-VISIT PREP REQUIREMENT ANALYZER (patient-side)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Analyzes OCR-extracted panels + text from a patient's uploaded lab order
+ * and returns a structured set of prep requirements. Used by the post-upload
+ * modal AND the appointment confirmation email to tell the patient exactly
+ * what to do before their visit.
+ */
+
+export interface PrepRequirement {
+  key: string;
+  title: string;
+  body: string;
+  icon: 'fasting' | 'urine' | 'glucose' | 'hydrate' | 'timing' | 'info';
+}
+
+export interface PrepAnalysis {
+  hasAnyPrep: boolean;
+  requirements: PrepRequirement[];
+  detectedPanels: string[];
+}
+
+export function analyzePrepRequirements(
+  labOrderPanels: string[] | null | undefined,
+  ocrText: string | null | undefined
+): PrepAnalysis {
+  const panels = Array.isArray(labOrderPanels) ? labOrderPanels : [];
+  const textLower = (ocrText || '').toLowerCase();
+  const panelsLower = panels.map(p => String(p).toLowerCase());
+  const everything = [...panelsLower, textLower].join(' ');
+
+  const requirements: PrepRequirement[] = [];
+  const seen = new Set<string>();
+  const push = (r: PrepRequirement) => {
+    if (seen.has(r.key)) return;
+    seen.add(r.key);
+    requirements.push(r);
+  };
+
+  // Fasting detection
+  if (/\bfasting\b|\bfasted\b|\bnpo\b|lipid|cholesterol|\bcmp\b|comprehensive\s*metabolic|\bbmp\b|basic\s*metabolic|\bglucose\b(?!\s*tolerance)|fasting\s*insulin|iron\s*panel|ferritin|\bhepatic\b/.test(everything)) {
+    push({
+      key: 'fasting',
+      title: 'Please fast 8–12 hours before your visit',
+      body: 'Water and black coffee (no cream, no sugar) are OK. Stop eating no later than 8 hours before your appointment time. If you take medications, continue them unless your doctor told you otherwise.',
+      icon: 'fasting',
+    });
+  }
+
+  // Urine collection
+  if (/\burine\b|\burinalysis\b|\bua\b|urine\s*culture|\bmicroalbumin\b|\b24[-\s]*hour\s*urine\b|creatinine\s*clearance/.test(everything)) {
+    const is24Hour = /\b24[-\s]*hour/.test(everything);
+    if (is24Hour) {
+      push({
+        key: 'urine-24h',
+        title: 'Your order includes a 24-hour urine collection',
+        body: "This is a special collection — your phlebotomist will bring a large container and explain the process. You'll collect every drop of urine over 24 hours starting the morning of your draw. Please call us at (941) 527-9169 ahead of time so we can coordinate the exact start time.",
+        icon: 'urine',
+      });
+    } else {
+      push({
+        key: 'urine',
+        title: 'Your order includes a urine test',
+        body: "Your phlebotomist will arrive with a sterile collection cup and walk you through the clean-catch technique. Please try to hold off using the restroom for 30–60 minutes before your appointment so you're ready to collect.",
+        icon: 'urine',
+      });
+    }
+  }
+
+  // Glucose tolerance test (GTT)
+  if (/glucose\s*tolerance|\bgtt\b|oral\s*glucose/.test(everything)) {
+    push({
+      key: 'gtt',
+      title: 'Glucose Tolerance Test — plan to be available 2–3 hours',
+      body: 'This test requires a baseline draw, drinking a glucose solution, and additional draws at timed intervals (usually 1 hr and 2 hr after). Please fast 8–12 hours beforehand. Block 2–3 hours of time at home, and avoid exercise or smoking during the test.',
+      icon: 'glucose',
+    });
+  }
+
+  // Hydration for standard draw
+  if (requirements.length === 0 && panels.length > 0) {
+    // Any detected test gets the gentle "hydrate" recommendation
+    push({
+      key: 'hydrate',
+      title: 'Stay well hydrated before your visit',
+      body: 'Drink an extra 16oz of water this morning and tomorrow — it makes finding the vein faster and the draw less painful. No other special prep is needed for the tests your doctor ordered.',
+      icon: 'hydrate',
+    });
+  }
+
+  return {
+    hasAnyPrep: requirements.length > 0,
+    requirements,
+    detectedPanels: panels.slice(0, 10),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 6. DELAY MESSAGE TEMPLATES
 // ─────────────────────────────────────────────────────────────
 
 export function buildDelayMessage(patientFirstName: string, delayMinutes: number): string {

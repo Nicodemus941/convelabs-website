@@ -4,11 +4,13 @@ import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { ChevronLeft, Upload, FileText, X, Phone, SkipForward, Shield, Loader2, CheckCircle } from 'lucide-react';
+import { ChevronLeft, Upload, FileText, X, Phone, SkipForward, Shield, Loader2, CheckCircle, Sparkles } from 'lucide-react';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import LabDestinationSelector from './LabDestinationSelector';
+import LabOrderPrepModal from './LabOrderPrepModal';
+import { analyzePrepRequirements, type PrepAnalysis } from '@/lib/phlebHelpers';
 
 interface LabOrderUploadStepProps {
   onNext: () => void;
@@ -63,14 +65,69 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   );
   const [faxNumber, setFaxNumber] = useState(getValues('labOrder.doctorFaxNumber') || '');
 
-  // Lab order dropzone — supports multiple files
-  const onDropLabOrder = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles.length > 0) {
-      onFilesSelected([...selectedFiles, ...acceptedFiles]);
-      setValue('labOrder.hasFile', true);
-      setValue('labOrder.skipped', false);
+  // Lab order dropzone — supports multiple files. On drop we:
+  //   1. Add file to local state for UI preview
+  //   2. Upload to Supabase storage immediately (so we can OCR it)
+  //   3. Fire ocr-lab-order edge fn on the first NEW file
+  //   4. If fasting / urine / GTT detected → show the prep modal ("thanks, we read your order")
+  //   5. Stash uploaded path + OCR result on form context so BookingFlow can reuse at checkout
+  const onDropLabOrder = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+
+    // Step 1: show files in UI right away
+    onFilesSelected([...selectedFiles, ...acceptedFiles]);
+    setValue('labOrder.hasFile', true);
+    setValue('labOrder.skipped', false);
+
+    // Step 2: upload to storage so OCR can read them + so checkout doesn't re-upload
+    const previouslyUploaded: string[] = (getValues('labOrder.uploadedPaths' as any) || []) as any;
+    const newPaths: string[] = [];
+    for (const file of acceptedFiles) {
+      const fileName = `laborder_${Date.now()}_${file.name}`;
+      const { error } = await supabase.storage.from('lab-orders').upload(fileName, file);
+      if (!error) newPaths.push(fileName);
+      else console.warn('Immediate lab-order upload failed (will retry at checkout):', error);
     }
-  }, [onFilesSelected, selectedFiles, setValue]);
+    if (newPaths.length === 0) return;
+
+    const allPaths = [...previouslyUploaded, ...newPaths];
+    setValue('labOrder.uploadedPaths' as any, allPaths);
+
+    // Step 3 + 4: OCR the first newly-uploaded file
+    setLabOrderOcrProcessing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('ocr-lab-order', {
+        body: { filePath: newPaths[0] },
+      });
+      if (error) {
+        console.warn('[ocr] edge fn error (non-blocking):', error);
+        return;
+      }
+      if (!data?.ok) {
+        console.warn('[ocr] returned not-ok:', data);
+        return;
+      }
+      const panels: string[] = Array.isArray(data.panels) ? data.panels : [];
+      const text: string = typeof data.textPreview === 'string' ? data.textPreview : '';
+      const analysis = analyzePrepRequirements(panels, text);
+
+      // Stash on form so the confirmation email / day-before SMS can use it too
+      setValue('labOrder.ocrPanels' as any, panels);
+      setValue('labOrder.ocrText' as any, text);
+
+      // Fire the modal ONLY if there's actionable prep — don't interrupt for nothing
+      if (analysis.hasAnyPrep) {
+        setPrepAnalysis(analysis);
+        setPrepModalOpen(true);
+      } else {
+        toast.success('Lab order uploaded — no special prep needed.');
+      }
+    } catch (e) {
+      console.warn('[ocr] client exception (non-blocking):', e);
+    } finally {
+      setLabOrderOcrProcessing(false);
+    }
+  }, [onFilesSelected, selectedFiles, setValue, getValues]);
 
   const { getRootProps: getLabOrderRootProps, getInputProps: getLabOrderInputProps, isDragActive: isLabOrderDragActive } = useDropzone({
     onDrop: onDropLabOrder,
@@ -81,6 +138,11 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
 
   const [ocrProcessing, setOcrProcessing] = useState(false);
   const [ocrResult, setOcrResult] = useState<any>(null);
+
+  // ── Lab order OCR state (fires on upload, drives the prep modal) ─────
+  const [labOrderOcrProcessing, setLabOrderOcrProcessing] = useState(false);
+  const [prepModalOpen, setPrepModalOpen] = useState(false);
+  const [prepAnalysis, setPrepAnalysis] = useState<PrepAnalysis | null>(null);
 
   // Insurance dropzone + auto OCR
   const onDropInsurance = useCallback(async (acceptedFiles: File[]) => {
@@ -125,10 +187,24 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     maxSize: 10 * 1024 * 1024,
   });
 
-  const handleRemoveFile = (index: number) => {
+  const handleRemoveFile = async (index: number) => {
     const updated = selectedFiles.filter((_, i) => i !== index);
     onFilesSelected(updated);
     if (updated.length === 0) setValue('labOrder.hasFile', false);
+
+    // Also remove the matching uploaded path + storage object (best-effort)
+    const paths: string[] = (getValues('labOrder.uploadedPaths' as any) || []) as any;
+    if (paths[index]) {
+      try {
+        await supabase.storage.from('lab-orders').remove([paths[index]]);
+      } catch (e) { console.warn('Storage remove failed (non-blocking):', e); }
+      const nextPaths = paths.filter((_, i) => i !== index);
+      setValue('labOrder.uploadedPaths' as any, nextPaths);
+      if (nextPaths.length === 0) {
+        setValue('labOrder.ocrPanels' as any, []);
+        setValue('labOrder.ocrText' as any, '');
+      }
+    }
   };
 
   const handleRemoveInsurance = () => {
@@ -198,6 +274,13 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
                 {isLabOrderDragActive ? 'Drop here' : 'Drag & drop or click to upload'}
               </p>
               <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG, HEIC (max 10MB)</p>
+            </div>
+          )}
+
+          {labOrderOcrProcessing && (
+            <div className="flex items-center gap-2 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2">
+              <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+              <span>Reading your lab order to give you personalized prep instructions…</span>
             </div>
           )}
 
@@ -345,6 +428,14 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
           </Button>
         </div>
       </CardContent>
+
+      {/* "Thanks, we read your lab order" modal — fires on upload when prep needed */}
+      <LabOrderPrepModal
+        open={prepModalOpen}
+        onClose={() => setPrepModalOpen(false)}
+        analysis={prepAnalysis}
+        patientFirstName={getValues('patientDetails.firstName')}
+      />
     </Card>
   );
 };

@@ -65,8 +65,84 @@ Deno.serve(async (req) => {
         totalAmount = appt.total_amount ?? totalAmount;
         isWaived = (appt.payment_status === 'completed' && appt.total_amount === 0) || isWaived;
         viewToken = (appt as any).view_token || null;
+        // Grab OCR'd lab order data so we can render the prep section
+        (body as any).__labOrderPanels = Array.isArray((appt as any).lab_order_panels) ? (appt as any).lab_order_panels : [];
+        (body as any).__labOrderOcrText = (appt as any).lab_order_ocr_text || '';
+        (body as any).__labDestination = (appt as any).lab_destination || '';
+        (body as any).__labDestinationPending = !!(appt as any).lab_destination_pending;
       }
     }
+
+    // ─── Build panel-aware prep section for the email body ──────────
+    // Mirror of src/lib/phlebHelpers.ts analyzePrepRequirements — kept duplicated
+    // here because edge functions can't import src/ files. If you update one,
+    // update the other.
+    const buildPrepHtml = (): string => {
+      const panels: string[] = ((body as any).__labOrderPanels || []) as string[];
+      const ocrText: string = String((body as any).__labOrderOcrText || '');
+      const destPending: boolean = !!(body as any).__labDestinationPending;
+      if (panels.length === 0 && !ocrText && !destPending) return '';
+
+      const everything = [...panels.map(p => String(p).toLowerCase()), ocrText.toLowerCase()].join(' ');
+      const reqs: { title: string; body: string; color: string }[] = [];
+
+      if (/\bfasting\b|\bfasted\b|\bnpo\b|lipid|cholesterol|\bcmp\b|comprehensive\s*metabolic|\bbmp\b|basic\s*metabolic|\bglucose\b(?!\s*tolerance)|fasting\s*insulin|iron\s*panel|ferritin|\bhepatic\b/.test(everything)) {
+        reqs.push({
+          title: '🍽️ Please fast 8–12 hours before your visit',
+          body: 'Water and black coffee (no cream, no sugar) are OK. Stop eating no later than 8 hours before your appointment time. If you take medications, continue them unless your doctor told you otherwise.',
+          color: '#d97706',
+        });
+      }
+
+      if (/\b24[-\s]*hour\s*urine\b|creatinine\s*clearance/.test(everything)) {
+        reqs.push({
+          title: '🧪 24-hour urine collection',
+          body: "Your order includes a 24-hour urine test. Your phlebotomist will bring a large collection container. You'll collect every drop of urine over 24 hours. Please call (941) 527-9169 to coordinate the exact start time.",
+          color: '#2563eb',
+        });
+      } else if (/\burine\b|\burinalysis\b|\bua\b|urine\s*culture|\bmicroalbumin\b/.test(everything)) {
+        reqs.push({
+          title: '🧪 Urine test included',
+          body: "Your phlebotomist will arrive with a sterile collection cup and walk you through the clean-catch technique. Try to hold off using the restroom for 30–60 minutes before your appointment so you're ready to collect.",
+          color: '#2563eb',
+        });
+      }
+
+      if (/glucose\s*tolerance|\bgtt\b|oral\s*glucose/.test(everything)) {
+        reqs.push({
+          title: '⏱️ Glucose Tolerance Test — plan 2–3 hours',
+          body: 'This test requires a baseline draw, drinking a glucose solution, and additional timed draws. Please fast 8–12 hours beforehand. Block 2–3 hours at home. Avoid exercise or smoking during the test.',
+          color: '#7c3aed',
+        });
+      }
+
+      if (reqs.length === 0 && !destPending && panels.length === 0) return '';
+
+      let html = `<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:16px;margin:16px 0;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#0369a1;font-weight:700;margin-bottom:6px;">✨ Your Personalized Prep</div>
+        <p style="margin:0 0 12px;font-size:13px;color:#0c4a6e;">We read your lab order — here's exactly how to prepare for a smooth visit.</p>`;
+
+      if (panels.length > 0) {
+        html += `<div style="margin-bottom:12px;font-size:12px;color:#334155;"><strong>Detected tests:</strong> ${panels.slice(0, 8).map(p => `<span style="display:inline-block;background:white;border:1px solid #cbd5e1;border-radius:999px;padding:2px 8px;margin:2px;font-size:11px;color:#334155;">${p}</span>`).join(' ')}</div>`;
+      }
+
+      for (const r of reqs) {
+        html += `<div style="background:white;border-left:3px solid ${r.color};padding:10px 12px;margin:8px 0;border-radius:4px;">
+          <div style="font-weight:700;font-size:13px;color:#111827;margin-bottom:4px;">${r.title}</div>
+          <div style="font-size:12px;color:#4b5563;line-height:1.5;">${r.body}</div>
+        </div>`;
+      }
+
+      if (destPending) {
+        html += `<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:10px 12px;margin:8px 0;">
+          <div style="font-weight:700;font-size:13px;color:#92400e;">📞 We'll call you about your lab destination</div>
+          <div style="font-size:12px;color:#78350f;margin-top:4px;">You asked us to help confirm which lab to send your samples to. Our team will reach out within 1 business day. Your appointment is secured.</div>
+        </div>`;
+      }
+
+      html += `</div>`;
+      return html;
+    };
 
     const SITE_URL = Deno.env.get('SITE_URL') || 'https://www.convelabs.com';
     const visitUrl = viewToken ? `${SITE_URL}/visit/${viewToken}` : `${SITE_URL}/dashboard`;
@@ -116,6 +192,7 @@ Deno.serve(async (req) => {
                 ${!isWaived ? `<tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Amount</td><td style="padding:10px 0 6px;font-weight:700;font-size:18px;text-align:right;color:#B91C1C;">$${Number(totalAmount).toFixed(2)}</td></tr>` : '<tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Amount</td><td style="padding:10px 0 6px;font-weight:700;text-align:right;color:#059669;">Complimentary</td></tr>'}
               </table>
             </div>
+            ${buildPrepHtml()}
             <p style="font-size:13px;color:#6b7280;"><strong>What to expect:</strong> A licensed phlebotomist will arrive at your location during your scheduled time window. Please have your lab order and insurance card ready.</p>
             <p style="font-size:13px;color:#6b7280;">Need to reschedule? Call us at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a></p>
             <div style="text-align:center;margin:20px 0;">
