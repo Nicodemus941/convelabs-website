@@ -1,5 +1,4 @@
 {
-  "//": "First rewrite is an intentional no-op passthrough for /assets/*. Vercel processes rewrites in order and stops at the first match. When the browser requests a stale /assets/Foo-HASH.js that no longer exists after a deploy, the first rule matches and keeps the path as /assets/Foo-HASH.js — Vercel then returns a clean 404 instead of falling through to the SPA catch-all (which would return index.html with text/html and cause a JS MIME-mismatch error).",
   "headers": [
     {
       "source": "/assets/(.*)",
@@ -23,7 +22,6 @@
     }
   ],
   "rewrites": [
-    { "source": "/assets/:path*", "destination": "/assets/:path*" },
     {
       "source": "/(.*)",
       "has": [{ "type": "host", "value": "patients.convelabs.com" }],
