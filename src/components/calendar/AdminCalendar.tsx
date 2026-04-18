@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -56,6 +56,8 @@ const AdminCalendar: React.FC = () => {
   const [conflictModalOpen, setConflictModalOpen] = useState(false);
   const [detectedConflicts, setDetectedConflicts] = useState<Conflict[]>([]);
   const [pendingSlots, setPendingSlots] = useState<ProposedSlot[]>([]);
+  // Ref for FullCalendar so we can gotoDate() after a recurring series is created
+  const calendarRef = useRef<FullCalendar | null>(null);
 
   // Sprint 4 — patient autocomplete for the recurring modal
   const [patientResults, setPatientResults] = useState<Array<{ id: string; first_name: string; last_name: string; email: string | null; phone: string | null; address: string | null; city: string | null; state: string | null; zipcode: string | null; }>>([]);
@@ -161,7 +163,11 @@ const AdminCalendar: React.FC = () => {
         if (period === 'PM' && hours !== 12) hours += 12;
         if (period === 'AM' && hours === 12) hours = 0;
       }
-      const apptDateTime = `${slot.dateIso}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+      // Noon-ET anchor so appointment_date column is TZ-stable across renders
+      // (matches verify-appointment-checkout pattern). The real-time info stays
+      // in appointment_time. Avoids the "appointments stored as UTC midnight
+      // render on previous day" class of bug.
+      const apptDateTime = `${slot.dateIso}T12:00:00-04:00`;
       return {
         appointment_date: apptDateTime,
         appointment_time: slot.time,
@@ -247,6 +253,16 @@ const AdminCalendar: React.FC = () => {
     setRecurringForm({ patientSearch: '', patientName: '', patientEmail: '', patientPhone: '', serviceType: 'mobile', frequency: 'weekly', occurrences: '4', startDate: '', endDate: '', time: '', address: '', notes: '', waiveFee: false, paymentMode: 'per_visit', dayOfWeek: null });
     setRecurringModalOpen(false);
     fetchAppointments();
+
+    // Auto-navigate the calendar to the first new appointment's month so the
+    // admin immediately SEES what was just created — no more "where did they go?"
+    try {
+      const firstDateIso = slots[0]?.dateIso;
+      if (firstDateIso && calendarRef.current) {
+        const api = calendarRef.current.getApi();
+        api.gotoDate(firstDateIso);
+      }
+    } catch (e) { console.warn('[recurring] calendar auto-navigate failed:', e); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recurringForm]);
 
@@ -545,6 +561,7 @@ const AdminCalendar: React.FC = () => {
             </div>
           ) : (
             <FullCalendar
+              ref={calendarRef}
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
               initialView={isMobile ? 'timeGridDay' : 'timeGridWeek'}
               headerToolbar={{
