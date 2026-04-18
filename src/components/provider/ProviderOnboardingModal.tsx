@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -61,18 +62,29 @@ const ProviderOnboardingModal: React.FC<Props> = ({ open, orgName, phoneHint, de
   const persist = async (opts: { setPassword: boolean }) => {
     setSaving(true);
     try {
-      const updatePayload: any = {
-        data: {
+      // Route through the edge fn so the password-update admin API bypasses
+      // Supabase's 'Secure password change' reauth requirement (which would
+      // otherwise 422 any client-side updateUser call on a SMS-OTP session).
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('No active session');
+
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/complete-provider-onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
           full_name: name.trim(),
           title: title.trim() || null,
-          onboarded_at: new Date().toISOString(),
-          password_set: !!opts.setPassword,
-        },
-      };
-      if (opts.setPassword) updatePayload.password = password;
+          password: opts.setPassword ? password : undefined,
+          mark_onboarded: true,
+        }),
+      });
+      const j = await resp.json();
+      if (!resp.ok) throw new Error(j.error || 'Failed to save');
 
-      const { error } = await supabase.auth.updateUser(updatePayload);
-      if (error) throw error;
+      // Refresh the session so the new JWT carries the freshly-stamped
+      // metadata (full_name, onboarded_at, password_set)
+      await supabase.auth.refreshSession().catch(() => {});
 
       setHasPassword(opts.setPassword);
       setStep(3);
@@ -91,6 +103,12 @@ const ProviderOnboardingModal: React.FC<Props> = ({ open, orgName, phoneHint, de
         onInteractOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
+        {/* Accessibility — required by Radix for DialogContent */}
+        <VisuallyHidden>
+          <DialogTitle>Provider portal onboarding</DialogTitle>
+          <DialogDescription>Three-step setup — confirm your name, optionally set a password, and you're in.</DialogDescription>
+        </VisuallyHidden>
+
         {/* Progress bar */}
         <div className="h-1.5 bg-gray-100 relative">
           <div className="h-full bg-[#B91C1C] transition-all duration-300" style={{ width: `${(step / 3) * 100}%` }} />

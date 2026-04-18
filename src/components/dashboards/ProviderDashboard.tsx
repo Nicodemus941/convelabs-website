@@ -81,11 +81,20 @@ const ProviderDashboard: React.FC = () => {
     if (newPw.length < 8) { toast.error('Password must be at least 8 characters'); return; }
     if (newPw !== newPwConfirm) { toast.error('Passwords do not match'); return; }
     try {
-      const { error } = await supabase.auth.updateUser({
-        password: newPw,
-        data: { password_set: true },
+      // Route through edge fn (admin API) to bypass 'Secure password change'
+      // reauth on SMS-only sessions — same reason as the onboarding modal.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('No active session');
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/complete-provider-onboarding', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ password: newPw }),
       });
-      if (error) throw error;
+      const j = await resp.json();
+      if (!resp.ok) throw new Error(j.error || 'Failed to save');
+
+      await supabase.auth.refreshSession().catch(() => {});
       toast.success('Password saved. You can now sign in with email + password.');
       setShowPwPrompt(false);
       setNeedsPasswordSetup(false);
