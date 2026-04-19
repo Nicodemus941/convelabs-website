@@ -7,11 +7,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   Building2, Plus, Search, RefreshCw, Send, DollarSign, Mail,
   Phone, User, FileText, Loader2, Download, Pencil, Power,
+  Megaphone, Eye, Sparkles, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -238,6 +241,100 @@ const OrganizationsTab: React.FC = () => {
 
   const filtered = orgs.filter(o => !searchQuery || o.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
+  // ── Organizations list view is split into two tabs: Directory + Outreach.
+  //    Detail view (when an org is clicked) bypasses tabs entirely.
+  const [activeTab, setActiveTab] = useState<'directory' | 'outreach'>('directory');
+
+  // ── Outreach tab state ─────────────────────────────────────────
+  const [inquiries, setInquiries] = useState<any[]>([]);
+  const [loadingInquiries, setLoadingInquiries] = useState(false);
+  const [selectedRecipients, setSelectedRecipients] = useState<Record<string, { email: string; firstName?: string; practiceName?: string }>>({});
+  const [outreachSubject, setOutreachSubject] = useState('A concierge lab partner for your patients');
+  const [outreachIntro, setOutreachIntro] = useState('');
+  const [addCustomEmail, setAddCustomEmail] = useState('');
+  const [addCustomName, setAddCustomName] = useState('');
+  const [addCustomPractice, setAddCustomPractice] = useState('');
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [sendingOutreach, setSendingOutreach] = useState(false);
+  const [lastSendResult, setLastSendResult] = useState<any>(null);
+
+  // Fetch recent partnership inquiries when the Outreach tab becomes active
+  useEffect(() => {
+    if (activeTab !== 'outreach') return;
+    (async () => {
+      setLoadingInquiries(true);
+      const { data } = await supabase
+        .from('provider_partnership_inquiries' as any)
+        .select('id, practice_name, contact_name, contact_email, status, created_at')
+        .in('status', ['new', 'contacted'])
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setInquiries((data as any[]) || []);
+      setLoadingInquiries(false);
+    })();
+  }, [activeTab]);
+
+  const toggleRecipient = (key: string, recipient: { email: string; firstName?: string; practiceName?: string }) => {
+    setSelectedRecipients(prev => {
+      const next = { ...prev };
+      if (next[key]) delete next[key];
+      else next[key] = recipient;
+      return next;
+    });
+  };
+
+  const addCustomRecipient = () => {
+    const email = addCustomEmail.trim().toLowerCase();
+    if (!email || !email.includes('@')) { toast.error('Invalid email'); return; }
+    const key = `custom:${email}`;
+    setSelectedRecipients(prev => ({
+      ...prev,
+      [key]: {
+        email,
+        firstName: addCustomName.trim() || undefined,
+        practiceName: addCustomPractice.trim() || undefined,
+      },
+    }));
+    setAddCustomEmail(''); setAddCustomName(''); setAddCustomPractice('');
+    toast.success(`Added ${email}`);
+  };
+
+  const handlePreviewOutreach = async () => {
+    const list = Object.values(selectedRecipients);
+    if (list.length === 0) { toast.error('Pick at least one recipient'); return; }
+    try {
+      const { data, error } = await supabase.functions.invoke('send-partner-outreach', {
+        body: { recipients: list, customSubject: outreachSubject || undefined, customIntro: outreachIntro || undefined, dryRun: true },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      setPreviewHtml((data as any).preview_html);
+    } catch (e: any) {
+      toast.error(`Preview failed: ${e.message}`);
+    }
+  };
+
+  const handleSendOutreach = async () => {
+    const list = Object.values(selectedRecipients);
+    if (list.length === 0) { toast.error('Pick at least one recipient'); return; }
+    if (!window.confirm(`Send outreach email to ${list.length} recipient${list.length === 1 ? '' : 's'}?`)) return;
+    setSendingOutreach(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('send-partner-outreach', {
+        body: { recipients: list, customSubject: outreachSubject || undefined, customIntro: outreachIntro || undefined },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message);
+      setLastSendResult(data);
+      const sent = (data as any)?.sent || 0;
+      const skipped = (data as any)?.skipped_already_contacted || 0;
+      toast.success(`Sent ${sent} · skipped ${skipped} already contacted`);
+      setSelectedRecipients({});
+    } catch (e: any) {
+      toast.error(`Send failed: ${e.message}`);
+    } finally {
+      setSendingOutreach(false);
+    }
+  };
+
   // Organization detail view
   if (selectedOrg) {
     const totalInvoiced = invoices.reduce((s, i) => s + i.amount, 0);
@@ -459,12 +556,15 @@ const OrganizationsTab: React.FC = () => {
   }
 
   // Organization list
+  const orgsWithEmail = orgs.filter(o => o.contact_email && o.is_active);
+  const selectedCount = Object.keys(selectedRecipients).length;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2"><Building2 className="h-6 w-6 text-[#B91C1C]" /> Organizations</h1>
-          <p className="text-sm text-muted-foreground">Manage partner organizations and billing</p>
+          <p className="text-sm text-muted-foreground">Manage partner organizations, billing, and outreach</p>
         </div>
         <div className="flex gap-2">
           <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setShowAddOrg(true)}><Plus className="h-4 w-4" /> Add Organization</Button>
@@ -475,35 +575,234 @@ const OrganizationsTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search organizations..." className="pl-9" />
-      </div>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+        <TabsList>
+          <TabsTrigger value="directory" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> Directory</TabsTrigger>
+          <TabsTrigger value="outreach" className="gap-1.5"><Megaphone className="h-3.5 w-3.5" /> Outreach</TabsTrigger>
+        </TabsList>
 
-      {loading ? (
-        <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>
-      ) : filtered.length === 0 ? (
-        <Card className="shadow-sm border-dashed"><CardContent className="p-12 text-center"><Building2 className="h-12 w-12 text-gray-300 mx-auto mb-3" /><p className="font-semibold">No organizations</p><p className="text-sm text-muted-foreground">Add an organization to start billing.</p></CardContent></Card>
-      ) : (
-        <div className="grid gap-3">
-          {filtered.map(org => (
-            <Card key={org.id} className="shadow-sm cursor-pointer hover:shadow-md transition" onClick={() => setSelectedOrg(org)}>
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className="w-11 h-11 rounded-lg bg-[#B91C1C]/10 flex items-center justify-center"><Building2 className="h-5 w-5 text-[#B91C1C]" /></div>
-                <div className="flex-1">
-                  <p className="font-semibold">{org.name}</p>
-                  <div className="flex gap-3 text-xs text-muted-foreground">
-                    {org.contact_name && <span><User className="h-3 w-3 inline mr-1" />{org.contact_name}</span>}
-                    {org.contact_email && <span><Mail className="h-3 w-3 inline mr-1" />{org.contact_email}</span>}
-                    {org.contact_phone && <span><Phone className="h-3 w-3 inline mr-1" />{org.contact_phone}</span>}
+        {/* ─── DIRECTORY TAB (existing content) ─────────────────── */}
+        <TabsContent value="directory" className="space-y-6 mt-4">
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search organizations..." className="pl-9" />
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>
+          ) : filtered.length === 0 ? (
+            <Card className="shadow-sm border-dashed"><CardContent className="p-12 text-center"><Building2 className="h-12 w-12 text-gray-300 mx-auto mb-3" /><p className="font-semibold">No organizations</p><p className="text-sm text-muted-foreground">Add an organization to start billing.</p></CardContent></Card>
+          ) : (
+            <div className="grid gap-3">
+              {filtered.map(org => (
+                <Card key={org.id} className="shadow-sm cursor-pointer hover:shadow-md transition" onClick={() => setSelectedOrg(org)}>
+                  <CardContent className="p-4 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-lg bg-[#B91C1C]/10 flex items-center justify-center"><Building2 className="h-5 w-5 text-[#B91C1C]" /></div>
+                    <div className="flex-1">
+                      <p className="font-semibold">{org.name}</p>
+                      <div className="flex gap-3 text-xs text-muted-foreground">
+                        {org.contact_name && <span><User className="h-3 w-3 inline mr-1" />{org.contact_name}</span>}
+                        {org.contact_email && <span><Mail className="h-3 w-3 inline mr-1" />{org.contact_email}</span>}
+                        {org.contact_phone && <span><Phone className="h-3 w-3 inline mr-1" />{org.contact_phone}</span>}
+                      </div>
+                    </div>
+                    <Badge variant="outline" className={org.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{org.is_active ? 'Active' : 'Inactive'}</Badge>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ─── OUTREACH TAB ─────────────────────────────────────── */}
+        <TabsContent value="outreach" className="space-y-5 mt-4">
+          <Card className="border-conve-red/20 bg-gradient-to-br from-conve-red/5 to-rose-50">
+            <CardContent className="p-5">
+              <div className="flex items-start gap-3">
+                <div className="h-10 w-10 rounded-lg bg-conve-red/10 flex items-center justify-center flex-shrink-0">
+                  <Sparkles className="h-5 w-5 text-conve-red" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900">High-converting partner outreach</h3>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">
+                    Pick recipients below, customize the subject/intro, preview, then send. Every email's CTA routes to <code className="bg-white px-1.5 py-0.5 rounded text-[11px]">/partner-with-us</code>.
+                    Dedup via <code className="bg-white px-1.5 py-0.5 rounded text-[11px]">campaign_sends</code> — same address won't get the same campaign twice.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Composer */}
+          <Card className="shadow-sm">
+            <CardContent className="p-5 space-y-4">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-gray-500">Subject line</Label>
+                <Input value={outreachSubject} onChange={e => setOutreachSubject(e.target.value)} placeholder="A concierge lab partner for your patients" />
+              </div>
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Custom intro <span className="normal-case text-gray-400 font-normal">(optional — leave blank to use the default Hormozi template)</span>
+                </Label>
+                <Textarea
+                  value={outreachIntro}
+                  onChange={e => setOutreachIntro(e.target.value)}
+                  rows={4}
+                  placeholder="Leave blank for the default. Or add something personal: &quot;I saw your practice has a focus on X — we've served several similar clinics and think we could take the collection step off your plate.&quot;"
+                />
+              </div>
+
+              {/* Selected recipients summary */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-700">
+                    {selectedCount === 0 ? 'No recipients selected yet' : `${selectedCount} recipient${selectedCount === 1 ? '' : 's'} selected`}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" onClick={handlePreviewOutreach} disabled={selectedCount === 0}>
+                      <Eye className="h-3.5 w-3.5 mr-1" /> Preview
+                    </Button>
+                    <Button size="sm" className="bg-conve-red hover:bg-conve-red-dark text-white" onClick={handleSendOutreach} disabled={selectedCount === 0 || sendingOutreach}>
+                      {sendingOutreach ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> Sending…</> : <><Send className="h-3.5 w-3.5 mr-1" /> Send to {selectedCount}</>}
+                    </Button>
                   </div>
                 </div>
-                <Badge variant="outline" className={org.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{org.is_active ? 'Active' : 'Inactive'}</Badge>
+                {selectedCount > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {Object.entries(selectedRecipients).slice(0, 10).map(([key, r]) => (
+                      <span key={key} className="inline-flex items-center gap-1 text-[11px] bg-white border border-gray-200 px-2 py-0.5 rounded-full">
+                        {r.email}
+                        <button onClick={() => toggleRecipient(key, r)} className="text-gray-400 hover:text-red-600">×</button>
+                      </span>
+                    ))}
+                    {selectedCount > 10 && <span className="text-[11px] text-gray-500">+{selectedCount - 10} more</span>}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Recipient pickers */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Existing organizations */}
+            <Card className="shadow-sm">
+              <CardContent className="p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
+                  From Directory ({orgsWithEmail.length} with email)
+                </p>
+                {orgsWithEmail.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">No orgs with contact emails yet.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                    {orgsWithEmail.map(o => {
+                      const key = `org:${o.id}`;
+                      const checked = !!selectedRecipients[key];
+                      return (
+                        <label key={key} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleRecipient(key, {
+                              email: o.contact_email!,
+                              firstName: (o.contact_name || '').split(' ')[0] || undefined,
+                              practiceName: o.name,
+                            })}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{o.name}</p>
+                            <p className="text-[11px] text-gray-500 truncate">{o.contact_email} {o.contact_name ? `· ${o.contact_name}` : ''}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </CardContent>
             </Card>
-          ))}
-        </div>
-      )}
+
+            {/* Recent inquiries */}
+            <Card className="shadow-sm">
+              <CardContent className="p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3 flex items-center justify-between">
+                  From Inquiries ({inquiries.length})
+                  {loadingInquiries && <Loader2 className="h-3 w-3 animate-spin" />}
+                </p>
+                {!loadingInquiries && inquiries.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">No new partner inquiries.</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                    {inquiries.map((inq: any) => {
+                      const key = `inq:${inq.id}`;
+                      const checked = !!selectedRecipients[key];
+                      return (
+                        <label key={key} className="flex items-center gap-2.5 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => toggleRecipient(key, {
+                              email: inq.contact_email,
+                              firstName: (inq.contact_name || '').split(' ')[0] || undefined,
+                              practiceName: inq.practice_name,
+                            })}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{inq.practice_name}</p>
+                            <p className="text-[11px] text-gray-500 truncate">{inq.contact_email} · {inq.status}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Custom recipient add */}
+          <Card className="shadow-sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">Add a custom recipient</p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <Input placeholder="email@practice.com" value={addCustomEmail} onChange={e => setAddCustomEmail(e.target.value)} />
+                <Input placeholder="First name" value={addCustomName} onChange={e => setAddCustomName(e.target.value)} />
+                <Input placeholder="Practice name" value={addCustomPractice} onChange={e => setAddCustomPractice(e.target.value)} />
+                <Button variant="outline" onClick={addCustomRecipient}><Plus className="h-4 w-4 mr-1" /> Add</Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Last send result */}
+          {lastSendResult && (
+            <Card className={`shadow-sm ${lastSendResult.sent > 0 ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+              <CardContent className="p-4 text-sm">
+                <div className="flex items-center gap-2 font-semibold">
+                  {lastSendResult.sent > 0 ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
+                  Last send — campaign <code className="text-xs bg-white px-1.5 py-0.5 rounded">{lastSendResult.campaign_key}</code>
+                </div>
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  <div><span className="text-gray-600">Attempted:</span> <strong>{lastSendResult.attempted}</strong></div>
+                  <div><span className="text-gray-600">Sent:</span> <strong className="text-emerald-700">{lastSendResult.sent}</strong></div>
+                  <div><span className="text-gray-600">Already contacted:</span> <strong>{lastSendResult.skipped_already_contacted}</strong></div>
+                  <div><span className="text-gray-600">Failed:</span> <strong className={lastSendResult.failed > 0 ? 'text-red-700' : ''}>{lastSendResult.failed}</strong></div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Preview modal */}
+          <Dialog open={!!previewHtml} onOpenChange={(v) => { if (!v) setPreviewHtml(null); }}>
+            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Email preview</DialogTitle>
+              </DialogHeader>
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <div dangerouslySetInnerHTML={{ __html: previewHtml || '' }} />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPreviewHtml(null)}>Close</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+      </Tabs>
 
       {/* Add Organization Modal */}
       <Dialog open={showAddOrg} onOpenChange={setShowAddOrg}>
