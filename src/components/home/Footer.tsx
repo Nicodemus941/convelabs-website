@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Container } from "@/components/ui/container";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
-import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield } from "lucide-react";
+import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield, Phone, ShieldCheck, Mail } from "lucide-react";
 import { ENROLLMENT_URL, TESTS_URL, BOOKING_URL, AUTH_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
@@ -110,33 +110,55 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="md:col-span-1">
-            <h3 className="text-xl font-bold mb-4">ConveLabs<span className="text-conve-red">.</span></h3>
-            <p className="text-gray-400 mb-4">
-              Luxury mobile phlebotomy services, bringing healthcare to your doorstep.
+            <h3 className="text-xl font-bold mb-3">ConveLabs<span className="text-conve-red">.</span></h3>
+            <p className="text-gray-400 mb-4 text-sm leading-relaxed">
+              Concierge mobile phlebotomy — a licensed phlebotomist at your door, in a window you pick, with lab results you actually get back. Central Florida.
             </p>
+            {/* Direct-call + email (Hormozi: phone number is a conversion element, not a fallback) */}
+            <div className="space-y-1.5 text-sm">
+              <a href="tel:+19415279169" className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors">
+                <Phone className="h-3.5 w-3.5 text-conve-red" /> (941) 527-9169
+              </a>
+              <a href="mailto:info@convelabs.com" className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors">
+                <Mail className="h-3.5 w-3.5 text-conve-red" /> info@convelabs.com
+              </a>
+            </div>
+            {/* Recollection Guarantee — the single biggest differentiator, previously hidden */}
+            <div className="mt-4 bg-gray-800/60 border border-gray-700 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-semibold text-white">Recollection Guarantee</p>
+                  <p className="text-[11px] text-gray-400 leading-snug mt-0.5">
+                    If we caused the issue, recollection is 100% free. If the reference lab caused it, 50% off.{' '}
+                    <Link to="/guarantee" className="text-conve-red hover:underline">Read the guarantee →</Link>
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
-          
+
           <div>
             <h4 className="font-semibold mb-4">Services</h4>
             <ul className="space-y-3">
               <li><Link to="/pricing" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Memberships</Link></li>
-              <li><Link to="/partnerships" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Partnerships</Link></li>
-              <li><Link to="/services/at-home" className="text-gray-400 hover:text-white transition-colors inline-block py-1">At-Home Testing</Link></li>
+              <li><Link to="/services/at-home" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Mobile Blood Draw</Link></li>
               <li><Link to="/services/concierge-doctor" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Concierge Doctor</Link></li>
+              <li><Link to="/guarantee" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Recollection Guarantee</Link></li>
             </ul>
           </div>
-          
+
           <div>
             <h4 className="font-semibold mb-4">Company</h4>
             <ul className="space-y-3">
               <li><Link to="/about" className="text-gray-400 hover:text-white transition-colors inline-block py-1">About Us</Link></li>
+              <li><Link to="/partnerships" className="text-gray-400 hover:text-white transition-colors inline-block py-1">For Providers</Link></li>
               <li><Link to="/contact" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Contact</Link></li>
-              <li><Link to="/services" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Services</Link></li>
               <li><Link to="/privacy-policy" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Terms & Conditions</Link></li>
+              <li><Link to="/terms" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Terms &amp; Conditions</Link></li>
             </ul>
           </div>
-          
+
           <div>
             <h4 className="font-semibold mb-4">Locations</h4>
             <ul className="space-y-3">
@@ -148,14 +170,39 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
             </ul>
           </div>
         </div>
-        
-        {/* Newsletter */}
-        <div className="border-t border-gray-800 mt-8 pt-6 pb-6 max-w-md mx-auto text-center">
-          <p className="text-sm font-semibold mb-2">Weekly Health Tips</p>
-          <p className="text-xs text-gray-400 mb-3">Get expert insights on blood work, preventive health, and wellness.</p>
-          <form onSubmit={(e) => { e.preventDefault(); const input = e.currentTarget.querySelector('input'); if (input?.value) { supabase.from('leads' as any).insert({ email: input.value, source: 'footer_newsletter', status: 'new' }).then(() => { input.value = ''; }); } }} className="flex gap-2">
-            <input type="email" placeholder="Your email" className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#B91C1C]" required />
-            <button type="submit" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">Subscribe</button>
+
+        {/* Lead-magnet — Hormozi: specific beats generic. "Expert insights"
+            converts poorly; a named PDF / checklist with a number in the
+            title converts substantially better. */}
+        <div className="border-t border-gray-800 mt-8 pt-6 pb-6 max-w-xl mx-auto text-center">
+          <p className="text-sm font-bold mb-1 text-white">
+            Free: The 5 Labs Most Doctors Miss
+          </p>
+          <p className="text-xs text-gray-400 mb-3 leading-relaxed">
+            A one-page checklist of the panels that catch problems years early — the same ones our concierge patients run. Straight to your inbox, no sales pitch.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const input = e.currentTarget.querySelector('input');
+              if (input?.value) {
+                supabase
+                  .from('leads' as any)
+                  .insert({ email: input.value, source: 'footer_5_labs_checklist', status: 'new' })
+                  .then(() => { input.value = ''; });
+              }
+            }}
+            className="flex gap-2 max-w-md mx-auto"
+          >
+            <input
+              type="email"
+              placeholder="Your email"
+              className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#B91C1C]"
+              required
+            />
+            <button type="submit" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors whitespace-nowrap">
+              Send the checklist →
+            </button>
           </form>
         </div>
 
