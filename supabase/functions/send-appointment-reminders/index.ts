@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
+import { shouldSendNow } from '../_shared/quiet-hours.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -16,6 +17,15 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Quiet-hours guardrail — no patient SMS/email 9pm-8am ET.
+  const gate = shouldSendNow('reminder');
+  if (!gate.allow) {
+    console.log(`[quiet-hours] send-appointment-reminders deferred: ${gate.reason}`);
+    return new Response(JSON.stringify({ deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 

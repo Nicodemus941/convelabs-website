@@ -16,6 +16,7 @@
 //   - appointments with no phone or email on file
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { shouldSendNow } from '../_shared/quiet-hours.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -85,6 +86,15 @@ function tomorrowET(): { iso: string; label: string } {
 }
 
 Deno.serve(async (_req) => {
+  // Quiet-hours guardrail — no patient SMS/email 9pm-8am ET. Reminders
+  // deferred; the next cron tick after 8am picks up the backlog.
+  const gate = shouldSendNow('reminder');
+  if (!gate.allow) {
+    console.log(`[quiet-hours] send-fasting-reminders deferred: ${gate.reason}; resume ${gate.nextAllowedAt}`);
+    return new Response(JSON.stringify({ deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
   try {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const tomorrow = tomorrowET();

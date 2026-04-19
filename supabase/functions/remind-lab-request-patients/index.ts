@@ -15,6 +15,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { nextAvailableSlots } from '../_shared/availability.ts';
 import { formatSlotsForSms } from '../_shared/preoffered-slots.ts';
+import { shouldSendNow } from '../_shared/quiet-hours.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -43,6 +44,16 @@ function daysBetween(iso: string): number {
 }
 
 Deno.serve(async (req) => {
+  // Quiet-hours guardrail — skip patient-facing sends 9pm-8am ET. Note we
+  // still run the EXPIRE-past-deadline pass below unconditionally (that's a
+  // DB update, no outbound notification), but the SMS/email branch is gated.
+  const gate = shouldSendNow('reminder');
+  if (!gate.allow) {
+    console.log(`[quiet-hours] remind-lab-request-patients deferred: ${gate.reason}`);
+    return new Response(JSON.stringify({ deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
   try {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const now = new Date();

@@ -4,6 +4,7 @@ import { createSupabaseAdmin } from "../_shared/email/index.ts";
 import { processManualEmails, fetchMemberRecipients } from "../_shared/email/recipients.ts";
 import { processBatchedRecipients } from "../_shared/email/marketing.ts";
 import { setupDatabaseFunctions } from "../_shared/database-functions.ts";
+import { shouldSendNow } from "../_shared/quiet-hours.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -14,6 +15,15 @@ serve(async (req: Request) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Quiet-hours guardrail — marketing never fires 9pm-8am ET.
+  const gate = shouldSendNow('marketing');
+  if (!gate.allow) {
+    console.log(`[quiet-hours] process-scheduled-campaigns deferred: ${gate.reason}`);
+    return new Response(JSON.stringify({ deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {

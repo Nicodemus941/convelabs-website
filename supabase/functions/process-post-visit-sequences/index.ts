@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { shouldSendNow } from '../_shared/quiet-hours.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,6 +14,15 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    });
+  }
+
+  // Quiet-hours guardrail — no patient sends 9pm-8am ET.
+  const gate = shouldSendNow('post_visit');
+  if (!gate.allow) {
+    console.log(`[quiet-hours] process-post-visit-sequences deferred: ${gate.reason}`);
+    return new Response(JSON.stringify({ deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
+      status: 200, headers: { 'Content-Type': 'application/json', ...corsHeaders },
     });
   }
 

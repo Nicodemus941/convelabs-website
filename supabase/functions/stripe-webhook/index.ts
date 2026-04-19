@@ -38,16 +38,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Handle the event — log to webhook_logs
+    // T2: log ONCE at end of handler (success) or in catch (error). The
+    // previous code wrote a "processing" row here, before handler work.
+    // If the handler crashed past this point without reaching the success
+    // update, the row was stranded as "processing" — no way to tell success
+    // from failure from an orphan. Now: no row until the outcome is known.
     console.log(`Processing event type: ${event.type}`);
     const webhookLogId = crypto.randomUUID();
-    await supabaseClient.from('webhook_logs').insert({
-      id: webhookLogId,
-      event_type: event.type,
-      stripe_session_id: event.data?.object?.id || null,
-      status: 'processing',
-      payload_summary: { type: event.type, metadata_type: event.data?.object?.metadata?.type || null },
-    }).catch(() => {});
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object;
@@ -167,8 +164,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Log success
-    await supabaseClient.from('webhook_logs').update({ status: 'success' }).eq('id', webhookLogId).catch(() => {});
+    // Log success (insert, not update — we no longer write a pre-handler row)
+    await supabaseClient.from('webhook_logs').insert({
+      id: webhookLogId,
+      event_type: event.type,
+      stripe_session_id: event.data?.object?.id || null,
+      status: 'success',
+      payload_summary: { type: event.type, metadata_type: event.data?.object?.metadata?.type || null },
+    }).catch(() => {});
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,
@@ -541,15 +544,19 @@ async function handleSubscriptionUpdate(subscription: any) {
 }
 
 // Handle subscription cancellation
+// T4 fix: cancel BOTH recurring_bookings AND user_memberships if both exist
+// for the same subscription id. Previously we short-circuited after finding
+// a recurring_booking match — any membership on the same subscription stayed
+// active, leaving credits available after the patient's card was gone.
 async function handleSubscriptionCancellation(subscription: any) {
   try {
     const subscriptionId = subscription.id;
+    const results: { recurring_booking?: any; membership?: any; matched: number } = { matched: 0 };
 
-    // Check if this cancellation is for a recurring_bookings row (Tier 3 patient subscription)
-    // before we try to mark a membership — these two systems share the subscription webhook.
+    // 1. recurring_bookings (Tier 3 patient-paid recurring plan)
     const { data: recurring } = await supabaseClient
       .from('recurring_bookings' as any)
-      .select('id, patient_email')
+      .select('id, patient_email, is_active')
       .eq('stripe_subscription_id', subscriptionId)
       .maybeSingle();
 
@@ -559,11 +566,14 @@ async function handleSubscriptionCancellation(subscription: any) {
         cancelled_at: new Date().toISOString(),
       }).eq('id', (recurring as any).id);
       console.log(`[subscription.deleted] cancelled recurring_booking ${(recurring as any).id} (${(recurring as any).patient_email})`);
-      return recurring;
+      results.recurring_booking = recurring;
+      results.matched++;
     }
 
-    // Otherwise, legacy path — mark membership as canceled
-    const { data, error } = await supabaseClient
+    // 2. user_memberships — ALSO check, don't skip if recurring matched.
+    //    Shouldn't normally coexist but we don't enforce that at DB level,
+    //    so the safe thing is cancel whatever exists.
+    const { data: membership } = await supabaseClient
       .from('user_memberships')
       .update({
         status: 'canceled',
@@ -571,16 +581,22 @@ async function handleSubscriptionCancellation(subscription: any) {
       })
       .eq('stripe_subscription_id', subscriptionId)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error) {
-      // Not a membership either — probably unrelated. Log and move on.
-      console.warn(`[subscription.deleted] no match for ${subscriptionId}:`, error.message);
-      return null;
+    if (membership) {
+      console.log(`[subscription.deleted] marked membership ${(membership as any).id} canceled`);
+      results.membership = membership;
+      results.matched++;
     }
 
-    console.log(`Marked subscription ${subscriptionId} as canceled`);
-    return data;
+    if (results.matched === 0) {
+      console.warn(`[subscription.deleted] no match for ${subscriptionId} in recurring_bookings OR user_memberships`);
+      return null;
+    }
+    if (results.matched === 2) {
+      console.warn(`[subscription.deleted] DUAL match on ${subscriptionId} — recurring_booking AND membership share this sub id. Both cancelled, but investigate how they got linked to the same subscription.`);
+    }
+    return results;
   } catch (error) {
     console.error('Error handling subscription cancellation:', error);
     throw error;
