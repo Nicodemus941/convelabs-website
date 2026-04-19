@@ -22,6 +22,11 @@ interface Partner {
 
 const PARTNERS: Partner[] = [
   {
+    name: 'Aristotle',
+    url: 'https://aristotleeducation.com',
+    description: "Dr. Jamnadas — fasting, vagus-nerve & longevity protocols",
+  },
+  {
     name: 'Clinical Associates of Orlando',
     url: 'https://clinicalassociatesorlando.com',
     description: 'Clinical research · IRB-governed trials',
@@ -37,9 +42,9 @@ const PARTNERS: Partner[] = [
     description: 'Concierge doctor · advanced lab testing',
   },
   {
-    name: 'NaturaMed',
+    name: 'Natura Integrative and Functional Medicine',
     url: 'https://naturamed.org',
-    description: 'Functional medicine · Nourish to Flourish',
+    description: 'Nourish to Flourish · AlignHer protocols',
   },
   {
     name: 'ND Wellness',
