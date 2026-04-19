@@ -121,7 +121,7 @@ export async function getAvailableSlotsForDate(
   const [apptResp, blockResp] = await Promise.all([
     supabase
       .from('appointments')
-      .select('appointment_time, status')
+      .select('appointment_time, status, duration_minutes, service_type')
       .gte('appointment_date', dayStart)
       .lte('appointment_date', dayEnd)
       .neq('status', 'cancelled'),
@@ -132,10 +132,27 @@ export async function getAvailableSlotsForDate(
       .gte('end_date', dateIso),
   ]);
 
-  const bookedTimes = new Set<string>();
+  // DURATION-AWARE BLOCKING: each existing appointment blocks every grid slot
+  // whose start falls within [appt_start, appt_start + duration + travel_buffer).
+  // Travel buffer (mobile only) = 30 min so we don't book back-to-back draws
+  // in different ZIP codes.
+  const BUFFER_MIN_MOBILE = 30;
+  const BUFFER_MIN_OFFICE = 0;
+  const DEFAULT_DURATION_MIN = 30;
+  const blockedMinuteRanges: Array<[number, number]> = [];
   for (const a of apptResp.data || []) {
-    if (a.appointment_time) bookedTimes.add(String(a.appointment_time).trim());
+    if (!a.appointment_time) continue;
+    const { h, m } = parseTime(String(a.appointment_time));
+    const start = h * 60 + m;
+    const duration = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : DEFAULT_DURATION_MIN;
+    const buffer = a.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+    blockedMinuteRanges.push([start, start + duration + buffer]);
   }
+  const slotIsBooked = (t: string): boolean => {
+    const { h, m } = parseTime(t);
+    const slotMin = h * 60 + m;
+    return blockedMinuteRanges.some(([s, e]) => slotMin >= s && slotMin < e);
+  };
   const fullyBlocked = (blockResp.data || []).length > 0;
 
   // Also exclude "too soon" — same-day bookings cut after 11am ET (can't mobilize phleb in < 2h)
@@ -153,7 +170,7 @@ export async function getAvailableSlotsForDate(
     if (fullyBlocked) return { time: t, available: false, reason: 'blocked' };
     if (!allowed.includes(t)) return { time: t, available: false, reason: 'outside_window' };
     if (!hasEnoughLead(t)) return { time: t, available: false, reason: 'past' };
-    if (bookedTimes.has(t)) return { time: t, available: false, reason: 'booked' };
+    if (slotIsBooked(t)) return { time: t, available: false, reason: 'booked' };
     return { time: t, available: true };
   });
 }
