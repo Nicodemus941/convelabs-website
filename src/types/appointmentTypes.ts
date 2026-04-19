@@ -62,6 +62,9 @@ export interface BookingFormValues {
     email: string;
     phone: string;
     dateOfBirth?: Date;
+    // When booking for a saved family member, stamp their id here so the
+    // appointment row links back to family_members.
+    familyMemberId?: string | null;
   };
   additionalPatients?: Array<{
     firstName: string;
@@ -116,7 +119,8 @@ export const bookingFormSchema = z.object({
     lastName: z.string().min(1, "Last name is required"),
     email: z.string().email("Invalid email address"),
     phone: z.string().optional(),
-    dateOfBirth: z.date().optional()
+    dateOfBirth: z.date().optional(),
+    familyMemberId: z.string().nullable().optional(),
   }),
   additionalPatients: z.array(z.object({
     firstName: z.string().min(1, "First name required"),

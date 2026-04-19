@@ -271,6 +271,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           lastName: data.patientDetails.lastName,
           email: data.patientDetails.email,
           phone: data.patientDetails.phone,
+          // Family-member booking: when the account holder is booking a
+          // visit for a saved family member, this id points at the
+          // family_members row. Stored on appointments.family_member_id.
+          familyMemberId: (data.patientDetails as any).familyMemberId || null,
         },
         locationDetails: {
           address: data.locationDetails.address,

@@ -937,6 +937,12 @@ async function handleAppointmentPayment(session: any) {
         patient_name: patientName,
         patient_email: metadata.patient_email || null,
         patient_phone: metadata.patient_phone || null,
+        // When account holder booked for a saved family member, link the
+        // appointment to that family_members row. The billing/booker stays
+        // on patient_id; family_member_id is the visit subject.
+        family_member_id: metadata.family_member_id && metadata.family_member_id.length >= 32
+          ? metadata.family_member_id
+          : null,
         address: fullAddress,
         zipcode: metadata.zip_code || '',
         service_type: metadata.service_type || 'mobile',

@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X, CheckCircle, Users } from 'lucide-react';
+import { CalendarIcon, ArrowLeft, ArrowRight, UserPlus, X, CheckCircle, Users, Heart } from 'lucide-react';
 import { useFormContext, useFieldArray } from 'react-hook-form';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,53 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
   const [hasAuthAccount, setHasAuthAccount] = useState(false);
   const [checking, setChecking] = useState(false);
   const [bookingForSelf, setBookingForSelf] = useState(true);
+  // Family members saved on the logged-in user's chart. When booking for
+  // "someone else," we show these as quick-pick cards so they don't re-type
+  // the info. Appointment rows get family_member_id stamped so downstream
+  // dashboards can show "for [spouse name]" chips.
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const [selectedFamilyMemberId, setSelectedFamilyMemberId] = useState<string | null>(null);
+
+  // Load the user's family members once we know who they are
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      const { data: tp } = await supabase
+        .from('tenant_patients')
+        .select('id')
+        .or(`user_id.eq.${user.id},email.ilike.${user.email || 'none'}`)
+        .maybeSingle();
+      if (!tp?.id) return;
+      const { data: fams } = await supabase
+        .from('family_members' as any)
+        .select('id, first_name, last_name, relationship, email, phone, date_of_birth, insurance_provider, insurance_member_id, insurance_group_number')
+        .eq('patient_id', tp.id)
+        .order('created_at');
+      setFamilyMembers((fams as any[]) || []);
+    })();
+  }, [user]);
+
+  const handlePickFamilyMember = (fm: any) => {
+    setSelectedFamilyMemberId(fm.id);
+    setValue('patientDetails.firstName', fm.first_name || '');
+    setValue('patientDetails.lastName', fm.last_name || '');
+    setValue('patientDetails.email', fm.email || user?.email || '');
+    setValue('patientDetails.phone', fm.phone || '');
+    if (fm.date_of_birth) setValue('patientDetails.dateOfBirth', fm.date_of_birth);
+    // Stamp the family_member_id on the form so BookingFlow forwards it to
+    // create-appointment-checkout → appointments.family_member_id.
+    setValue('patientDetails.familyMemberId' as any, fm.id);
+    toast.success(`Booking for ${fm.first_name} (${fm.relationship})`);
+  };
+
+  const handleClearFamilyMember = () => {
+    setSelectedFamilyMemberId(null);
+    setValue('patientDetails.familyMemberId' as any, null);
+    setValue('patientDetails.firstName', '');
+    setValue('patientDetails.lastName', '');
+    setValue('patientDetails.email', '');
+    setValue('patientDetails.phone', '');
+  };
 
   const handleEmailBlur = async () => {
     const email = getValues('patientDetails.email');
@@ -76,6 +123,10 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
   
   const handleBookingForToggle = (forSelf: boolean) => {
     setBookingForSelf(forSelf);
+    // Always reset the family_member_id when toggling — protects against
+    // "selected family member, toggled back to self, submitted" wiring bug.
+    setSelectedFamilyMemberId(null);
+    setValue('patientDetails.familyMemberId' as any, null);
     if (forSelf && user) {
       // Restore logged-in user's info
       setValue('patientDetails.firstName', user.firstName || '');
@@ -124,6 +175,75 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
               >
                 <Users className="h-3.5 w-3.5" /> Booking for someone else
               </Button>
+            </div>
+          )}
+
+          {/* Family member quick-pick — only when logged-in user is booking
+              for someone else and has saved family members on their chart */}
+          {user && !bookingForSelf && familyMembers.length > 0 && (
+            <div className="bg-gradient-to-br from-pink-50 to-rose-50 border border-pink-200 rounded-xl p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Heart className="h-4 w-4 text-rose-600" />
+                <p className="text-sm font-semibold text-rose-900">Book for a family member</p>
+                {selectedFamilyMemberId && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 text-xs text-rose-700 hover:text-rose-900"
+                    onClick={handleClearFamilyMember}
+                  >
+                    <X className="h-3 w-3 mr-1" /> Clear
+                  </Button>
+                )}
+              </div>
+              <p className="text-[11px] text-rose-700 -mt-2">
+                Select a saved family member to auto-fill the form. Billing stays under your account.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {familyMembers.map((fm) => {
+                  const isSelected = selectedFamilyMemberId === fm.id;
+                  return (
+                    <button
+                      type="button"
+                      key={fm.id}
+                      onClick={() => handlePickFamilyMember(fm)}
+                      className={cn(
+                        'text-left border rounded-lg px-3 py-2 transition-all bg-white',
+                        isSelected
+                          ? 'border-rose-500 ring-2 ring-rose-300 shadow-sm'
+                          : 'border-rose-200 hover:border-rose-400 hover:shadow-sm'
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm text-gray-900 truncate">
+                            {fm.first_name} {fm.last_name}
+                          </p>
+                          <p className="text-[11px] text-rose-700 capitalize">
+                            {fm.relationship}
+                            {fm.date_of_birth && ` · DOB ${fm.date_of_birth}`}
+                          </p>
+                        </div>
+                        {isSelected && (
+                          <CheckCircle className="h-4 w-4 text-rose-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-rose-700/80 italic">
+                Need to add someone new? <a href="/patient-profile" target="_blank" className="underline">Manage family members →</a>
+              </p>
+            </div>
+          )}
+
+          {user && !bookingForSelf && familyMembers.length === 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs text-blue-800 leading-relaxed">
+                💡 Tip: <a href="/patient-profile" target="_blank" className="underline font-medium">Add family members to your chart</a> once — then they're one-click to book next time.
+              </p>
             </div>
           )}
           
