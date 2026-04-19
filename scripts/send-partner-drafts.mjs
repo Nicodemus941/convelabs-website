@@ -480,6 +480,45 @@ const emails = [
       ${SIGNOFF}
     `),
   },
+
+  // ── 8. KRISTEN BLAKE WELLNESS — Kristen (anytime Mon-Fri, patient-pay default) ──
+  // NOTE: placeholder email kristen@kristenblakewellness.com — confirm real
+  // inbox before firing the live send.
+  {
+    subjectPrefix: '[DRAFT → Kristen Blake Wellness]',
+    actualRecipient: 'kristen@kristenblakewellness.com (Kristen Blake)',
+    portalEmail: 'kristen@kristenblakewellness.com',
+    subject: 'A concierge lab-draw partner for your Kristen Blake Wellness patients',
+    html: brandWrap('Kristen Blake Wellness — your portal is ready', `
+      <!-- HOOK -->
+      <p>Hi Kristen,</p>
+      <p>The patients who choose Kristen Blake Wellness are choosing <strong>a higher standard of care</strong> — personal, unhurried, built around them. The lab-collection step should feel like the rest of that experience, not a downgrade into a cold waiting room or a missed fasting window.</p>
+
+      <!-- AGITATE -->
+      <p>We rebuilt ConveLabs specifically so the collection step matches the standard your brand already holds. Here's what that looks like for your practice.</p>
+
+      <!-- STACK -->
+      <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What this means for Kristen Blake Wellness, specifically</h3>
+      <ul style="padding-left:20px;margin:10px 0 16px;">
+        <li><strong>Anytime Monday–Friday business-hours booking</strong> — your patients are not restricted to the 6–9am fasting window. They book around their lives.</li>
+        <li><strong>Patient-pay by default</strong> — each patient pays directly through Stripe the moment they book. Zero invoices in your inbox, zero receivables for your team to chase.</li>
+        <li><strong>One-toggle "Kristen Blake Wellness pays" override</strong> — for any visit you want to cover in-house (comped patients, onboarding panels, VIP care), flip a single toggle at scheduling and the charge routes to your org instead of the patient. Clean billing separation either way.</li>
+        <li><strong>Full wellness-panel support</strong> — CBC/CMP, thyroid full, hormones (total + free + SHBG), vitamin D, iron studies, lipid subfractions, HbA1c, hs-CRP, omega-3 index, and the specialty kits your protocols use.</li>
+        <li><strong>Membership linking</strong> — patients who are also ConveLabs members automatically get whichever rate is lower. No "did I get my discount?" phone calls.</li>
+        <li><strong>Team logins</strong> — add anyone on your side (front desk, nurse, assistant) with one click each. Each gets their own scoped portal view.</li>
+        <li><strong>Protocol-aligned intake</strong> — you can add a quick note on the lab request (e.g. "on extended fast", "post-IV therapy", "48h off supplements") and the patient's pre-visit instructions reinforce it automatically.</li>
+        <li><strong>Coming soon:</strong> enter the patient's next Kristen Blake Wellness appointment when scheduling the draw, so results land in your hands <em>before</em> the follow-up consult.</li>
+      </ul>
+
+      ${TECH_POSITIONING}
+      ${PLATFORM_STACK}
+      ${RISK_REVERSAL}
+
+      ${loginBlock('kristen@kristenblakewellness.com')}
+      <p>Kristen — the level of care your patients get from Kristen Blake Wellness is the standard I'd want for my own family. This rebuild is us trying to earn a seat at that table.</p>
+      ${SIGNOFF}
+    `),
+  },
 ];
 
 async function send(one) {
