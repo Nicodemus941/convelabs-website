@@ -149,17 +149,37 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json' }
     });
 
-  } catch (err) {
-    console.error(`Error processing webhook: ${err.message}`);
-    // Log failure
-    await supabaseClient.from('webhook_logs').insert({
-      event_type: 'webhook_error',
-      status: 'failed',
-      error_message: err.message,
-    }).catch(() => {});
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    const stack = err?.stack || '';
+    console.error(`[stripe-webhook] top-level crash: ${msg}\n${stack}`);
 
-    return new Response(JSON.stringify({ error: `Webhook error: ${err.message}` }), {
-      status: 400,
+    // Persist to BOTH webhook_logs and error_logs so we have redundant visibility.
+    // Previously this insert was silently .catch()'d — meaning any crash after
+    // signature-verification but before a handler-specific catch was invisible.
+    // That's how 500s slipped past us: the runtime saw an unhandled rejection
+    // before we could log the real error. Now both tables get the stack trace.
+    await Promise.allSettled([
+      supabaseClient.from('webhook_logs').insert({
+        event_type: 'webhook_error',
+        status: 'failed',
+        error_message: msg.substring(0, 2000),
+      }),
+      supabaseClient.from('error_logs').insert({
+        component: 'stripe-webhook',
+        action: 'top_level_catch',
+        error_type: 'unhandled',
+        error_message: msg.substring(0, 2000),
+        error_stack: stack.substring(0, 4000),
+      }),
+    ]);
+
+    // Return 200 so Stripe stops retrying — we've captured the error server-side.
+    // A 4xx/5xx triggers Stripe's exponential backoff which fires the same event
+    // dozens of times per day and pollutes the dashboard. If our code can't
+    // process the event, retrying won't help; we'll fix it and manually resend.
+    return new Response(JSON.stringify({ received: true, logged_error: msg }), {
+      status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
   }
@@ -798,7 +818,10 @@ async function handleAppointmentPayment(session: any) {
     // banner + panel chips render for image/PDF uploads too.
     if (appointment.lab_order_file_path) {
       try {
-        supabase.functions.invoke('ocr-lab-order', {
+        // Fire-and-forget OCR trigger. Was `supabase.functions.invoke` which
+        // threw ReferenceError (no `supabase` binding in this module) — silently
+        // caught by the surrounding try, so OCR never ran. Use supabaseClient.
+        supabaseClient.functions.invoke('ocr-lab-order', {
           body: { appointmentId: appointment.id },
         }).catch((e) => console.warn('[ocr] trigger failed (non-blocking):', e));
       } catch (e) { console.warn('[ocr] invoke exception:', e); }
@@ -1381,12 +1404,15 @@ async function handleLabRequestUnlock(session: any) {
       return;
     }
 
-    // Load the lab request + org for pricing/rules
-    const { data: request } = await supabase
+    // Load the lab request + org for pricing/rules.
+    // Module binding is `supabaseClient`, not `supabase` — every reference
+    // below was throwing ReferenceError silently inside the outer try, which
+    // made the whole unlock path a no-op in production. Now corrected.
+    const { data: request } = await supabaseClient
       .from('patient_lab_requests').select('*').eq('id', labRequestId).maybeSingle();
     if (!request) { console.error('[unlock] lab request not found', labRequestId); return; }
 
-    const { data: org } = await supabase
+    const { data: org } = await supabaseClient
       .from('organizations').select('id, name, contact_email, billing_email, contact_name, show_patient_name_on_appointment')
       .eq('id', request.organization_id).maybeSingle();
 
@@ -1405,10 +1431,10 @@ async function handleLabRequestUnlock(session: any) {
     }
 
     // Create the membership row
-    const { data: plan } = await supabase
+    const { data: plan } = await supabaseClient
       .from('membership_plans' as any).select('id').eq('tier', tier).maybeSingle();
     if (plan) {
-      await supabase.from('user_memberships' as any).insert({
+      await supabaseClient.from('user_memberships' as any).insert({
         email: patientEmail,
         stripe_customer_id: customerId,
         stripe_subscription_id: subscriptionId,
@@ -1421,7 +1447,7 @@ async function handleLabRequestUnlock(session: any) {
 
     // Create the appointment
     const apptDateIso = `${apptDate}T12:00:00-04:00`;
-    const { data: appt, error: apptErr } = await supabase.from('appointments').insert({
+    const { data: appt, error: apptErr } = await supabaseClient.from('appointments').insert({
       patient_name: request.patient_name,
       patient_email: patientEmail,
       patient_phone: patientPhone,
@@ -1450,7 +1476,7 @@ async function handleLabRequestUnlock(session: any) {
 
     if (apptErr) { console.error('[unlock] appointment insert failed:', apptErr); return; }
 
-    await supabase.from('patient_lab_requests').update({
+    await supabaseClient.from('patient_lab_requests').update({
       status: 'scheduled',
       appointment_id: appt.id,
       patient_scheduled_at: new Date().toISOString(),
