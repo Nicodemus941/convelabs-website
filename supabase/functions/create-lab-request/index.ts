@@ -9,6 +9,7 @@
 // Response: { success: true, request_id, access_token, patient_url }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { computePreofferedSlots, formatSlotsForSms } from '../_shared/preoffered-slots.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -200,9 +201,15 @@ Deno.serve(async (req) => {
     }
 
     // ── SMS ──────────────────────────────────────────────────────────────
+    // Pre-offer 3 quick-reply slots so patient can text "1", "2", or "3"
+    // instead of tapping through the link (reply-to-book)
+    const slots = computePreofferedSlots(draw_by_date, 3);
+    const slotsLine = slots.length > 0 ? `Reply ${formatSlotsForSms(slots)}. ` : '';
+
     if (patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
       try {
-        const smsBody = `ConveLabs: ${providerDisplayName.split(' ').slice(-1)[0]} at ${org.name} ordered your bloodwork by ${fmtDate(draw_by_date).replace(',', '')}${next_doctor_appt_date ? ` (before your ${fmtDate(next_doctor_appt_date).replace(',', '')} visit)` : ''}. Book: ${patientUrl}`;
+        const providerLast = providerDisplayName.split(' ').slice(-1)[0];
+        const smsBody = `ConveLabs: ${providerLast} at ${org.name} ordered your bloodwork by ${fmtDate(draw_by_date).replace(',', '')}${next_doctor_appt_date ? ` (before your ${fmtDate(next_doctor_appt_date).replace(',', '')} visit)` : ''}. ${slotsLine}Or pick a time: ${patientUrl}`;
         const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
         const fd = new URLSearchParams({ To: normalizePhone(patient_phone), From: TWILIO_FROM, Body: smsBody });
         await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
@@ -213,7 +220,11 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn('SMS send failed:', e); }
     }
 
-    await admin.from('patient_lab_requests').update({ patient_notified_at: new Date().toISOString() }).eq('id', inserted.id);
+    await admin.from('patient_lab_requests').update({
+      patient_notified_at: new Date().toISOString(),
+      preoffered_slots: slots,
+      preoffered_slots_at: new Date().toISOString(),
+    }).eq('id', inserted.id);
 
     return new Response(JSON.stringify({
       success: true,

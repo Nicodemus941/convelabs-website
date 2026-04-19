@@ -152,6 +152,24 @@ const ProviderDashboard: React.FC = () => {
 
   useEffect(() => { loadData(); }, []);
 
+  // Realtime: when any lab_request or appointment belonging to this org
+  // changes, refetch the dashboard. Keeps Lab Requests + Upcoming live.
+  useEffect(() => {
+    const orgId = data?.org?.id;
+    if (!orgId) return;
+    const channel = supabase
+      .channel(`provider-dashboard-${orgId}`)
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'patient_lab_requests', filter: `organization_id=eq.${orgId}` }, () => {
+        loadData();
+      })
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'appointments', filter: `organization_id=eq.${orgId}` }, () => {
+        loadData();
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.org?.id]);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate('/provider');
