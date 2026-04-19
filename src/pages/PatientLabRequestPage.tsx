@@ -318,6 +318,22 @@ const PatientLabRequestPage: React.FC = () => {
                 <span><strong>{org.name}</strong> has been notified</span>
               </div>
 
+              {/* Member trophy — shown when the patient's membership was auto-detected.
+                  Closes the loop on the "Welcome back" badge at page load: tier was
+                  detected, perks were honored, booking went through. Tiny dopamine hit
+                  that reinforces the value of the membership they already pay for. */}
+              {request.detected_tier && request.detected_tier !== 'none' && (() => {
+                const tier = request.detected_tier;
+                const color = TIER_COLOR[tier] || TIER_COLOR.regular_member;
+                const label = TIER_LABEL[tier] || 'Member';
+                return (
+                  <div className={`flex items-center justify-center gap-2 text-sm rounded-xl px-4 py-2.5 border font-medium ${color.bg} ${color.text} ${color.border}`}>
+                    <span aria-hidden className="text-base">🏆</span>
+                    <span>Booked as a <strong>{label}</strong> — your membership perks are active.</span>
+                  </div>
+                );
+              })()}
+
               {/* Real booking details from the server when available */}
               {bookedDate && bookedTime && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-left space-y-1">
@@ -505,7 +521,24 @@ const PatientLabRequestPage: React.FC = () => {
                       <button key={s.time} type="button"
                         onClick={() => {
                           if (s.available) setTime(s.time);
-                          else if (isLocked) setUnlockSlot(s);
+                          else if (isLocked) {
+                            setUnlockSlot(s);
+                            // Fire-and-forget telemetry: one row per locked-slot click.
+                            // Do NOT await — the unlock modal must open instantly.
+                            fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/log-slot-lock-interaction', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                access_token: token,
+                                slot_date: date,
+                                slot_time: s.time,
+                                required_tier: s.requires_tier,
+                                current_tier: request.detected_tier || 'none',
+                                unlock_price_cents: s.unlock_price_cents,
+                                visit_savings_cents: s.visit_savings_cents,
+                              }),
+                            }).catch(() => { /* telemetry never blocks UX */ });
+                          }
                         }}
                         disabled={!s.available && !isLocked}
                         title={titleText}

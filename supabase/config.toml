@@ -91,6 +91,9 @@ verify_jwt = false
 [functions.get-lab-request-slots]
 verify_jwt = false
 
+[functions.log-slot-lock-interaction]
+verify_jwt = false
+
 [functions.schedule-lab-request]
 verify_jwt = false
 
