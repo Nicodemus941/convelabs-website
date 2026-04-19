@@ -10,6 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import LabDestinationSelector from './LabDestinationSelector';
 import LabOrderPrepModal from './LabOrderPrepModal';
+import ServiceAutoSwitchModal from './ServiceAutoSwitchModal';
 import { analyzePrepRequirements, type PrepAnalysis } from '@/lib/phlebHelpers';
 
 interface LabOrderUploadStepProps {
@@ -19,6 +20,7 @@ interface LabOrderUploadStepProps {
   selectedFiles: File[];
   onInsuranceFileSelected?: (file: File | null) => void;
   selectedInsuranceFile?: File | null;
+  onGoBackToSchedule?: () => void; // Layer 2: send user back to re-pick time after auto-switch
 }
 
 // Visit types that require lab order upload (cannot skip)
@@ -35,6 +37,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   selectedFiles,
   onInsuranceFileSelected,
   selectedInsuranceFile,
+  onGoBackToSchedule,
 }) => {
   const { setValue, getValues, watch } = useFormContext<BookingFormValues>();
   const visitType = watch('serviceDetails.visitType') || '';
@@ -115,12 +118,57 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       setValue('labOrder.ocrPanels' as any, panels);
       setValue('labOrder.ocrText' as any, text);
 
-      // Fire the modal ONLY if there's actionable prep — don't interrupt for nothing
-      if (analysis.hasAnyPrep) {
-        setPrepAnalysis(analysis);
-        setPrepModalOpen(true);
-      } else {
-        toast.success('Lab order uploaded — no special prep needed.');
+      // ── Layer 2: service-vs-OCR mismatch auto-switch ──────────────
+      // `fastingDetected` is set by the OCR edge fn (true if any fasting
+      // panel hit). The user already picked a service earlier in the flow;
+      // if it conflicts with the OCR verdict, swap it + clear the slot +
+      // prompt re-pick. This prevents the hard server-side reject in
+      // create-appointment-checkout (Layer 3) from ever firing.
+      const fastingDetected: boolean = Boolean((data as any).fastingDetected);
+      const currentService = (getValues('serviceDetails.selectedService') || '') as string;
+      let serviceSwitched = false;
+
+      if (currentService === 'fasting-blood-draw' && fastingDetected === false) {
+        // Fasting picked but order doesn't require fasting → switch to routine
+        setValue('serviceDetails.selectedService', 'routine-blood-draw');
+        setValue('serviceDetails.duration', 60);
+        setValue('serviceDetails.sameDay', false);
+        setValue('serviceDetails.date', undefined as any);
+        setValue('serviceDetails.timeSlot', '');
+        setAutoSwitchModal({
+          open: true,
+          fromService: 'fasting-blood-draw',
+          toService: 'routine-blood-draw',
+          fastingDetected: false,
+          panels,
+        });
+        serviceSwitched = true;
+      } else if (currentService === 'routine-blood-draw' && fastingDetected === true) {
+        // Routine picked but order requires fasting → switch to fasting
+        setValue('serviceDetails.selectedService', 'fasting-blood-draw');
+        setValue('serviceDetails.duration', 60);
+        setValue('serviceDetails.sameDay', false);
+        setValue('serviceDetails.date', undefined as any);
+        setValue('serviceDetails.timeSlot', '');
+        setAutoSwitchModal({
+          open: true,
+          fromService: 'routine-blood-draw',
+          toService: 'fasting-blood-draw',
+          fastingDetected: true,
+          panels,
+        });
+        serviceSwitched = true;
+      }
+
+      // Fire the prep modal ONLY if there's actionable prep AND we didn't
+      // just open the auto-switch modal (don't stack two modals on the user)
+      if (!serviceSwitched) {
+        if (analysis.hasAnyPrep) {
+          setPrepAnalysis(analysis);
+          setPrepModalOpen(true);
+        } else {
+          toast.success('Lab order uploaded — no special prep needed.');
+        }
       }
     } catch (e) {
       console.warn('[ocr] client exception (non-blocking):', e);
@@ -143,6 +191,15 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   const [labOrderOcrProcessing, setLabOrderOcrProcessing] = useState(false);
   const [prepModalOpen, setPrepModalOpen] = useState(false);
   const [prepAnalysis, setPrepAnalysis] = useState<PrepAnalysis | null>(null);
+
+  // ── Layer 2: service auto-switch on OCR / service mismatch ───────────
+  const [autoSwitchModal, setAutoSwitchModal] = useState<{
+    open: boolean;
+    fromService: string;
+    toService: string;
+    fastingDetected: boolean;
+    panels: string[];
+  } | null>(null);
 
   // Insurance dropzone + auto OCR
   const onDropInsurance = useCallback(async (acceptedFiles: File[]) => {
@@ -436,6 +493,24 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
         analysis={prepAnalysis}
         patientFirstName={getValues('patientDetails.firstName')}
       />
+
+      {/* Layer 2 — service-vs-OCR auto-switch (e.g., fasting requested but
+          order shows no fasting panel → swap to Routine, force re-pick slot) */}
+      {autoSwitchModal && (
+        <ServiceAutoSwitchModal
+          open={autoSwitchModal.open}
+          onClose={() => setAutoSwitchModal(null)}
+          onGoBackToSchedule={() => {
+            setAutoSwitchModal(null);
+            if (onGoBackToSchedule) onGoBackToSchedule();
+          }}
+          fromService={autoSwitchModal.fromService}
+          toService={autoSwitchModal.toService}
+          fastingDetected={autoSwitchModal.fastingDetected}
+          panels={autoSwitchModal.panels}
+          patientFirstName={getValues('patientDetails.firstName')}
+        />
+      )}
     </Card>
   );
 };

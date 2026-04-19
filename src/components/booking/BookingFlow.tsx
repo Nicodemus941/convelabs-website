@@ -470,6 +470,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   selectedFiles={labOrderFiles}
                   onInsuranceFileSelected={setInsuranceFile}
                   selectedInsuranceFile={insuranceFile}
+                  onGoBackToSchedule={() => {
+                    // Layer 2 OCR auto-switch: send patient back to re-pick
+                    // a time slot that matches the auto-switched service.
+                    setShowLabOrder(false);
+                    setShowDatePicker(true);
+                    prevStepRef.current = currentStep;
+                    setCurrentStep(BookingStep.ServiceAndDate);
+                  }}
                 />
               )}
 
