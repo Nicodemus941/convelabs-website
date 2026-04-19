@@ -20,7 +20,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const EXPECTED_TOKEN = 'patient-live-2026-04-19';
 const CAMPAIGN_KEY = 'patient_announce_2026_04_19';
-const PATIENT_SUBJECT = "Your ConveLabs account is live — here's what just got easier";
+const PATIENT_SUBJECT = 'Your ConveLabs account is live — lock in founding-member pricing (ends April 30)';
 const PUBLIC_SITE = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
 
 const buildPatientEmailHtml = (opts: {
@@ -32,13 +32,16 @@ const buildPatientEmailHtml = (opts: {
   const portalUrl = `${PUBLIC_SITE}/login?email=${encodeURIComponent(email)}`;
   return `
 <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:640px;margin:0 auto;background:#ffffff;">
-  <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);padding:28px 32px;border-radius:12px 12px 0 0;text-align:center;">
+  <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);padding:28px 24px;border-radius:12px 12px 0 0;text-align:center;">
     <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">Your ConveLabs account is live</h1>
-    <p style="margin:6px 0 0;color:#fecaca;font-size:13px;letter-spacing:.5px;">Concierge lab collection · built around you</p>
+    <p style="margin:6px 0 0;color:#fecaca;font-size:13px;letter-spacing:.5px;">Founder-owned since 2023 · trusted by hundreds of Central Florida patients</p>
   </div>
-  <div style="padding:28px 32px;background:#ffffff;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;color:#111827;line-height:1.6;font-size:14.5px;">
+  <div style="background:#78350f;color:#fef3c7;padding:10px 14px;text-align:center;font-size:13px;font-weight:700;letter-spacing:.3px;">
+    ⏰ Founding-member pricing ends <span style="color:#fde68a;">April 30, 2026</span> — rates rise May 1
+  </div>
+  <div style="padding:28px 24px;background:#ffffff;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;color:#111827;line-height:1.6;font-size:14.5px;">
     <p>Hi ${firstName || 'there'},</p>
-    <p>Thanks for choosing ConveLabs for your blood work. I wanted to let you know your patient portal is now live — and everything we've been building for the last few months is <strong>designed to make the lab-testing part of your life smaller</strong>, not bigger.</p>
+    <p>Thanks for choosing ConveLabs for your blood work. Your patient portal is now live — and I'm writing to give you <strong>one chance to lock in founding-member pricing</strong> before rates go up at the end of this month.</p>
 
     <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">No more of this:</h3>
     <ul style="padding-left:20px;margin:10px 0 16px;color:#374151;">
@@ -58,37 +61,69 @@ const buildPatientEmailHtml = (opts: {
       <li><strong>Add your family.</strong> Household members share one account view, so managing a spouse's or parent's labs isn't a second headache.</li>
     </ul>
 
-    <div style="background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%);border:2px solid #d97706;border-radius:14px;padding:22px;margin:22px 0;">
-      <p style="margin:0 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">If you run labs more than 2× a year</p>
-      <h3 style="margin:0 0 12px;color:#78350f;font-size:18px;">Three membership tiers — pay once a year, save on every draw</h3>
-      <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:separate;border-spacing:6px 0;">
-        <tr>
-          <td style="width:33%;vertical-align:top;background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;padding:14px;text-align:center;">
-            <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#6b7280;font-weight:700;">Tier 1</p>
-            <h4 style="margin:4px 0;color:#111827;font-size:16px;">Member</h4>
-            <p style="margin:0;font-size:22px;font-weight:800;color:#111827;">$99<span style="font-size:11px;font-weight:500;color:#6b7280;"> / year</span></p>
-            <p style="margin:4px 0;font-size:12px;color:#166534;font-weight:700;">$130 / visit · save $20 each</p>
-            <p style="margin:8px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Weekend access · portal · 10% family add-on</p>
-          </td>
-          <td style="width:33%;vertical-align:top;background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;border:1.5px solid #7F1D1D;border-radius:12px;padding:14px;text-align:center;">
-            <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#fecaca;font-weight:700;">Most popular</p>
-            <h4 style="margin:4px 0;color:#fff;font-size:16px;">VIP</h4>
-            <p style="margin:0;font-size:22px;font-weight:800;color:#fff;">$199<span style="font-size:11px;font-weight:500;color:#fecaca;"> / year</span></p>
-            <p style="margin:4px 0;font-size:12px;color:#fef3c7;font-weight:700;">$115 / visit · save $35 each</p>
-            <p style="margin:8px 0 0;font-size:12px;color:#fecaca;line-height:1.4;">Priority same-day · family $45 · extended hours</p>
-          </td>
-          <td style="width:33%;vertical-align:top;background:#fff;border:1.5px solid #fde68a;border-radius:12px;padding:14px;text-align:center;">
-            <p style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#92400e;font-weight:700;">Best value</p>
-            <h4 style="margin:4px 0;color:#111827;font-size:16px;">Concierge</h4>
-            <p style="margin:0;font-size:22px;font-weight:800;color:#111827;">$399<span style="font-size:11px;font-weight:500;color:#6b7280;"> / year</span></p>
-            <p style="margin:4px 0;font-size:12px;color:#166534;font-weight:700;">$99 / visit · save $51 each</p>
-            <p style="margin:8px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">Same-day guaranteed · dedicated phleb · NDA available</p>
-          </td>
-        </tr>
-      </table>
-      <p style="margin:14px 0 0;font-size:13px;color:#451a03;line-height:1.55;">
-        <strong>The math:</strong> if you do <strong>6 visits a year</strong>, Member saves $120 (pays for itself at visit 5). VIP saves $210. Concierge saves $306. If you run labs more than 2× / year, membership pays for itself.
+    <div style="background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%);border:2px solid #d97706;border-radius:14px;padding:22px 18px;margin:22px 0;">
+      <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">Founding-member offer · ends April 30, 2026</p>
+      <h3 style="margin:0 0 8px;color:#78350f;font-size:20px;line-height:1.3;">Lock in today's rate. It never raises for you.</h3>
+      <p style="margin:0 0 16px;font-size:13.5px;color:#451a03;line-height:1.55;">
+        Pay once a year. Every mobile draw after that is discounted for life. <strong>Standard mobile draw: $150.</strong> Member pricing below. Rates rise <strong>May 1, 2026</strong> — if you join by April 30, your rate never raises as long as you stay a member.
       </p>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff;border:1.5px solid #e5e7eb;border-radius:12px;margin:0 0 10px;">
+        <tr><td style="padding:18px 20px;">
+          <p style="margin:0 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#6b7280;font-weight:800;">Tier 1 · Member</p>
+          <p style="margin:0 0 10px;color:#111827;font-size:28px;font-weight:800;line-height:1.1;">$99<span style="font-size:14px;font-weight:500;color:#6b7280;"> / year</span></p>
+          <p style="margin:0 0 8px;background:#d1fae5;color:#065f46;display:inline-block;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;">$130 per visit · save $20 each draw</p>
+          <p style="margin:10px 0 0;font-size:13.5px;color:#374151;line-height:1.5;">Weekend appointments · patient portal · 10% off family add-ons</p>
+          <div style="text-align:center;margin:14px 0 0;">
+            <a href="${portalUrl}&tier=member" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Lock in Member — $99 →</a>
+          </div>
+        </td></tr>
+      </table>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);border-radius:12px;margin:0 0 10px;">
+        <tr><td style="padding:18px 20px;">
+          <p style="margin:0 0 2px;">
+            <span style="background:#fde68a;color:#78350f;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Most popular</span>
+          </p>
+          <p style="margin:6px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#fecaca;font-weight:800;">Tier 2 · VIP</p>
+          <p style="margin:0 0 10px;color:#ffffff;font-size:28px;font-weight:800;line-height:1.1;">$199<span style="font-size:14px;font-weight:500;color:#fecaca;"> / year</span></p>
+          <p style="margin:0 0 8px;background:#fde68a;color:#78350f;display:inline-block;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;">$115 per visit · save $35 each draw</p>
+          <p style="margin:10px 0 12px;font-size:13.5px;color:#fef3c7;line-height:1.5;">Priority same-day booking · family add-ons at $45 · extended hours · everything in Member</p>
+          <div style="background:rgba(255,255,255,0.12);border:1px dashed #fecaca;border-radius:10px;padding:12px 14px;margin:0 0 12px;">
+            <p style="margin:0 0 6px;font-size:11px;color:#fef3c7;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">Founding VIP bonuses (ends April 30)</p>
+            <p style="margin:0 0 4px;font-size:13px;color:#fef3c7;line-height:1.5;">🎁 <strong>Free family add-on (1 extra member)</strong> — bring your spouse, parent, or child to one appointment at no extra cost <span style="color:#fecaca;">(value: $75)</span></p>
+            <p style="margin:0;font-size:13px;color:#fef3c7;line-height:1.5;">🔒 <strong>Founding-rate lock for life</strong> — your $199 annual rate never raises as long as you stay a member <span style="color:#fecaca;">(value: $50+/yr)</span></p>
+          </div>
+          <div style="text-align:center;margin:6px 0 0;">
+            <a href="${portalUrl}&tier=vip" style="display:inline-block;background:#fde68a;color:#78350f;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:800;font-size:13.5px;">Claim VIP + bonuses — $199 →</a>
+          </div>
+        </td></tr>
+      </table>
+
+      <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff;border:2px solid #fde68a;border-radius:12px;margin:0 0 10px;">
+        <tr><td style="padding:18px 20px;">
+          <p style="margin:0 0 2px;">
+            <span style="background:#92400e;color:#fef3c7;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Best value per visit</span>
+          </p>
+          <p style="margin:6px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">Tier 3 · Concierge</p>
+          <p style="margin:0 0 10px;color:#111827;font-size:28px;font-weight:800;line-height:1.1;">$399<span style="font-size:14px;font-weight:500;color:#6b7280;"> / year</span></p>
+          <p style="margin:0 0 8px;background:#d1fae5;color:#065f46;display:inline-block;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;">$99 per visit · save $51 each draw</p>
+          <p style="margin:10px 0 0;font-size:13.5px;color:#374151;line-height:1.5;">Same-day guaranteed · dedicated phlebotomist · NDA available on request · concierge support · everything in VIP <em>(including founding-rate lock)</em></p>
+          <div style="text-align:center;margin:14px 0 0;">
+            <a href="${portalUrl}&tier=concierge" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Lock in Concierge — $399 →</a>
+          </div>
+        </td></tr>
+      </table>
+
+      <div style="background:#ffffff;border:1px solid #fde68a;border-radius:10px;padding:14px 16px;margin:14px 0 0;">
+        <p style="margin:0 0 6px;font-size:12px;color:#92400e;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">The math (at 6 visits a year)</p>
+        <p style="margin:0;font-size:13.5px;color:#451a03;line-height:1.6;">
+          <strong>Member</strong> saves $120 — pays for itself at visit #5<br>
+          <strong>VIP</strong> saves $210 + $75 family bonus = <strong>$285 value</strong> for $199<br>
+          <strong>Concierge</strong> saves $306 — pays for itself at visit #5<br>
+          <span style="color:#92400e;">If you run labs more than 2×/year, membership is cheaper than paying per visit.</span>
+        </p>
+      </div>
     </div>
 
     <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:16px 18px;margin:16px 0;">
@@ -121,10 +156,11 @@ const buildPatientEmailHtml = (opts: {
       </ul>
     </div>
 
-    <div style="text-align:center;margin:24px 0 10px;">
-      <a href="${portalUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:15px 42px;border-radius:10px;text-decoration:none;font-weight:800;font-size:15px;">Open my portal →</a>
+    <div style="text-align:center;margin:24px 0 6px;">
+      <a href="${portalUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:15px 38px;border-radius:10px;text-decoration:none;font-weight:800;font-size:15.5px;line-height:1.2;">Lock in my founding rate →</a>
     </div>
-    <p style="text-align:center;font-size:12px;color:#6b7280;margin:0 0 12px;">Your email is already on file — no password? Click the button; you'll be prompted to set one.</p>
+    <p style="text-align:center;font-size:12px;color:#78350f;font-weight:700;margin:0 0 6px;">⏰ Offer ends Thursday, April 30, 2026</p>
+    <p style="text-align:center;font-size:12px;color:#6b7280;margin:0 0 12px;">Your email is already on file — no password? Click the button and you'll set one.</p>
 
     <p style="margin:20px 0 6px;">If you ever have a question, email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or text <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a>. I read every message myself.</p>
     <p style="margin:16px 0 0;">With gratitude,<br>
