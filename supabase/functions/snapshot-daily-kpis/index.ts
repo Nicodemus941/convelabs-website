@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
       error_type: 'unhandled',
       error_message: (error?.message || String(error)).substring(0, 2000),
       error_stack: (error?.stack || '').substring(0, 4000),
-    }).catch(() => {});
+    }).then(() => {}, () => {});
     return new Response(JSON.stringify({ success: false, error: error?.message || String(error) }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

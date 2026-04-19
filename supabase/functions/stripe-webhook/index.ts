@@ -165,13 +165,20 @@ Deno.serve(async (req) => {
     }
 
     // Log success (insert, not update — we no longer write a pre-handler row)
-    await supabaseClient.from('webhook_logs').insert({
-      id: webhookLogId,
-      event_type: event.type,
-      stripe_session_id: event.data?.object?.id || null,
-      status: 'success',
-      payload_summary: { type: event.type, metadata_type: event.data?.object?.metadata?.type || null },
-    }).catch(() => {});
+    // NOTE: Supabase query builders are thenable but do NOT expose .catch()
+    // directly. Calling .catch() on .insert() throws "catch is not a function"
+    // synchronously BEFORE the Promise resolves — which was wrapping every
+    // webhook in an error because this log-success path fired unconditionally.
+    // Fix: proper try/catch instead of the builder.catch() footgun.
+    try {
+      await supabaseClient.from('webhook_logs').insert({
+        id: webhookLogId,
+        event_type: event.type,
+        stripe_session_id: event.data?.object?.id || null,
+        status: 'success',
+        payload_summary: { type: event.type, metadata_type: event.data?.object?.metadata?.type || null },
+      });
+    } catch (_logErr) { /* non-blocking */ }
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,

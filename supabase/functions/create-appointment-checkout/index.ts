@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
           service_type_requested: serviceType,
           outcome: 'no_order',
           resolution_note: 'Fasting service selected without lab order upload. Admin should verify post-visit.',
-        }).catch(() => {});
+        }).then(() => {}, () => {});
       } else {
         // Run OCR synchronously (adds ~5-15s to checkout but only for fasting bookings)
         try {
@@ -164,7 +164,7 @@ Deno.serve(async (req) => {
               lab_order_file_path: primaryOrderPath,
               outcome: 'ocr_failed',
               resolution_note: `OCR unavailable at booking: ${ocrResult?.error || ocrResp.status}`,
-            }).catch(() => {});
+            }).then(() => {}, () => {});
           } else if (ocrResult.fastingDetected === false) {
             // OCR says NO fasting required, but they selected fasting service. REJECT.
             await supabaseClient.from('service_mismatch_log').insert({
@@ -176,7 +176,7 @@ Deno.serve(async (req) => {
               lab_order_file_path: primaryOrderPath,
               outcome: 'rejected',
               resolution_note: 'Booking rejected — service_type=fasting but OCR detected no fasting panels',
-            }).catch(() => {});
+            }).then(() => {}, () => {});
 
             return new Response(
               JSON.stringify({
@@ -195,7 +195,7 @@ Deno.serve(async (req) => {
               lab_order_file_path: primaryOrderPath,
               outcome: 'warning_passed',
               resolution_note: 'OCR confirmed fasting required; booking approved',
-            }).catch(() => {});
+            }).then(() => {}, () => {});
           }
         } catch (ocrErr: any) {
           // OCR crash / timeout — log, pass through, don't block
@@ -205,7 +205,7 @@ Deno.serve(async (req) => {
             lab_order_file_path: primaryOrderPath,
             outcome: 'ocr_failed',
             resolution_note: `OCR exception: ${ocrErr?.message || 'unknown'}`,
-          }).catch(() => {});
+          }).then(() => {}, () => {});
         }
       }
     }

@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
         action: 'auto_sync',
         error_message: `Synced ${synced.length} payment(s): ${synced.map(s => `${s.patientName} ($${s.amount})`).join(', ')}`,
         resolved: true,
-      }).catch(() => {});
+      }).then(() => {}, () => {});
     }
 
     return new Response(JSON.stringify({

@@ -78,7 +78,7 @@ export async function verifyRecipientEmail(
           email_owner: registryName,
           reason: 'Email belongs to a different patient',
         },
-      }).catch(() => {});
+      }).then(() => {}, () => {});
 
       return {
         safe: false,
@@ -157,7 +157,7 @@ export async function verifyRecipientPhone(
           phone_owner: registryName,
           reason: 'Phone belongs to a different patient',
         },
-      }).catch(() => {});
+      }).then(() => {}, () => {});
 
       return {
         safe: false,
