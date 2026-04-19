@@ -29,7 +29,11 @@ const PatientProfile = () => {
   const [specimens, setSpecimens] = useState<any[]>([]);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [addFamilyOpen, setAddFamilyOpen] = useState(false);
-  const [familyForm, setFamilyForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse' });
+  const [familyForm, setFamilyForm] = useState({
+    firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse',
+    insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '',
+  });
+  const [editingFamilyId, setEditingFamilyId] = useState<string | null>(null);
 
   // Form state
   const [form, setForm] = useState({
@@ -310,15 +314,36 @@ const PatientProfile = () => {
                         </p>
                       )}
                     </div>
-                    <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-600 h-8 w-8 p-0"
-                      onClick={async () => {
-                        if (!confirm(`Remove ${fm.first_name} from family?`)) return;
-                        await supabase.from('family_members' as any).delete().eq('id', fm.id);
-                        setFamilyMembers(prev => prev.filter(f => f.id !== fm.id));
-                        toast.success('Family member removed');
-                      }}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" className="text-gray-500 hover:text-[#B91C1C] h-8 w-8 p-0"
+                        onClick={() => {
+                          setFamilyForm({
+                            firstName: fm.first_name || '',
+                            lastName: fm.last_name || '',
+                            email: fm.email || '',
+                            phone: fm.phone || '',
+                            dob: fm.date_of_birth || '',
+                            relationship: fm.relationship || 'spouse',
+                            insuranceProvider: fm.insurance_provider || '',
+                            insuranceMemberId: fm.insurance_member_id || '',
+                            insuranceGroup: fm.insurance_group_number || '',
+                          });
+                          setEditingFamilyId(fm.id);
+                          setAddFamilyOpen(true);
+                        }}
+                        title="Edit family member">
+                        <User className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-red-400 hover:text-red-600 h-8 w-8 p-0"
+                        onClick={async () => {
+                          if (!confirm(`Remove ${fm.first_name} from family?`)) return;
+                          await supabase.from('family_members' as any).delete().eq('id', fm.id);
+                          setFamilyMembers(prev => prev.filter(f => f.id !== fm.id));
+                          toast.success('Family member removed');
+                        }}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -330,10 +355,21 @@ const PatientProfile = () => {
               </div>
             )}
 
-            {/* Add Family Member Modal */}
-            <Dialog open={addFamilyOpen} onOpenChange={setAddFamilyOpen}>
-              <DialogContent className="max-w-md w-[95vw] sm:w-full">
-                <DialogHeader><DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-[#B91C1C]" /> Add Family Member</DialogTitle></DialogHeader>
+            {/* Add / Edit Family Member Modal */}
+            <Dialog open={addFamilyOpen} onOpenChange={(v) => {
+              setAddFamilyOpen(v);
+              if (!v) {
+                setEditingFamilyId(null);
+                setFamilyForm({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+              }
+            }}>
+              <DialogContent className="max-w-md w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <UserPlus className="h-5 w-5 text-[#B91C1C]" />
+                    {editingFamilyId ? 'Edit Family Member' : 'Add Family Member'}
+                  </DialogTitle>
+                </DialogHeader>
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div><Label>First Name *</Label><Input value={familyForm.firstName} onChange={e => setFamilyForm(p => ({ ...p, firstName: e.target.value }))} /></div>
@@ -348,6 +384,7 @@ const PatientProfile = () => {
                         <SelectItem value="child">Child</SelectItem>
                         <SelectItem value="parent">Parent</SelectItem>
                         <SelectItem value="sibling">Sibling</SelectItem>
+                        <SelectItem value="dependent">Dependent</SelectItem>
                         <SelectItem value="other">Other</SelectItem>
                       </SelectContent>
                     </Select>
@@ -357,24 +394,62 @@ const PatientProfile = () => {
                     <div><Label>Phone</Label><Input value={familyForm.phone} onChange={e => setFamilyForm(p => ({ ...p, phone: e.target.value }))} /></div>
                   </div>
                   <div><Label>Date of Birth</Label><Input type="date" value={familyForm.dob} onChange={e => setFamilyForm(p => ({ ...p, dob: e.target.value }))} /></div>
+
+                  {/* Insurance — optional. Stored on the family-member row so
+                      their lab orders bill to their own plan, not the primary's. */}
+                  <div className="border-t pt-3 mt-3">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+                      <Shield className="h-3 w-3" /> Insurance (optional — leave blank if same as primary)
+                    </p>
+                    <div className="space-y-3">
+                      <div><Label>Insurance Provider</Label><Input value={familyForm.insuranceProvider} onChange={e => setFamilyForm(p => ({ ...p, insuranceProvider: e.target.value }))} placeholder="e.g. Blue Cross Blue Shield" /></div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Member ID</Label><Input value={familyForm.insuranceMemberId} onChange={e => setFamilyForm(p => ({ ...p, insuranceMemberId: e.target.value }))} /></div>
+                        <div><Label>Group #</Label><Input value={familyForm.insuranceGroup} onChange={e => setFamilyForm(p => ({ ...p, insuranceGroup: e.target.value }))} /></div>
+                      </div>
+                    </div>
+                  </div>
+
                   <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!familyForm.firstName || !familyForm.lastName}
                     onClick={async () => {
-                      const { data, error } = await supabase.from('family_members' as any).insert({
-                        patient_id: patient?.id,
+                      const payload = {
                         first_name: familyForm.firstName,
                         last_name: familyForm.lastName,
                         email: familyForm.email || null,
                         phone: familyForm.phone || null,
                         date_of_birth: familyForm.dob || null,
                         relationship: familyForm.relationship,
-                      }).select().single();
-                      if (error) { toast.error(error.message); return; }
-                      setFamilyMembers(prev => [...prev, data]);
-                      setFamilyForm({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse' });
+                        insurance_provider: familyForm.insuranceProvider || null,
+                        insurance_member_id: familyForm.insuranceMemberId || null,
+                        insurance_group_number: familyForm.insuranceGroup || null,
+                      };
+
+                      if (editingFamilyId) {
+                        const { data, error } = await supabase
+                          .from('family_members' as any)
+                          .update(payload)
+                          .eq('id', editingFamilyId)
+                          .select()
+                          .single();
+                        if (error) { toast.error(error.message); return; }
+                        setFamilyMembers(prev => prev.map(f => f.id === editingFamilyId ? data : f));
+                        toast.success(`${familyForm.firstName} updated`);
+                      } else {
+                        const { data, error } = await supabase
+                          .from('family_members' as any)
+                          .insert({ patient_id: patient?.id, ...payload })
+                          .select()
+                          .single();
+                        if (error) { toast.error(error.message); return; }
+                        setFamilyMembers(prev => [...prev, data]);
+                        toast.success(`${familyForm.firstName} added to family`);
+                      }
+
+                      setFamilyForm({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+                      setEditingFamilyId(null);
                       setAddFamilyOpen(false);
-                      toast.success(`${familyForm.firstName} added to family`);
                     }}>
-                    Add Family Member
+                    {editingFamilyId ? 'Save Changes' : 'Add Family Member'}
                   </Button>
                 </div>
               </DialogContent>

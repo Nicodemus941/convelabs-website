@@ -541,8 +541,18 @@ async function send(one) {
   console.log(`${one.subjectPrefix}: ${resp.status} ${resp.ok ? '✓' : '✗'} ${result.substring(0, 200)}`);
 }
 
-for (const e of emails) {
+// Optional filter — set FILTER env var to a substring that should match
+// subjectPrefix or actualRecipient. Useful when appending a new partner
+// (e.g. FILTER="Kristen") and you only want to preview the new one.
+const FILTER = process.env.FILTER || '';
+const toSend = FILTER
+  ? emails.filter(e => (e.subjectPrefix + ' ' + e.actualRecipient).toLowerCase().includes(FILTER.toLowerCase()))
+  : emails;
+
+if (FILTER) console.log(`FILTER="${FILTER}" matched ${toSend.length} of ${emails.length} drafts.`);
+
+for (const e of toSend) {
   await send(e);
   await new Promise(r => setTimeout(r, 900));
 }
-console.log(`\nAll ${emails.length} Hormozi-structured drafts sent to info@convelabs.com.`);
+console.log(`\n${toSend.length} Hormozi-structured draft${toSend.length === 1 ? '' : 's'} sent to info@convelabs.com.`);
