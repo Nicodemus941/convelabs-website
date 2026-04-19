@@ -45,7 +45,7 @@ const PatientProfileTab: React.FC = () => {
   useEffect(() => {
     const loadAll = async () => {
       const [{ data: pts }, { data: appts }, { data: mems }] = await Promise.all([
-        supabase.from('tenant_patients').select('*').eq('is_active', true).order('first_name', { ascending: true }).limit(1000),
+        supabase.from('tenant_patients').select('*').eq('is_active', true).is('deleted_at', null).order('first_name', { ascending: true }).limit(1000),
         supabase.from('appointments').select('patient_id').not('patient_id', 'is', null),
         supabase.from('user_memberships' as any)
           .select('user_id, status, membership_plans(name)')
@@ -468,7 +468,43 @@ const PatientProfileTab: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-3 pt-4 border-t mt-2">
+            <div className="flex justify-between items-center gap-3 pt-4 border-t mt-2">
+              {/* Danger zone — delete. Soft-deletes by default; server decides
+                  hard vs soft based on whether the patient has any history. */}
+              <Button
+                variant="outline"
+                className="h-10 px-4 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                onClick={async () => {
+                  const reason = window.prompt(
+                    `Delete patient "${p.first_name} ${p.last_name}"?\n\n` +
+                    `Patients with appointment history are SOFT-deleted (hidden but audit-preserved for HIPAA).\n` +
+                    `Patients with no history are removed permanently.\n\n` +
+                    `Enter a short reason (min 3 chars):`
+                  );
+                  if (!reason || reason.trim().length < 3) return;
+                  const { data, error } = await supabase.rpc('delete_patient', {
+                    p_patient_id: p.id,
+                    p_reason: reason.trim(),
+                    p_hard_delete: true, // let server downgrade to soft if unsafe
+                  });
+                  if (error) { toast.error(`Delete failed: ${error.message}`); return; }
+                  if ((data as any)?.action === 'hard_delete') {
+                    toast.success('Patient permanently deleted (no history)');
+                  } else {
+                    toast.success(`Patient soft-deleted${(data as any)?.note ? ` · ${(data as any).note}` : ''}`);
+                  }
+                  setEditModalOpen(false);
+                  // Refresh list, excluding soft-deleted
+                  const { data: refreshed } = await supabase
+                    .from('tenant_patients').select('*').is('deleted_at', null)
+                    .order('first_name').limit(500);
+                  setAllPatients(refreshed || []);
+                  setSelectedPatient(null);
+                }}
+              >
+                Delete Patient
+              </Button>
+              <div className="flex gap-3">
               <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
               <Button className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold" onClick={async () => {
                 const { error } = await supabase.from('tenant_patients').update({
@@ -487,10 +523,11 @@ const PatientProfileTab: React.FC = () => {
                 toast.success('Patient info updated');
                 setSelectedPatient({ ...p, first_name: editForm.firstName, last_name: editForm.lastName, email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null, address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null, gate_code: editForm.gateCode || null, insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null });
                 setEditModalOpen(false);
-                // Refresh patient list
-                const { data } = await supabase.from('tenant_patients').select('*').order('first_name').limit(500);
+                // Refresh patient list (exclude soft-deleted)
+                const { data } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
                 setAllPatients(data || []);
               }}>Save Changes</Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -755,7 +792,7 @@ const PatientProfileTab: React.FC = () => {
                   setNewPatient({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
                   setCreatePatientOpen(false);
 
-                  const { data: refreshed } = await supabase.from('tenant_patients').select('*').order('first_name').limit(500);
+                  const { data: refreshed } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
                   setAllPatients(refreshed || []);
                   setPatients(refreshed || []);
 

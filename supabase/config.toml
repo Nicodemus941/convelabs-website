@@ -97,6 +97,9 @@ verify_jwt = false
 [functions.reconcile-stripe-payments]
 verify_jwt = false
 
+[functions.send-april-update-drafts]
+verify_jwt = false
+
 [functions.schedule-lab-request]
 verify_jwt = false
 
