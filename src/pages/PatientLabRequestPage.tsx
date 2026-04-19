@@ -51,6 +51,14 @@ interface LabRequestData {
     status: string;
     already_scheduled: boolean;
     appointment_id: string | null;
+    scheduled_appointment?: {
+      date: string;
+      time: string;
+      address: string;
+      status: string;
+      total_amount: number | null;
+      fasting_required: boolean;
+    } | null;
   };
   org: {
     id: string;
@@ -262,10 +270,19 @@ const PatientLabRequestPage: React.FC = () => {
 
   // ── SUCCESS VIEW ─────────────────────────────────────────────────────
   if (success) {
+    // When patient revisits the link after booking, prefer the REAL appointment
+    // data from the server (date, time, address) so they see actual confirmation
+    // rather than a generic "you're all set" with no context.
+    const booked = request.scheduled_appointment;
+    const bookedDate = booked?.date?.substring(0, 10) || date;
+    const bookedTime = booked?.time || time;
+    const bookedAddress = booked?.address || address;
+    const bookedFasting = booked?.fasting_required ?? request.fasting_required;
+
     // Compute the fasting cutoff label for display (mirrors send-fasting-reminders logic)
     const fastingCutoff = (() => {
-      if (!request.fasting_required || !time) return null;
-      const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time.trim());
+      if (!bookedFasting || !bookedTime) return null;
+      const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(bookedTime.trim());
       if (!match) return null;
       let h = parseInt(match[1], 10);
       const m = parseInt(match[2], 10);
@@ -298,7 +315,17 @@ const PatientLabRequestPage: React.FC = () => {
                 <CheckCircle2 className="h-4 w-4" />
                 <span><strong>{org.name}</strong> has been notified</span>
               </div>
-              <p className="text-sm text-gray-600">A confirmation SMS + email is on the way.</p>
+
+              {/* Real booking details from the server when available */}
+              {bookedDate && bookedTime && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-left space-y-1">
+                  <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Your appointment</p>
+                  <p className="text-sm"><strong>When:</strong> {format(new Date(bookedDate + 'T12:00:00'), 'EEEE, MMM d')} at {bookedTime}</p>
+                  {bookedAddress && <p className="text-sm"><strong>Where:</strong> {bookedAddress}</p>}
+                </div>
+              )}
+
+              <p className="text-sm text-gray-600">A confirmation SMS + email is on the way. Need to reschedule? Email <a href="mailto:info@convelabs.com" className="text-[#B91C1C] underline">info@convelabs.com</a> or call (941) 527-9169.</p>
 
               {/* Fasting cutoff callout (if fasting required) */}
               {fastingCutoff && (

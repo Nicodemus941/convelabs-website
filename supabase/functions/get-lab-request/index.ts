@@ -49,6 +49,29 @@ Deno.serve(async (req) => {
       } catch { /* non-blocking */ }
     }
 
+    // If already scheduled, pull the appointment so we can show the real
+    // confirmation details (date, time, address) when patient revisits the link
+    let scheduled_appointment: any = null;
+    if (request.appointment_id) {
+      try {
+        const { data: appt } = await admin
+          .from('appointments')
+          .select('appointment_date, appointment_time, address, status, total_amount, fasting_required')
+          .eq('id', request.appointment_id)
+          .maybeSingle();
+        if (appt) {
+          scheduled_appointment = {
+            date: appt.appointment_date,
+            time: appt.appointment_time,
+            address: appt.address,
+            status: appt.status,
+            total_amount: appt.total_amount,
+            fasting_required: appt.fasting_required,
+          };
+        }
+      } catch { /* non-blocking */ }
+    }
+
     return new Response(JSON.stringify({
       request: {
         id: request.id,
@@ -66,6 +89,7 @@ Deno.serve(async (req) => {
         status: request.status,
         appointment_id: request.appointment_id,
         already_scheduled: request.status !== 'pending_schedule',
+        scheduled_appointment,
       },
       org: {
         id: org?.id,
