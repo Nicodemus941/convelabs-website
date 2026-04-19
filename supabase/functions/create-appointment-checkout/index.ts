@@ -91,6 +91,10 @@ Deno.serve(async (req) => {
       // Partner/org linkage — applies partner time-window rules, pricing floor,
       // billing mode (patient vs org), and patient-name masking
       organizationId = null,
+      // H2: attribution passed from client sessionStorage — UTM params,
+      // referrer, landing page for the current booking session. Stamped on
+      // the appointment row (via webhook metadata) for CAC attribution.
+      attribution = {},
     } = await req.json();
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
@@ -597,6 +601,15 @@ Deno.serve(async (req) => {
       insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',
       lab_destination: labDestination ? String(labDestination).substring(0, 50) : '',
       lab_destination_pending: labDestinationPending ? 'true' : 'false',
+      // H2: attribution (last-touch) — stripe-webhook reads these into the
+      // appointments row for CAC-per-channel reporting
+      utm_source: String(attribution?.utm_source || '').substring(0, 100),
+      utm_medium: String(attribution?.utm_medium || '').substring(0, 100),
+      utm_campaign: String(attribution?.utm_campaign || '').substring(0, 100),
+      utm_content: String(attribution?.utm_content || '').substring(0, 100),
+      utm_term: String(attribution?.utm_term || '').substring(0, 100),
+      referrer_url: String(attribution?.referrer_url || '').substring(0, 500),
+      landing_page: String(attribution?.landing_page || '').substring(0, 500),
     };
 
     // ─── LOG UPGRADE EVENTS (INTENT) for ROI dashboard ───────────────

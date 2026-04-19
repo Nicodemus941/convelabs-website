@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { attributionForBooking } from '@/lib/attribution';
 
 export interface AppointmentCheckoutParams {
   serviceType: string;
@@ -44,10 +45,16 @@ export async function createAppointmentCheckoutSession(
   try {
     const { data: { user } } = await supabase.auth.getUser();
 
+    // H2: pull last-touch attribution (UTMs, referrer, landing page) from
+    // sessionStorage so every Stripe checkout + downstream appointment row
+    // is stamped with the acquisition channel. Drives CAC-per-channel report.
+    const attribution = attributionForBooking();
+
     const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
       body: {
         ...params,
         userId: user?.id || null,
+        attribution,
       },
     });
 

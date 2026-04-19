@@ -1,8 +1,9 @@
 
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { HelmetProvider } from 'react-helmet-async';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { captureAttribution } from '@/lib/attribution';
 import { ConversionOptimizationProvider } from '@/contexts/ConversionOptimizationContext';
 import { BookingModalProvider } from '@/contexts/BookingModalContext';
 import { ConversionAnalytics } from '@/components/conversion/ConversionAnalytics';
@@ -38,6 +39,13 @@ const PageLoader = () => (
 );
 
 function App() {
+  // H2: capture UTM + referrer + landing-page on app load so every booking
+  // stamps a last-touch channel and every signup stamps a first-touch
+  // channel. Enables CAC-per-channel reporting in admin.
+  useEffect(() => {
+    captureAttribution();
+  }, []);
+
   return (
     <ErrorBoundary>
       <HelmetProvider>

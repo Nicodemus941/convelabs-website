@@ -981,6 +981,14 @@ async function handleAppointmentPayment(session: any) {
         extended_hours: false,
         weekend_service: metadata.weekend === 'true',
         booking_source: 'online',
+        // H2: last-touch attribution from session — empty strings become null
+        utm_source: metadata.utm_source || null,
+        utm_medium: metadata.utm_medium || null,
+        utm_campaign: metadata.utm_campaign || null,
+        utm_content: metadata.utm_content || null,
+        utm_term: metadata.utm_term || null,
+        referrer_url: metadata.referrer_url || null,
+        landing_page: metadata.landing_page || null,
       }])
       .select()
       .single();

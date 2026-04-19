@@ -242,6 +242,110 @@ Deno.serve(async (req) => {
             }
             break;
           }
+          case 'google_review': {
+            // H3: Ask for a Google review 48h post-visit.
+            // 1. Resolve the review URL — prefer the org's url, fall back to
+            //    the corporate default stored in business_metrics.
+            // 2. Skip entirely if neither is set (no blind asks).
+            // 3. Skip if patient was already asked in the last 90 days.
+            let reviewUrl: string | null = null;
+            if (seq.appointment_id) {
+              const { data: appt } = await supabase
+                .from('appointments')
+                .select('organization_id, patient_name')
+                .eq('id', seq.appointment_id)
+                .maybeSingle();
+              if (appt?.organization_id) {
+                const { data: org } = await supabase
+                  .from('organizations')
+                  .select('google_review_url, google_review_enabled')
+                  .eq('id', appt.organization_id)
+                  .maybeSingle();
+                if (org?.google_review_enabled && org.google_review_url) {
+                  reviewUrl = org.google_review_url;
+                }
+              }
+            }
+            if (!reviewUrl) {
+              const { data: defaultRow } = await supabase
+                .from('business_metrics')
+                .select('value_text')
+                .eq('metric_key', 'default_google_review_url')
+                .maybeSingle();
+              reviewUrl = (defaultRow?.value_text || '').trim() || null;
+            }
+            if (!reviewUrl) {
+              console.log(`[google_review] seq ${seq.id}: no review URL configured — skipping`);
+              break;
+            }
+
+            // Dedup within 90d by patient
+            if (seq.patient_id) {
+              const { data: priorAsk } = await supabase
+                .from('review_request_log')
+                .select('id')
+                .eq('patient_id', seq.patient_id)
+                .gte('sent_at', new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString())
+                .limit(1)
+                .maybeSingle();
+              if (priorAsk) {
+                console.log(`[google_review] seq ${seq.id}: patient ${seq.patient_id} already asked in last 90d — skipping`);
+                break;
+              }
+            }
+
+            const smsText = `Hi ${patientName}, if your ConveLabs visit was a good experience, would you share a quick Google review? Takes 30 seconds: ${reviewUrl}`;
+            let smsSent = false;
+            let emailSent = false;
+
+            if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
+              try {
+                await sendSMS(seq.patient_phone, smsText);
+                smsSent = true;
+              } catch (e) { console.warn(`[google_review] SMS failed:`, e); }
+            }
+
+            if (MAILGUN_API_KEY && seq.patient_email) {
+              try {
+                await sendEmail(seq.patient_email, `One quick favor, ${patientName}?`, `
+                  <div style="font-family:Arial;max-width:600px;margin:0 auto;">
+                    <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
+                      <h2 style="margin:0;font-size:20px;">Would you share your ConveLabs experience?</h2>
+                    </div>
+                    <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
+                      <p>Hi ${patientName},</p>
+                      <p>If your recent visit went well, a quick Google review helps other patients find us — and is the single biggest thing you can do to support a small business like ours.</p>
+                      <div style="text-align:center;margin:24px 0;">
+                        <a href="${reviewUrl}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Leave a Google Review</a>
+                      </div>
+                      <p style="font-size:13px;color:#6b7280;">Takes about 30 seconds. Thanks for trusting us with your care.</p>
+                      <p style="font-size:12px;color:#9ca3af;margin-top:20px;">If your experience was anything less than 5 stars, please <a href="mailto:info@convelabs.com" style="color:#B91C1C;">reply to this email first</a> so we can make it right before you post.</p>
+                    </div>
+                  </div>
+                `);
+                emailSent = true;
+              } catch (e) { console.warn(`[google_review] email failed:`, e); }
+            }
+
+            if (smsSent || emailSent) {
+              // Log the ask so we can measure sent→clicked→rating conversion
+              await supabase.from('review_request_log').insert({
+                appointment_id: seq.appointment_id,
+                patient_id: seq.patient_id,
+                patient_email: seq.patient_email,
+                patient_phone: seq.patient_phone,
+                channel: smsSent && emailSent ? 'both' : smsSent ? 'sms' : 'email',
+                google_review_url: reviewUrl,
+              });
+              // And stamp the appointment so we don't re-queue
+              if (seq.appointment_id) {
+                await supabase.from('appointments')
+                  .update({ review_request_sent_at: now })
+                  .eq('id', seq.appointment_id);
+              }
+            }
+            break;
+          }
           case 'rebooking_nudge': {
             if (MAILGUN_API_KEY && seq.patient_email) {
               await sendEmail(seq.patient_email, 'Time for Your Next Check-Up?', `

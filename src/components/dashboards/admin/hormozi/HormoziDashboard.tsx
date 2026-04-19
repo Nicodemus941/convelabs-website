@@ -9,6 +9,9 @@ import {
 import { useHormoziData, MARGIN_TARGET_PCT } from '@/hooks/useHormoziData';
 import DataHealthCard from './DataHealthCard';
 import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
+import AcquisitionByChannel from './AcquisitionByChannel';
+import Level0Tracker from './Level0Tracker';
+import ReviewsWidget from './ReviewsWidget';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -109,6 +112,12 @@ const HormoziDashboard: React.FC = () => {
           {isFetching ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
+
+      {/* ─── LEVEL 0 GATE TRACKER (master plan Part B) ───────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gate Progress</h2>
+        <Level0Tracker />
+      </section>
 
       {/* ─── HEADLINE NUMBERS ─────────────────────────────────────── */}
       <section>
@@ -318,12 +327,19 @@ const HormoziDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* ─── ACQUISITION (Level 0: "CAC documented per channel") ───── */}
+      <section className="mb-6">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Acquisition</h2>
+        <AcquisitionByChannel />
+      </section>
+
       {/* ─── ATTENTION ITEMS ──────────────────────────────────────── */}
       <section>
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Needs Attention</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
           <DataHealthCard />
           <ActiveSubscriptionsCard />
+          <ReviewsWidget />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card>
