@@ -13,6 +13,7 @@ import AcquisitionByChannel from './AcquisitionByChannel';
 import Level0Tracker from './Level0Tracker';
 import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
+import TrendSparkline from './TrendSparkline';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -45,9 +46,11 @@ interface KpiProps {
   subtextColor?: 'green' | 'red' | 'amber' | 'muted';
   icon: React.ComponentType<{ className?: string }>;
   emphasis?: boolean;
+  trend?: number[]; // optional 14-day daily series
+  trendLabel?: string;
 }
 
-const Kpi: React.FC<KpiProps> = ({ label, value, subtext, subtextColor = 'muted', icon: Icon, emphasis }) => {
+const Kpi: React.FC<KpiProps> = ({ label, value, subtext, subtextColor = 'muted', icon: Icon, emphasis, trend, trendLabel }) => {
   const subColor = {
     green: 'text-emerald-600',
     red: 'text-red-600',
@@ -64,6 +67,18 @@ const Kpi: React.FC<KpiProps> = ({ label, value, subtext, subtextColor = 'muted'
       <CardContent>
         <div className={`text-2xl font-bold ${emphasis ? 'text-conve-red' : 'text-gray-900'}`}>{value}</div>
         {subtext && <p className={`text-xs mt-1 ${subColor}`}>{subtext}</p>}
+        {trend && trend.length >= 2 && (
+          <div className="mt-2">
+            <TrendSparkline
+              values={trend}
+              width={110}
+              height={24}
+              strokeColor={emphasis ? '#B91C1C' : '#6B7280'}
+              showDelta
+              ariaLabel={trendLabel || `${label} — last 14 days`}
+            />
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -134,6 +149,8 @@ const HormoziDashboard: React.FC = () => {
             label="Today"
             value={fmtMoney(data.revenue_today)}
             icon={DollarSign}
+            trend={data.revenue_daily_14d}
+            trendLabel="Daily revenue — last 14 days"
           />
           <Kpi
             label="This Month"
@@ -141,6 +158,8 @@ const HormoziDashboard: React.FC = () => {
             subtext={`${data.visits_mtd} completed visits`}
             icon={TrendingUp}
             emphasis
+            trend={data.visits_daily_14d}
+            trendLabel="Daily visits — last 14 days"
           />
           <Kpi
             label="Projected End-of-Month"

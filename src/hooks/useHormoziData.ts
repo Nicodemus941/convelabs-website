@@ -71,6 +71,10 @@ export interface HormoziKPIs {
   refunded_mtd: number;
   stuck_sequences: number;
   unresolved_errors: number;
+
+  // Trend series (last 14 days, oldest → newest, used by sparklines)
+  revenue_daily_14d: number[];
+  visits_daily_14d: number[];
 }
 
 const daysBetween = (from: Date, to: Date): number =>
@@ -269,6 +273,54 @@ export const useHormoziData = () => {
         .eq('resolved', false)
         .gte('created_at', thirtyDaysAgo);
 
+      // ── TREND SERIES (last 14 days daily buckets) ────────────────
+      // Separate queries because the window crosses the current month
+      // boundary (mtdCharges/mtdAppts above only cover this month).
+      const fourteenDaysAgoDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+      const fourteenDaysAgo = new Date(
+        fourteenDaysAgoDate.getFullYear(),
+        fourteenDaysAgoDate.getMonth(),
+        fourteenDaysAgoDate.getDate()
+      ).toISOString();
+
+      const [{ data: trendCharges }, { data: trendAppts }] = await Promise.all([
+        supabase
+          .from('stripe_qb_sync_log' as any)
+          .select('amount_gross_cents, charge_date')
+          .gte('charge_date', fourteenDaysAgo),
+        supabase
+          .from('appointments')
+          .select('appointment_date')
+          .gte('appointment_date', fourteenDaysAgo)
+          .eq('status', 'completed'),
+      ]);
+
+      const dayKey = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+      const revenueByDay = new Map<string, number>();
+      for (const c of ((trendCharges as any[] | null) || [])) {
+        if (!c.charge_date) continue;
+        const k = dayKey(new Date(c.charge_date));
+        revenueByDay.set(k, (revenueByDay.get(k) || 0) + (c.amount_gross_cents || 0) / 100);
+      }
+
+      const visitsByDay = new Map<string, number>();
+      for (const a of ((trendAppts as any[] | null) || [])) {
+        if (!a.appointment_date) continue;
+        const k = dayKey(new Date(a.appointment_date));
+        visitsByDay.set(k, (visitsByDay.get(k) || 0) + 1);
+      }
+
+      const revenue_daily_14d: number[] = [];
+      const visits_daily_14d: number[] = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+        const k = dayKey(new Date(d.getFullYear(), d.getMonth(), d.getDate()));
+        revenue_daily_14d.push(revenueByDay.get(k) || 0);
+        visits_daily_14d.push(visitsByDay.get(k) || 0);
+      }
+
       return {
         revenue_today,
         revenue_mtd,
@@ -292,6 +344,8 @@ export const useHormoziData = () => {
         refunded_mtd,
         stuck_sequences: stuck_sequences || 0,
         unresolved_errors: unresolved_errors || 0,
+        revenue_daily_14d,
+        visits_daily_14d,
       };
     },
   });
