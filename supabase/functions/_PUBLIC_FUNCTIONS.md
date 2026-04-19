@@ -49,3 +49,25 @@ npx supabase functions deploy <name> --project-ref yluyonhrxxtyuiyrdixl --no-ver
 
 Last regression: 2026-04-18, commit ef9b6ec — deployed without the flag,
 silently broke the patient slot-availability view until caught.
+
+Second regression caught same day: stripe-webhook ALSO flipped to
+verify_jwt=true. Stripe itself doesn't send Supabase JWTs, so every
+incoming invoice.paid / invoice.payment_succeeded / checkout.session.completed
+event returned 401 UNAUTHORIZED_NO_AUTH_HEADER from our side. Real customer
+payments were silently not reaching our database. Stripe retries these for
+~3 days so some events may still be replayed when stripe-webhook went
+public again — no permanent data loss, but a good chunk of transient
+invisible failure.
+
+## One-liner to redeploy ALL public edge fns
+
+```bash
+npx supabase functions deploy \
+  stripe-webhook twilio-inbound-sms twilio-voice-greeting \
+  send-password-reset update-user-password \
+  send-fasting-reminders remind-lab-request-patients \
+  backfill-provider-phone-auth provider-otp-send provider-otp-verify \
+  get-lab-request get-lab-request-slots schedule-lab-request unlock-lab-request-slot \
+  dev-test-lab-sms dev-twilio-recent \
+  --project-ref yluyonhrxxtyuiyrdixl --no-verify-jwt
+```

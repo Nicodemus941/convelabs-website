@@ -89,6 +89,10 @@ Deno.serve(async (req) => {
     // Normalize appointment_date to noon ET for TZ stability (matches other booking paths)
     const apptDateIso = `${appointment_date}T12:00:00-04:00`;
 
+    // Opportunistic US ZIP parse from the address (5 or 9 digits at end)
+    const zipMatch = String(address).match(/\b(\d{5})(?:-\d{4})?\b/);
+    const parsedZip = zipMatch ? zipMatch[1] : null;
+
     const patientEmail = (patient_email_override || request.patient_email || '').toLowerCase() || null;
     const patientPhone = patient_phone_override || request.patient_phone || null;
 
@@ -115,6 +119,7 @@ Deno.serve(async (req) => {
       urine_required: request.urine_required,
       gtt_required: request.gtt_required,
       insurance_card_path: insurance_card_path || null,
+      zipcode: parsedZip,
       lab_request_id: request.id,
       notes: request.admin_notes
         ? `[Lab request by ${org.name}] ${request.admin_notes}`
