@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Search, FileText, Clock, CheckCircle2, PlayCircle, Loader2, ExternalLink } from 'lucide-react';
+import SopImageManager from './SopImageManager';
 
 /**
  * DocumentationTab — the operator manual.
@@ -252,6 +253,9 @@ const DocumentationTab: React.FC = () => {
                   ? <ReactMarkdown>{open.content_md}</ReactMarkdown>
                   : <p className="text-gray-500">No written content yet — edit this SOP in admin → Training.</p>}
               </div>
+
+              {/* Screenshot gallery — rendered below markdown for visual context */}
+              <SopImageManager courseId={open.id} canEdit={false} compact />
 
               <div className="flex justify-end pt-4 border-t mt-4">
                 <Button variant="outline" onClick={() => setOpen(null)}>Close</Button>
