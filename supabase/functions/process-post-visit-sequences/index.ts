@@ -212,24 +212,112 @@ Deno.serve(async (req) => {
           }
           case 'membership_upsell': {
             if (MAILGUN_API_KEY && seq.patient_email) {
-              await sendEmail(seq.patient_email, 'Save 25% on Every ConveLabs Visit', `
-                <div style="font-family:Arial;max-width:600px;margin:0 auto;">
-                  <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:28px;border-radius:12px 12px 0 0;text-align:center;">
-                    <h2 style="margin:0;">Become a ConveLabs Member</h2>
-                    <p style="margin:6px 0 0;opacity:0.9;">Save on every visit, every time.</p>
+              // ── Hormozi-grade rewrite (post Founding 50 launch) ──
+              // 1. Pull live seat count — the scarcity line is real, not fake.
+              // 2. If seats are closed, gracefully degrade to standard VIP
+              //    pitch (no broken "13 left" line).
+              // 3. Direct-to-checkout link routes through /join?tier=vip with
+              //    email pre-filled so it's 1-click, not 4.
+              let seatsLine = '';
+              let seatsOpen = true;
+              let seatsRemaining = 50;
+              try {
+                const { data: seatStatus } = await supabase.rpc('get_founding_seats_status' as any, { p_tier: 'vip' });
+                if (seatStatus && typeof seatStatus === 'object') {
+                  seatsOpen = !!(seatStatus as any).is_open && (seatStatus as any).remaining > 0;
+                  seatsRemaining = (seatStatus as any).remaining || 0;
+                }
+              } catch (_e) { /* best-effort */ }
+
+              if (seatsOpen) {
+                seatsLine = `
+                  <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid #d97706;border-radius:12px;padding:16px;margin:18px 0;">
+                    <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">Founding 50 · still open</p>
+                    <p style="margin:0;font-size:15px;color:#451a03;font-weight:700;">
+                      ${seatsRemaining === 1 ? 'Last Founding seat available' : `${seatsRemaining} Founding VIP seats left`}
+                    </p>
+                    <p style="margin:6px 0 0;font-size:13px;color:#78350f;line-height:1.5;">
+                      First 50 VIP members lock $199/yr for life — never raises, not even as our standard rate does.
+                    </p>
                   </div>
-                  <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
+                `;
+              }
+
+              const vipCheckoutUrl = `https://convelabs.com/join?tier=vip&email=${encodeURIComponent(seq.patient_email)}`;
+
+              const subject = seatsOpen
+                ? `${patientName}, your Founding VIP seat is still open`
+                : `${patientName}, a quick thank-you from the ConveLabs team`;
+
+              await sendEmail(seq.patient_email, subject, `
+                <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:620px;margin:0 auto;background:#ffffff;">
+                  <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;padding:28px 24px;border-radius:12px 12px 0 0;text-align:center;">
+                    <h2 style="margin:0;font-size:20px;">A quick note from Nico</h2>
+                    <p style="margin:6px 0 0;font-size:13px;color:#fecaca;">Founder · ConveLabs Concierge Lab Services</p>
+                  </div>
+                  <div style="background:#ffffff;border:1px solid #e5e7eb;border-top:0;padding:28px 24px;border-radius:0 0 12px 12px;color:#111827;line-height:1.65;font-size:14.5px;">
                     <p>Hi ${patientName},</p>
-                    <p>As a valued ConveLabs patient, we'd like to offer you membership pricing:</p>
-                    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
-                      <tr style="background:#fef2f2;"><td style="padding:10px;font-weight:600;">Member ($99/yr)</td><td style="padding:10px;text-align:right;">Mobile: $130 <span style="color:#059669;">(save $20)</span></td></tr>
-                      <tr><td style="padding:10px;font-weight:600;">VIP ($199/yr)</td><td style="padding:10px;text-align:right;">Mobile: $115 <span style="color:#059669;">(save $35)</span></td></tr>
-                      <tr style="background:#fef2f2;"><td style="padding:10px;font-weight:600;">Concierge ($399/yr)</td><td style="padding:10px;text-align:right;">Mobile: $99 <span style="color:#059669;">(save $51)</span></td></tr>
+                    <p>Thank you for trusting us with your lab work this week. I wanted to reach out personally to share something worth considering.</p>
+
+                    ${seatsLine}
+
+                    <h3 style="margin:20px 0 8px;color:#B91C1C;font-size:15px;">Your $199 Founding VIP unlocks</h3>
+                    <table cellpadding="0" cellspacing="0" width="100%" style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin:10px 0 18px;">
+                      <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+                        <td style="padding:12px 14px;font-size:13px;color:#111827;"><strong>12 months of VIP membership</strong><br><span style="color:#6b7280;font-size:12px;">Visits at $115 (save $35 each draw)</span></td>
+                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#111827;font-size:13px;">$199</td>
+                      </tr>
+                      <tr style="background:#fef3c7;border-bottom:1px solid #fde68a;">
+                        <td style="padding:12px 14px;font-size:13px;color:#78350f;"><strong>🔒 Founding rate-lock for life</strong><br><span style="color:#92400e;font-size:12px;">Your $199 never raises</span></td>
+                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#92400e;font-size:13px;">+$50/yr</td>
+                      </tr>
+                      <tr style="background:#fef3c7;border-bottom:1px solid #fde68a;">
+                        <td style="padding:12px 14px;font-size:13px;color:#78350f;"><strong>👪 Free family add-on</strong><br><span style="color:#92400e;font-size:12px;">1 extra household member at no extra cost</span></td>
+                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#92400e;font-size:13px;">+$75</td>
+                      </tr>
+                      <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
+                        <td style="padding:12px 14px;font-size:13px;color:#111827;"><strong>⚡ Priority same-day booking</strong><br><span style="color:#6b7280;font-size:12px;">Skip the +$100 STAT surcharge</span></td>
+                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#111827;font-size:13px;">+$150</td>
+                      </tr>
+                      <tr style="background:#f9fafb;">
+                        <td style="padding:12px 14px;font-size:13px;color:#111827;"><strong>🏅 Founding Member badge + early access</strong><br><span style="color:#6b7280;font-size:12px;">Numbered badge · first access to new offerings</span></td>
+                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#111827;font-size:13px;">priceless</td>
+                      </tr>
+                      <tr style="background:#ecfdf5;border-top:2px solid #a7f3d0;">
+                        <td style="padding:14px;font-size:14px;font-weight:700;color:#065f46;">Stacked value</td>
+                        <td style="padding:14px;text-align:right;color:#065f46;font-size:14px;">
+                          <span style="text-decoration:line-through;color:#9ca3af;font-weight:400;margin-right:8px;">$474</span>
+                          <span style="font-weight:800;">$199</span>
+                        </td>
+                      </tr>
                     </table>
-                    <div style="text-align:center;margin:20px 0;">
-                      <a href="https://convelabs.com/pricing" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View Membership Plans</a>
+
+                    <p style="margin:0 0 10px;font-size:14px;color:#374151;"><strong>Pays for itself in 1 visit.</strong> Then the rest of the year is free.</p>
+
+                    <div style="text-align:center;margin:22px 0 10px;">
+                      <a href="${vipCheckoutUrl}" style="display:inline-block;background:#B91C1C;color:#ffffff;padding:15px 38px;border-radius:10px;text-decoration:none;font-weight:800;font-size:15.5px;">
+                        ${seatsOpen ? 'Claim my Founding seat →' : 'Join VIP — $199/yr →'}
+                      </a>
                     </div>
-                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
+                    <p style="text-align:center;font-size:12px;color:#6b7280;margin:0;">Your email is already on file — one click checkout.</p>
+
+                    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:14px 16px;margin:22px 0 8px;">
+                      <p style="margin:0;font-size:13px;color:#14532d;line-height:1.55;">
+                        <strong style="color:#166534;">30-day full refund.</strong> If Founding VIP isn't right for you, cancel within 30 days — full refund, no questions. After that it's non-refundable <em>unless</em> you haven't used any benefits.
+                      </p>
+                    </div>
+
+                    <p style="margin:20px 0 6px;font-size:14px;">Questions? Email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or text me at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a>. I read every message myself.</p>
+                    <p style="margin:16px 0 0;">With gratitude,<br>
+                    <strong>Nicodemme "Nico" Jean-Baptiste</strong><br>
+                    <em>Founder, ConveLabs</em></p>
+
+                    <hr style="border:0;border-top:1px solid #e5e7eb;margin:24px 0 14px;">
+                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin:0;line-height:1.55;">
+                      You're receiving this because you recently had a visit with ConveLabs.<br>
+                      1800 Pembrook Drive, Suite 300, Orlando, FL 32810 · (941) 527-9169<br>
+                      <a href="https://convelabs.com/unsubscribe?email=${encodeURIComponent(seq.patient_email)}" style="color:#9ca3af;">Unsubscribe from marketing emails</a> — appointment notifications continue either way.
+                    </p>
                   </div>
                 </div>
               `);
