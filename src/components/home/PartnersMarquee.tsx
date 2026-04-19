@@ -82,42 +82,44 @@ const PartnersMarquee: React.FC = () => {
         </div>
 
         <div
-          className="relative w-full overflow-hidden"
-          aria-label="Trusted partners carousel"
+          className="relative w-full convelabs-marquee-viewport"
+          aria-label="Trusted partners — swipe or tap to visit"
         >
-          {/* Edge fade masks — tighter on mobile */}
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 sm:w-16 bg-gradient-to-r from-gray-50 to-transparent z-10" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 sm:w-16 bg-gradient-to-l from-gray-50 to-transparent z-10" />
+          {/* Edge fade masks — desktop only (mobile uses snap scrolling) */}
+          <div className="hidden md:block pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-gray-50 to-transparent z-10" />
+          <div className="hidden md:block pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-gray-50 to-transparent z-10" />
 
-          {/* Nested structure: outer = viewport (above), MIDDLE = animated
-              track (inline-block, no flex), INNER = flex row of cards.
-              This avoids iOS/Android bugs with animation on flex elements. */}
-          <div className="convelabs-marquee-track">
-            <div className="convelabs-marquee-row">
-              {LOOP.map((p, idx) => (
-                <a
-                  key={`${p.name}-${idx}`}
-                  href={p.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group"
-                  title={`Visit ${p.name}`}
-                  style={{ width: '224px', flexShrink: 0 }}
-                >
-                  <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all whitespace-normal">
-                    <div className="flex items-center min-h-[2.5rem] mb-1.5 sm:mb-2">
-                      <span className="font-bold text-gray-900 text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
-                        {p.name}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-gray-500 leading-relaxed">
-                      {p.description}
-                    </p>
+          {/* Single row. Mobile: user swipes (native scroll + snap).
+              Desktop: auto-animates via CSS. Same markup, CSS decides. */}
+          <div className="convelabs-marquee-row" style={{ whiteSpace: 'nowrap' }}>
+            {LOOP.map((p, idx) => (
+              <a
+                key={`${p.name}-${idx}`}
+                href={p.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group"
+                title={`Visit ${p.name}`}
+                style={{ width: '224px', flexShrink: 0, whiteSpace: 'normal' }}
+              >
+                <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all">
+                  <div className="flex items-center min-h-[2.5rem] mb-1.5 sm:mb-2">
+                    <span className="font-bold text-gray-900 text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
+                      {p.name}
+                    </span>
                   </div>
-                </a>
-              ))}
-            </div>
+                  <p className="text-[11px] text-gray-500 leading-relaxed">
+                    {p.description}
+                  </p>
+                </div>
+              </a>
+            ))}
           </div>
+
+          {/* Mobile-only swipe hint — fades after first interaction */}
+          <p className="md:hidden text-[10px] text-gray-400 text-center mt-2 italic">
+            ← swipe to see more →
+          </p>
         </div>
 
         {/* Provider CTA — convert viewing orgs into inbound partner leads */}

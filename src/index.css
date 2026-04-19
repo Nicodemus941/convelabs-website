@@ -264,34 +264,45 @@
   animation: fade-in 0.2s ease-out;
 }
 
-/* ── PartnersMarquee infinite scroll (bulletproof cross-browser) ─────
- * NESTED pattern: outer viewport has overflow-hidden, MIDDLE track
- * element has the animation (NOT flex, NOT width:max-content), inner
- * flex row has the cards. Separating the transform from the flex layout
- * avoids iOS Safari and Android Chrome bugs where `width: max-content`
- * on a `display: flex` element silently breaks the animation.
+/* ── PartnersMarquee: DUAL-MODE marquee ──────────────────────────────
  *
- * No static `transform` on the track — keyframes handle everything.
+ * Root cause of "won't scroll on mobile": many iOS devices ship with
+ * "Reduce Motion" enabled in Accessibility settings (either by default
+ * or by user preference), which silently killed the animation. Also,
+ * mobile users expect to SWIPE through content rather than watch a
+ * passive animation.
+ *
+ * Solution:
+ *   - Mobile (<768px): native horizontal scroll + snap. User swipes.
+ *     No animation. Works regardless of reduce-motion settings.
+ *   - Desktop (≥768px): CSS auto-scroll animation (existing behavior).
+ *   - Reduce Motion: falls back to the swipe mode on ALL sizes.
+ *
+ * Both modes feel right for their device class.
  */
-@keyframes convelabs-marquee-scroll {
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+
+/* Mobile: swipe mode */
+.convelabs-marquee-viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;           /* Firefox */
+  -ms-overflow-style: none;        /* IE/legacy Edge */
+}
+.convelabs-marquee-viewport::-webkit-scrollbar {
+  display: none;                   /* WebKit (Safari/Chrome) */
 }
 
-.convelabs-marquee-track {
-  display: inline-block;
-  white-space: nowrap;
-  animation: convelabs-marquee-scroll 40s linear infinite;
-  will-change: transform;
-}
-
-/* Inner flex row — kept simple so the track element isn't a flex
- * container (which broke animation on some mobile browsers) */
 .convelabs-marquee-row {
   display: inline-flex;
   flex-wrap: nowrap;
   gap: 1rem;
-  vertical-align: top;
+  padding: 0 1rem;                 /* so first/last cards don't hug edges */
+}
+
+.convelabs-marquee-row > * {
+  scroll-snap-align: start;
 }
 
 @media (min-width: 640px) {
@@ -300,20 +311,26 @@
   }
 }
 
-.convelabs-marquee-track:hover {
-  animation-play-state: paused;
-}
+/* Desktop: switch off swipe, turn on auto-animation */
+@media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
+  .convelabs-marquee-viewport {
+    overflow-x: hidden;
+    scroll-snap-type: none;
+  }
 
-@media (max-width: 640px) {
-  .convelabs-marquee-track {
-    animation-duration: 30s;
+  .convelabs-marquee-row {
+    animation: convelabs-marquee-scroll 40s linear infinite;
+    padding: 0;
+  }
+
+  .convelabs-marquee-row:hover {
+    animation-play-state: paused;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .convelabs-marquee-track {
-    animation: none;
-  }
+@keyframes convelabs-marquee-scroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 /* Mobile Overflow Prevention */
