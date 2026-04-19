@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { format, addDays, subDays } from 'date-fns';
-import { CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X } from 'lucide-react';
 import { useFormContext } from 'react-hook-form';
 import { 
   FormField, 
@@ -191,6 +191,10 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const [blockedDates, setBlockedDates] = useState<{ start: string; end: string }[]>([]);
   const [showAfterHours, setShowAfterHours] = useState(false);
   const [holdId, setHoldId] = useState<string | null>(null);
+  // Tier-unlock dialog state. Clicking a tier-locked slot opens this with
+  // the required tier + upgrade CTA, instead of silently greying the slot out.
+  // Hormozi: every "no" is a revenue conversation if framed right.
+  const [unlockSlot, setUnlockSlot] = useState<{ time: string; requiredTier?: MemberTier; reason?: string } | null>(null);
   const [heldSlots, setHeldSlots] = useState<Set<string>>(new Set());
 
   // Fetch admin-blocked dates on mount
@@ -594,34 +598,47 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
                         // Tier-aware window enforcement: does this slot fit the
                         // patient's tier rules for the selected date? Uses the
-                        // same server-side rules (bookingWindows.ts). Slots
-                        // outside tier window are shown disabled with the reason
-                        // on hover + an upgrade CTA surfaced below the grid.
-                        let tierDisabled = false;
+                        // same server-side rules (bookingWindows.ts).
+                        // Tier-locked slots render differently from "booked" or
+                        // "past" — they're CLICKABLE and open an unlock dialog,
+                        // because they represent revenue upside (membership upsell).
+                        let tierLocked = false;
                         let tierReason: string | undefined;
+                        let tierUnlockTier: MemberTier | undefined;
                         if (selectedDate) {
                           const hhmm = normalizeTime(window.time);
                           if (hhmm) {
                             const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                            // Heuristic: slots before 9am assumed fasting
                             const isFasting = hhmm < '09:00';
                             const check = isBookingAllowed({ tier: patientTier, dateIso, time: window.time, isFasting });
                             if (!check.allowed) {
-                              tierDisabled = true;
+                              tierLocked = true;
                               tierReason = check.upgradeCTA?.message || check.reason || 'Not available in your tier';
+                              tierUnlockTier = check.upgradeCTA?.toTier;
                             }
                           }
                         }
-                        const isUnavailable = isBooked || isHeldByOther || isPastOrTooSoon || tierDisabled;
+                        // isUnavailable = truly disabled (booked/held/past). Tier-locked is a SEPARATE state.
+                        const isUnavailable = isBooked || isHeldByOther || isPastOrTooSoon;
+
+                        // Tier-locked tier-specific styling
+                        const lockColor = tierUnlockTier === 'concierge' ? 'purple' : tierUnlockTier === 'vip' ? 'red' : 'amber';
+                        const lockClasses = lockColor === 'purple'
+                          ? 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100 hover:border-purple-400'
+                          : lockColor === 'red'
+                          ? 'bg-red-50 text-red-900 border-red-300 hover:bg-red-100 hover:border-red-400'
+                          : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 hover:border-amber-400';
 
                         return (
                           <button
                             key={window.time}
                             type="button"
-                            title={tierDisabled ? tierReason : isBooked ? 'Already booked' : isHeldByOther ? 'Being booked by someone else' : isPastOrTooSoon ? 'Too soon for same-day' : ''}
+                            title={tierLocked ? (tierReason || `Unlock with ${(tierUnlockTier || '').toUpperCase()}`) : isBooked ? 'Already booked' : isHeldByOther ? 'Being booked by someone else' : isPastOrTooSoon ? 'Too soon for same-day' : ''}
                             className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all ${
                               isUnavailable
                                 ? 'bg-gray-50 text-gray-300 line-through cursor-not-allowed border-gray-100'
+                                : tierLocked
+                                ? `${lockClasses} cursor-pointer`
                                 : isSelected
                                 ? 'bg-[#B91C1C] text-white border-[#B91C1C] shadow-md scale-[1.02]'
                                 : isAfterHours
@@ -630,6 +647,10 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             }`}
                             onClick={async () => {
                               if (isUnavailable) return;
+                              if (tierLocked) {
+                                setUnlockSlot({ time: window.time, requiredTier: tierUnlockTier, reason: tierReason });
+                                return;
+                              }
 
                               // Release previous hold if exists
                               if (holdId) {
@@ -657,11 +678,19 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             }}
                             disabled={isUnavailable}
                           >
+                            {tierLocked && (
+                              <Lock className="inline h-3 w-3 mr-1 mb-0.5" />
+                            )}
                             <span>{window.time}</span>
-                            {isAfterHours && !isUnavailable && (
+                            {tierLocked && tierUnlockTier && (
+                              <span className="block text-[9px] font-semibold uppercase tracking-wider mt-0.5">
+                                {tierUnlockTier === 'vip' ? 'VIP' : tierUnlockTier === 'concierge' ? 'Concierge' : 'Member'} only
+                              </span>
+                            )}
+                            {isAfterHours && !isUnavailable && !tierLocked && (
                               <span className="block text-[9px] opacity-70 mt-0.5">+$50</span>
                             )}
-                            {isSameDay && !isAfterHours && !isUnavailable && (
+                            {isSameDay && !isAfterHours && !isUnavailable && !tierLocked && (
                               <span className="block text-[9px] opacity-70 mt-0.5">+$100</span>
                             )}
                           </button>
@@ -749,6 +778,77 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           </Button>
         </div>
       </CardContent>
+
+      {/* Tier-unlock dialog — shown when a patient clicks a locked slot.
+          Reuses ConveLabs's 3-tier structure + the Hormozi savings math.
+          Primary CTA routes to /pricing?tier=X for upgrade flow. */}
+      {unlockSlot && (() => {
+        const tier = unlockSlot.requiredTier;
+        const tierName = tier === 'concierge' ? 'Concierge' : tier === 'vip' ? 'VIP' : 'Member';
+        const tierPrice = tier === 'concierge' ? 399 : tier === 'vip' ? 199 : 99;
+        const tierPerVisit = tier === 'concierge' ? 99 : tier === 'vip' ? 115 : 130;
+        const standardVisit = 150;
+        const perVisitSavings = standardVisit - tierPerVisit;
+        const color = tier === 'concierge' ? 'purple' : tier === 'vip' ? 'red' : 'amber';
+        const colorBg = color === 'purple' ? 'bg-purple-50 border-purple-300'
+          : color === 'red' ? 'bg-red-50 border-red-300'
+          : 'bg-amber-50 border-amber-300';
+        const colorAccent = color === 'purple' ? 'text-purple-700'
+          : color === 'red' ? 'text-red-700'
+          : 'text-amber-700';
+        const colorBtn = color === 'purple' ? 'bg-purple-600 hover:bg-purple-700'
+          : color === 'red' ? 'bg-red-600 hover:bg-red-700'
+          : 'bg-amber-600 hover:bg-amber-700';
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4" onClick={() => setUnlockSlot(null)}>
+            <div className={`relative max-w-md w-full ${colorBg} border-2 rounded-xl p-6 shadow-xl`} onClick={e => e.stopPropagation()}>
+              <button onClick={() => setUnlockSlot(null)} className="absolute top-3 right-3 text-gray-500 hover:text-gray-700">
+                <X className="h-4 w-4" />
+              </button>
+              <div className={`inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider ${colorAccent} mb-2`}>
+                <Sparkles className="h-4 w-4" /> {tierName} tier unlock
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-1">
+                The <span className={colorAccent}>{unlockSlot.time}</span> slot opens up as a {tierName}
+              </h3>
+              <p className="text-sm text-gray-700 mb-4">
+                {unlockSlot.reason || `${tierName} members book times outside the standard non-member window.`}
+              </p>
+
+              <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
+                <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">The math</p>
+                <div className="flex items-baseline justify-between mb-1">
+                  <span className="text-sm text-gray-700">{tierName} membership</span>
+                  <span className="text-lg font-bold text-gray-900">${tierPrice}<span className="text-xs font-normal text-gray-500">/yr</span></span>
+                </div>
+                <div className="flex items-baseline justify-between mb-1">
+                  <span className="text-sm text-gray-700">Per-visit price</span>
+                  <span className={`text-sm font-semibold ${colorAccent}`}>${tierPerVisit} <span className="text-xs text-gray-500">(save ${perVisitSavings} vs ${standardVisit})</span></span>
+                </div>
+                <div className="flex items-baseline justify-between pt-2 mt-2 border-t border-gray-100">
+                  <span className="text-xs text-gray-600">Break-even</span>
+                  <span className="text-xs text-gray-700">after {Math.ceil(tierPrice / perVisitSavings)} visits</span>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <a
+                  href={`/pricing?tier=${tier || 'member'}`}
+                  className={`${colorBtn} text-white font-semibold rounded-lg py-3 text-center text-sm block transition`}
+                >
+                  View {tierName} membership →
+                </a>
+                <button
+                  onClick={() => setUnlockSlot(null)}
+                  className="w-full text-xs text-gray-600 hover:text-gray-800 py-2"
+                >
+                  Not now — pick a different time
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Card>
   );
 };
