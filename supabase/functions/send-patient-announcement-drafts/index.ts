@@ -29,7 +29,7 @@ const EXPECTED_TOKEN = 'april-drafts-2026';
 //   9. UNSUBSCRIBE  — CAN-SPAM compliance
 // ─────────────────────────────────────────────────────────────────────────
 
-const PATIENT_SUBJECT = 'Your ConveLabs account is live — lock in founding-member pricing (ends April 30)';
+const PATIENT_SUBJECT = 'Your ConveLabs portal is live — a quick note from Nico';
 
 const buildPatientEmailHtml = (opts: {
   firstName: string;
@@ -41,34 +41,22 @@ const buildPatientEmailHtml = (opts: {
   return `
 <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:640px;margin:0 auto;background:#ffffff;">
   <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);padding:28px 24px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">Your ConveLabs account is live</h1>
-    <p style="margin:6px 0 0;color:#fecaca;font-size:13px;letter-spacing:.5px;">Founder-owned since 2023 · trusted by hundreds of Central Florida patients</p>
-  </div>
-
-  <!-- Urgency ribbon — Hormozi: every offer has a deadline -->
-  <div style="background:#78350f;color:#fef3c7;padding:10px 14px;text-align:center;font-size:13px;font-weight:700;letter-spacing:.3px;">
-    ⏰ Founding-member pricing ends <span style="color:#fde68a;">April 30, 2026</span> — rates rise May 1
+    <h1 style="margin:0;color:#fff;font-size:22px;font-weight:700;">A quick note from Nico</h1>
+    <p style="margin:6px 0 0;color:#fecaca;font-size:13px;letter-spacing:.5px;">Founder, ConveLabs Concierge Lab Services</p>
   </div>
 
   <div style="padding:28px 24px;background:#ffffff;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;color:#111827;line-height:1.6;font-size:14.5px;">
 
-    <!-- ── 1. HOOK ─────────────────────────────────────────────── -->
+    <!-- ── 1. WARM OPENING — relationship first, offer later ───────── -->
     <p>Hi ${firstName || 'there'},</p>
-    <p>Thanks for choosing ConveLabs for your blood work. Your patient portal is now live — and I'm writing to give you <strong>one chance to lock in founding-member pricing</strong> before rates go up at the end of this month.</p>
+    <p>I wanted to reach out personally to say <strong>thank you</strong> for trusting ConveLabs with your blood work. We're a small, founder-owned business in Central Florida, and every patient we serve is someone we genuinely appreciate.</p>
+    <p>A quick update — your patient portal is now live. Everything we've been building over the last few months is designed to make the lab-testing part of your life <strong>smaller</strong>, not bigger. No more waiting rooms, no more surprise bills, no more phone tag to schedule.</p>
 
-    <!-- ── 2. AGITATE — name the pain ──────────────────────────── -->
-    <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">No more of this:</h3>
-    <ul style="padding-left:20px;margin:10px 0 16px;color:#374151;">
-      <li>Driving to a lab + sitting in a waiting room you don't feel well in.</li>
-      <li>Calling five times to schedule, then getting a random 4-hour window.</li>
-      <li>Forgetting to fast because no one reminded you until morning-of.</li>
-      <li>Getting billed later with no idea what the charge was for.</li>
-    </ul>
-
-    <!-- ── 3. STACK — 6 portal features → benefits ─────────────── -->
-    <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">Here's what your portal now gives you</h3>
+    <!-- ── 2. STACK — portal features → benefits ─────────────── -->
+    <h3 style="margin:22px 0 8px;color:#B91C1C;font-size:15px;">What your portal gives you</h3>
     <ul style="padding-left:20px;margin:10px 0 16px;line-height:1.75;">
       <li><strong>Book in 90 seconds.</strong> Pick a day, pick a time. A real phlebotomist shows up at your door in a known window. No waiting rooms.</li>
+      <li><strong>Our OCR reads your lab order for you.</strong> Upload the order your doctor gave you (PDF or phone photo — either works), and within seconds our ConveLabs OCR Technology tells you <em>exactly</em> what to expect: whether fasting is required, the precise cutoff time to stop eating and drinking, whether to bring a urine sample, whether a glucose-tolerance test is ordered. No more calling your doctor's office to check. No more showing up unprepared. It's like having a lab nurse in your pocket — walking you through the prep, quietly, the night before.</li>
       <li><strong>Transparent pricing, paid at booking.</strong> You see the exact price before you click confirm — never a surprise invoice in the mail two weeks later.</li>
       <li><strong>Every appointment in one place.</strong> Upcoming visits, past visits, receipts, lab order files — all in your portal. Nothing to hunt down.</li>
       <li><strong>Reschedule or cancel yourself.</strong> Life happens. Two clicks, no phone call.</li>
@@ -76,12 +64,12 @@ const buildPatientEmailHtml = (opts: {
       <li><strong>Add your family.</strong> Household members share one account view, so managing a spouse's or parent's labs isn't a second headache.</li>
     </ul>
 
-    <!-- ── 4. MEMBERSHIP (Grand Slam Offer) — mobile-first, deadline-anchored ── -->
+    <!-- ── 4. MEMBERSHIP — framed as a thank-you gift, not a hard sell ── -->
     <div style="background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%);border:2px solid #d97706;border-radius:14px;padding:22px 18px;margin:22px 0;">
-      <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">Founding-member offer · ends April 30, 2026</p>
-      <h3 style="margin:0 0 8px;color:#78350f;font-size:20px;line-height:1.3;">Lock in today's rate. It never raises for you.</h3>
+      <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">A thank-you to our early patients</p>
+      <h3 style="margin:0 0 8px;color:#78350f;font-size:20px;line-height:1.3;">Founding-member pricing, if it fits</h3>
       <p style="margin:0 0 16px;font-size:13.5px;color:#451a03;line-height:1.55;">
-        Pay once a year. Every mobile draw after that is discounted for life. <strong>Standard mobile draw: $150.</strong> Member pricing below. Rates rise <strong>May 1, 2026</strong> — if you join by April 30, your rate never raises as long as you stay a member.
+        If you run labs more than once or twice a year, a membership tends to pay for itself pretty quickly. <strong>Standard mobile draw: $150.</strong> Member pricing below. These rates are our thank-you to the patients who've been with us while we built this — we wanted you to have the option first.
       </p>
 
       <!-- Tier 1: Member (anchor) -->
@@ -110,7 +98,7 @@ const buildPatientEmailHtml = (opts: {
 
           <!-- Bonus stack — Hormozi: stack real, verifiable bonuses on top -->
           <div style="background:rgba(255,255,255,0.12);border:1px dashed #fecaca;border-radius:10px;padding:12px 14px;margin:0 0 12px;">
-            <p style="margin:0 0 6px;font-size:11px;color:#fef3c7;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">Founding VIP bonuses (ends April 30)</p>
+            <p style="margin:0 0 6px;font-size:11px;color:#fef3c7;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">Founding VIP bonuses</p>
             <p style="margin:0 0 4px;font-size:13px;color:#fef3c7;line-height:1.5;">🎁 <strong>Free family add-on (1 extra member)</strong> — bring your spouse, parent, or child to one appointment at no extra cost <span style="color:#fecaca;">(value: $75)</span></p>
             <p style="margin:0;font-size:13px;color:#fef3c7;line-height:1.5;">🔒 <strong>Founding-rate lock for life</strong> — your $199 annual rate never raises as long as you stay a member <span style="color:#fecaca;">(value: $50+/yr)</span></p>
           </div>
@@ -182,11 +170,10 @@ const buildPatientEmailHtml = (opts: {
       </ul>
     </div>
 
-    <!-- ── 8. CTA — one button, deadline-anchored ─────────────── -->
+    <!-- ── 8. CTA — warm, single action ──────────────────────── -->
     <div style="text-align:center;margin:24px 0 6px;">
-      <a href="${portalUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:15px 38px;border-radius:10px;text-decoration:none;font-weight:800;font-size:15.5px;line-height:1.2;">Lock in my founding rate →</a>
+      <a href="${portalUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:15px 38px;border-radius:10px;text-decoration:none;font-weight:800;font-size:15.5px;line-height:1.2;">Open my portal →</a>
     </div>
-    <p style="text-align:center;font-size:12px;color:#78350f;font-weight:700;margin:0 0 6px;">⏰ Offer ends Thursday, April 30, 2026</p>
     <p style="text-align:center;font-size:12px;color:#6b7280;margin:0 0 12px;">Your email is already on file — no password? Click the button and you'll set one.</p>
 
     <p style="margin:20px 0 6px;">If you ever have a question, email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or text <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a>. I read every message myself.</p>
@@ -225,20 +212,33 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Single representative preview — first name shown as "there", email
-    // fallback as info@convelabs.com so the CTA button goes to a valid login
-    // prefill for the reviewer.
-    const html = draftBanner() + buildPatientEmailHtml({
-      firstName: 'there',
-      email: 'info@convelabs.com',
-      unsubscribeUrl: 'https://www.convelabs.com/unsubscribe?email=info@convelabs.com&campaign=patient_announce_2026_04_19',
+    // Allow override_to for real-person test sends (e.g. sending the
+    // exact production copy to a patient's inbox so they can click through
+    // the enrollment flow end-to-end). When override is used, the yellow
+    // DRAFT banner + [DRAFT →] subject prefix are stripped so the preview
+    // matches what a real patient would receive.
+    const overrideTo = typeof body?.override_to === 'string' && body.override_to.includes('@')
+      ? String(body.override_to).trim().toLowerCase()
+      : null;
+    const overrideName = typeof body?.override_first_name === 'string'
+      ? String(body.override_first_name).trim()
+      : null;
+    const sendTo = overrideTo || DRAFT_TO;
+    const firstName = overrideName || 'there';
+
+    const html = (overrideTo ? '' : draftBanner()) + buildPatientEmailHtml({
+      firstName,
+      email: sendTo,
+      unsubscribeUrl: `https://www.convelabs.com/unsubscribe?email=${encodeURIComponent(sendTo)}&campaign=patient_announce_2026_04_19`,
     });
 
     const fd = new FormData();
-    fd.append('from', `ConveLabs Drafts <noreply@${MAILGUN_DOMAIN}>`);
-    fd.append('to', DRAFT_TO);
-    fd.append('h:Reply-To', DRAFT_TO);
-    fd.append('subject', `[DRAFT → Patients] ${PATIENT_SUBJECT}`);
+    fd.append('from', overrideTo
+      ? `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`
+      : `ConveLabs Drafts <noreply@${MAILGUN_DOMAIN}>`);
+    fd.append('to', sendTo);
+    fd.append('h:Reply-To', 'info@convelabs.com');
+    fd.append('subject', overrideTo ? PATIENT_SUBJECT : `[DRAFT → Patients] ${PATIENT_SUBJECT}`);
     fd.append('html', html);
     fd.append('o:tracking-clicks', 'no');
 
@@ -253,7 +253,7 @@ Deno.serve(async (req) => {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    return new Response(JSON.stringify({ success: true, to: DRAFT_TO, subject: PATIENT_SUBJECT, mailgun: JSON.parse(mg) }, null, 2), {
+    return new Response(JSON.stringify({ success: true, to: sendTo, subject: (overrideTo ? '' : '[DRAFT → Patients] ') + PATIENT_SUBJECT, mailgun: JSON.parse(mg) }, null, 2), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {

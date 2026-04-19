@@ -109,6 +109,9 @@ verify_jwt = false
 [functions.send-patient-announcement-drafts]
 verify_jwt = false
 
+[functions.snapshot-daily-kpis]
+verify_jwt = false
+
 [functions.schedule-lab-request]
 verify_jwt = false
 
