@@ -55,19 +55,38 @@ Deno.serve(async (req) => {
       // Get customer and checkout IDs
       const customerId = session.customer;
       const checkoutId = session.id;
-      
+
       // Get metadata from session
       const metadata = session.metadata || {};
-      
+
       // Check if this is a Supernova member signup
       const isSupernovaMember = metadata.is_supernova_member === 'true';
-      
+
       // Check if this is an upgrade
       const isUpgrade = metadata.is_upgrade === 'true';
-      
+
       // Check if this is a Founding Member signup (before August 1st)
       const isFoundingMember = metadata.founding_member === 'true';
-      
+
+      // Whitelist of known metadata.type values. Anything not on this list
+      // with metadata.type SET is a client-side bug or a malicious/stale
+      // session — we used to silently fall through to handleMembershipSignup,
+      // which misclassified the charge and created a phantom membership.
+      // Now we reject explicitly; the outer catch logs to error_logs with
+      // the full session id so we can diagnose and manually reprocess.
+      const KNOWN_TYPES = new Set([
+        'appointment_payment',
+        'lab_request_unlock',
+        'bundle_payment',
+        'subscription_payment',
+        'credit_pack',
+      ]);
+      if (metadata.type && !KNOWN_TYPES.has(metadata.type)) {
+        throw new Error(
+          `unknown metadata.type="${metadata.type}" on session ${session.id} — refusing to default to membership signup. Investigate and replay manually.`
+        );
+      }
+
       // Handle appointment payments
       if (metadata.type === 'appointment_payment') {
         await handleAppointmentPayment(session);
@@ -92,7 +111,7 @@ Deno.serve(async (req) => {
       else if (isUpgrade) {
         await handleMembershipUpgrade(session, isFoundingMember, isSupernovaMember);
       }
-      // Handle regular membership signups
+      // Handle regular membership signups (no metadata.type — legacy path)
       else {
         await handleMembershipSignup(session, isFoundingMember, isSupernovaMember);
       }
@@ -111,6 +130,13 @@ Deno.serve(async (req) => {
     else if (event.type === 'invoice.payment_failed') {
       const invoice = event.data.object;
       await handlePaymentFailure(invoice);
+    }
+    // Handle refunds — fires when any refund is issued (via process-refund,
+    // Stripe dashboard, or auto-refund from a dispute). Keeps the QB ledger
+    // in sync with reality — previously a refund in Stripe produced no
+    // compensating entry in stripe_qb_sync_log → books over-stated revenue.
+    else if (event.type === 'charge.refunded') {
+      await handleChargeRefunded(event.data.object);
     }
     // Handle invoice paid (for manual appointment invoices)
     else if (event.type === 'invoice.paid') {
@@ -389,10 +415,16 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       }
     }
 
-    // Insert the user membership
+    // Upsert the user membership — Stripe replays checkout.session.completed
+    // on retry (or when an admin resends from the dashboard). Before we had
+    // the uniq_user_memberships_stripe_sub index + upsert below, each replay
+    // created a SECOND row with full credits allocated — silent credit leak.
+    // onConflict uses stripe_subscription_id because that's what the unique
+    // index is keyed on. ignoreDuplicates:false ensures we still get the row
+    // back so agreement-linking + add-on insertion see the correct id.
     const { data: membershipData, error: membershipError } = await supabaseClient
       .from('user_memberships')
-      .insert([{
+      .upsert([{
         user_id: userId,
         plan_id: planId,
         stripe_customer_id: customerId,
@@ -409,7 +441,7 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
         bonus_credits: bonusCredits,
         promotion_locked_price: promotionLockedPrice,
         supernova_enrollment_date: isSupernovaMember ? new Date().toISOString() : null
-      }])
+      }], { onConflict: 'stripe_subscription_id', ignoreDuplicates: false })
       .select()
       .single();
 
@@ -425,12 +457,16 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     const agreementId = session.metadata?.agreement_id;
     if (agreementId) {
       try {
+        // Was `(membership as any)?.id` — but `membership` is not defined in
+        // this scope (the variable is `membershipData`). Silent ReferenceError
+        // wrapped in the inner try, which meant agreement→membership links
+        // never got written. Audit trail was broken for every signup.
         await supabaseClient.from('membership_agreements' as any).update({
-          user_membership_id: (membership as any)?.id || null,
+          user_membership_id: (membershipData as any)?.id || null,
           stripe_subscription_id: subscriptionId,
           stripe_checkout_session_id: session.id,
         }).eq('id', agreementId);
-        console.log(`Linked agreement ${agreementId} to membership ${(membership as any)?.id}`);
+        console.log(`Linked agreement ${agreementId} to membership ${(membershipData as any)?.id}`);
       } catch (e) {
         console.warn('[agreement link] non-blocking failure:', e);
       }
@@ -597,34 +633,159 @@ async function handleSubscriptionCheckoutComplete(session: any) {
   }
 }
 
+/**
+ * Keep the QB ledger honest when money goes back out. Fires on every refund
+ * — ours (process-refund), manual (Stripe dashboard), or automatic (dispute
+ * lost). Before this handler, Stripe would show a refund but stripe_qb_sync_log
+ * still showed full revenue → books over-stated income → tax-season surprise.
+ *
+ * Strategy: update the existing sync-log row's amount_refunded_cents + status,
+ * AND write a compensating negative-amount row classified as "Refunds Issued"
+ * so QB import sees both the original revenue and the reversing entry.
+ */
+async function handleChargeRefunded(charge: any) {
+  try {
+    const chargeId = charge.id;
+    const totalRefunded = charge.amount_refunded || 0;
+    const isFullRefund = totalRefunded >= charge.amount;
+
+    // 1. Update the existing sync-log row (if we previously synced this charge)
+    const { data: existing } = await supabaseClient
+      .from('stripe_qb_sync_log')
+      .select('id, appointment_id, amount_gross_cents, amount_refunded_cents, qb_class_name')
+      .eq('stripe_charge_id', chargeId)
+      .is('stripe_balance_transaction_id', null) // only match the revenue row, not compensating rows
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      await supabaseClient
+        .from('stripe_qb_sync_log')
+        .update({
+          amount_refunded_cents: totalRefunded,
+          sync_status: isFullRefund ? 'refunded' : 'partial_refund',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+    } else {
+      console.warn(`[charge.refunded] no sync_log row for ${chargeId} — skipping update, compensating entry will still be written`);
+    }
+
+    // 2. Write a compensating negative-amount row so QB sees a reversing
+    //    entry even without our nightly sync. Idempotent via the charge.id +
+    //    refund-marker suffix so multiple webhook deliveries don't duplicate.
+    const refundMarkerId = `${chargeId}__refund`;
+    const { data: refundExists } = await supabaseClient
+      .from('stripe_qb_sync_log')
+      .select('id')
+      .eq('stripe_charge_id', refundMarkerId)
+      .maybeSingle();
+
+    if (!refundExists) {
+      await supabaseClient
+        .from('stripe_qb_sync_log')
+        .insert({
+          stripe_charge_id: refundMarkerId,
+          stripe_customer_id: typeof charge.customer === 'string' ? charge.customer : charge.customer?.id || null,
+          charge_date: new Date().toISOString(),
+          amount_gross_cents: -totalRefunded,
+          amount_fee_cents: 0,
+          amount_net_cents: -totalRefunded,
+          amount_refunded_cents: 0,
+          currency: charge.currency || 'usd',
+          appointment_id: existing?.appointment_id || null,
+          qb_account_name: 'Refunds Issued',
+          qb_class_name: existing?.qb_class_name || null,
+          qb_income_type: 'refund',
+          sync_status: 'pending',
+          raw_stripe_data: charge,
+        });
+    }
+
+    // 3. If this charge was tied to an appointment, flag its refund status
+    //    so the admin UI stops showing it as collectible revenue.
+    if (existing?.appointment_id) {
+      await supabaseClient
+        .from('appointments')
+        .update({
+          refund_status: isFullRefund ? 'fully_refunded' : 'partially_refunded',
+          payment_status: isFullRefund ? 'refunded' : 'partial_refund',
+        })
+        .eq('id', existing.appointment_id);
+    }
+
+    console.log(`[charge.refunded] processed ${chargeId}: refunded $${(totalRefunded / 100).toFixed(2)}${isFullRefund ? ' (full)' : ' (partial)'}`);
+  } catch (error: any) {
+    console.error('[charge.refunded] error:', error);
+    // Don't re-throw — we want the webhook to 200 either way; error_logs
+    // captured via the top-level catch in the main handler.
+    throw error;
+  }
+}
+
 // Handle payment failure
+// Two paths: (a) subscription invoices → flip membership to past_due,
+// (b) appointment invoices → flip the appointment into the reminder
+// cascade so process-invoice-reminders picks it up. Before this, an
+// appointment invoice that bounced produced zero follow-up; every
+// failed-card charge was silently uncollectable unless a human noticed.
 async function handlePaymentFailure(invoice: any) {
   try {
     const subscriptionId = invoice.subscription;
-    
-    if (!subscriptionId) {
-      console.log('No subscription associated with this invoice');
-      return;
+    const appointmentId = invoice.metadata?.appointment_id || null;
+
+    // Path (b): appointment invoice — enroll in the existing dunning cascade
+    if (appointmentId) {
+      try {
+        await supabaseClient
+          .from('appointments')
+          .update({
+            payment_status: 'failed',
+            invoice_status: 'sent', // triggers process-invoice-reminders
+            invoice_sent_at: new Date().toISOString(),
+          })
+          .eq('id', appointmentId);
+
+        // Append WHY payment failed to the notes field (read-then-append
+        // because Postgres doesn't have a native ilike-append — keeps the
+        // admin UI's notes section informative instead of "just reach out").
+        const failReason = invoice.last_finalization_error?.message
+          || invoice.charge?.failure_message
+          || 'Card was declined';
+        const { data: appt } = await supabaseClient
+          .from('appointments').select('notes').eq('id', appointmentId).maybeSingle();
+        const appended = [(appt?.notes || '').trim(), `[auto] Invoice payment failed ${new Date().toISOString().substring(0, 10)}: ${failReason}`].filter(Boolean).join(' | ');
+        await supabaseClient.from('appointments').update({ notes: appended }).eq('id', appointmentId);
+
+        console.log(`[invoice.payment_failed] appointment ${appointmentId} enrolled in reminder cascade`);
+      } catch (e) {
+        console.error('[invoice.payment_failed] appointment update error:', e);
+      }
     }
-    
-    // Mark membership as past_due
-    const { data, error } = await supabaseClient
-      .from('user_memberships')
-      .update({ 
-        status: 'past_due',
-        updated_at: new Date().toISOString()
-      })
-      .eq('stripe_subscription_id', subscriptionId)
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error marking membership as past_due:', error);
-      throw error;
+
+    // Path (a): subscription invoice — mark membership past_due
+    if (subscriptionId) {
+      const { data, error } = await supabaseClient
+        .from('user_memberships')
+        .update({
+          status: 'past_due',
+          updated_at: new Date().toISOString()
+        })
+        .eq('stripe_subscription_id', subscriptionId)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        console.warn('[invoice.payment_failed] past_due update error:', error.message);
+      } else if (data) {
+        console.log(`Marked subscription ${subscriptionId} as past_due`);
+        return data;
+      }
     }
-    
-    console.log(`Marked subscription ${subscriptionId} as past_due`);
-    return data;
+
+    if (!subscriptionId && !appointmentId) {
+      console.log('[invoice.payment_failed] no subscription or appointment — nothing to update');
+    }
   } catch (error) {
     console.error('Error handling payment failure:', error);
     throw error;
@@ -1269,8 +1430,30 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
+    // Founding-member Sept-1 billing anchor — mirrors handleMembershipSignup
+    // lines 369-390. Was missing here, so founding members who upgraded lost
+    // their promised Sept-1 billing date and got charged on an arbitrary day
+    // (breaking a founding-member promise → trust damage).
+    let nextBillingOverride: Date | null = null;
+    if (isFoundingMember) {
+      const currentDate = new Date();
+      const launchDate = new Date(currentDate.getFullYear(), 7, 1); // Aug 1
+      if (currentDate < launchDate) {
+        nextBillingOverride = new Date(currentDate.getFullYear(), 8, 1); // Sept 1
+        try {
+          await stripe.subscriptions.update(subscriptionId, {
+            billing_cycle_anchor: Math.floor(nextBillingOverride.getTime() / 1000),
+            proration_behavior: 'none',
+          });
+          console.log(`[upgrade] preserved founding-member Sept-1 anchor on sub ${subscriptionId}`);
+        } catch (stripeErr: any) {
+          console.error(`[upgrade] failed to re-anchor founding-member billing: ${stripeErr.message}`);
+        }
+      }
+    }
+
     // Transfer remaining credits from old plan
-    const remainingCredits = currentMembership ? 
+    const remainingCredits = currentMembership ?
       (currentMembership.credits_remaining + (currentMembership.rollover_credits || 0)) : 0;
     
     // If the user already has a membership, update it
@@ -1300,6 +1483,7 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
           credits_remaining: planData.credits_per_year + remainingCredits + bonusCredits,
           credits_allocated_annual: planData.credits_per_year,
           next_renewal: nextRenewal.toISOString(),
+          next_billing_override: nextBillingOverride ? nextBillingOverride.toISOString() : null,
           is_supernova_member: isSupernovaMember,
           bonus_credits: bonusCredits,
           promotion_locked_price: promotionLockedPrice,
