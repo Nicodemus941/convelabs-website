@@ -9,6 +9,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import MembershipAgreementDialog from '@/components/membership/MembershipAgreementDialog';
+import FoundingSeatsCounter from '@/components/membership/FoundingSeatsCounter';
+import BonusStackCard from '@/components/membership/BonusStackCard';
 
 /**
  * PRICING PAGE — Hormozi-structured 4-tier annual offer.
@@ -237,8 +239,15 @@ const Pricing: React.FC = () => {
         </div>
       </section>
 
+      {/* Founding 50 scarcity banner — live count of remaining VIP seats */}
+      <section className="pt-2 pb-4">
+        <div className="container mx-auto px-4 max-w-3xl">
+          <FoundingSeatsCounter variant="full" />
+        </div>
+      </section>
+
       {/* 4-Tier Grid */}
-      <section className="py-12">
+      <section className="py-8">
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-7xl mx-auto">
             {TIERS.map((tier) => (
@@ -333,6 +342,11 @@ const Pricing: React.FC = () => {
                 </CardContent>
               </Card>
             ))}
+          </div>
+
+          {/* Founding VIP Bonus Stack — the Hormozi value-ladder card */}
+          <div className="max-w-xl mx-auto mt-12">
+            <BonusStackCard />
           </div>
 
           {/* Concierge Promise callout */}

@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { User } from "@/types/auth";
 import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
+import FoundingMemberBadge from "@/components/membership/FoundingMemberBadge";
+import FoundingSeatsCounter from "@/components/membership/FoundingSeatsCounter";
 
 
 interface DashboardWelcomeProps {
@@ -15,7 +17,7 @@ const DashboardWelcome = ({ user, handleBookAppointment }: DashboardWelcomeProps
   const handleBookClick = () => {
     window.location.href = GHS_BOOKING_PAGE;
   };
-  
+
   return (
     <>
       <div className="flex flex-col md:flex-row md:items-center justify-between">
@@ -26,8 +28,8 @@ const DashboardWelcome = ({ user, handleBookAppointment }: DashboardWelcomeProps
           </p>
         </div>
         <div className="mt-4 md:mt-0 flex gap-2">
-          <Button 
-            className="bg-conve-red hover:bg-conve-red/90" 
+          <Button
+            className="bg-conve-red hover:bg-conve-red/90"
             onClick={handleBookClick}
           >
             <span className="flex items-center">
@@ -38,6 +40,18 @@ const DashboardWelcome = ({ user, handleBookAppointment }: DashboardWelcomeProps
             <a href="/pricing">View Plans</a>
           </Button>
         </div>
+      </div>
+
+      {/* Founding Member badge — renders only if this user claimed a seat */}
+      <div className="mt-4">
+        <FoundingMemberBadge />
+      </div>
+
+      {/* Founding 50 scarcity strip — shown to all patients on dashboard.
+          Founding members see their badge above; prospects see the counter
+          as a call to join. Component renders null when seats are closed. */}
+      <div className="mt-3">
+        <FoundingSeatsCounter variant="banner" />
       </div>
     </>
   );

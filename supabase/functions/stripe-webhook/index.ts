@@ -454,6 +454,33 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
 
     console.log(`Created membership for user ${userId} with plan ${planId}`);
 
+    // ── FOUNDING 50 SEAT CLAIM ─────────────────────────────────────
+    // If (a) the checkout flagged this as founding intent AND (b) the
+    // plan is VIP, atomically claim the next founding seat number.
+    // The RPC serializes via row-lock on system_settings, enforces the
+    // 50-cap server-side, and sets founding_member_number +
+    // founding_locked_rate_cents on the row we just upserted.
+    //
+    // If the cap is already reached: RPC returns NULL, the membership
+    // is still active, but the user doesn't get founding status. No
+    // error thrown — graceful degradation.
+    const isVipPlan = String(planData?.name || '').toLowerCase() === 'vip';
+    if (isFoundingMember && isVipPlan && (membershipData as any)?.id) {
+      try {
+        const { data: seatNumber, error: claimErr } = await supabaseClient
+          .rpc('claim_founding_seat' as any, { p_membership_id: (membershipData as any).id });
+        if (claimErr) {
+          console.warn(`[founding-50] claim RPC error (non-blocking):`, claimErr.message);
+        } else if (seatNumber) {
+          console.log(`[founding-50] assigned seat #${seatNumber} to membership ${(membershipData as any).id}`);
+        } else {
+          console.log(`[founding-50] cap reached — membership ${(membershipData as any).id} created WITHOUT founding status`);
+        }
+      } catch (e: any) {
+        console.warn(`[founding-50] claim exception (non-blocking):`, e?.message || e);
+      }
+    }
+
     // Link the signed agreement to the now-active membership (Sprint: membership agreements)
     // Agreement row was written BEFORE checkout; we find it by metadata.agreement_id
     // that the client passed through create-checkout-session → Stripe metadata.

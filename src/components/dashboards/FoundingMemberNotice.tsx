@@ -1,39 +1,18 @@
-
 import React from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Sparkles, Calendar } from "lucide-react";
-import { FoundingMemberBadge } from "@/components/ui/founding-member-badge";
+import FoundingMemberBadgeLive from "@/components/membership/FoundingMemberBadge";
 
-interface FoundingMemberNoticeProps {
-  nextBillingDate?: string | null;
-}
-
-const FoundingMemberNotice = ({ nextBillingDate }: FoundingMemberNoticeProps) => {
-  const formattedDate = nextBillingDate 
-    ? new Date(nextBillingDate).toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric' 
-      })
-    : "September 1st, 2025";
-
-  return (
-    <Alert className="bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200 mb-6">
-      <Sparkles className="h-5 w-5 text-amber-600" />
-      <AlertTitle className="flex items-center font-bold text-amber-800">
-        <FoundingMemberBadge className="mr-2" />
-      </AlertTitle>
-      <AlertDescription className="text-amber-800">
-        <p className="mb-2">
-          Thank you for joining as a Founding Member! Your membership officially begins August 1st.
-        </p>
-        <div className="flex items-center text-sm">
-          <Calendar className="h-4 w-4 mr-1" />
-          <span>Next billing date: {formattedDate}</span>
-        </div>
-      </AlertDescription>
-    </Alert>
-  );
+/**
+ * FoundingMemberNotice — renders the data-driven Founding Member badge
+ * for patients on the dashboard. Automatically hides (renders null)
+ * when the current user isn't a founding member, so callers can
+ * unconditionally mount this.
+ *
+ * Previously: hardcoded "Next billing September 1st, 2025" — stale
+ * after the 2025 launch window. Now reads founding_member_number +
+ * founding_locked_rate_cents from user_memberships.
+ */
+const FoundingMemberNotice: React.FC<{ className?: string }> = ({ className }) => {
+  return <FoundingMemberBadgeLive className={className ?? "mb-6"} />;
 };
 
 export default FoundingMemberNotice;

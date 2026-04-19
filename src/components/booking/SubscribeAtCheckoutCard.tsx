@@ -5,6 +5,7 @@ import { Sparkles, Check, X, ChevronDown, ChevronUp, Crown, Star, Shield } from 
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import MembershipAgreementDialog from '@/components/membership/MembershipAgreementDialog';
+import FoundingSeatsCounter from '@/components/membership/FoundingSeatsCounter';
 
 /**
  * SUBSCRIBE-AT-CHECKOUT CARD — inline Hormozi upsell surface on the booking flow.
@@ -164,6 +165,12 @@ const SubscribeAtCheckoutCard: React.FC<Props> = ({ patientEmail, patientName, s
                             Add {t.planName} Annual · {dollars(t.annualCents)}/yr
                             {(t as any).popular && <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase bg-[#B91C1C] text-white">Most Popular</span>}
                           </p>
+                          {/* Founding 50 scarcity pill — only on VIP tile */}
+                          {t.key === 'vip' && (
+                            <div className="mt-1">
+                              <FoundingSeatsCounter variant="pill" />
+                            </div>
+                          )}
                           <p className="text-xs text-gray-600 mt-0.5">
                             This visit: <span className="line-through text-gray-400">{dollars(serviceBaseCents)}</span>{' '}
                             <strong className="text-gray-900">{dollars(t.thisVisitCents)}</strong>
