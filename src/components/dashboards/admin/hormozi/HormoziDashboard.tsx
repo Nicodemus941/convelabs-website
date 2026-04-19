@@ -12,6 +12,7 @@ import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
 import AcquisitionByChannel from './AcquisitionByChannel';
 import Level0Tracker from './Level0Tracker';
 import ReviewsWidget from './ReviewsWidget';
+import OpsHealthCard from './OpsHealthCard';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -112,6 +113,12 @@ const HormoziDashboard: React.FC = () => {
           {isFetching ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
+
+      {/* ─── OPS HEALTH PULSE (Part I2 Phase 1) ───────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Operational Pulse</h2>
+        <OpsHealthCard />
+      </section>
 
       {/* ─── LEVEL 0 GATE TRACKER (master plan Part B) ───────────── */}
       <section>
