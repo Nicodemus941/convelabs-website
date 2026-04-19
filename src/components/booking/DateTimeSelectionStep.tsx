@@ -163,8 +163,11 @@ const afterHoursWindows = [
   { time: "7:30 PM", label: "7:30 - 8:00 PM" },
 ];
 
-// Services that use routine hours (9am-1:30pm)
+// Services that use routine hours (9am-1:30pm) — FORCES isFasting=false at the slot level
 const ROUTINE_SERVICES = ['routine-blood-draw'];
+// Services that require fasting — FORCES isFasting=true at the slot level,
+// so slot-gating uses fastingRanges instead of the pre-9am heuristic
+const FASTING_SERVICES = ['fasting-blood-draw'];
 // Services that skip time selection (STAT/same-day)
 const STAT_SERVICES = ['stat-blood-draw'];
 
@@ -376,6 +379,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const isSunday = selectedDate && selectedDate.getDay() === 0;
   const isStat = STAT_SERVICES.includes(selectedService || '');
   const isRoutine = ROUTINE_SERVICES.includes(selectedService || '');
+  const isFastingService = FASTING_SERVICES.includes(selectedService || '');
 
   // Get Current Date
   const today = new Date();
@@ -609,7 +613,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                           const hhmm = normalizeTime(window.time);
                           if (hhmm) {
                             const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                            const isFasting = hhmm < '09:00';
+                            // isFasting is now service-driven, not a pre-9am heuristic:
+                            //   - FASTING service selected → always isFasting=true (must be 6-9am)
+                            //   - ROUTINE service selected → always isFasting=false (9am+ windows)
+                            //   - Fallback for unclassified services → old pre-9am heuristic
+                            const isFasting = isFastingService
+                              ? true
+                              : isRoutine
+                              ? false
+                              : hhmm < '09:00';
                             const check = isBookingAllowed({ tier: patientTier, dateIso, time: window.time, isFasting });
                             if (!check.allowed) {
                               tierLocked = true;

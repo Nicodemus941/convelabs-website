@@ -49,7 +49,7 @@ const MOBILE_SENIOR_SERVICES = ['routine-blood-draw', 'fasting-blood-draw', 'sta
 // All services for other visit types
 const ALL_SERVICES: Service[] = [
   { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. Available 9 AM - 1:30 PM.' },
-  { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. Available any time.' },
+  { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. 6–9 AM Mon–Fri for non-members; members unlock wider windows.' },
   { id: 'stat-blood-draw', name: 'STAT / Same-Day', duration: 60, credits: 1, description: 'Next available slot. +$100 surcharge.' },
   { id: 'therapeutic-phlebotomy', name: 'Therapeutic Phlebotomy', duration: 75, credits: 1, description: 'Blood removal per doctor order. 1hr 15min.' },
   { id: 'glucose-tolerance', name: 'Glucose Tolerance Test (GTT)', duration: 120, credits: 1, description: 'Measures how your body processes sugar.' },
