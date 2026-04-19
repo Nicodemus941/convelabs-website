@@ -22,7 +22,7 @@ interface Partner {
 
 const PARTNERS: Partner[] = [
   {
-    name: 'Aristotle',
+    name: 'Aristotle Education',
     url: 'https://aristotleeducation.com',
     description: "Dr. Jamnadas — fasting, vagus-nerve & longevity protocols",
   },
