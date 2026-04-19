@@ -9,6 +9,7 @@ import ComparisonTable from "@/components/home/ComparisonTable";
 import ValueStack from "@/components/home/ValueStack";
 import GuaranteeBanner from "@/components/home/GuaranteeBanner";
 import TrustBanner from "@/components/home/TrustBanner";
+import PartnersMarquee from "@/components/home/PartnersMarquee";
 import HowItWorks from "@/components/home/HowItWorks";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
 import MembershipCTA from "@/components/home/MembershipCTA";
@@ -210,6 +211,7 @@ const Home = () => {
             <TestimonialsSection />
             <GuaranteeBanner />
             <TrustBanner />
+            <PartnersMarquee />
             <ComparisonTable />
             <ValueStack />
             <HowItWorks />
