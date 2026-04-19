@@ -11,6 +11,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+import { isSlotStillAvailable } from '../_shared/availability.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -24,8 +25,9 @@ const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY') || '';
 const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
-// Mobile vs in-office default pricing (same as main booking flow).
-const PRICING: Record<string, number> = { 'mobile': 15000, 'in-office': 5500 };
+// 100% mobile service — ConveLabs does not operate a walk-in lab. In-office
+// was removed from the patient flow intentionally.
+const MOBILE_PRICE_CENTS = 15000;
 
 function fmtDate(iso: string): string {
   const d = new Date(iso + 'T12:00:00');
@@ -38,18 +40,17 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const body = await req.json();
     const {
-      access_token, service_type, appointment_date, appointment_time,
+      access_token, appointment_date, appointment_time,
       address, patient_email_override, patient_phone_override, insurance_card_path,
     } = body || {};
+    // service_type is always 'mobile' — we removed the in-office option
+    const service_type = 'mobile';
 
-    if (!access_token || !service_type || !appointment_date || !appointment_time) {
+    if (!access_token || !appointment_date || !appointment_time) {
       return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-    if (!['mobile', 'in-office'].includes(service_type)) {
-      return new Response(JSON.stringify({ error: 'Invalid service_type' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-    if (service_type === 'mobile' && !address) {
-      return new Response(JSON.stringify({ error: 'Address required for mobile visits' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!address || String(address).trim().length < 10) {
+      return new Response(JSON.stringify({ error: 'Your address is required — we come to you' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // Load lab request
@@ -64,15 +65,26 @@ Deno.serve(async (req) => {
 
     // Load org + billing rules
     const { data: org } = await admin.from('organizations')
-      .select('id, name, default_billed_to, member_stacking_rule, locked_price_cents, org_invoice_price_cents, show_patient_name_on_appointment, contact_email, billing_email, contact_phone, contact_name')
+      .select('id, name, default_billed_to, member_stacking_rule, locked_price_cents, org_invoice_price_cents, show_patient_name_on_appointment, contact_email, billing_email, contact_phone, contact_name, time_window_rules')
       .eq('id', request.organization_id).maybeSingle();
     if (!org) return new Response(JSON.stringify({ error: 'Org not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+    // RACE-CONDITION GUARD: re-check the slot is still available at write time.
+    // If a concurrent booking took it in the seconds between page-load and
+    // submit, we return 409 so the patient picks a different slot.
+    const stillOpen = await isSlotStillAvailable(admin, org.id, appointment_date, appointment_time, org.time_window_rules);
+    if (!stillOpen) {
+      return new Response(JSON.stringify({
+        error: 'That slot was just taken. Please pick a different time.',
+        slot_conflict: true,
+      }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     const orgCovers = org.default_billed_to === 'org' || org.member_stacking_rule === 'org_covers';
     const billedTo = orgCovers ? 'org' : 'patient';
     const effectivePriceCents = orgCovers
       ? 0
-      : (org.locked_price_cents ?? PRICING[service_type] ?? 15000);
+      : (org.locked_price_cents ?? MOBILE_PRICE_CENTS);
 
     // Normalize appointment_date to noon ET for TZ stability (matches other booking paths)
     const apptDateIso = `${appointment_date}T12:00:00-04:00`;
@@ -85,9 +97,9 @@ Deno.serve(async (req) => {
       patient_name: request.patient_name,
       patient_email: patientEmail,
       patient_phone: patientPhone,
-      address: service_type === 'mobile' ? address : '1800 Pembrook Drive, Suite 300, Orlando, FL 32810',
-      service_type,
-      service_name: service_type === 'mobile' ? 'Mobile Blood Draw' : 'In-Office Visit',
+      address: address.trim(),
+      service_type: 'mobile',
+      service_name: 'Mobile Blood Draw',
       appointment_date: apptDateIso,
       appointment_time,
       total_amount: effectivePriceCents / 100,
@@ -141,7 +153,7 @@ Deno.serve(async (req) => {
           line_items: [{
             price_data: {
               currency: 'usd',
-              product_data: { name: service_type === 'mobile' ? 'Mobile Blood Draw' : 'In-Office Visit' },
+              product_data: { name: 'Mobile Blood Draw' },
               unit_amount: effectivePriceCents,
             },
             quantity: 1,
@@ -174,7 +186,7 @@ Deno.serve(async (req) => {
     <p><strong>${request.patient_name}</strong> scheduled their lab draw.</p>
     <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;">
       <p style="margin:0;font-size:14px;"><strong>When:</strong> ${fmtDate(appointment_date)} at ${appointment_time}</p>
-      <p style="margin:6px 0 0;font-size:14px;"><strong>Where:</strong> ${service_type === 'mobile' ? 'At patient\'s address' : 'ConveLabs Maitland office'}</p>
+      <p style="margin:6px 0 0;font-size:14px;"><strong>Where:</strong> At patient's address (mobile)</p>
       ${request.next_doctor_appt_date ? `<p style="margin:6px 0 0;font-size:13px;color:#166534;">In time for their ${fmtDate(request.next_doctor_appt_date)} visit with you ✓</p>` : ''}
     </div>
     <div style="text-align:center;margin:22px 0;">

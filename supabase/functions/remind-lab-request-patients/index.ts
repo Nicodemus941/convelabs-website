@@ -13,7 +13,8 @@
 // Scheduling: wire up via pg_cron to hit this fn daily.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { computePreofferedSlots, formatSlotsForSms } from '../_shared/preoffered-slots.ts';
+import { nextAvailableSlots } from '../_shared/availability.ts';
+import { formatSlotsForSms } from '../_shared/preoffered-slots.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -99,10 +100,10 @@ Deno.serve(async (req) => {
 
     let sent = 0;
     for (const r of due || []) {
-      const { data: org } = await admin.from('organizations').select('name').eq('id', r.organization_id).maybeSingle();
+      const { data: org } = await admin.from('organizations').select('name, time_window_rules').eq('id', r.organization_id).maybeSingle();
       const daysLeft = daysBetween(r.draw_by_date);
       const reminderNum = (r.patient_reminder_count || 0) + 1;
-      const slots = computePreofferedSlots(r.draw_by_date, 3);
+      const slots = await nextAvailableSlots(admin, r.organization_id, r.draw_by_date, org?.time_window_rules, 3);
       const patientUrl = `${PUBLIC_SITE_URL}/lab-request/${r.access_token}`;
       const firstName = r.patient_name.split(' ')[0];
       const urgencyTag = daysLeft <= 2 ? '🔴 URGENT' : daysLeft <= 4 ? '🟡 Reminder' : 'Reminder';

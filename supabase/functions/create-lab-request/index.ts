@@ -9,7 +9,8 @@
 // Response: { success: true, request_id, access_token, patient_url }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { computePreofferedSlots, formatSlotsForSms } from '../_shared/preoffered-slots.ts';
+import { nextAvailableSlots } from '../_shared/availability.ts';
+import { formatSlotsForSms } from '../_shared/preoffered-slots.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -201,9 +202,11 @@ Deno.serve(async (req) => {
     }
 
     // ── SMS ──────────────────────────────────────────────────────────────
-    // Pre-offer 3 quick-reply slots so patient can text "1", "2", or "3"
-    // instead of tapping through the link (reply-to-book)
-    const slots = computePreofferedSlots(draw_by_date, 3);
+    // Pre-offer 3 quick-reply slots, now filtered by LIVE availability +
+    // the org's time_window_rules. Never offer a slot that's already taken.
+    const { data: orgRules } = await admin
+      .from('organizations').select('time_window_rules').eq('id', organization_id).maybeSingle();
+    const slots = await nextAvailableSlots(admin, organization_id, draw_by_date, orgRules?.time_window_rules, 3);
     const slotsLine = slots.length > 0 ? `Reply ${formatSlotsForSms(slots)}. ` : '';
 
     if (patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
