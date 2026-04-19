@@ -62,7 +62,25 @@ interface LabRequestData {
   };
 }
 
-interface Slot { time: string; available: boolean; reason?: string }
+interface Slot {
+  time: string;
+  available: boolean;
+  reason?: string;
+  requires_tier?: string;
+  unlock_price_cents?: number;
+  visit_savings_cents?: number;
+}
+
+const TIER_LABEL: Record<string, string> = {
+  regular_member: 'Regular Member',
+  vip: 'VIP',
+  concierge: 'Concierge',
+};
+const TIER_COLOR: Record<string, { bg: string; text: string; border: string; button: string }> = {
+  regular_member: { bg: 'bg-amber-50', text: 'text-amber-900', border: 'border-amber-300', button: 'bg-amber-500 hover:bg-amber-600' },
+  vip: { bg: 'bg-red-50', text: 'text-red-900', border: 'border-red-300', button: 'bg-red-600 hover:bg-red-700' },
+  concierge: { bg: 'bg-purple-50', text: 'text-purple-900', border: 'border-purple-300', button: 'bg-purple-600 hover:bg-purple-700' },
+};
 
 const PatientLabRequestPage: React.FC = () => {
   const { token } = useParams();
@@ -82,6 +100,10 @@ const PatientLabRequestPage: React.FC = () => {
   // Live availability state
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [orgCovers, setOrgCovers] = useState(false);
+
+  // Unlock modal state
+  const [unlockSlot, setUnlockSlot] = useState<Slot | null>(null);
 
   // Fetch the lab request context once
   useEffect(() => {
@@ -125,6 +147,7 @@ const PatientLabRequestPage: React.FC = () => {
         const j = await resp.json();
         if (!resp.ok) throw new Error(j.error || 'Failed to load slots');
         setSlots(j.slots || []);
+        setOrgCovers(!!j.org_covers);
         // If the currently-selected time is no longer available, clear it
         if (time && !(j.slots || []).some((s: Slot) => s.time === time && s.available)) {
           setTime('');
@@ -417,8 +440,11 @@ const PatientLabRequestPage: React.FC = () => {
                 <div className="grid grid-cols-3 gap-1.5 mt-1.5">
                   {slots.map(s => {
                     const isFirst = s.available && s.time === firstAvailable;
+                    const isLocked = s.reason === 'tier_locked';
+                    const tierColor = isLocked && s.requires_tier ? TIER_COLOR[s.requires_tier] : null;
                     const titleText = s.available
                       ? (isFirst ? 'First available' : 'Available')
+                      : isLocked ? `🔒 Unlock with ${TIER_LABEL[s.requires_tier || ''] || 'membership'}`
                       : s.reason === 'booked' ? 'Already booked'
                       : s.reason === 'past' ? 'Need at least 2 hrs lead time'
                       : s.reason === 'blocked' ? 'Office closed'
@@ -426,16 +452,22 @@ const PatientLabRequestPage: React.FC = () => {
                       : 'Unavailable';
                     return (
                       <button key={s.time} type="button"
-                        onClick={() => s.available && setTime(s.time)}
-                        disabled={!s.available}
+                        onClick={() => {
+                          if (s.available) setTime(s.time);
+                          else if (isLocked) setUnlockSlot(s);
+                        }}
+                        disabled={!s.available && !isLocked}
                         title={titleText}
                         className={`relative text-xs py-2 px-2 rounded border transition ${
                           time === s.time
                             ? 'bg-[#B91C1C] text-white border-[#B91C1C]'
                             : s.available
                               ? 'bg-white border-gray-200 hover:border-[#B91C1C] hover:bg-red-50 text-gray-700'
-                              : 'bg-gray-50 text-gray-300 border-gray-100 line-through cursor-not-allowed'
+                              : isLocked && tierColor
+                                ? `${tierColor.bg} ${tierColor.text} ${tierColor.border} cursor-pointer hover:opacity-80`
+                                : 'bg-gray-50 text-gray-300 border-gray-100 line-through cursor-not-allowed'
                         }`}>
+                        {isLocked && <span className="mr-0.5">🔒</span>}
                         {s.time}
                         {isFirst && time !== s.time && (
                           <span className="absolute -top-1.5 -right-1 text-[8px] bg-emerald-500 text-white px-1 rounded">first</span>
@@ -444,6 +476,13 @@ const PatientLabRequestPage: React.FC = () => {
                     );
                   })}
                 </div>
+                {/* Nudge: if first several slots are locked, surface an unlock callout */}
+                {slots.some(s => s.reason === 'tier_locked') && (
+                  <div className="mt-2 bg-gradient-to-r from-amber-50 to-red-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex items-center gap-2">
+                    <span>⚡</span>
+                    <span className="flex-1">Early morning slots unlock with a membership · tap any 🔒 slot to see the math</span>
+                  </div>
+                )}
                 {availableSlots.length > 0 && (
                   <p className="text-[10px] text-gray-400 mt-2 flex items-center gap-1">
                     <Clock className="h-2.5 w-2.5" /> Live availability · refreshes each time you pick a date
@@ -519,6 +558,66 @@ const PatientLabRequestPage: React.FC = () => {
           Questions? <a href="mailto:info@convelabs.com" className="underline">info@convelabs.com</a> · (941) 527-9169
         </p>
       </div>
+
+      {/* UNLOCK SLOT MODAL */}
+      {unlockSlot && unlockSlot.requires_tier && (() => {
+        const tier = unlockSlot.requires_tier;
+        const label = TIER_LABEL[tier] || 'Member';
+        const color = TIER_COLOR[tier] || TIER_COLOR.regular_member;
+        const unlockPrice = (unlockSlot.unlock_price_cents || 0) / 100;
+        const visitSavings = (unlockSlot.visit_savings_cents || 0) / 100;
+        const visitsToBreakEven = visitSavings > 0 ? Math.ceil(unlockPrice / visitSavings) : null;
+        return (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4" onClick={() => setUnlockSlot(null)}>
+            <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4" onClick={e => e.stopPropagation()}>
+              <div className={`${color.bg} ${color.border} border rounded-xl p-4 text-center`}>
+                <div className="text-3xl mb-1">🔒</div>
+                <p className={`text-xs uppercase tracking-wider ${color.text} font-semibold`}>Unlocks with {label}</p>
+                <h3 className={`text-2xl font-bold ${color.text} mt-1`}>{unlockSlot.time}</h3>
+                <p className="text-xs text-gray-600 mt-1">Before most offices open · home before 8 AM</p>
+              </div>
+
+              {!orgCovers && visitSavings > 0 && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm">
+                  <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-2">Math for this visit</p>
+                  <div className="space-y-1 text-gray-700">
+                    <div className="flex justify-between"><span>Non-member rate</span><span>${(visitSavings + (unlockSlot.visit_savings_cents != null ? (15000 - unlockSlot.visit_savings_cents) / 100 : 130)).toFixed(0)}</span></div>
+                    <div className="flex justify-between font-semibold text-emerald-700"><span>{label} rate</span><span>${((15000 - (unlockSlot.visit_savings_cents || 0)) / 100).toFixed(0)}</span></div>
+                    <div className="border-t my-2" />
+                    <div className="flex justify-between"><span>Membership (annual)</span><span>${unlockPrice.toFixed(0)} /yr</span></div>
+                    <div className="flex justify-between"><span>Savings today</span><span className="text-emerald-700 font-semibold">${visitSavings.toFixed(0)}</span></div>
+                    {visitsToBreakEven && (
+                      <p className="text-[11px] text-gray-500 italic mt-2">Membership pays for itself in {visitsToBreakEven} visit{visitsToBreakEven === 1 ? '' : 's'} — every future visit is pure savings.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {orgCovers && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+                  <p className="font-semibold mb-1">This visit is covered by {org.name}</p>
+                  <p className="text-xs">No cost to you today. Joining {label} for <strong>${unlockPrice.toFixed(0)}/yr</strong> unlocks {unlockSlot.time} for this visit AND saves you on all your own future ConveLabs visits.</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Button
+                  className={`w-full ${color.button} text-white h-11 gap-1.5`}
+                  onClick={() => {
+                    toast.info('Membership checkout coming in the next release. For now, pick an available slot — we\'ll reach out when the upgrade flow is live.');
+                    setUnlockSlot(null);
+                  }}>
+                  Join {label} + book this slot
+                </Button>
+                <Button variant="outline" className="w-full" onClick={() => setUnlockSlot(null)}>
+                  Skip — pick an available slot
+                </Button>
+              </div>
+              <p className="text-[11px] text-gray-500 text-center">47% of ConveLabs patients are members — early slots fill fast.</p>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

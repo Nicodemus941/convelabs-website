@@ -95,6 +95,13 @@ export interface AvailableSlot {
   time: string;
   available: boolean;
   reason?: 'past' | 'booked' | 'blocked' | 'outside_window';
+  // Tier-gating (populated when caller passes tier info):
+  //   requires_tier: minimum membership tier needed to book this slot
+  //   unlock_price_cents: annual cost to upgrade
+  //   visit_savings_cents: how much patient saves on THIS visit if they join
+  requires_tier?: string;
+  unlock_price_cents?: number;
+  visit_savings_cents?: number;
 }
 
 /**
@@ -132,26 +139,39 @@ export async function getAvailableSlotsForDate(
       .gte('end_date', dateIso),
   ]);
 
-  // DURATION-AWARE BLOCKING: each existing appointment blocks every grid slot
-  // whose start falls within [appt_start, appt_start + duration + travel_buffer).
-  // Travel buffer (mobile only) = 30 min so we don't book back-to-back draws
-  // in different ZIP codes.
+  // BIDIRECTIONAL DURATION-AWARE BLOCKING.
+  // For each existing appointment at start S with duration D and travel
+  // buffer B, we block:
+  //   BACKWARD: slots T where S <= T < S + D + B   (slot starts during
+  //             existing appointment or its travel window)
+  //   FORWARD:  slots T where S - NEW_FOOTPRINT < T < S  (a new slot
+  //             beginning here would bleed INTO the existing appointment)
+  //
+  // NEW_FOOTPRINT assumes the new appointment is 30 min + mobile buffer =
+  // 60 min. So for an 8:00 AM existing appointment, the forward block is
+  // (420, 480) — 7:00 is free (finishes by 8:00) but 7:30 is blocked
+  // (a 7:30 draw would finish at 8:00 with zero travel time).
   const BUFFER_MIN_MOBILE = 30;
   const BUFFER_MIN_OFFICE = 0;
   const DEFAULT_DURATION_MIN = 30;
-  const blockedMinuteRanges: Array<[number, number]> = [];
-  for (const a of apptResp.data || []) {
-    if (!a.appointment_time) continue;
-    const { h, m } = parseTime(String(a.appointment_time));
-    const start = h * 60 + m;
-    const duration = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : DEFAULT_DURATION_MIN;
-    const buffer = a.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
-    blockedMinuteRanges.push([start, start + duration + buffer]);
-  }
+  const NEW_APPT_FOOTPRINT_MIN = DEFAULT_DURATION_MIN + BUFFER_MIN_MOBILE;
+
   const slotIsBooked = (t: string): boolean => {
-    const { h, m } = parseTime(t);
-    const slotMin = h * 60 + m;
-    return blockedMinuteRanges.some(([s, e]) => slotMin >= s && slotMin < e);
+    const { h: th, m: tm } = parseTime(t);
+    const slotMin = th * 60 + tm;
+    for (const a of apptResp.data || []) {
+      if (!a.appointment_time) continue;
+      const { h, m } = parseTime(String(a.appointment_time));
+      const apptStart = h * 60 + m;
+      const duration = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : DEFAULT_DURATION_MIN;
+      const buffer = a.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+      const apptEnd = apptStart + duration + buffer;
+      // Backward block (start-inclusive, end-exclusive)
+      if (slotMin >= apptStart && slotMin < apptEnd) return true;
+      // Forward block (both exclusive) — 7:00 OK, 7:30 blocked for an 8:00 existing appt
+      if (slotMin > apptStart - NEW_APPT_FOOTPRINT_MIN && slotMin < apptStart) return true;
+    }
+    return false;
   };
   const fullyBlocked = (blockResp.data || []).length > 0;
 
@@ -172,6 +192,45 @@ export async function getAvailableSlotsForDate(
     if (!hasEnoughLead(t)) return { time: t, available: false, reason: 'past' };
     if (slotIsBooked(t)) return { time: t, available: false, reason: 'booked' };
     return { time: t, available: true };
+  });
+}
+
+/**
+ * Layer tier-gating info onto the base availability slots. If a slot is
+ * technically open but outside the current tier's window, it flips to
+ * unavailable with a 'tier_locked' reason + populates unlock offer fields.
+ * Kept SEPARATE from getAvailableSlotsForDate so the provider-initiated
+ * lab-request flow can opt out of tier gating (providers booking on behalf
+ * of their patients bypass tier windows — the org's time_window_rules are
+ * the only constraint).
+ */
+export function withTierGating(
+  slots: AvailableSlot[],
+  dateIso: string,
+  currentTier: string,
+  serviceType: 'mobile' | 'in-office' = 'mobile',
+  tierGatingModule: {
+    minTierForSlot: (d: string, t: string) => string;
+    slotUnlockOffer: (cur: string, req: string, st: string) => { unlock_price_cents: number; visit_savings_cents: number; required_tier: string };
+    TIER_ORDER: string[];
+  },
+): AvailableSlot[] {
+  const { minTierForSlot: minTier, slotUnlockOffer, TIER_ORDER } = tierGatingModule;
+  return slots.map(s => {
+    if (!s.available) return s;
+    const required = minTier(dateIso, s.time);
+    const currentIdx = TIER_ORDER.indexOf(currentTier);
+    const requiredIdx = TIER_ORDER.indexOf(required);
+    if (requiredIdx <= currentIdx) return s; // slot accessible at current tier
+    const offer = slotUnlockOffer(currentTier, required, serviceType);
+    return {
+      ...s,
+      available: false,
+      reason: 'tier_locked' as any,
+      requires_tier: required,
+      unlock_price_cents: offer.unlock_price_cents,
+      visit_savings_cents: offer.visit_savings_cents,
+    };
   });
 }
 
