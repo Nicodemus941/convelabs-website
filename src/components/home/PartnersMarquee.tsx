@@ -1,4 +1,6 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
+import { ArrowRight, Building2 } from 'lucide-react';
 
 /**
  * PartnersMarquee — "organizations we serve" scrolling marquee for the
@@ -109,6 +111,34 @@ const PartnersMarquee: React.FC = () => {
                 </div>
               </a>
             ))}
+          </div>
+        </div>
+
+        {/* Provider CTA — convert viewing orgs into inbound partner leads.
+            Links to /partnerships (marketing page with tiers, benefits, and
+            the full onboarding funnel). */}
+        <div className="mt-8 max-w-2xl mx-auto">
+          <div className="bg-gradient-to-br from-conve-red/5 to-rose-50 border border-conve-red/20 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="h-12 w-12 rounded-xl bg-conve-red/10 flex items-center justify-center flex-shrink-0">
+              <Building2 className="h-6 w-6 text-conve-red" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-conve-red mb-1">
+                Are you a provider?
+              </p>
+              <h3 className="text-lg font-bold text-gray-900 leading-tight">
+                Partner with ConveLabs — your patients, our collection
+              </h3>
+              <p className="text-xs text-gray-600 mt-1 leading-relaxed">
+                Send your patients to the concierge phlebotomy team your peers already trust. Custom pricing, branded portal, billing isolation, and the ConveLabs OCR stack — set up in under 48 hours.
+              </p>
+            </div>
+            <Link
+              to="/partnerships"
+              className="inline-flex items-center gap-1.5 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors flex-shrink-0"
+            >
+              Register your org <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
         </div>
 
