@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -249,7 +250,7 @@ const TrainingTab: React.FC = () => {
                 <Badge className={`text-xs capitalize ${categoryColor(selectedCourse.category)}`}>{selectedCourse.category}</Badge>
                 <span className="text-xs text-gray-500">{selectedCourse.estimated_minutes} min</span>
               </div>
-              <div className="prose prose-sm max-w-none whitespace-pre-wrap font-sans text-sm leading-relaxed">{selectedCourse.content_md}</div>
+              <div className="max-w-none text-gray-800 text-sm leading-relaxed [&_h1]:text-xl [&_h1]:font-bold [&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:text-gray-900 [&_h2]:text-lg [&_h2]:font-bold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-gray-900 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:text-[#B91C1C] [&_p]:mb-3 [&_p]:leading-relaxed [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3 [&_ol]:space-y-1 [&_li]:leading-relaxed [&_strong]:font-semibold [&_strong]:text-gray-900 [&_em]:italic [&_code]:bg-gray-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:text-[12.5px] [&_code]:font-mono [&_code]:text-gray-900 [&_pre]:bg-gray-900 [&_pre]:text-gray-100 [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:text-[12px] [&_pre_code]:bg-transparent [&_pre_code]:text-gray-100 [&_pre_code]:p-0 [&_blockquote]:border-l-4 [&_blockquote]:border-[#B91C1C] [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-gray-600 [&_blockquote]:my-3 [&_a]:text-[#B91C1C] [&_a]:underline [&_table]:w-full [&_table]:my-3 [&_table]:text-xs [&_th]:bg-gray-50 [&_th]:font-semibold [&_th]:text-left [&_th]:p-2 [&_th]:border [&_th]:border-gray-200 [&_td]:p-2 [&_td]:border [&_td]:border-gray-200 [&_hr]:my-4 [&_hr]:border-gray-200"><ReactMarkdown>{selectedCourse.content_md}</ReactMarkdown></div>
             </div>
           )}
         </DialogContent>
