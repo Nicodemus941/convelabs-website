@@ -49,3 +49,77 @@ verify_jwt = false
 
 [functions.ghs-webhook]
 verify_jwt = false
+
+# ─── PUBLIC EDGE FUNCTIONS ─────────────────────────────────────────────────
+# These are hit by Stripe webhooks, Twilio webhooks, pg_cron, or unauthenticated
+# patient browsers. verify_jwt MUST stay false — otherwise webhooks/patients
+# get 401'd and we silently lose events. See supabase/functions/_PUBLIC_FUNCTIONS.md
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.twilio-inbound-sms]
+verify_jwt = false
+
+[functions.twilio-voice-greeting]
+verify_jwt = false
+
+[functions.send-password-reset]
+verify_jwt = false
+
+[functions.update-user-password]
+verify_jwt = false
+
+[functions.send-fasting-reminders]
+verify_jwt = false
+
+[functions.remind-lab-request-patients]
+verify_jwt = false
+
+[functions.backfill-provider-phone-auth]
+verify_jwt = false
+
+[functions.provider-otp-send]
+verify_jwt = false
+
+[functions.provider-otp-verify]
+verify_jwt = false
+
+[functions.get-lab-request]
+verify_jwt = false
+
+[functions.get-lab-request-slots]
+verify_jwt = false
+
+[functions.schedule-lab-request]
+verify_jwt = false
+
+[functions.unlock-lab-request-slot]
+verify_jwt = false
+
+[functions.cancel-lab-request]
+verify_jwt = true  # provider-authed
+
+[functions.create-lab-request]
+verify_jwt = true  # provider-authed
+
+[functions.invite-team-member]
+verify_jwt = true  # provider-authed
+
+[functions.complete-provider-onboarding]
+verify_jwt = true  # provider-authed
+
+[functions.provider-dashboard-data]
+verify_jwt = true  # provider-authed
+
+[functions.dev-test-lab-sms]
+verify_jwt = false  # dev-only, protected by shared secret in body
+
+[functions.dev-twilio-recent]
+verify_jwt = false  # dev-only, protected by shared secret in body
+
+[functions.stripe-event-reconcile]
+verify_jwt = false  # pg_cron
+
+[functions.smoke-test-public-endpoints]
+verify_jwt = false  # pg_cron
