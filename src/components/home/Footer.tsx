@@ -7,9 +7,45 @@ import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield } from "luci
 import { ENROLLMENT_URL, TESTS_URL, BOOKING_URL, AUTH_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
-const Footer = () => {
+interface FooterProps {
+  /**
+   * 'full' (default) — for public marketing pages. Renders Quick Access,
+   *   services/company/locations link columns, weekly newsletter signup,
+   *   scripture, social links. Built for conversion + local SEO.
+   *
+   * 'slim' — for signed-in portal pages. Keeps legal + contact essentials,
+   *   kills the marketing noise (no locations grid, no newsletter signup,
+   *   no services columns). The user is already a customer; they came
+   *   to DO something, not convert. Cleaner = more work gets done.
+   */
+  variant?: 'full' | 'slim';
+}
+
+const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
   const { user } = useAuth();
   const bookingModal = useBookingModalSafe();
+
+  // ── Slim portal footer — legal + a single lifeline link ─────────
+  if (variant === 'slim') {
+    return (
+      <footer className="bg-gray-50 border-t border-gray-200 text-gray-600 py-5 text-xs">
+        <Container>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2">
+            <p className="text-gray-500">
+              © {new Date().getFullYear()} ConveLabs · Founded by Nico Jean-Baptiste, Licensed Phlebotomist
+            </p>
+            <div className="flex items-center gap-4">
+              <a href="tel:+19415279169" className="hover:text-conve-red">(941) 527-9169</a>
+              <a href="mailto:info@convelabs.com" className="hover:text-conve-red">info@convelabs.com</a>
+              <Link to="/privacy-policy" className="hover:text-conve-red">Privacy</Link>
+              <Link to="/terms" className="hover:text-conve-red">Terms</Link>
+            </div>
+          </div>
+        </Container>
+      </footer>
+    );
+  }
+
   return (
     <footer className="bg-gray-900 text-white py-12">
       <Container>

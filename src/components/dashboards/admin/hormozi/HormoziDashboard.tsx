@@ -14,6 +14,7 @@ import Level0Tracker from './Level0Tracker';
 import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
 import TrendSparkline from './TrendSparkline';
+import CampaignROICard from './CampaignROICard';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -128,6 +129,11 @@ const HormoziDashboard: React.FC = () => {
           {isFetching ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
+
+      {/* ─── ACTIVE CAMPAIGN ROI (auto-hides when none) ───────────── */}
+      <section>
+        <CampaignROICard />
+      </section>
 
       {/* ─── OPS HEALTH PULSE (Part I2 Phase 1) ───────────────────── */}
       <section>

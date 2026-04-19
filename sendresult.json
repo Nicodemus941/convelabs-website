@@ -1,0 +1,19 @@
+{
+  "success": true,
+  "campaign_key": "patient_announce_2026_04_19",
+  "fired_at": "2026-04-19T15:13:05.002Z",
+  "totals": {
+    "patient_rows_considered": 445,
+    "unique_email_groups": 404,
+    "filtered_out": 41,
+    "conflicts_blocked": 0,
+    "skipped_already_sent": 349,
+    "skipped_unsubscribed": 0,
+    "eligible": 55,
+    "sent": 31,
+    "failed": 0,
+    "skipped_race": 24
+  },
+  "conflicts_written_to_table": 0,
+  "failed_samples": []
+}

@@ -48,7 +48,7 @@ const DashboardWrapper = ({ children, requireAuth = false }: DashboardWrapperPro
             </div>
           </div>
         </main>
-        <Footer />
+        <Footer variant="slim" />
       </div>
     );
   }
@@ -71,7 +71,7 @@ const DashboardWrapper = ({ children, requireAuth = false }: DashboardWrapperPro
           {children}
         </PageTransition>
       </main>
-      <Footer />
+      <Footer variant="slim" />
     </div>
   );
 };
