@@ -119,7 +119,7 @@ Deno.serve(async (_req) => {
       // ── SMS ────────────────────────────────────────────────────────────
       if (a.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
         try {
-          const smsBody = `ConveLabs fasting reminder: ${firstName}, your blood draw is tomorrow at ${a.appointment_time}. Stop eating & drinking (water OK) ${cutoff}. We'll see you at ${addrShort}. Questions? Reply HELP.`;
+          const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${a.appointment_time}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water). Arriving at ${addrShort}. Reply HELP.`;
           const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
           const fd = new URLSearchParams({ To: normalizePhone(a.patient_phone), From: TWILIO_FROM, Body: smsBody });
           const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
@@ -145,8 +145,10 @@ Deno.serve(async (_req) => {
     <p>Hi ${firstName},</p>
     <p>Quick reminder: your ConveLabs blood draw is <strong>tomorrow (${tomorrow.label}) at ${a.appointment_time}</strong>.</p>
     <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:14px 16px;margin:16px 0;">
-      <p style="margin:0;font-size:15px;color:#78350f;"><strong>🍽️ Stop eating &amp; drinking ${cutoff}</strong></p>
-      <p style="margin:6px 0 0;font-size:13px;color:#92400e;">Water is fine the whole time. No coffee, no juice, no mints, no gum.</p>
+      <p style="margin:0;font-size:15px;color:#78350f;"><strong>🍽️ Stop ${cutoff}</strong></p>
+      <p style="margin:8px 0 0;font-size:13px;color:#92400e;"><strong>Avoid:</strong> food, juice, coffee, tea, soda, energy drinks, gum, mints, cough drops, breath strips.</p>
+      <p style="margin:4px 0 0;font-size:13px;color:#92400e;"><strong>OK:</strong> plain water (as much as you like) + any daily medications you normally take with water.</p>
+      <p style="margin:8px 0 0;font-size:12px;color:#92400e;font-style:italic;">If you're on insulin or have a medical reason you can't fast safely, call us at (941) 527-9169 — we'll reschedule.</p>
     </div>
     ${panelChips ? `<p style="font-size:13px;color:#6b7280;margin:14px 0 4px;">What your provider ordered:</p><div>${panelChips}</div>` : ''}
     <p style="font-size:13px;color:#6b7280;margin-top:14px;">We'll arrive at <strong>${addrShort || 'your address'}</strong> at ${a.appointment_time}.</p>

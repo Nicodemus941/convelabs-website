@@ -49,12 +49,14 @@ Deno.serve(async (req) => {
     // Find the most recent pending lab request for this phone
     const { data: reqs } = await admin
       .from('patient_lab_requests')
-      .select('id, organization_id, patient_name, patient_phone, preoffered_slots, access_token, draw_by_date, status')
-      .eq('status', 'pending_schedule')
+      .select('id, organization_id, patient_name, patient_phone, preoffered_slots, access_token, draw_by_date, status, appointment_id')
       .order('created_at', { ascending: false })
-      .limit(50);
-
-    const match = (reqs || []).find(r => phoneDigits(r.patient_phone || '').endsWith(fromDigits.slice(-10)));
+      .limit(100);
+    const forThisPhone = (reqs || []).filter(r => phoneDigits(r.patient_phone || '').endsWith(fromDigits.slice(-10)));
+    const match = forThisPhone.find(r => r.status === 'pending_schedule') || null;
+    // BOOKED-PATIENT FALLBACK: if no pending request but they have a recently
+    // scheduled/completed one, we still recognize them for HELP replies.
+    const alreadyBooked = !match ? forThisPhone.find(r => r.status === 'scheduled' || r.status === 'completed') : null;
 
     // Log the inbound regardless
     if (match) {
@@ -72,6 +74,19 @@ Deno.serve(async (req) => {
     }
 
     if (!match) {
+      // If they're a booked patient, give them useful info instead of a brick-wall reply
+      if (alreadyBooked && alreadyBooked.appointment_id) {
+        const { data: appt } = await admin
+          .from('appointments')
+          .select('appointment_date, appointment_time, address, status')
+          .eq('id', alreadyBooked.appointment_id)
+          .maybeSingle();
+        if (appt) {
+          const d = appt.appointment_date?.substring(0, 10) || '';
+          const prettyDate = d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'your scheduled date';
+          return twiml(`Your ConveLabs appointment: ${prettyDate} at ${appt.appointment_time || ''} · ${appt.address?.substring(0, 40) || ''}. Need to reschedule or cancel? Email info@convelabs.com or call (941) 527-9169.`);
+        }
+      }
       return twiml(`We couldn't find an active lab request for this number. If you believe this is a mistake, email info@convelabs.com. Book any time at ${PUBLIC_SITE_URL}/book-now`);
     }
 

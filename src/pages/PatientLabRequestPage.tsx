@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Loader2, CheckCircle2, Home, ArrowRight, ExternalLink, Clock } from 'lucide-react';
+import { Loader2, CheckCircle2, Home, ArrowRight, ExternalLink, Clock, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
+import AddressAutocomplete from '@/components/ui/address-autocomplete';
 
 /**
  * PATIENT LAB REQUEST BOOKING PAGE (/lab-request/:token)
@@ -453,13 +454,42 @@ const PatientLabRequestPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Address — required because we're mobile-only */}
+        {/* Pre-submit fasting cutoff callout (shows INLINE as patient picks their time) */}
+        {time && request.fasting_required && (() => {
+          const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time.trim());
+          if (!m) return null;
+          let h = parseInt(m[1], 10); const min = parseInt(m[2], 10);
+          if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+          if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+          const cutoffMin = h * 60 + min - 8 * 60;
+          let cH: number, cM: number, suf: string;
+          if (cutoffMin >= 0) { cH = Math.floor(cutoffMin / 60); cM = cutoffMin % 60; suf = 'on draw day'; }
+          else { const w = cutoffMin + 1440; cH = Math.floor(w / 60); cM = w % 60; suf = 'the night before'; }
+          const period = cH >= 12 ? 'PM' : 'AM';
+          const dH = cH > 12 ? cH - 12 : cH === 0 ? 12 : cH;
+          const mStr = cM === 0 ? '' : `:${String(cM).padStart(2, '0')}`;
+          const cutoffStr = cH === 0 && cM === 0 ? `midnight ${suf}` : `${dH}${mStr} ${period} ${suf}`;
+          return (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-700 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-amber-900">Picking {time} means: stop eating & drinking by {cutoffStr}</p>
+                <p className="text-xs text-amber-800 mt-0.5">Water is fine. No coffee, juice, soda, mints, or gum. We'll remind you by text at 8 PM the night before.</p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Address — required because we're mobile-only, powered by Google Places */}
         <Card className="shadow-sm mb-4">
           <CardContent className="p-5 space-y-3">
             <div>
               <Label>Where should we come? *</Label>
-              <Input value={address} onChange={e => setAddress(e.target.value)}
-                placeholder="Street, City, State, ZIP" />
+              <AddressAutocomplete
+                value={address}
+                onChange={setAddress}
+                placeholder="Start typing your address…"
+              />
               <p className="text-[11px] text-gray-500 mt-1">Home, office, hotel, wherever you'll be at your appointment time.</p>
             </div>
           </CardContent>
