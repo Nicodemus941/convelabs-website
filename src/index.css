@@ -264,6 +264,42 @@
   animation: fade-in 0.2s ease-out;
 }
 
+/* ── PartnersMarquee infinite scroll ────────────────────────────────
+ * Moved from inline <style> because some mobile browsers don't
+ * reliably apply dynamically-injected keyframes. Lives in the
+ * global stylesheet so animation runs on iOS Safari + Android
+ * Chrome without flicker.
+ */
+@keyframes convelabs-marquee-scroll {
+  0%   { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-50%, 0, 0); }
+}
+
+.convelabs-marquee-track {
+  animation: convelabs-marquee-scroll 40s linear infinite;
+  width: max-content;
+  will-change: transform;
+  /* translate3d triggers GPU compositing on mobile */
+  transform: translate3d(0, 0, 0);
+}
+
+.convelabs-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+@media (max-width: 640px) {
+  /* Speed up on small screens so it feels lively on phones */
+  .convelabs-marquee-track {
+    animation-duration: 28s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .convelabs-marquee-track {
+    animation: none;
+  }
+}
+
 /* Mobile Overflow Prevention */
 body {
   overflow-x: hidden;

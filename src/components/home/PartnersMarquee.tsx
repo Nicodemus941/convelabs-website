@@ -70,13 +70,13 @@ const LOOP = [...PARTNERS, ...PARTNERS];
 
 const PartnersMarquee: React.FC = () => {
   return (
-    <section className="py-12 bg-gradient-to-b from-white to-gray-50 border-y border-gray-100 overflow-hidden">
+    <section className="py-10 sm:py-12 bg-gradient-to-b from-white to-gray-50 border-y border-gray-100 overflow-hidden">
       <div className="container mx-auto px-4">
-        <div className="text-center mb-6">
-          <p className="text-[11px] uppercase tracking-widest text-gray-500 font-bold mb-1">
+        <div className="text-center mb-5 sm:mb-6">
+          <p className="text-[10px] sm:text-[11px] uppercase tracking-widest text-gray-500 font-bold mb-1">
             Organizations we serve
           </p>
-          <h2 className="text-2xl md:text-3xl font-bold text-gray-900">
+          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 leading-tight px-2">
             The providers who trust us with their patients' blood work
           </h2>
         </div>
@@ -85,23 +85,24 @@ const PartnersMarquee: React.FC = () => {
           className="relative w-full overflow-hidden"
           aria-label="Trusted partners carousel"
         >
-          {/* Edge fade masks */}
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-gray-50 to-transparent z-10" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-gray-50 to-transparent z-10" />
+          {/* Edge fade masks — tighter on mobile */}
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-8 sm:w-16 bg-gradient-to-r from-gray-50 to-transparent z-10" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-8 sm:w-16 bg-gradient-to-l from-gray-50 to-transparent z-10" />
 
-          <div className="flex gap-6 animate-marquee hover:[animation-play-state:paused]">
+          {/* flex-nowrap is explicit for mobile; global class handles animation */}
+          <div className="flex flex-nowrap gap-4 sm:gap-6 convelabs-marquee-track">
             {LOOP.map((p, idx) => (
               <a
                 key={`${p.name}-${idx}`}
                 href={p.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-shrink-0 w-64 group"
+                className="flex-shrink-0 w-56 sm:w-64 group"
                 title={`Visit ${p.name}`}
               >
-                <div className="bg-white border border-gray-200 rounded-xl px-5 py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all">
-                  <div className="flex items-center h-10 mb-2">
-                    <span className="font-bold text-gray-900 text-[15px] leading-tight group-hover:text-conve-red transition-colors">
+                <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all">
+                  <div className="flex items-center min-h-[2.5rem] mb-1.5 sm:mb-2">
+                    <span className="font-bold text-gray-900 text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
                       {p.name}
                     </span>
                   </div>
@@ -114,53 +115,36 @@ const PartnersMarquee: React.FC = () => {
           </div>
         </div>
 
-        {/* Provider CTA — convert viewing orgs into inbound partner leads.
-            Links to /partnerships (marketing page with tiers, benefits, and
-            the full onboarding funnel). */}
-        <div className="mt-8 max-w-2xl mx-auto">
-          <div className="bg-gradient-to-br from-conve-red/5 to-rose-50 border border-conve-red/20 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="h-12 w-12 rounded-xl bg-conve-red/10 flex items-center justify-center flex-shrink-0">
-              <Building2 className="h-6 w-6 text-conve-red" />
+        {/* Provider CTA — convert viewing orgs into inbound partner leads */}
+        <div className="mt-6 sm:mt-8 max-w-2xl mx-auto">
+          <div className="bg-gradient-to-br from-conve-red/5 to-rose-50 border border-conve-red/20 rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4">
+            <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-conve-red/10 flex items-center justify-center flex-shrink-0">
+              <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-conve-red" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-widest text-conve-red mb-1">
                 Are you a provider?
               </p>
-              <h3 className="text-lg font-bold text-gray-900 leading-tight">
+              <h3 className="text-base sm:text-lg font-bold text-gray-900 leading-tight">
                 Partner with ConveLabs — your patients, our collection
               </h3>
               <p className="text-xs text-gray-600 mt-1 leading-relaxed">
-                Send your patients to the concierge phlebotomy team your peers already trust. Custom pricing, branded portal, billing isolation, and the ConveLabs OCR stack — set up in under 48 hours.
+                Send your patients to the concierge phlebotomy team your peers already trust. Custom pricing, branded portal, live in under 48 hours.
               </p>
             </div>
             <Link
-              to="/partnerships"
-              className="inline-flex items-center gap-1.5 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors flex-shrink-0"
+              to="/partner-with-us"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-sm px-5 py-2.5 rounded-xl transition-colors flex-shrink-0"
             >
-              Register your org <ArrowRight className="h-4 w-4" />
+              Partner with us <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>
 
-        <p className="text-[11px] text-gray-400 text-center mt-6 italic">
+        <p className="text-[10px] sm:text-[11px] text-gray-400 text-center mt-4 sm:mt-6 italic px-4">
           Logos/names are the property of their respective organizations. Partnerships reflect ongoing lab-collection relationships.
         </p>
       </div>
-
-      {/* Pure-CSS marquee animation */}
-      <style>{`
-        @keyframes convelabs-marquee {
-          0%   { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .animate-marquee {
-          animation: convelabs-marquee 40s linear infinite;
-          width: max-content;
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .animate-marquee { animation: none; }
-        }
-      `}</style>
     </section>
   );
 };
