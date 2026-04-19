@@ -30,3 +30,4 @@ dist-ssr
 
 # Local-only data imports (PII + scripts with DB creds)
 _import/
+sendresult.json
