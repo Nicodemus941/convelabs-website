@@ -212,6 +212,46 @@ Deno.serve(async (req) => {
 
     await admin.from('patient_lab_requests').update({ provider_notified_at: new Date().toISOString() }).eq('id', request.id);
 
+    // ── PATIENT CONFIRMATION EMAIL ──────────────────────────────────────
+    if (patientEmail && MAILGUN_API_KEY) {
+      try {
+        const fastingBlock = request.fasting_required
+          ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin:14px 0;"><strong style="color:#78350f;">🍽️ Fasting required</strong><p style="margin:4px 0 0;font-size:13px;color:#92400e;">Stop eating and drinking 8 hrs before your draw. Water is fine. We'll text you a full reminder at 8 PM the night before.</p></div>`
+          : '';
+        const panelBlock = (Array.isArray(request.lab_order_panels) && request.lab_order_panels.length > 0)
+          ? `<p style="font-size:13px;color:#6b7280;margin:14px 0 4px;">PANELS ORDERED</p><div>${request.lab_order_panels.slice(0, 6).map((p: any) => `<span style="display:inline-block;background:#fef2f2;color:#B91C1C;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;margin:2px 3px 0 0;">${typeof p === 'string' ? p : p.name || ''}</span>`).join(' ')}</div>`
+          : '';
+        const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
+  <div style="background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:22px;border-radius:12px 12px 0 0;text-align:center;">
+    <h1 style="margin:0;font-size:20px;">✓ Your ConveLabs draw is booked</h1>
+  </div>
+  <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111827;">
+    <p>Hi ${String(request.patient_name).split(' ')[0]},</p>
+    <p>You're all set. Here's the recap:</p>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px;">
+      <p style="margin:0;"><strong>When:</strong> ${fmtDate(appointment_date)} at ${appointment_time}</p>
+      <p style="margin:6px 0 0;"><strong>Where:</strong> ${String(address).trim()}</p>
+      <p style="margin:6px 0 0;"><strong>Ordered by:</strong> ${org.name}</p>
+    </div>
+    ${fastingBlock}
+    ${panelBlock}
+    <p style="font-size:13px;color:#6b7280;margin-top:20px;">Need to reschedule? Email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or call (941) 527-9169.</p>
+    <div style="background:#f9fafb;border-radius:8px;padding:12px 14px;margin-top:14px;font-size:12px;color:#6b7280;">
+      <strong>Our recollection guarantee:</strong> if ConveLabs causes a redraw, it's free. If the reference lab causes it, 50% off.
+    </div>
+    <p style="margin-top:20px;">— Nico at ConveLabs</p>
+  </div>
+</div>`;
+        const fd = new FormData();
+        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('to', patientEmail);
+        fd.append('subject', `✓ Booked: ${fmtDate(appointment_date)} at ${appointment_time}`);
+        fd.append('html', html);
+        fd.append('o:tracking-clicks', 'no');
+        await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+      } catch (e) { console.warn('patient confirmation email failed:', e); }
+    }
+
     // ── PATIENT CONFIRMATION SMS (includes fasting heads-up if applicable) ─
     // Sent now at booking time. The night-before fasting reminder cron will
     // also fire at 8 PM ET the day before — this one is the immediate

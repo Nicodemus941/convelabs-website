@@ -591,6 +591,27 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
     }
   };
 
+  const handleCancelRequest = async (requestId: string, patientName: string) => {
+    const reason = window.prompt(`Cancel ${patientName}'s lab request? We'll notify them. Reason (optional):`);
+    if (reason === null) return; // cancelled the prompt
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      const token = session?.session?.access_token;
+      if (!token) throw new Error('No session');
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/cancel-lab-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ request_id: requestId, reason: reason || undefined }),
+      });
+      const j = await resp.json();
+      if (!resp.ok) throw new Error(j.error || 'Cancel failed');
+      toast.success('Lab request cancelled — patient notified');
+      onRefresh();
+    } catch (e: any) {
+      toast.error(e?.message || 'Cancel failed');
+    }
+  };
+
   const rows = groups[tab];
 
   return (
@@ -659,8 +680,20 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Badge variant="outline" className="text-[10px] capitalize">{r.status.replace(/_/g, ' ')}</Badge>
                     {r.status === 'pending_schedule' && (
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Copy link" onClick={() => handleCopyLink(r.access_token)}>
-                        <Copy className="h-3.5 w-3.5" />
+                      <>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Copy link" onClick={() => handleCopyLink(r.access_token)}>
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs"
+                          title="Cancel this request" onClick={() => handleCancelRequest(r.id, r.patient_name)}>
+                          Cancel
+                        </Button>
+                      </>
+                    )}
+                    {r.status === 'scheduled' && (
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs"
+                        title="Cancel this request + appointment" onClick={() => handleCancelRequest(r.id, r.patient_name)}>
+                        Cancel
                       </Button>
                     )}
                   </div>

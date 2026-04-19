@@ -72,6 +72,10 @@ Deno.serve(async (req) => {
       if (metadata.type === 'appointment_payment') {
         await handleAppointmentPayment(session);
       }
+      // Handle lab-request unlock (membership + visit bundled in one checkout)
+      else if (metadata.type === 'lab_request_unlock') {
+        await handleLabRequestUnlock(session);
+      }
       // Handle bundle (prepaid recurring series) payments
       else if (metadata.type === 'bundle_payment') {
         await handleBundlePayment(session);
@@ -1345,5 +1349,134 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
   } catch (error) {
     console.error('Error processing membership upgrade:', error);
     throw error;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// handleLabRequestUnlock
+// Fires when a patient completes the unlock checkout (subscription mode with
+// one-time visit invoice item). Creates:
+//   1. user_memberships row (linked to the new Stripe subscription)
+//   2. appointment at the chosen slot with the tier-discounted price
+//   3. add_invoice_items to the subscription's first invoice = the visit charge
+//   4. patient_lab_requests updated to status='scheduled' with appointment_id
+//   5. provider notified via email (reuses the usual lab-request notification)
+// ─────────────────────────────────────────────────────────────────────────
+async function handleLabRequestUnlock(session: any) {
+  try {
+    const metadata = session.metadata || {};
+    const labRequestId = metadata.lab_request_id;
+    const tier = metadata.tier;
+    const visitCents = parseInt(metadata.visit_cents || '0', 10);
+    const apptDate = metadata.appointment_date;
+    const apptTime = metadata.appointment_time;
+    const address = metadata.address;
+    const patientEmail = metadata.patient_email;
+    const patientPhone = metadata.patient_phone;
+    const customerId = session.customer;
+    const subscriptionId = session.subscription;
+
+    if (!labRequestId || !apptDate || !apptTime) {
+      console.error('[unlock] missing metadata', metadata);
+      return;
+    }
+
+    // Load the lab request + org for pricing/rules
+    const { data: request } = await supabase
+      .from('patient_lab_requests').select('*').eq('id', labRequestId).maybeSingle();
+    if (!request) { console.error('[unlock] lab request not found', labRequestId); return; }
+
+    const { data: org } = await supabase
+      .from('organizations').select('id, name, contact_email, billing_email, contact_name, show_patient_name_on_appointment')
+      .eq('id', request.organization_id).maybeSingle();
+
+    // Add visit as a one-time invoice item on the subscription
+    // (can happen before or after subscription start — Stripe will include it on next invoice)
+    try {
+      await stripe.invoiceItems.create({
+        customer: customerId,
+        subscription: subscriptionId,
+        amount: visitCents,
+        currency: 'usd',
+        description: `Mobile Blood Draw — ${tier} rate (lab request)`,
+      });
+    } catch (e: any) {
+      console.warn('[unlock] invoice item create failed:', e.message);
+    }
+
+    // Create the membership row
+    const { data: plan } = await supabase
+      .from('membership_plans' as any).select('id').eq('tier', tier).maybeSingle();
+    if (plan) {
+      await supabase.from('user_memberships' as any).insert({
+        email: patientEmail,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subscriptionId,
+        membership_plan_id: plan.id,
+        status: 'active',
+        started_at: new Date().toISOString(),
+        source: 'lab_request_unlock',
+      });
+    }
+
+    // Create the appointment
+    const apptDateIso = `${apptDate}T12:00:00-04:00`;
+    const { data: appt, error: apptErr } = await supabase.from('appointments').insert({
+      patient_name: request.patient_name,
+      patient_email: patientEmail,
+      patient_phone: patientPhone,
+      address,
+      service_type: 'mobile',
+      service_name: 'Mobile Blood Draw',
+      appointment_date: apptDateIso,
+      appointment_time: apptTime,
+      total_amount: visitCents / 100,
+      status: 'scheduled',
+      payment_status: 'paid', // included in the subscription first invoice
+      organization_id: org?.id || null,
+      billed_to: 'patient',
+      patient_name_masked: org?.show_patient_name_on_appointment === false,
+      lab_order_file_path: request.lab_order_file_path,
+      lab_order_panels: request.lab_order_panels,
+      lab_order_full_text: request.lab_order_full_text,
+      fasting_required: request.fasting_required,
+      urine_required: request.urine_required,
+      gtt_required: request.gtt_required,
+      lab_request_id: request.id,
+      member_status: tier,
+      stripe_checkout_session_id: session.id,
+      notes: `[Lab request by ${org?.name}] Unlocked with ${tier} membership.`,
+    }).select('*').single();
+
+    if (apptErr) { console.error('[unlock] appointment insert failed:', apptErr); return; }
+
+    await supabase.from('patient_lab_requests').update({
+      status: 'scheduled',
+      appointment_id: appt.id,
+      patient_scheduled_at: new Date().toISOString(),
+      provider_notified_at: new Date().toISOString(),
+    }).eq('id', request.id);
+
+    // Provider notification email (reuses the same template format)
+    const providerEmail = org?.contact_email || org?.billing_email;
+    if (providerEmail && Deno.env.get('MAILGUN_API_KEY')) {
+      try {
+        const fd = new FormData();
+        fd.append('from', `ConveLabs <noreply@${Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com'}>`);
+        fd.append('to', providerEmail);
+        fd.append('subject', `✓ ${request.patient_name} booked + joined ${tier}: ${apptDate} at ${apptTime}`);
+        fd.append('html', `<p>${request.patient_name} booked their draw for <strong>${apptDate} at ${apptTime}</strong>, and while they were at it, joined our <strong>${tier} membership</strong>. Win-win.</p><p>— Nico</p>`);
+        fd.append('o:tracking-clicks', 'no');
+        await fetch(`https://api.mailgun.net/v3/${Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com'}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`api:${Deno.env.get('MAILGUN_API_KEY')}`)}` },
+          body: fd,
+        });
+      } catch (e) { console.warn('[unlock] provider email failed:', e); }
+    }
+
+    console.log(`[unlock] success: request ${labRequestId} → appt ${appt.id} + ${tier} membership`);
+  } catch (error: any) {
+    console.error('[unlock] top-level error:', error);
   }
 }

@@ -432,11 +432,18 @@ const PatientLabRequestPage: React.FC = () => {
                   <Label>Pick an available time</Label>
                   {slotsLoading && <span className="text-[10px] text-gray-400 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> checking…</span>}
                 </div>
-                {!slotsLoading && availableSlots.length === 0 && (
-                  <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
-                    No open slots on this date — try another day.
-                  </div>
-                )}
+                {!slotsLoading && availableSlots.length === 0 && (() => {
+                  const isToday = date === new Date().toISOString().substring(0, 10);
+                  const nowHr = new Date().getHours();
+                  const sameDayCutoff = isToday && nowHr >= 10;
+                  return (
+                    <div className="mt-2 bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800">
+                      {sameDayCutoff
+                        ? <>Same-day bookings cut off at 10 AM ET — please pick tomorrow, or call <a href="tel:+19415279169" className="underline font-semibold">(941) 527-9169</a> for an urgent draw.</>
+                        : <>No open slots on this date — try another day.</>}
+                    </div>
+                  );
+                })()}
                 <div className="grid grid-cols-3 gap-1.5 mt-1.5">
                   {slots.map(s => {
                     const isFirst = s.available && s.time === firstAvailable;
@@ -603,9 +610,38 @@ const PatientLabRequestPage: React.FC = () => {
               <div className="space-y-2">
                 <Button
                   className={`w-full ${color.button} text-white h-11 gap-1.5`}
-                  onClick={() => {
-                    toast.info('Membership checkout coming in the next release. For now, pick an available slot — we\'ll reach out when the upgrade flow is live.');
-                    setUnlockSlot(null);
+                  onClick={async () => {
+                    if (!address || address.trim().length < 10) {
+                      toast.error('Please enter your address first — we need it to book your visit.');
+                      setUnlockSlot(null);
+                      setTimeout(() => {
+                        document.querySelector('input[placeholder*="address"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 150);
+                      return;
+                    }
+                    try {
+                      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/unlock-lab-request-slot', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          access_token: token,
+                          tier,
+                          appointment_date: date,
+                          appointment_time: unlockSlot.time,
+                          address,
+                          email_override: emailOverride.trim() || undefined,
+                          phone_override: phoneOverride.trim() || undefined,
+                        }),
+                      });
+                      const j = await resp.json();
+                      if (!resp.ok) {
+                        toast.error(j.error || 'Could not start checkout');
+                        return;
+                      }
+                      if (j.checkout_url) window.location.href = j.checkout_url;
+                    } catch (e: any) {
+                      toast.error(e?.message || 'Failed to start checkout');
+                    }
                   }}>
                   Join {label} + book this slot
                 </Button>
