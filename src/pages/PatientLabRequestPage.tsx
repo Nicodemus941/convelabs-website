@@ -238,6 +238,26 @@ const PatientLabRequestPage: React.FC = () => {
 
   // ── SUCCESS VIEW ─────────────────────────────────────────────────────
   if (success) {
+    // Compute the fasting cutoff label for display (mirrors send-fasting-reminders logic)
+    const fastingCutoff = (() => {
+      if (!request.fasting_required || !time) return null;
+      const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time.trim());
+      if (!match) return null;
+      let h = parseInt(match[1], 10);
+      const m = parseInt(match[2], 10);
+      if (match[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+      if (match[3].toUpperCase() === 'AM' && h === 12) h = 0;
+      const cutoffMin = h * 60 + m - 8 * 60; // 8 hours before
+      let cutH: number, cutM: number, suffix: string;
+      if (cutoffMin >= 0) { cutH = Math.floor(cutoffMin / 60); cutM = cutoffMin % 60; suffix = 'on draw day'; }
+      else { const w = cutoffMin + 1440; cutH = Math.floor(w / 60); cutM = w % 60; suffix = 'the night before'; }
+      if (cutH === 0 && cutM === 0) return `midnight ${suffix}`;
+      const period = cutH >= 12 ? 'PM' : 'AM';
+      const dH = cutH > 12 ? cutH - 12 : cutH === 0 ? 12 : cutH;
+      const mStr = cutM === 0 ? '' : `:${String(cutM).padStart(2, '0')}`;
+      return `${dH}${mStr} ${period} ${suffix}`;
+    })();
+
     return (
       <div className="min-h-screen bg-gray-50 px-4 py-8">
         <div className="max-w-lg mx-auto">
@@ -250,13 +270,38 @@ const PatientLabRequestPage: React.FC = () => {
                 <CheckCircle2 className="h-10 w-10 text-emerald-600" />
               </div>
               <h1 className="text-2xl font-bold">You're all set, {firstName}.</h1>
-              <p className="text-gray-600">{org.name} has been notified. You'll get a confirmation email and SMS with all the details.</p>
-              {request.next_doctor_appt_date && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
-                  <p className="text-xs uppercase tracking-wider text-blue-900 font-semibold">Reminder</p>
-                  <p className="text-sm text-blue-900 mt-1">Your next visit with {org.name} is <strong>{format(new Date(request.next_doctor_appt_date + 'T12:00:00'), 'EEEE, MMMM d')}</strong>. Results will be in their hands before then.</p>
+              <div className="flex items-center justify-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-4 py-1.5 w-fit mx-auto">
+                <CheckCircle2 className="h-4 w-4" />
+                <span><strong>{org.name}</strong> has been notified</span>
+              </div>
+              <p className="text-sm text-gray-600">A confirmation SMS + email is on the way.</p>
+
+              {/* Fasting cutoff callout (if fasting required) */}
+              {fastingCutoff && (
+                <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-left">
+                  <p className="text-xs uppercase tracking-wider text-amber-900 font-semibold">🍽️ Fasting required</p>
+                  <p className="text-sm text-amber-900 mt-1"><strong>Stop eating &amp; drinking by {fastingCutoff}.</strong> Water is fine — no coffee, juice, mints, or gum.</p>
+                  <p className="text-xs text-amber-800 mt-1.5">We'll text you another reminder the night before at 8 PM so you don't have to keep this in your head.</p>
                 </div>
               )}
+
+              {/* Next consult reminder */}
+              {request.next_doctor_appt_date && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-left">
+                  <p className="text-xs uppercase tracking-wider text-blue-900 font-semibold">Your consult is on the way too</p>
+                  <p className="text-sm text-blue-900 mt-1">Your next visit with {org.name} is <strong>{format(new Date(request.next_doctor_appt_date + 'T12:00:00'), 'EEEE, MMMM d')}</strong>. Your results will be in their hands before then.</p>
+                </div>
+              )}
+
+              {/* Recollection guarantee — trust anchor */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-left">
+                <p className="text-xs uppercase tracking-wider text-gray-700 font-semibold">Our guarantee — in writing</p>
+                <ul className="mt-2 space-y-1 text-xs text-gray-700">
+                  <li>• If <strong>ConveLabs</strong> made a mistake, recollection is <strong>free</strong>.</li>
+                  <li>• If the <strong>lab</strong> made a mistake, recollection is <strong>50% off</strong>.</li>
+                </ul>
+              </div>
+
               <div className="pt-4 border-t">
                 <p className="text-sm text-gray-600 mb-3">Want to manage future appointments in one place?</p>
                 <Button asChild className="bg-[#B91C1C] hover:bg-[#991B1B] text-white w-full"><Link to="/signup">Create a ConveLabs account</Link></Button>

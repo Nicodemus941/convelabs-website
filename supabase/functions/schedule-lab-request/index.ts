@@ -212,6 +212,40 @@ Deno.serve(async (req) => {
 
     await admin.from('patient_lab_requests').update({ provider_notified_at: new Date().toISOString() }).eq('id', request.id);
 
+    // ── PATIENT CONFIRMATION SMS (includes fasting heads-up if applicable) ─
+    // Sent now at booking time. The night-before fasting reminder cron will
+    // also fire at 8 PM ET the day before — this one is the immediate
+    // acknowledgement.
+    const patientSmsPhone = patientPhone;
+    if (patientSmsPhone) {
+      try {
+        const TWILIO_SID2 = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+        const TWILIO_TOKEN2 = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+        const TWILIO_FROM2 = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+        if (TWILIO_SID2 && TWILIO_TOKEN2 && TWILIO_FROM2) {
+          const fastingLine = request.fasting_required
+            ? ` FASTING: stop eating/drinking (water OK) 8 hrs before (e.g., for 8am draw, stop by midnight).`
+            : '';
+          const smsBody = `ConveLabs: ✓ Booked for ${fmtDate(appointment_date)} at ${appointment_time}. We'll text a reminder the night before.${fastingLine} Questions? Reply HELP.`;
+          function normPhone(p: string): string {
+            const d = p.replace(/\D/g, '');
+            if (d.length === 10) return `+1${d}`;
+            if (d.length === 11 && d.startsWith('1')) return `+${d}`;
+            if (p.startsWith('+')) return p;
+            return `+${d}`;
+          }
+          const twilioAuth = btoa(`${TWILIO_SID2}:${TWILIO_TOKEN2}`);
+          const fd = new URLSearchParams({ To: normPhone(patientSmsPhone), From: TWILIO_FROM2, Body: smsBody });
+          await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID2}/Messages.json`, {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: fd.toString(),
+          });
+          await admin.from('appointments').update({ patient_confirmation_sent_at: new Date().toISOString() }).eq('id', appt.id);
+        }
+      } catch (e) { console.warn('patient confirmation SMS failed:', e); }
+    }
+
     return new Response(JSON.stringify({
       success: true,
       appointment_id: appt.id,
