@@ -428,7 +428,8 @@ const PatientProfileTab: React.FC = () => {
                     value={editForm.address}
                     onChange={v => setEditForm(pr => ({ ...pr, address: v }))}
                     onPlaceSelected={(place) => {
-                      setEditForm(pr => ({ ...pr, address: place.address, city: place.city || pr.city, state: place.state || pr.state, zipcode: place.zipCode || pr.zipcode }));
+                      // Use street-only in Address — City/State/Zip are separate fields below.
+                      setEditForm(pr => ({ ...pr, address: place.street || place.address, city: place.city || pr.city, state: place.state || pr.state, zipcode: place.zipCode || pr.zipcode }));
                     }}
                     placeholder="Start typing address — Google suggestions"
                     className="h-9"
@@ -683,9 +684,10 @@ const PatientProfileTab: React.FC = () => {
                     value={newPatient.address}
                     onChange={v => setNewPatient(p => ({ ...p, address: v }))}
                     onPlaceSelected={(place) => {
+                      // Use street-only in Address — City/State/Zip are separate fields below.
                       setNewPatient(p => ({
                         ...p,
-                        address: place.address,
+                        address: place.street || place.address,
                         city: place.city || p.city,
                         state: place.state || p.state,
                         zipcode: place.zipCode || p.zipcode,

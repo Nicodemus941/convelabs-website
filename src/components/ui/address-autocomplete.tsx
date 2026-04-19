@@ -6,7 +6,8 @@ interface AddressAutocompleteProps {
   value: string;
   onChange: (address: string) => void;
   onPlaceSelected?: (place: {
-    address: string;
+    address: string;  // full formatted: "123 Main St, Orlando, FL 32801, USA"
+    street: string;   // street only: "123 Main St" — use this when you have separate city/state/zip fields
     city: string;
     state: string;
     zipCode: string;
@@ -100,6 +101,7 @@ const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
 
       onPlaceSelected?.({
         address: formatted,
+        street: street.trim(),
         city,
         state,
         zipCode,

@@ -77,7 +77,8 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
                         value={field.value}
                         onChange={field.onChange}
                         onPlaceSelected={(place) => {
-                          field.onChange(place.address);
+                          // Street-only since city/state/zip have their own form fields.
+                          field.onChange(place.street || place.address);
                           if (place.city) setValue('locationDetails.city', place.city);
                           if (place.state) setValue('locationDetails.state', place.state);
                           if (place.zipCode) setValue('locationDetails.zipCode', place.zipCode);

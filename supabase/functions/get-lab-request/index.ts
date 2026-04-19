@@ -7,6 +7,7 @@
 // Response: 200 { request: {...}, org: {...} } | 404 if not found/expired
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { lookupTierByEmail } from '../_shared/lookup-tier-by-email.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -72,6 +73,10 @@ Deno.serve(async (req) => {
       } catch { /* non-blocking */ }
     }
 
+    // Phase 2 fix: auto-detect membership tier from patient email so the
+    // lab-request page unlocks member slots without requiring sign-in first.
+    const detected_tier = await lookupTierByEmail(admin, request.patient_email);
+
     return new Response(JSON.stringify({
       request: {
         id: request.id,
@@ -90,6 +95,7 @@ Deno.serve(async (req) => {
         appointment_id: request.appointment_id,
         already_scheduled: request.status !== 'pending_schedule',
         scheduled_appointment,
+        detected_tier,  // 'none' | 'regular_member' | 'vip' | 'concierge'
       },
       org: {
         id: org?.id,

@@ -51,6 +51,8 @@ interface LabRequestData {
     status: string;
     already_scheduled: boolean;
     appointment_id: string | null;
+    /** Server-detected membership tier from patient_email → user_memberships. */
+    detected_tier?: 'none' | 'regular_member' | 'vip' | 'concierge';
     scheduled_appointment?: {
       date: string;
       time: string;
@@ -372,6 +374,21 @@ const PatientLabRequestPage: React.FC = () => {
         <div className="text-center mb-4">
           <span className="text-xl font-bold">ConveLabs<span className="text-[#B91C1C]">.</span></span>
         </div>
+
+        {/* Member welcome badge — appears when server auto-detected the patient's
+            tier from their email. Removes the "I'm a member but see locked slots"
+            confusion by confirming their tier up-front. */}
+        {request.detected_tier && request.detected_tier !== 'none' && (() => {
+          const tier = request.detected_tier;
+          const color = TIER_COLOR[tier] || TIER_COLOR.regular_member;
+          const label = TIER_LABEL[tier] || 'Member';
+          return (
+            <div className={`mb-4 flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium ${color.bg} ${color.text} ${color.border}`}>
+              <span aria-hidden>👋</span>
+              Welcome back, {firstName} — {label} perks unlocked automatically.
+            </div>
+          );
+        })()}
 
         {/* Context card */}
         <Card className="shadow-sm mb-4">

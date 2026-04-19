@@ -10,6 +10,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { getAvailableSlotsForDate, withTierGating } from '../_shared/availability.ts';
 import { minTierForSlot, slotUnlockOffer } from '../_shared/tier-gating.ts';
+import { lookupTierByEmail } from '../_shared/lookup-tier-by-email.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,10 +30,10 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Validate token + get org
+    // Validate token + get org (also pull patient_email for server-side tier lookup)
     const { data: request } = await admin
       .from('patient_lab_requests')
-      .select('id, organization_id, draw_by_date, access_token_expires_at, status')
+      .select('id, organization_id, draw_by_date, access_token_expires_at, status, patient_email')
       .eq('access_token', access_token)
       .maybeSingle();
     if (!request) return new Response(JSON.stringify({ error: 'Invalid link' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -53,10 +54,21 @@ Deno.serve(async (req) => {
     // 1. Base availability: real bookings, buffers, org time-window rules
     let slots = await getAvailableSlotsForDate(admin, request.organization_id, date, org?.time_window_rules);
 
+    // Phase 2 fix for the "member sees locked slots" bug on the anonymous
+    // lab-request page: derive tier server-side from the token's patient_email
+    // so a member doesn't have to sign in first. We still honor a client-passed
+    // current_tier (for signed-in patients where the client knows best), but
+    // prefer the server lookup when it upgrades the tier.
+    const detectedTier = await lookupTierByEmail(admin, request.patient_email);
+    const clientTier = (current_tier || 'none') as string;
+    const effectiveTier = TIER_ORDER.indexOf(detectedTier) > TIER_ORDER.indexOf(clientTier)
+      ? detectedTier
+      : clientTier;
+
     // 2. Tier gating — only applied when patient is paying (no point locking
     //    slots behind a membership upsell if the org is footing the bill).
     if (!orgCovers) {
-      slots = withTierGating(slots, date, current_tier || 'none', 'mobile', {
+      slots = withTierGating(slots, date, effectiveTier, 'mobile', {
         minTierForSlot,
         slotUnlockOffer,
         TIER_ORDER,
@@ -67,6 +79,7 @@ Deno.serve(async (req) => {
       slots,
       draw_by_date: request.draw_by_date,
       org_covers: orgCovers,
+      detected_tier: detectedTier,  // so the UI can show "Welcome back, VIP member" badge
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
