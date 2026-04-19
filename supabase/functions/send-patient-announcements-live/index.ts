@@ -1,12 +1,41 @@
 // send-patient-announcements-live
 // ─────────────────────────────────────────────────────────────────────────
-// Fires the patient announcement to every active, non-unsubscribed,
-// non-already-sent patient. Triple dedup:
-//   1. Query filter excludes anyone in email_unsubscribes
-//   2. Query filter excludes anyone in campaign_sends for this campaign_key
-//   3. Per-recipient check before send (race-condition belt)
-//   4. INSERT into campaign_sends on success
-// Cron self-unschedules after firing so it cannot re-trigger.
+// Fires the patient portal-launch announcement with Hormozi-grade safeguards
+// against cross-contamination:
+//
+//   LAYER A — query-level (hardest to bypass)
+//     A1. Group patient rows by lowercase(email) so each unique email maps
+//         to exactly ONE canonical patient row before we even think about
+//         sending. One email → one send. Period.
+//     A2. When multiple rows share an email, inspect their first_names:
+//           - all same (or blank) → pick the "best" row (user_id > first_name
+//             present > most recently updated) and send.
+//           - DIFFERENT first_names → REFUSE to send. Log to
+//             patient_email_conflicts with all candidate names + patient_ids.
+//             Admin resolves manually, then re-fires.
+//     A3. Internal / test / disposable email domains are filtered out at
+//         the grouping step (info@convelabs.com, @convelabs.com, example.com,
+//         '+test' pattern, etc). Never gets to the send queue.
+//
+//   LAYER B — render-level
+//     B1. The firstName that goes into the greeting comes from the SAME
+//         canonical row whose email we send to. Not from a different row.
+//         Not from the "first match" of a query.
+//     B2. The portal URL embeds the exact recipient email as a URL param,
+//         so if a patient forwards the link, the pre-fill stays correct.
+//
+//   LAYER C — send-level
+//     C1. campaign_sends row is inserted immediately on Mailgun 2xx, so
+//         even a concurrent second invoke cannot re-send to the same email
+//         (unique(campaign_key, recipient_email) index enforces this server
+//         side; the in-memory skipSet enforces it within the same loop).
+//     C2. DRY-RUN mode: POST {"token":"...","dryRun":true} returns the
+//         complete send plan (queue + conflicts + filtered) with ZERO
+//         emails sent. Use this before every live invocation.
+//     C3. email_unsubscribes is joined in — anyone who opted out is never
+//         re-contacted.
+//
+// ─────────────────────────────────────────────────────────────────────────
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 
@@ -22,6 +51,107 @@ const EXPECTED_TOKEN = 'patient-live-2026-04-19';
 const CAMPAIGN_KEY = 'patient_announce_2026_04_19';
 const PATIENT_SUBJECT = 'Your ConveLabs portal is live — a quick note from Nico';
 const PUBLIC_SITE = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
+
+// ─── EMAIL SAFETY HELPERS ───────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+function isWellFormedEmail(email: string): boolean {
+  return EMAIL_RE.test(email.trim());
+}
+
+// Partner inbox addresses we already sent the PARTNER announcement to.
+// Any sub-address of these (via Gmail's `+tag` trick) lands in the same
+// inbox — so firing the PATIENT blast at them would flood the partner's
+// inbox with copies of a message meant for patients, and the actual
+// patients would never see it. Keep in sync with send-partner-
+// announcements-live's emails[] list.
+const PARTNER_INBOXES: ReadonlySet<string> = new Set([
+  'sdean@aristotleeducation.com',
+  'smartin@clinicalassociatesorlando.com',
+  'elitemedicalconcierge@gmail.com',
+  'jasonlittleton@jasonmd.com',
+  'team@naturamed.org',
+  'info@ndwellness.com',
+  'schedule@trpclinic.com',
+  'kristen@kristenblakewellness.com',
+]);
+
+// Specific local-part prefixes that indicate a partner's patient-handle
+// bucket even when the address doesn't literally match a partner inbox.
+// E.g. 'elitemediconciergel@gmail.com' (typo variant) + every
+// 'elitemedicalconcierge+<patient>@gmail.com' sub-address.
+const PARTNER_LOCAL_PREFIXES: ReadonlyArray<string> = [
+  'elitemedicalconcierge',
+  'elitemediconcierge', // typo variant seen in the data
+];
+
+// Strip Gmail-style +tag from the local part → canonical inbox form
+function canonicalizeEmail(email: string): string {
+  const e = email.trim().toLowerCase();
+  const atIdx = e.indexOf('@');
+  if (atIdx < 0) return e;
+  const local = e.slice(0, atIdx);
+  const domain = e.slice(atIdx); // includes '@'
+  const plusIdx = local.indexOf('+');
+  if (plusIdx < 0) return e;
+  return local.slice(0, plusIdx) + domain;
+}
+
+// Internal / test / partner-subaddress addresses we MUST NEVER send the
+// patient blast to even if they somehow ended up as a tenant_patients row.
+function isInternalOrTestEmail(email: string): boolean {
+  const e = email.trim().toLowerCase();
+  if (!e) return true;
+
+  // ConveLabs team / infrastructure
+  if (e === 'info@convelabs.com') return true;
+  if (e.endsWith('@convelabs.com')) return true;
+  if (e.endsWith('@mg.convelabs.com')) return true;
+
+  // Test patterns
+  if (e.includes('+test')) return true;
+  if (e.includes('+dev')) return true;
+  if (e.endsWith('@example.com')) return true;
+  if (e.endsWith('@example.org')) return true;
+  if (e.endsWith('@test.com')) return true;
+  if (e.endsWith('@localhost')) return true;
+  // Mailgun bounce / spamtrap patterns (common placeholders)
+  if (e.startsWith('bounce@') || e.startsWith('spam@')) return true;
+
+  // Partner inbox (already received partner email) — including any
+  // +tag sub-address that routes to the same inbox
+  const canonical = canonicalizeEmail(e);
+  if (PARTNER_INBOXES.has(canonical)) return true;
+
+  // Partner-handle prefix filter (catches +tagged sub-addresses AND typo
+  // variants like elitemediconciergel@gmail.com)
+  const atIdx = e.indexOf('@');
+  if (atIdx > 0) {
+    const local = e.slice(0, atIdx);
+    for (const prefix of PARTNER_LOCAL_PREFIXES) {
+      if (local.startsWith(prefix)) return true;
+    }
+  }
+
+  return false;
+}
+
+// Pick the "best" canonical row when multiple share an email + same name.
+// Preference: has user_id (real auth) > has first_name > most recent update.
+function pickCanonicalRow(rows: any[]): any {
+  return [...rows].sort((a, b) => {
+    const aHasUser = !!a.user_id;
+    const bHasUser = !!b.user_id;
+    if (aHasUser !== bHasUser) return aHasUser ? -1 : 1;
+    const aName = (a.first_name || '').trim();
+    const bName = (b.first_name || '').trim();
+    if (!!aName !== !!bName) return aName ? -1 : 1;
+    return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
+  })[0];
+}
+
+// ─── EMAIL BODY (unchanged content, wrapped in safe renderer) ──────────
 
 const buildPatientEmailHtml = (opts: {
   firstName: string;
@@ -167,6 +297,8 @@ const buildPatientEmailHtml = (opts: {
 </div>`;
 };
 
+// ─── MAIN HANDLER ──────────────────────────────────────────────────────
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
@@ -181,51 +313,190 @@ Deno.serve(async (req) => {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    const dryRun: boolean = Boolean(body?.dryRun);
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    // Pull the addressable list: active, has email, not deleted
+    // ─── PULL SOURCES ────────────────────────────────────────────────
     const { data: patients, error } = await supabase
       .from('tenant_patients')
-      .select('id, first_name, email')
+      .select('id, first_name, last_name, email, user_id, updated_at')
       .eq('is_active', true)
       .is('deleted_at', null)
       .not('email', 'is', null)
       .neq('email', '');
     if (error) throw error;
 
-    // Pull already-sent for this campaign + already-unsubscribed
     const [{ data: alreadySent }, { data: unsubs }] = await Promise.all([
       supabase.from('campaign_sends').select('recipient_email').eq('campaign_key', CAMPAIGN_KEY),
       supabase.from('email_unsubscribes').select('email'),
     ]);
-    const skipSet = new Set<string>([
-      ...(alreadySent || []).map((r: any) => String(r.recipient_email).toLowerCase()),
-      ...(unsubs || []).map((r: any) => String(r.email).toLowerCase()),
-    ]);
+    const alreadySentSet = new Set<string>((alreadySent || []).map((r: any) => String(r.recipient_email).toLowerCase()));
+    const unsubSet = new Set<string>((unsubs || []).map((r: any) => String(r.email).toLowerCase()));
 
-    const stats = { eligible: 0, sent: 0, skipped_dup: 0, failed: 0 };
-    const failed_samples: any[] = [];
+    // ─── LAYER A: group + resolve conflicts ─────────────────────────
+    const byEmail = new Map<string, any[]>();
+    const filtered: Array<{ email: string; reason: string }> = [];
 
     for (const p of (patients || [])) {
-      const email = (p.email || '').trim();
-      if (!email) continue;
-      stats.eligible++;
-      if (skipSet.has(email.toLowerCase())) {
-        stats.skipped_dup++;
+      const raw = String(p.email || '').trim();
+      const key = raw.toLowerCase();
+      if (!raw) continue;
+      if (!isWellFormedEmail(raw)) {
+        filtered.push({ email: raw, reason: 'malformed_email' });
+        continue;
+      }
+      if (isInternalOrTestEmail(raw)) {
+        filtered.push({ email: raw, reason: 'internal_or_test_email' });
+        continue;
+      }
+      const arr = byEmail.get(key) || [];
+      arr.push(p);
+      byEmail.set(key, arr);
+    }
+
+    interface QueueItem { email: string; firstName: string; patient_id: string; row_count: number }
+    const queue: QueueItem[] = [];
+    const conflicts: Array<{ email: string; reason: string; row_count: number; candidate_names: string[]; patient_ids: string[] }> = [];
+
+    for (const [email, rows] of byEmail.entries()) {
+      if (rows.length === 1) {
+        const r = rows[0];
+        queue.push({ email, firstName: (r.first_name || '').trim(), patient_id: r.id, row_count: 1 });
+        continue;
+      }
+      // Multiple rows — check name consistency
+      const distinctNames = new Set(
+        rows.map(r => (r.first_name || '').trim().toLowerCase()).filter(Boolean)
+      );
+      if (distinctNames.size > 1) {
+        conflicts.push({
+          email,
+          reason: 'different_first_names',
+          row_count: rows.length,
+          candidate_names: Array.from(distinctNames),
+          patient_ids: rows.map(r => r.id),
+        });
+        continue;
+      }
+      // All names agree (or all blank) — pick canonical row
+      const best = pickCanonicalRow(rows);
+      queue.push({ email, firstName: (best.first_name || '').trim(), patient_id: best.id, row_count: rows.length });
+    }
+
+    // Strip out already-sent + unsubscribed from the queue
+    const sendQueue = queue.filter(q => {
+      if (alreadySentSet.has(q.email.toLowerCase())) return false;
+      if (unsubSet.has(q.email.toLowerCase())) return false;
+      return true;
+    });
+    const skipped_already_sent = queue.length - sendQueue.length - queue.filter(q => unsubSet.has(q.email.toLowerCase())).length;
+    const skipped_unsubscribed = queue.filter(q => unsubSet.has(q.email.toLowerCase())).length;
+
+    // ─── LAYER C2: DRY-RUN EXIT ─────────────────────────────────────
+    if (dryRun) {
+      return new Response(JSON.stringify({
+        success: true,
+        dry_run: true,
+        campaign_key: CAMPAIGN_KEY,
+        totals: {
+          patient_rows_considered: patients?.length || 0,
+          unique_email_groups: byEmail.size,
+          filtered_out: filtered.length,
+          conflicts_blocked: conflicts.length,
+          skipped_already_sent,
+          skipped_unsubscribed,
+          would_send: sendQueue.length,
+        },
+        // Keep samples small but complete enough for visual audit
+        queue_sample: sendQueue.slice(0, 50).map(q => ({ email: q.email, firstName: q.firstName, row_count: q.row_count })),
+        conflicts,
+        filtered_sample: filtered.slice(0, 20),
+      }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ─── RECORD CONFLICTS (so admin can audit/resolve) ───────────────
+    if (conflicts.length > 0) {
+      await supabase.from('patient_email_conflicts' as any).insert(
+        conflicts.map(c => ({
+          campaign_key: CAMPAIGN_KEY,
+          email: c.email,
+          reason: c.reason,
+          row_count: c.row_count,
+          candidate_names: c.candidate_names,
+          patient_ids: c.patient_ids,
+        }))
+      ).then(() => { /* non-blocking */ }).catch((e: any) => {
+        console.warn('[conflicts] insert failed (non-blocking):', e?.message || e);
+      });
+    }
+
+    // ─── LIVE SEND ───────────────────────────────────────────────────
+    const stats = {
+      eligible: sendQueue.length,
+      sent: 0,
+      failed: 0,
+      skipped_race: 0,
+    };
+    const failed_samples: any[] = [];
+    const inMemoryClaimed = new Set<string>();
+
+    for (const item of sendQueue) {
+      const emailKey = item.email.toLowerCase();
+
+      if (inMemoryClaimed.has(emailKey)) { stats.skipped_race++; continue; }
+
+      // ── RESERVE-FIRST PATTERN ────────────────────────────────────
+      // Insert campaign_sends row with status='sending' BEFORE firing
+      // Mailgun. The uniq_campaign_sends_key_email index guarantees
+      // atomicity — if a concurrent invoke is also trying to claim
+      // this email, exactly ONE of us gets the row. The loser skips.
+      // This is the only pattern that makes concurrent invocations
+      // safe against sending the same email twice to the same address.
+      const { data: claim, error: claimErr } = await supabase
+        .from('campaign_sends')
+        .insert({
+          campaign_key: CAMPAIGN_KEY,
+          recipient_email: emailKey,
+          status: 'sending',
+          metadata: {
+            patient_id: item.patient_id,
+            first_name: item.firstName || null,
+            source_row_count: item.row_count,
+          },
+        })
+        .select('id')
+        .maybeSingle();
+
+      if (claimErr) {
+        const code = String((claimErr as any).code || '');
+        const msg = String((claimErr as any).message || '');
+        if (code === '23505' || /duplicate|unique/i.test(msg)) {
+          // Someone else already claimed this email. Do NOT send.
+          stats.skipped_race++;
+          continue;
+        }
+        // Real database error — don't risk sending without audit trail
+        stats.failed++;
+        if (failed_samples.length < 5) {
+          failed_samples.push({ email: item.email, status: 0, err: `claim_failed: ${msg}` });
+        }
         continue;
       }
 
-      const unsubscribeUrl = `${PUBLIC_SITE}/unsubscribe?email=${encodeURIComponent(email)}&campaign=${encodeURIComponent(CAMPAIGN_KEY)}`;
+      inMemoryClaimed.add(emailKey);
+
+      // Build + fire Mailgun
+      const unsubscribeUrl = `${PUBLIC_SITE}/unsubscribe?email=${encodeURIComponent(item.email)}&campaign=${encodeURIComponent(CAMPAIGN_KEY)}`;
       const html = buildPatientEmailHtml({
-        firstName: (p.first_name || '').trim() || 'there',
-        email,
+        firstName: item.firstName || 'there',
+        email: item.email,
         unsubscribeUrl,
       });
 
       const fd = new FormData();
       fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
-      fd.append('to', email);
+      fd.append('to', item.email);
       fd.append('h:Reply-To', 'info@convelabs.com');
       fd.append('subject', PATIENT_SUBJECT);
       fd.append('html', html);
@@ -237,27 +508,25 @@ Deno.serve(async (req) => {
         body: fd,
       });
       const mgBody = await resp.text();
+
       if (resp.ok) {
         let mgId: string | null = null;
         try { mgId = JSON.parse(mgBody).id; } catch { /* non-blocking */ }
-        // Record immediately so concurrent runs don't re-send
-        await supabase.from('campaign_sends').insert({
-          campaign_key: CAMPAIGN_KEY,
-          recipient_email: email.toLowerCase(),
-          mailgun_id: mgId,
-          status: 'sent',
-          metadata: { patient_id: p.id, first_name: p.first_name || null },
-        }).then(() => { /* ignored */ });
-        // Also add to in-memory skipSet so a mid-run duplicate can't sneak through
-        skipSet.add(email.toLowerCase());
+        await supabase.from('campaign_sends')
+          .update({ status: 'sent', mailgun_id: mgId })
+          .eq('id', claim!.id);
         stats.sent++;
       } else {
+        // Mailgun rejected → flip status to 'failed' so we can retry safely
+        await supabase.from('campaign_sends')
+          .update({ status: 'failed', metadata: { patient_id: item.patient_id, first_name: item.firstName || null, error: mgBody.substring(0, 200) } })
+          .eq('id', claim!.id);
         stats.failed++;
         if (failed_samples.length < 5) {
-          failed_samples.push({ email, status: resp.status, err: mgBody.substring(0, 200) });
+          failed_samples.push({ email: item.email, status: resp.status, err: mgBody.substring(0, 200) });
         }
       }
-      // Gentle rate-limit: ~5 sends/sec
+      // ~5 sends/sec throttle
       await new Promise(r => setTimeout(r, 200));
     }
 
@@ -265,7 +534,19 @@ Deno.serve(async (req) => {
       success: true,
       campaign_key: CAMPAIGN_KEY,
       fired_at: new Date().toISOString(),
-      ...stats,
+      totals: {
+        patient_rows_considered: patients?.length || 0,
+        unique_email_groups: byEmail.size,
+        filtered_out: filtered.length,
+        conflicts_blocked: conflicts.length,
+        skipped_already_sent,
+        skipped_unsubscribed,
+        eligible: stats.eligible,
+        sent: stats.sent,
+        failed: stats.failed,
+        skipped_race: stats.skipped_race,
+      },
+      conflicts_written_to_table: conflicts.length,
       failed_samples,
     }, null, 2), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {

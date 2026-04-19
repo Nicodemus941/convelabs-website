@@ -35,23 +35,9 @@ async function hasAlreadyBeenSent(email: string): Promise<boolean> {
   return Array.isArray(rows) && rows.length > 0;
 }
 
-async function recordSent(email: string, mailgunId: string | null) {
-  await fetch(`${SUPABASE_URL}/rest/v1/campaign_sends`, {
-    method: 'POST',
-    headers: {
-      apikey: SERVICE_KEY,
-      Authorization: `Bearer ${SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-      Prefer: 'return=minimal',
-    },
-    body: JSON.stringify({
-      campaign_key: CAMPAIGN_KEY,
-      recipient_email: email.toLowerCase(),
-      mailgun_id: mailgunId,
-      status: 'sent',
-    }),
-  }).catch(() => {});
-}
+// recordSent deprecated — replaced by reserve-first flow inline in sendOne.
+// Kept here for historical reference. Safe to delete in a later commit.
+// async function recordSent(email: string, mailgunId: string | null) { ... }
 
 const brandWrap = (title: string, body: string) => `
 <div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:640px;margin:0 auto;background:#ffffff;">
@@ -469,10 +455,38 @@ const emails = [
 ];
 
 async function sendOne(draft: typeof emails[0]) {
-  // Hard dedup guard — never send to the same org twice for this campaign,
-  // regardless of why this function got called.
+  // Belt: lookup check.
   if (await hasAlreadyBeenSent(draft.to)) {
     return { ok: true, status: 0, to: draft.to, skipped: 'already_sent' };
+  }
+  // Suspenders: RESERVE the row BEFORE calling Mailgun. The
+  // uniq_campaign_sends_key_email index ensures only one concurrent
+  // invoke can claim a given email. If our insert races with another
+  // run, one of us hits 23505 unique_violation and skips the send.
+  const reserveResp = await fetch(`${SUPABASE_URL}/rest/v1/campaign_sends`, {
+    method: 'POST',
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=minimal',
+    },
+    body: JSON.stringify({
+      campaign_key: CAMPAIGN_KEY,
+      recipient_email: draft.to.toLowerCase(),
+      status: 'sending',
+    }),
+  });
+  if (!reserveResp.ok && reserveResp.status === 409) {
+    return { ok: true, status: 0, to: draft.to, skipped: 'reserve_race' };
+  }
+  if (!reserveResp.ok) {
+    const errText = await reserveResp.text().catch(() => '');
+    if (/duplicate|unique/i.test(errText) || /23505/.test(errText)) {
+      return { ok: true, status: 0, to: draft.to, skipped: 'reserve_race' };
+    }
+    // Non-dup error — refuse to send without an audit row
+    return { ok: false, status: reserveResp.status, to: draft.to, error: `reserve_failed: ${errText.substring(0, 200)}` };
   }
   const fd = new FormData();
   fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
@@ -491,7 +505,20 @@ async function sendOne(draft: typeof emails[0]) {
   if (!resp.ok) return { ok: false, status: resp.status, to: draft.to, error: body.substring(0, 400) };
   let mgId: string | null = null;
   try { mgId = JSON.parse(body).id; } catch { /* non-blocking */ }
-  await recordSent(draft.to, mgId);
+  // Reserve row already exists with status='sending' — finalize it.
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/campaign_sends?campaign_key=eq.${encodeURIComponent(CAMPAIGN_KEY)}&recipient_email=eq.${encodeURIComponent(draft.to.toLowerCase())}`,
+    {
+      method: 'PATCH',
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        'Content-Type': 'application/json',
+        Prefer: 'return=minimal',
+      },
+      body: JSON.stringify({ status: 'sent', mailgun_id: mgId }),
+    },
+  ).catch(() => {});
   return { ok: true, status: resp.status, to: draft.to, id: mgId };
 }
 
