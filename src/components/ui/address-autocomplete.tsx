@@ -92,11 +92,14 @@ const AddressAutocomplete: React.FC<AddressAutocompleteProps> = ({
         lng = place.geometry.location.lng();
       }
 
-      const formatted = place.formatted_address || `${street}, ${city}, ${state} ${zipCode}`;
-      onChange(street || formatted);
+      const formatted = place.formatted_address || `${street}, ${city}, ${state} ${zipCode}`.trim();
+      // Always display the full formatted address ("183 S Orange Ave, Orlando, FL 32801")
+      // — previous code collapsed it to just the street which looked like Google's
+      // autocomplete was deleting the city right after selection.
+      onChange(formatted);
 
       onPlaceSelected?.({
-        address: street || formatted,
+        address: formatted,
         city,
         state,
         zipCode,

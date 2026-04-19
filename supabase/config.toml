@@ -123,3 +123,10 @@ verify_jwt = false  # pg_cron
 
 [functions.smoke-test-public-endpoints]
 verify_jwt = false  # pg_cron
+
+[functions.training-search]
+verify_jwt = true
+
+[functions.training-ask-nico]
+verify_jwt = true
+

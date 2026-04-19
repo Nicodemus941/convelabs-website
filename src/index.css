@@ -458,3 +458,31 @@ body {
 .is-desktop .tablet-only {
   display: none !important;
 }
+
+/* ─── Google Places Autocomplete dropdown ──────────────────────────────
+   The .pac-container is appended to document.body by the Google Maps JS
+   API. It defaults to z-index: 1000 and sometimes gets hidden under sticky
+   page elements (the patient /lab-request page had this — hovering over
+   the dropdown wouldn't register clicks).
+   Fix: pin it above everything with z-index: 100000 and force pointer-events. */
+.pac-container {
+  z-index: 100000 !important;
+  pointer-events: auto !important;
+  position: absolute !important;
+  background: #fff !important;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  font-family: inherit;
+}
+.pac-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.4;
+  border-top: 1px solid #f3f4f6;
+}
+.pac-item:first-child { border-top: none; }
+.pac-item:hover { background: #fef2f2; }
+.pac-item-query { font-weight: 500; color: #111827; }
+.pac-matched { font-weight: 700; color: #B91C1C; }

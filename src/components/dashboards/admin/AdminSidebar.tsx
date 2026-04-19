@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
   CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
-  Crown,
+  Crown, GraduationCap,
 } from 'lucide-react';
 
 type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
@@ -38,6 +38,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Notes', icon: ClipboardList, path: `${basePath}/notes` },
         { name: 'Operations', icon: Wrench, path: `${basePath}/operations` },
         { name: 'AI Assistant', icon: Sparkles, path: `${basePath}/ai-assistant` },
+        { name: 'Training', icon: GraduationCap, path: `${basePath}/training` },
       ],
     },
     {
