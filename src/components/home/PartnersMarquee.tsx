@@ -89,29 +89,34 @@ const PartnersMarquee: React.FC = () => {
           <div className="pointer-events-none absolute inset-y-0 left-0 w-8 sm:w-16 bg-gradient-to-r from-gray-50 to-transparent z-10" />
           <div className="pointer-events-none absolute inset-y-0 right-0 w-8 sm:w-16 bg-gradient-to-l from-gray-50 to-transparent z-10" />
 
-          {/* flex-nowrap is explicit for mobile; global class handles animation */}
-          <div className="flex flex-nowrap gap-4 sm:gap-6 convelabs-marquee-track">
-            {LOOP.map((p, idx) => (
-              <a
-                key={`${p.name}-${idx}`}
-                href={p.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex-shrink-0 w-56 sm:w-64 group"
-                title={`Visit ${p.name}`}
-              >
-                <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all">
-                  <div className="flex items-center min-h-[2.5rem] mb-1.5 sm:mb-2">
-                    <span className="font-bold text-gray-900 text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
-                      {p.name}
-                    </span>
+          {/* Nested structure: outer = viewport (above), MIDDLE = animated
+              track (inline-block, no flex), INNER = flex row of cards.
+              This avoids iOS/Android bugs with animation on flex elements. */}
+          <div className="convelabs-marquee-track">
+            <div className="convelabs-marquee-row">
+              {LOOP.map((p, idx) => (
+                <a
+                  key={`${p.name}-${idx}`}
+                  href={p.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group"
+                  title={`Visit ${p.name}`}
+                  style={{ width: '224px', flexShrink: 0 }}
+                >
+                  <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all whitespace-normal">
+                    <div className="flex items-center min-h-[2.5rem] mb-1.5 sm:mb-2">
+                      <span className="font-bold text-gray-900 text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
+                        {p.name}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      {p.description}
+                    </p>
                   </div>
-                  <p className="text-[11px] text-gray-500 leading-relaxed">
-                    {p.description}
-                  </p>
-                </div>
-              </a>
-            ))}
+                </a>
+              ))}
+            </div>
           </div>
         </div>
 

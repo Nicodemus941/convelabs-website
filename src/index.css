@@ -264,23 +264,40 @@
   animation: fade-in 0.2s ease-out;
 }
 
-/* ── PartnersMarquee infinite scroll ────────────────────────────────
- * Moved from inline <style> because some mobile browsers don't
- * reliably apply dynamically-injected keyframes. Lives in the
- * global stylesheet so animation runs on iOS Safari + Android
- * Chrome without flicker.
+/* ── PartnersMarquee infinite scroll (bulletproof cross-browser) ─────
+ * NESTED pattern: outer viewport has overflow-hidden, MIDDLE track
+ * element has the animation (NOT flex, NOT width:max-content), inner
+ * flex row has the cards. Separating the transform from the flex layout
+ * avoids iOS Safari and Android Chrome bugs where `width: max-content`
+ * on a `display: flex` element silently breaks the animation.
+ *
+ * No static `transform` on the track — keyframes handle everything.
  */
 @keyframes convelabs-marquee-scroll {
-  0%   { transform: translate3d(0, 0, 0); }
-  100% { transform: translate3d(-50%, 0, 0); }
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 .convelabs-marquee-track {
+  display: inline-block;
+  white-space: nowrap;
   animation: convelabs-marquee-scroll 40s linear infinite;
-  width: max-content;
   will-change: transform;
-  /* translate3d triggers GPU compositing on mobile */
-  transform: translate3d(0, 0, 0);
+}
+
+/* Inner flex row — kept simple so the track element isn't a flex
+ * container (which broke animation on some mobile browsers) */
+.convelabs-marquee-row {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 1rem;
+  vertical-align: top;
+}
+
+@media (min-width: 640px) {
+  .convelabs-marquee-row {
+    gap: 1.5rem;
+  }
 }
 
 .convelabs-marquee-track:hover {
@@ -288,9 +305,8 @@
 }
 
 @media (max-width: 640px) {
-  /* Speed up on small screens so it feels lively on phones */
   .convelabs-marquee-track {
-    animation-duration: 28s;
+    animation-duration: 30s;
   }
 }
 
