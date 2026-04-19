@@ -11,6 +11,7 @@ import UpcomingAppointments from "@/components/appointments/UpcomingAppointments
 import AppointmentHistory from "@/components/appointments/AppointmentHistory";
 import ReferralCard from "@/components/patient/ReferralCard";
 import MyRecurringPlans from "@/components/patient/MyRecurringPlans";
+import MemberSavingsBanner from "@/components/patient/MemberSavingsBanner";
 
 const PLANS = [
   { name: 'Member', price: 99, color: 'border-blue-200', badge: '', mobile: '$130', save: '$20', features: ['Mobile visits: $130 (save $20)', 'Weekend appointments', 'Patient portal'] },
@@ -105,6 +106,11 @@ const PatientDashboard = () => {
 
   return (
     <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 pb-24 md:pb-8">
+
+      {/* P5 — Member savings trophy. Only renders for active members with
+          at least one paid visit; silent for non-members + first-time members.
+          Placed above the hero action so loyalty lands before the next CTA. */}
+      <MemberSavingsBanner />
 
       {/* ===== HERO ACTION CARD — The #1 thing the patient should do ===== */}
       {isOverdue && !hasUpcoming ? (
