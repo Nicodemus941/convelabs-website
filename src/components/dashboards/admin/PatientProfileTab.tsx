@@ -19,8 +19,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
+import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
 const PatientProfileTab: React.FC = () => {
+  const bookingModal = useBookingModalSafe();
   const [searchQuery, setSearchQuery] = useState('');
   const [patients, setPatients] = useState<any[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
@@ -224,8 +226,36 @@ const PatientProfileTab: React.FC = () => {
               <Edit3 className="h-3.5 w-3.5" /> Edit Info
             </Button>
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              const role = JSON.parse(localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token') || '{}')?.user?.user_metadata?.role || 'office_manager';
-              window.location.href = `/dashboard/${role}/calendar`;
+              // Stash patient prefill for BookingFlow to consume on mount
+              // (cleared after one consumption to avoid leaking to next session).
+              // Hormozi: every click that doesn't serve the patient is waste —
+              // admin-booking-for-patient should NOT require retyping their info.
+              try {
+                sessionStorage.setItem('convelabs_admin_prefill_patient', JSON.stringify({
+                  firstName: p.first_name || '',
+                  lastName: p.last_name || '',
+                  email: p.email || '',
+                  phone: p.phone || '',
+                  address: p.address || '',
+                  city: p.city || '',
+                  state: p.state || 'FL',
+                  zipCode: p.zipcode || '',
+                  gateCode: p.gate_code || '',
+                  patientId: p.id,
+                  insuranceProvider: p.insurance_provider || '',
+                  insuranceMemberId: p.insurance_member_id || '',
+                }));
+              } catch (e) { /* non-blocking */ }
+
+              // Open the in-app booking modal (overlays admin UI) instead of
+              // navigating away. Previous code redirected to the public
+              // calendar page which dumped the admin into the patient-facing
+              // booking flow — wrong context entirely.
+              if (bookingModal?.openModal) {
+                bookingModal.openModal('admin_patient_chart');
+              } else {
+                toast.error('Booking modal not available in this context');
+              }
             }}>
               <CalendarPlus className="h-3.5 w-3.5" /> Schedule
             </Button>
@@ -589,7 +619,7 @@ const PatientProfileTab: React.FC = () => {
               <div className="flex gap-3">
               <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
               <Button className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold" onClick={async () => {
-                const { error } = await supabase.from('tenant_patients').update({
+                const { data, error } = await supabase.from('tenant_patients').update({
                   first_name: editForm.firstName, last_name: editForm.lastName,
                   email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
                   address: editForm.address || null,
@@ -600,8 +630,21 @@ const PatientProfileTab: React.FC = () => {
                   insurance_provider: editForm.insuranceProvider || null,
                   insurance_member_id: editForm.insuranceMemberId || null,
                   insurance_group_number: editForm.insuranceGroup || null,
-                }).eq('id', p.id);
-                if (error) { toast.error(error.message); return; }
+                }).eq('id', p.id).select();
+                // Surface the exact DB error — usually the org-email trigger or
+                // a unique constraint. Previously errors were swallowed on some
+                // paths so the admin saw "nothing happened" with no feedback.
+                if (error) {
+                  console.error('[patient update] failed:', error);
+                  toast.error(`Update failed: ${error.message}`);
+                  return;
+                }
+                // RLS can silently filter out an update → 0 rows returned with
+                // no error. Catch that explicitly so admin knows to check role.
+                if (!data || data.length === 0) {
+                  toast.error('Update returned 0 rows — likely a permissions issue. Are you signed in as super_admin?');
+                  return;
+                }
                 toast.success('Patient info updated');
                 setSelectedPatient({ ...p, first_name: editForm.firstName, last_name: editForm.lastName, email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null, address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null, gate_code: editForm.gateCode || null, insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null });
                 setEditModalOpen(false);

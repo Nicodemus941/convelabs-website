@@ -134,6 +134,39 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // the logged-in user's email to persist even when booking for another patient,
   // which sent notifications to the wrong person (HIPAA violation).
 
+  // EXCEPTION: admin-initiated "book for this patient" flow stores a prefill
+  // blob in sessionStorage ('convelabs_admin_prefill_patient') that we DO
+  // want to consume on mount — because the whole point is to save the admin
+  // from retyping the patient's info. Consumed once, then cleared to avoid
+  // leaking to a subsequent booking session.
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('convelabs_admin_prefill_patient');
+      if (!raw) return;
+      const p = JSON.parse(raw);
+      methods.reset({
+        ...methods.getValues(),
+        patientDetails: {
+          firstName: p.firstName || '',
+          lastName: p.lastName || '',
+          email: p.email || '',
+          phone: p.phone || '',
+        },
+        locationDetails: {
+          ...methods.getValues().locationDetails,
+          address: p.address || '',
+          city: p.city || '',
+          state: p.state || 'FL',
+          zipCode: p.zipCode || '',
+          gateCode: p.gateCode || '',
+        },
+      });
+      sessionStorage.removeItem('convelabs_admin_prefill_patient');
+    } catch (e) {
+      console.warn('[admin prefill] failed to consume:', e);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleNext = () => {
     prevStepRef.current = currentStep;
 
