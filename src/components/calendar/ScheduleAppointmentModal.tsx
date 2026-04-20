@@ -77,6 +77,24 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [serviceType, setServiceType] = useState('');
   const [date, setDate] = useState(defaultDate || new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState('');
+
+  // Set of HH:MM strings already booked on the selected date. Used to
+  // disable those times in the dropdown. Overridable via the
+  // "Override Availability" checkbox for urgent bookings.
+  const [bookedTimesOnDate, setBookedTimesOnDate] = useState<Set<string>>(new Set());
+  const [loadingSlots, setLoadingSlots] = useState(false);
+
+  // Convert "9:00 AM" ↔ "09:00:00" for matching against appointments.appointment_time
+  const timeLabelToDbFormat = (label: string): string => {
+    const m = label.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!m) return label;
+    let h = parseInt(m[1], 10);
+    const mm = m[2];
+    const period = m[3].toUpperCase();
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${mm}:00`;
+  };
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [zipcode, setZipcode] = useState('');
@@ -111,6 +129,36 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     if (selectedOrg.default_billed_to === 'org') setOrgBilling(true);
     if (selectedOrg.locked_service_type) setServiceType(selectedOrg.locked_service_type);
   }, [selectedOrg]);
+
+  // Load existing bookings for the selected date and build the booked-times set.
+  // This feeds the time dropdown so already-taken slots render as "taken" and
+  // non-selectable (unless admin flips the Override checkbox).
+  useEffect(() => {
+    if (!date) { setBookedTimesOnDate(new Set()); return; }
+    let cancelled = false;
+    setLoadingSlots(true);
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('appointments')
+          .select('appointment_time, status')
+          .gte('appointment_date', `${date}T00:00:00`)
+          .lte('appointment_date', `${date}T23:59:59`)
+          .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']);
+        if (cancelled) return;
+        const booked = new Set<string>();
+        for (const row of (data || [])) {
+          if (row.appointment_time) booked.add(String(row.appointment_time));
+        }
+        setBookedTimesOnDate(booked);
+      } catch (e) {
+        console.warn('[slot load] failed:', e);
+      } finally {
+        if (!cancelled) setLoadingSlots(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [date]);
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [overrideSlot, setOverrideSlot] = useState(false);
@@ -690,8 +738,18 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label>Email</Label>
+                    <Label>Email <span className="text-[11px] text-gray-400 font-normal">(optional)</span></Label>
                     <Input type="email" value={patientEmail} onChange={e => setPatientEmail(e.target.value)} placeholder="patient@email.com" />
+                    {!patientEmail && selectedOrg && selectedOrg.default_billed_to === 'org' && (
+                      <p className="text-[11px] text-emerald-700 mt-1">
+                        ✓ No patient email — confirmation + invoice will route to <strong>{selectedOrg.name}</strong> ({orgEmail || 'org contact'}).
+                      </p>
+                    )}
+                    {!patientEmail && !selectedOrg && (
+                      <p className="text-[11px] text-amber-700 mt-1">
+                        ⚠ Without an email, patient won't receive confirmation. Assign a partner org below to route notifications there instead.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <Label>Phone</Label>
@@ -738,19 +796,36 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
               </div>
               <div>
-                <Label>Time *</Label>
+                <Label>Time *{loadingSlots && <span className="ml-2 text-[11px] text-gray-400">checking availability…</span>}</Label>
                 <Select value={time} onValueChange={setTime}>
                   <SelectTrigger><SelectValue placeholder="Select time" /></SelectTrigger>
                   <SelectContent>
-                    {TIME_SLOTS.map(t => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
+                    {TIME_SLOTS.map(t => {
+                      const taken = bookedTimesOnDate.has(timeLabelToDbFormat(t));
+                      return (
+                        <SelectItem key={t} value={t} disabled={taken && !overrideSlot}>
+                          <span className={taken ? 'text-gray-400 line-through' : ''}>{t}</span>
+                          {taken && <span className="ml-2 text-[10px] text-amber-600 font-semibold">TAKEN</span>}
+                        </SelectItem>
+                      );
+                    })}
                     <div className="px-2 py-1.5 text-[10px] font-semibold text-amber-600 uppercase tracking-wide">After Hours (+$50)</div>
-                    {AFTER_HOURS_SLOTS.map(t => (
-                      <SelectItem key={t} value={t}>{t} ⏰</SelectItem>
-                    ))}
+                    {AFTER_HOURS_SLOTS.map(t => {
+                      const taken = bookedTimesOnDate.has(timeLabelToDbFormat(t));
+                      return (
+                        <SelectItem key={t} value={t} disabled={taken && !overrideSlot}>
+                          <span className={taken ? 'text-gray-400 line-through' : ''}>{t} ⏰</span>
+                          {taken && <span className="ml-2 text-[10px] text-amber-600 font-semibold">TAKEN</span>}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
+                {bookedTimesOnDate.size > 0 && (
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {bookedTimesOnDate.size} slot{bookedTimesOnDate.size > 1 ? 's' : ''} already taken on {date}. Toggle Override below to book anyway.
+                  </p>
+                )}
               </div>
             </div>
 
