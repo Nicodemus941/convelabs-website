@@ -10,6 +10,7 @@ import { useHormoziData, MARGIN_TARGET_PCT } from '@/hooks/useHormoziData';
 import DataHealthCard from './DataHealthCard';
 import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
 import AcquisitionByChannel from './AcquisitionByChannel';
+import RevenueTypeSplit from './RevenueTypeSplit';
 import Level0Tracker from './Level0Tracker';
 import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
@@ -364,6 +365,12 @@ const HormoziDashboard: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* ─── REVENUE SPLIT (I3: Profit First bucketing by revenue type) ─ */}
+      <section className="mb-6">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Revenue Type Split</h2>
+        <RevenueTypeSplit />
+      </section>
 
       {/* ─── ACQUISITION (Level 0: "CAC documented per channel") ───── */}
       <section className="mb-6">
