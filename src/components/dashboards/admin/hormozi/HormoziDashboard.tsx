@@ -15,6 +15,7 @@ import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
 import TrendSparkline from './TrendSparkline';
 import CampaignROICard from './CampaignROICard';
+import ChatROICard from './ChatROICard';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -133,6 +134,11 @@ const HormoziDashboard: React.FC = () => {
       {/* ─── ACTIVE CAMPAIGN ROI (auto-hides when none) ───────────── */}
       <section>
         <CampaignROICard />
+      </section>
+
+      {/* ─── CHATBOT ROI (auto-hides when no convos) ──────────────── */}
+      <section>
+        <ChatROICard />
       </section>
 
       {/* ─── OPS HEALTH PULSE (Part I2 Phase 1) ───────────────────── */}

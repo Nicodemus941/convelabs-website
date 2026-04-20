@@ -45,6 +45,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
       label: 'MARKETING',
       items: [
         { name: 'Campaigns', icon: Mail, path: `${basePath}/marketing` },
+        { name: 'Ask Nico Chatbot', icon: MessageSquare, path: `${basePath}/chatbot`, roles: ['super_admin'] },
       ],
     },
     {
