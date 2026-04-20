@@ -11,8 +11,18 @@ import {
   CalendarClock, XCircle, DollarSign, FileText, Shield,
   ChevronDown, ChevronUp, UserPlus, AlertTriangle, UserX,
   X, MoreHorizontal, ChevronRight, Upload, ExternalLink,
-  Pencil, Save, Loader2,
+  Pencil, Save, Loader2, Crown,
 } from 'lucide-react';
+
+// Tier -> badge style. Extracted so the modal + chart match pixel-for-pixel.
+const tierBadgeClass = (tier: string | undefined) => {
+  switch (tier) {
+    case 'concierge': return 'bg-gradient-to-r from-purple-600 to-pink-500 text-white';
+    case 'vip': return 'bg-gradient-to-r from-amber-500 to-yellow-400 text-white';
+    case 'member': return 'bg-emerald-100 text-emerald-700 border border-emerald-300';
+    default: return 'bg-gray-100 text-gray-600';
+  }
+};
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -352,8 +362,13 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-bold text-gray-900">{patientName}</h2>
+                {patientData?.membership_tier && patientData.membership_tier !== 'none' && (
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide ${tierBadgeClass(patientData.membership_tier)}`}>
+                    <Crown className="h-3 w-3" /> {patientData.membership_tier}
+                  </span>
+                )}
                 {noShowCount > 0 && (
                   <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 text-[10px] gap-0.5">
                     <AlertTriangle className="h-2.5 w-2.5" /> {noShowCount} no-show{noShowCount > 1 ? 's' : ''}

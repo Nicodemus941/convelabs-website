@@ -1004,6 +1004,10 @@ async function handleAppointmentPayment(session: any) {
         surcharge_amount: 0,
         stripe_checkout_session_id: checkoutSessionId,
         stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
+        // Honor client-supplied duration when present; the appointments_autofill
+        // trigger will still correct to the service-type default if this is
+        // missing or stuck at the 30-min column default.
+        duration_minutes: metadata.duration_minutes ? parseInt(metadata.duration_minutes, 10) : undefined,
         extended_hours: false,
         weekend_service: metadata.weekend === 'true',
         booking_source: 'online',
@@ -1024,6 +1028,42 @@ async function handleAppointmentPayment(session: any) {
     }
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
+
+    // ─── OWNER REVENUE SMS (fire FIRST, before anything that could throw) ──
+    // Pre-2026-04-20: owner SMS lived inside sendAppointmentConfirmation, so if
+    // a HIPAA guard, Mailgun, or patient-SMS step threw, the outer try/catch
+    // swallowed the owner notification too (Diane Kessler incident). Now we
+    // fire owner SMS in its own isolated try/catch right after the row is
+    // committed, before any of those downstream calls run.
+    try {
+      if (!Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+        const TWILIO_SID  = Deno.env.get('TWILIO_ACCOUNT_SID');
+        const TWILIO_AUTH = Deno.env.get('TWILIO_AUTH_TOKEN');
+        const TWILIO_MSG  = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+        const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
+        const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+        if (TWILIO_SID && TWILIO_AUTH) {
+          const pn = `${metadata.patient_first_name || ''} ${metadata.patient_last_name || ''}`.trim() || metadata.patient_email || '(unknown)';
+          const rev = appointment.total_amount || 0;
+          const body = `💰 New Booking!\n${pn}\n${metadata.service_name || metadata.service_type || ''}\n${appointmentDate || ''}${appointmentTime ? ` @ ${appointmentTime}` : ''}\n$${Number(rev).toFixed(2)}${appointment.duration_minutes ? ` · ${appointment.duration_minutes}min` : ''}`;
+          await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Basic ${btoa(`${TWILIO_SID}:${TWILIO_AUTH}`)}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+              To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
+              Body: body,
+              ...(TWILIO_MSG ? { MessagingServiceSid: TWILIO_MSG } : { From: TWILIO_FROM }),
+            }).toString(),
+          });
+          console.log(`[owner-sms-early] revenue notification sent for ${appointment.id}`);
+        }
+      }
+    } catch (e) {
+      console.error('[owner-sms-early] non-fatal:', e);
+    }
 
     // Fire OCR on the uploaded lab order (fire-and-forget) so the fasting
     // banner + panel chips render for image/PDF uploads too.

@@ -705,6 +705,18 @@ Deno.serve(async (req) => {
       utm_term: String(attribution?.utm_term || '').substring(0, 100),
       referrer_url: String(attribution?.referrer_url || '').substring(0, 500),
       landing_page: String(attribution?.landing_page || '').substring(0, 500),
+      // Service-type-aware block duration. Webhook uses this on insert; the
+      // appointments_autofill DB trigger is the safety net if it's missing.
+      duration_minutes: String((() => {
+        const s = (serviceType || '').toLowerCase();
+        if (s.startsWith('therapeutic')) return 75;
+        if (s.startsWith('specialty-kit-genova')) return 80;
+        if (s.startsWith('specialty-kit')) return 75;
+        if (s === 'partner-nd-wellness') return 65;
+        if (s === 'partner-aristotle-education') return 75;
+        if (s.startsWith('partner-')) return 60;
+        return 60;
+      })()),
     };
 
     // ─── LOG UPGRADE EVENTS (INTENT) for ROI dashboard ───────────────
