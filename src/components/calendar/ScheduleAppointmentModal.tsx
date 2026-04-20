@@ -1100,17 +1100,45 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 ⚠ Pick {(!date ? 'a Date' : '')}{(!date && !time) ? ' and ' : ''}{(!time ? 'a Time' : '')} above to continue.
               </div>
             )}
+            {/* Partner-window preview warning — shown BEFORE clicking Next so
+                admin sees the issue and can either change time/org or flip
+                Override Availability to bypass. Previously this was a
+                post-click toast that was easy to miss. */}
+            {(() => {
+              if (!date || !time || !selectedOrg || !Array.isArray(selectedOrg.time_window_rules)) return null;
+              let hh = 0, mm = 0;
+              if (time.includes('AM') || time.includes('PM')) {
+                const [tp, period] = time.split(' ');
+                const [h, m] = tp.split(':').map(Number);
+                hh = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
+                mm = m || 0;
+              } else { [hh, mm] = time.split(':').map(Number); }
+              const hour = hh + mm / 60;
+              const dow = new Date(date + 'T12:00:00').getDay();
+              const inWindow = (selectedOrg.time_window_rules as any[]).some((r: any) =>
+                r.dayOfWeek.includes(dow) && hour >= r.startHour && hour < r.endHour
+              );
+              if (inWindow) return null;
+              const wins = (selectedOrg.time_window_rules as any[]).map((r: any) => r.label || `${r.startHour}-${r.endHour}`).join(' · ');
+              return (
+                <div className="text-xs text-red-800 bg-red-50 border border-red-200 rounded p-2">
+                  🚫 <strong>{selectedOrg.name}</strong> normally only allows bookings: <strong>{wins}</strong>. Your pick ({new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' })} at {time}) is outside that window.
+                  <span className="block mt-1 text-[11px]">To book anyway, flip <strong>Override Availability</strong> above — it now bypasses partner time rules as well as slot conflicts.</span>
+                </div>
+              );
+            })()}
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
               <Button onClick={() => {
-                console.log('[schedule] Next:Review clicked', { date, time, selectedOrg: selectedOrg?.name, canGoToStep3 });
+                console.log('[schedule] Next:Review clicked', { date, time, selectedOrg: selectedOrg?.name, canGoToStep3, overrideSlot });
                 if (!date || !time) {
                   toast.error('Pick a date and time before continuing');
                   return;
                 }
                 // Partner time-window guard: reject advance if admin picked an org
-                // and the time is outside the org's allowed window.
-                if (selectedOrg && Array.isArray(selectedOrg.time_window_rules) && time && date) {
+                // and the time is outside the org's allowed window. Override
+                // Availability bypasses this too (admin explicit override).
+                if (!overrideSlot && selectedOrg && Array.isArray(selectedOrg.time_window_rules) && time && date) {
                   let hh = 0, mm = 0;
                   if (time.includes('AM') || time.includes('PM')) {
                     const [tp, period] = time.split(' ');
