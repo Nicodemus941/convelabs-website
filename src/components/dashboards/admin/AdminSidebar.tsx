@@ -39,6 +39,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Operations', icon: Wrench, path: `${basePath}/operations` },
         { name: 'AI Assistant', icon: Sparkles, path: `${basePath}/ai-assistant` },
         { name: 'Training', icon: GraduationCap, path: `${basePath}/training` },
+        { name: 'Scripts & Playbooks', icon: FileText, path: `${basePath}/scripts` },
       ],
     },
     {
@@ -46,6 +47,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
       items: [
         { name: 'Campaigns', icon: Mail, path: `${basePath}/marketing` },
         { name: 'Ask Nico Chatbot', icon: MessageSquare, path: `${basePath}/chatbot`, roles: ['super_admin'] },
+        { name: 'Provider Acquisition', icon: Users, path: `${basePath}/provider-acquisition`, roles: ['super_admin'] },
       ],
     },
     {

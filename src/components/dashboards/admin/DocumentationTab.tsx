@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Search, FileText, Clock, CheckCircle2, PlayCircle, Loader2, ExternalLink } from 'lucide-react';
 import SopImageManager from './SopImageManager';
+import BAASignaturesPanel from './BAASignaturesPanel';
 
 /**
  * DocumentationTab — the operator manual.
@@ -127,6 +128,9 @@ const DocumentationTab: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5">
+      {/* BAA compliance log — prominent for legal / audit visibility */}
+      <BAASignaturesPanel />
+
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Operations Manual</h1>

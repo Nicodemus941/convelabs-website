@@ -19,6 +19,8 @@ import { format } from 'date-fns';
 import RescheduleAppointmentModal from './RescheduleAppointmentModal';
 import CancelAppointmentModal from './CancelAppointmentModal';
 import NoShowAppointmentModal from './NoShowAppointmentModal';
+import AppointmentLabOrdersPanel from './AppointmentLabOrdersPanel';
+import StaffRefundButton from '@/components/admin/StaffRefundButton';
 
 interface AppointmentDetailModalProps {
   appointment: any | null;
@@ -293,6 +295,18 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               </Button>
             </>
           )}
+          {/* Staff refund button — only shows for paid appointments */}
+          {appt.payment_status === 'completed' && (appt.total_amount || 0) > 0 && (
+            <StaffRefundButton
+              appointmentId={appt.id}
+              patientEmail={appt.patient_email}
+              patientName={appt.patient_name}
+              totalAmountDollars={appt.total_amount || 0}
+              alreadyRefunded={!!appt.refunded_at || appt.refund_status === 'refunded'}
+              refundedAmountCents={appt.refund_amount_cents}
+              onRefunded={onUpdate}
+            />
+          )}
         </div>
 
         {/* Patient name + contact */}
@@ -487,52 +501,14 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         <Separator />
 
-        {/* Lab Orders */}
-        <div className="px-5 py-4 space-y-3">
-          <p className="text-sm font-bold text-gray-900">Lab Orders</p>
-          {appt.lab_order_file_path ? (
-            appt.lab_order_file_path.split(',').map((path: string, i: number) => (
-              <Button key={i} variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start h-8" onClick={async () => {
-                const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path.trim(), 3600);
-                if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-                else toast.error('Could not load file');
-              }}>
-                <FileText className="h-3.5 w-3.5" /> {path.trim().split('/').pop() || `Lab Order ${i + 1}`}
-                <ExternalLink className="h-3 w-3 ml-auto" />
-              </Button>
-            ))
-          ) : (
-            <p className="text-xs text-gray-400">No lab order uploaded</p>
-          )}
-          <label className="cursor-pointer">
-            <div className="border border-dashed border-gray-200 hover:border-blue-300 rounded-lg p-3 text-center transition-colors">
-              <Upload className="h-4 w-4 mx-auto text-gray-400 mb-1" />
-              <p className="text-xs text-gray-500">Upload lab order</p>
-            </div>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.heic"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                toast.info(`Uploading ${file.name}...`);
-                const fileName = `laborder_${appt.id}_${Date.now()}_${file.name}`;
-                const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
-                if (uploadErr) { toast.error('Upload failed: ' + uploadErr.message); return; }
-                const existingPath = appt.lab_order_file_path || '';
-                const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
-                const { error: updateErr } = await supabase.from('appointments').update({ lab_order_file_path: newPath }).eq('id', appt.id);
-                if (updateErr) { toast.error('Failed to link file'); return; }
-                // Fire OCR in the background so fasting banner / panel chips refresh
-                supabase.functions.invoke('ocr-lab-order', { body: { appointmentId: appt.id } })
-                  .catch((err) => console.warn('[ocr] trigger failed:', err));
-                toast.success('Lab order uploaded (OCR running)');
-                onUpdate();
-                e.target.value = '';
-              }}
-            />
-          </label>
+        {/* Lab Orders — Hormozi-structured staged upload + OCR readback */}
+        <div className="px-5 py-4">
+          <AppointmentLabOrdersPanel
+            appointmentId={appt.id}
+            patientName={appt.patient_name}
+            canEdit={true}
+            onChanged={onUpdate}
+          />
         </div>
 
         <Separator />

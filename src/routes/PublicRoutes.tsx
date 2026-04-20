@@ -28,6 +28,8 @@ const PartnerWithUsThanks = lazy(() => import('../pages/PartnerWithUsThanks'));
 const BookNow = lazy(() => import('../pages/BookNow'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 const PatientLabRequestPage = lazy(() => import('../pages/PatientLabRequestPage'));
+const ProviderClaimPage = lazy(() => import('../pages/ProviderClaimPage'));
+const CheckoutSuccessPage = lazy(() => import('../pages/CheckoutSuccessPage'));
 
 const Corporate = lazy(() => import('../pages/Corporate'));
 const CorporateCheckout = lazy(() => import('../pages/CorporateCheckout'));
@@ -72,6 +74,9 @@ export const routes = [
   <Route key="login" path="/login" element={<Login />} />,
   <Route key="provider" path="/provider" element={<ProviderLogin />} />,
   <Route key="lab-request" path="/lab-request/:token" element={<PatientLabRequestPage />} />,
+  <Route key="provider-claim" path="/join/:token" element={<ProviderClaimPage />} />,
+  <Route key="welcome" path="/welcome" element={<CheckoutSuccessPage />} />,
+  <Route key="payment-success" path="/payment-success" element={<CheckoutSuccessPage />} />,
   <Route key="signup" path="/signup" element={<Signup />} />,
   <Route key="forgot-password" path="/forgot-password" element={<ForgotPassword />} />,
   <Route key="reset-password" path="/reset-password" element={<ResetPassword />} />,

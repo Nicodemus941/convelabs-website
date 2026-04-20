@@ -149,12 +149,60 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { appointmentId, filePath: bareFilePath } = body || {};
+    const { appointmentId, filePath: bareFilePath, labOrderId } = body || {};
 
     let filePath: string | null = bareFilePath || null;
     let targetId: string | null = appointmentId || null;
+    let labOrderRowId: string | null = labOrderId || null;
 
-    if (appointmentId) {
+    // MODE 1 — labOrderId: run OCR on a specific row in appointment_lab_orders
+    //          (preferred path for the Hormozi upload flow — one row per file).
+    if (labOrderRowId) {
+      const { data: row } = await supabase
+        .from('appointment_lab_orders')
+        .select('id, appointment_id, file_path, ocr_status')
+        .eq('id', labOrderRowId)
+        .maybeSingle();
+      if (!row) {
+        return new Response(JSON.stringify({ error: 'Lab order row not found' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      filePath = row.file_path;
+      targetId = row.appointment_id;
+      // Mark as running so the UI poll reflects state
+      await supabase.from('appointment_lab_orders')
+        .update({ ocr_status: 'running' }).eq('id', labOrderRowId);
+    }
+    // MODE 2 — appointmentId: loop every pending row on the appointment
+    //          (covers re-OCR + legacy comma-split backfill).
+    else if (appointmentId) {
+      const { data: pending } = await supabase
+        .from('appointment_lab_orders')
+        .select('id, file_path')
+        .eq('appointment_id', appointmentId)
+        .in('ocr_status', ['pending', 'running'])
+        .is('deleted_at', null);
+      if (pending && pending.length > 0) {
+        // Recurse into ourselves for each pending row (fire-and-forget is fine
+        // since the UI polls the table for status changes).
+        const results: any[] = [];
+        for (const r of pending) {
+          const resp = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/ocr-lab-order`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            },
+            body: JSON.stringify({ labOrderId: r.id }),
+          });
+          results.push({ id: r.id, status: resp.status });
+        }
+        return new Response(JSON.stringify({ ok: true, processed: results.length, results }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      // Back-compat: fall through to legacy comma-split path
       const { data: appt } = await supabase
         .from('appointments')
         .select('id, lab_order_file_path, ocr_processed_at')
@@ -170,13 +218,12 @@ Deno.serve(async (req) => {
           status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      // Multiple files — run OCR on the FIRST one. Sufficient for MVP.
       filePath = String(appt.lab_order_file_path).split(',')[0].trim();
       targetId = appt.id;
     }
 
     if (!filePath) {
-      return new Response(JSON.stringify({ error: 'filePath or appointmentId required' }), {
+      return new Response(JSON.stringify({ error: 'filePath, labOrderId, or appointmentId required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -200,6 +247,14 @@ Deno.serve(async (req) => {
     const result = await runClaudeVisionOcr(base64, downloaded.mediaType);
 
     if (!result || 'error' in result) {
+      // If we're processing a specific row, mark it failed so the UI stops polling
+      if (labOrderRowId) {
+        await supabase.from('appointment_lab_orders').update({
+          ocr_status: 'failed',
+          ocr_error: (result as any)?.error || 'unknown',
+          ocr_completed_at: new Date().toISOString(),
+        }).eq('id', labOrderRowId);
+      }
       return new Response(JSON.stringify({
         error: 'OCR engine failed',
         detail: (result as any)?.error || 'unknown',
@@ -217,7 +272,17 @@ Deno.serve(async (req) => {
       FASTING_PANELS.some(fp => p.toLowerCase().includes(fp.toLowerCase()))
     );
 
-    if (targetId) {
+    // Persist the OCR result. Row-scoped if we came via labOrderId; otherwise
+    // the legacy appointment-level columns.
+    if (labOrderRowId) {
+      await supabase.from('appointment_lab_orders').update({
+        ocr_status: 'complete',
+        ocr_detected_panels: result.panels,
+        ocr_full_text: result.text,
+        ocr_fasting_required: fastingDetected,
+        ocr_completed_at: new Date().toISOString(),
+      }).eq('id', labOrderRowId);
+    } else if (targetId) {
       await supabase.from('appointments').update({
         lab_order_ocr_text: result.text,
         lab_order_panels: result.panels,

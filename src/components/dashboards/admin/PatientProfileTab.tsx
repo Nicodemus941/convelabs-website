@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import MembershipActionsModal from './MembershipActionsModal';
+import StaffRefundButton from '@/components/admin/StaffRefundButton';
+import { Sparkles } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,11 +24,13 @@ const PatientProfileTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [patients, setPatients] = useState<any[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
+  const [referringProvider, setReferringProvider] = useState<any>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [specimens, setSpecimens] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ amount: '', description: '', memo: '' });
@@ -104,6 +109,20 @@ const PatientProfileTab: React.FC = () => {
     setSelectedPatient(patient);
     setLoading(true);
 
+    // Fetch referring provider info — shows "Referred by Dr. X at Practice Y"
+    // at the top of the chart so every conversation starts warmer.
+    if (patient.email) {
+      const { data: refs } = await supabase
+        .from('patient_referring_providers')
+        .select('provider_name, practice_name, practice_city, status, matched_org_id, converted_at')
+        .ilike('patient_email', patient.email)
+        .order('discovered_at', { ascending: false })
+        .limit(1);
+      setReferringProvider(refs && refs.length > 0 ? refs[0] : null);
+    } else {
+      setReferringProvider(null);
+    }
+
     // Fetch appointments
     const { data: appts } = await supabase
       .from('appointments')
@@ -167,6 +186,34 @@ const PatientProfileTab: React.FC = () => {
                 )}
               </div>
               <p className="text-sm text-muted-foreground">Patient Chart</p>
+
+              {/* Referring-provider badge — context for every conversation */}
+              {referringProvider && (referringProvider.provider_name || referringProvider.practice_name) && (
+                <div className={`inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-md text-[11px] border ${
+                  referringProvider.status === 'converted'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : referringProvider.status === 'unsubscribed' || referringProvider.status === 'declined'
+                    ? 'bg-gray-50 border-gray-200 text-gray-500'
+                    : 'bg-blue-50 border-blue-200 text-blue-800'
+                }`}>
+                  <span className="font-semibold">Referred by:</span>
+                  <span>
+                    {referringProvider.provider_name ? `${referringProvider.provider_name}` : ''}
+                    {referringProvider.provider_name && referringProvider.practice_name ? ' · ' : ''}
+                    {referringProvider.practice_name || ''}
+                    {referringProvider.practice_city ? ` (${referringProvider.practice_city})` : ''}
+                  </span>
+                  {referringProvider.status === 'converted' && (
+                    <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-semibold">✓ Active partner</span>
+                  )}
+                  {referringProvider.status === 'contacted' && (
+                    <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-semibold">In sequence</span>
+                  )}
+                  {referringProvider.status === 'unsubscribed' && (
+                    <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded-full font-semibold">Unsubscribed</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap gap-2 pl-10 sm:pl-0">
@@ -193,8 +240,27 @@ const PatientProfileTab: React.FC = () => {
                 <MessageSquare className="h-3.5 w-3.5" /> Message
               </Button>
             )}
+            {/* Membership upgrade — only show if patient isn't already a member */}
+            {p.email && !(p.user_id && memberTiers.has(p.user_id)) && (
+              <Button
+                size="sm"
+                className="gap-1.5 text-xs bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+                onClick={() => setShowMembershipModal(true)}
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Membership
+              </Button>
+            )}
           </div>
         </div>
+
+        {/* Membership offer / registration modal */}
+        <MembershipActionsModal
+          open={showMembershipModal}
+          onClose={() => setShowMembershipModal(false)}
+          patientEmail={p.email || ''}
+          patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
+          onSuccess={() => loadPatientData(p)}
+        />
 
         {/* Patient Info Card */}
         <Card className="shadow-sm">
@@ -307,15 +373,31 @@ const PatientProfileTab: React.FC = () => {
                 <p className="text-sm font-semibold mb-2 text-gray-600">Past ({pastAppts.length})</p>
                 {pastAppts.map(a => (
                   <Card key={a.id} className="shadow-sm mb-2 opacity-75">
-                    <CardContent className="p-3 flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
+                    <CardContent className="p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant="outline" className="text-[10px] bg-gray-50 text-gray-600">{a.status}</Badge>
                           <span className="text-sm">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}</span>
+                          {(a.refunded_at || a.refund_status === 'refunded') && (
+                            <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">Refunded</Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1 capitalize">{(a.service_type || '').replace(/_|-/g, ' ')}</p>
                       </div>
-                      <span className="text-sm">${a.total_amount || 0}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-sm font-medium">${a.total_amount || 0}</span>
+                        {a.payment_status === 'completed' && (a.total_amount || 0) > 0 && (
+                          <StaffRefundButton
+                            appointmentId={a.id}
+                            patientEmail={p.email}
+                            patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
+                            totalAmountDollars={a.total_amount || 0}
+                            alreadyRefunded={!!a.refunded_at || a.refund_status === 'refunded'}
+                            refundedAmountCents={a.refund_amount_cents}
+                            onRefunded={() => loadPatientData(p)}
+                          />
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 ))}

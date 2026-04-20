@@ -35,6 +35,8 @@ import HormoziDashboard from "@/components/dashboards/admin/hormozi/HormoziDashb
 import UpgradesTab from "@/components/dashboards/admin/UpgradesTab";
 import TrainingTab from "@/components/dashboards/admin/TrainingTab";
 import ChatbotTab from "@/components/dashboards/admin/ChatbotTab";
+import ProviderAcquisitionTab from "@/components/dashboards/admin/ProviderAcquisitionTab";
+import ScriptsTab from "@/components/dashboards/admin/ScriptsTab";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 
 const Dashboard = () => {
@@ -135,7 +137,9 @@ const Dashboard = () => {
           {adminTab === "upgrades" && <UpgradesTab />}
           {adminTab === "training" && <TrainingTab />}
           {adminTab === "chatbot" && <ChatbotTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot"].includes(adminTab) && (
+          {adminTab === "provider-acquisition" && <ProviderAcquisitionTab />}
+          {adminTab === "scripts" && <ScriptsTab />}
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>

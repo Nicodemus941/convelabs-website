@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import StaffRefundButton from '@/components/admin/StaffRefundButton';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -467,6 +468,22 @@ const AppointmentFixer: React.FC = () => {
                 <a href={selected.stripe_invoice_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
                   <FileText className="h-3 w-3" /> Open Stripe Invoice <ChevronRight className="h-3 w-3" />
                 </a>
+              </div>
+            )}
+
+            {/* Refund action — only for paid, non-refunded appointments */}
+            {selected.payment_status === 'completed' && (selected.total_amount || 0) > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-1">REFUND</p>
+                <StaffRefundButton
+                  appointmentId={selected.id}
+                  patientEmail={selected.patient_email}
+                  patientName={selected.patient_name}
+                  totalAmountDollars={selected.total_amount || 0}
+                  alreadyRefunded={!!selected.refunded_at || selected.refund_status === 'refunded'}
+                  refundedAmountCents={selected.refund_amount_cents}
+                  onRefunded={doSearch}
+                />
               </div>
             )}
 

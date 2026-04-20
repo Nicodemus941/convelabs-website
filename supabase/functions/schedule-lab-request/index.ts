@@ -96,6 +96,16 @@ Deno.serve(async (req) => {
     const patientEmail = (patient_email_override || request.patient_email || '').toLowerCase() || null;
     const patientPhone = patient_phone_override || request.patient_phone || null;
 
+    // BUG FIX 2026-04-20: if patient owes money, the appointment must be
+    // HELD (not scheduled) until Stripe confirms payment. The previous flow
+    // fired "booked!" SMS + emails before the patient even paid.
+    //   - org_covers=true          → book immediately (no payment gate)
+    //   - org_covers=false + $0    → book immediately (free visit)
+    //   - org_covers=false + $>0   → status='pending_payment' until webhook
+    const needsPayment = !orgCovers && effectivePriceCents > 0;
+    const initialStatus = needsPayment ? 'pending_payment' : 'scheduled';
+    const initialPaymentStatus = orgCovers ? 'org_billed' : (needsPayment ? 'pending' : 'not_required');
+
     // Create the appointment
     const { data: appt, error: apptErr } = await admin.from('appointments').insert({
       patient_name: request.patient_name,
@@ -107,8 +117,8 @@ Deno.serve(async (req) => {
       appointment_date: apptDateIso,
       appointment_time,
       total_amount: effectivePriceCents / 100,
-      status: 'scheduled',
-      payment_status: orgCovers ? 'org_billed' : 'pending',
+      status: initialStatus,
+      payment_status: initialPaymentStatus,
       organization_id: org.id,
       billed_to: billedTo,
       patient_name_masked: org.show_patient_name_on_appointment === false,
@@ -131,11 +141,13 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: apptErr?.message || 'Failed to schedule' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Mark the lab request as scheduled
+    // Mark the lab request as scheduled (or payment-pending).
+    // patient_scheduled_at stays NULL until payment completes — this is what
+    // the provider timeline polls, so it won't flash "booked" prematurely.
     await admin.from('patient_lab_requests').update({
-      status: 'scheduled',
+      status: needsPayment ? 'pending_schedule' : 'scheduled',
       appointment_id: appt.id,
-      patient_scheduled_at: new Date().toISOString(),
+      patient_scheduled_at: needsPayment ? null : new Date().toISOString(),
     }).eq('id', request.id);
 
     // ── If patient owes money, create Stripe Checkout session ─────────────
@@ -176,6 +188,22 @@ Deno.serve(async (req) => {
         console.error('Stripe session create failed:', e);
         // Non-fatal — appointment still scheduled, admin can invoice later
       }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // NOTIFICATIONS — only fire if the booking is ACTUALLY confirmed.
+    // If the patient owes money, these get fired from stripe-webhook AFTER
+    // checkout.session.completed. Never lie to a patient about "booked!"
+    // before their card has actually processed.
+    // ──────────────────────────────────────────────────────────────────────
+    if (needsPayment) {
+      return new Response(JSON.stringify({
+        success: true,
+        appointment_id: appt.id,
+        stripe_url: stripeUrl,
+        pending_payment: true,
+        org_covers: false,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // ── Notify provider ──────────────────────────────────────────────────

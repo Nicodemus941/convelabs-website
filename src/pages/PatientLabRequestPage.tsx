@@ -10,6 +10,8 @@ import { toast } from 'sonner';
 import { Loader2, CheckCircle2, Home, ArrowRight, ExternalLink, Clock, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
+import DOBVerifyGate from '@/components/patient/DOBVerifyGate';
+import NotifyProviderConsentModal from '@/components/patient/NotifyProviderConsentModal';
 
 /**
  * PATIENT LAB REQUEST BOOKING PAGE (/lab-request/:token)
@@ -101,6 +103,19 @@ const PatientLabRequestPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  // HIPAA DOB gate — must pass before any PHI is revealed to the viewer.
+  // Persisted via sessionStorage so a reload on the same tab doesn't re-prompt,
+  // but a new tab / new session requires re-verification.
+  const [dobVerified, setDobVerified] = useState(() => {
+    try { return sessionStorage.getItem(`dob_verified_${token}`) === '1'; } catch { return false; }
+  });
+
+  // Fire the HIPAA consent modal once after a successful booking so we can
+  // capture "may we notify your provider?" authorization with typed signature.
+  const [consentModalOpen, setConsentModalOpen] = useState(false);
+  const [consentCompleted, setConsentCompleted] = useState(false);
+  const [bookedAppointmentId, setBookedAppointmentId] = useState<string | null>(null);
+
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [address, setAddress] = useState('');
@@ -129,6 +144,11 @@ const PatientLabRequestPage: React.FC = () => {
         if (!resp.ok) throw new Error(j.error || 'Link not found');
         setData(j);
         if (j.request.already_scheduled) setSuccess(true);
+
+        // Fire-and-forget: stamp patient_viewed_at so provider dashboard's
+        // timeline shows "Patient opened the booking page" in real time.
+        supabase.rpc('record_lab_request_viewed' as any, { p_token: token })
+          .then(() => {}, () => {});
 
         // If the SMS deep-linked with ?d=&t=, pre-select them
         const preD = params.get('d');
@@ -234,6 +254,13 @@ const PatientLabRequestPage: React.FC = () => {
         window.location.href = j.stripe_url;
       } else {
         setSuccess(true);
+        setBookedAppointmentId(j.appointment_id || null);
+        // Fire HIPAA consent modal once after org-covered bookings (or free).
+        // For pay-at-booking flows, the Stripe → webhook → DB trigger fires
+        // consent prompt via the success page ceremony instead.
+        if (j.appointment_id && !consentCompleted) {
+          setTimeout(() => setConsentModalOpen(true), 600);
+        }
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (e: any) {
@@ -248,6 +275,19 @@ const PatientLabRequestPage: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" />
       </div>
+    );
+  }
+
+  // HIPAA gate — block PHI reveal until DOB is verified
+  if (!dobVerified && token) {
+    return (
+      <DOBVerifyGate
+        token={token}
+        onVerified={() => {
+          try { sessionStorage.setItem(`dob_verified_${token}`, '1'); } catch {}
+          setDobVerified(true);
+        }}
+      />
     );
   }
 
@@ -731,6 +771,23 @@ const PatientLabRequestPage: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* HIPAA consent: notify referring provider? */}
+      {bookedAppointmentId && (
+        <NotifyProviderConsentModal
+          open={consentModalOpen}
+          onClose={() => { setConsentModalOpen(false); setConsentCompleted(true); }}
+          appointmentId={bookedAppointmentId}
+          labRequestId={data?.request?.id || null}
+          patientName={data?.request?.patient_name || ''}
+          patientEmail={data?.request?.patient_email || undefined}
+          patientPhone={data?.request?.patient_phone || undefined}
+          providerPracticeName={data?.org?.name || null}
+          providerEmail={data?.org?.contact_email || null}
+          accessToken={token}
+          onConsentComplete={() => setConsentCompleted(true)}
+        />
+      )}
     </div>
   );
 };

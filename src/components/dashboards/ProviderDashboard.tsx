@@ -17,7 +17,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
 import ProviderOnboardingModal from '@/components/provider/ProviderOnboardingModal';
 import CreateLabRequestModal from '@/components/provider/CreateLabRequestModal';
-import { FileHeart, Send, Copy, BellRing } from 'lucide-react';
+import LabRequestTimeline from '@/components/provider/LabRequestTimeline';
+import BAASigningModal from '@/components/provider/BAASigningModal';
+import { Activity } from 'lucide-react';
+import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
 
 /**
  * PROVIDER PORTAL DASHBOARD — Phase 1
@@ -63,6 +66,26 @@ const ProviderDashboard: React.FC = () => {
   const [showPwPrompt, setShowPwPrompt] = useState(false);
   const [newPw, setNewPw] = useState('');
   const [newPwConfirm, setNewPwConfirm] = useState('');
+  // BAA signing gate — blocks the portal until the provider has signed.
+  const [baaLoaded, setBaaLoaded] = useState(false);
+  const [baaSignature, setBaaSignature] = useState<{ id: string; signed_at: string; baa_version: string; signer_full_name: string } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: sig } = await supabase
+          .from('baa_signatures')
+          .select('id, signed_at, baa_version, signer_full_name')
+          .is('revoked_at', null)
+          .order('signed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setBaaSignature(sig as any);
+      } finally {
+        setBaaLoaded(true);
+      }
+    })();
+  }, []);
 
   // Onboarding gate + password-status check. Reads fresh metadata from
   // Supabase (not the cached useAuth user) so it reflects the latest state.
@@ -232,8 +255,26 @@ const ProviderDashboard: React.FC = () => {
 
   const prettyPatient = (a: any) => a.patient_name_masked ? (a.org_reference_id || 'Confidential') : (a.patient_name || 'Patient');
 
+  // BAA gate — blocks the entire portal until the provider has signed the BAA.
+  // Must come AFTER loading + error early returns so we don't flash the modal
+  // before knowing if they've signed.
+  const needsBaa = baaLoaded && !baaSignature;
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* BAA SIGNING MODAL — mandatory, non-dismissable until signed */}
+      <BAASigningModal
+        open={needsBaa && !showOnboarding /* let onboarding finish first */}
+        onSigned={(id) => {
+          setBaaSignature({
+            id,
+            signed_at: new Date().toISOString(),
+            baa_version: 'v1.0-2026-04-20',
+            signer_full_name: user?.user_metadata?.full_name || user?.email || '',
+          });
+        }}
+        currentUserFullName={user?.user_metadata?.full_name || ''}
+      />
       {/* HEADER */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -519,13 +560,57 @@ const ProviderDashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* MY DOCUMENTS — signed BAA + audit trail */}
+        {baaSignature && (
+          <Card className="shadow-sm mt-6">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileSignature className="h-4 w-4 text-[#B91C1C]" /> My Documents
+              </CardTitle>
+              <CardDescription className="text-xs">Signed agreements and compliance records for your practice.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between p-3 border border-emerald-200 bg-emerald-50 rounded-lg">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                    <ShieldCheck className="h-5 w-5 text-emerald-700" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">Business Associate Agreement · {baaSignature.baa_version}</p>
+                    <p className="text-[11px] text-gray-600">
+                      Signed by <strong>{baaSignature.signer_full_name}</strong> · {format(new Date(baaSignature.signed_at), 'PPp')}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 flex-shrink-0"
+                  onClick={() => window.open(`/api/baa-pdf/${baaSignature.id}`, '_blank')}
+                  title="Download signed copy"
+                >
+                  <Download className="h-3.5 w-3.5" /> PDF
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </main>
 
       {/* INVITE MODAL */}
       <InviteTeamMemberDialog open={showInvite} onClose={() => setShowInvite(false)} orgId={org.id} orgName={org.name} onInvited={() => { setShowInvite(false); loadData(); }} />
 
       {/* CREATE LAB REQUEST MODAL */}
-      <CreateLabRequestModal open={showLabRequest} onClose={() => setShowLabRequest(false)} orgId={org.id} orgName={org.name} onCreated={loadData} />
+      <CreateLabRequestModal
+        open={showLabRequest}
+        onClose={() => setShowLabRequest(false)}
+        orgId={org.id}
+        orgName={org.name}
+        orgDefaultBilledTo={org.default_billed_to as 'org' | 'patient' | null}
+        orgInvoicePriceCents={org.org_invoice_price_cents ?? null}
+        onCreated={loadData}
+      />
 
       {/* INLINE "SET A PASSWORD" DIALOG (from the yellow status banner) */}
       <Dialog open={showPwPrompt} onOpenChange={setShowPwPrompt}>
@@ -565,6 +650,7 @@ const ProviderDashboard: React.FC = () => {
 // ─── LAB REQUESTS SECTION ────────────────────────────────────────────
 const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; onRefresh: () => void }> = ({ labRequests, onCreate, onRefresh }) => {
   const [tab, setTab] = useState<'pending' | 'scheduled' | 'completed'>('pending');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const groups = {
     pending: labRequests.filter(r => r.status === 'pending_schedule'),
@@ -654,8 +740,10 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
             {rows.map((r: any) => {
               const daysLeft = Math.ceil((new Date(r.draw_by_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
               const urgencyColor = daysLeft <= 2 ? 'text-red-700' : daysLeft <= 7 ? 'text-amber-700' : 'text-emerald-700';
+              const expanded = expandedId === r.id;
               return (
-                <div key={r.id} className="p-4 flex items-center justify-between gap-3">
+                <div key={r.id}>
+                <div className="p-4 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium truncate">{r.patient_name}</p>
                     <p className="text-xs text-gray-500 truncate">
@@ -679,6 +767,11 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Badge variant="outline" className="text-[10px] capitalize">{r.status.replace(/_/g, ' ')}</Badge>
+                    <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] gap-1"
+                      title="Live tracking" onClick={() => setExpandedId(expanded ? null : r.id)}>
+                      <Activity className={`h-3.5 w-3.5 ${expanded ? 'text-[#B91C1C]' : 'text-gray-500'}`} />
+                      {expanded ? 'Hide' : 'Track'}
+                    </Button>
                     {r.status === 'pending_schedule' && (
                       <>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Copy link" onClick={() => handleCopyLink(r.access_token)}>
@@ -697,6 +790,14 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                       </Button>
                     )}
                   </div>
+                </div>
+                {expanded && (
+                  <div className="px-4 pb-4 bg-gray-50/50 border-t">
+                    <div className="pt-3">
+                      <LabRequestTimeline requestId={r.id} />
+                    </div>
+                  </div>
+                )}
                 </div>
               );
             })}

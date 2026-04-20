@@ -147,7 +147,10 @@ Deno.serve(async (req) => {
           recurring_booking_id: (draft as any).id,
         },
       },
-      success_url: `${origin}/dashboard/patient?subscription=active`,
+      // Hormozi trust ceremony: route to /welcome so the patient sees a proper
+      // "you paid ✓ · member #N · benefits" page before we dump them into the
+      // dashboard. Prevents the Suzanne-style "did my payment go through?" double-charge.
+      success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}&subscription=active`,
       cancel_url: `${origin}/dashboard/patient?subscription=cancel`,
     });
 

@@ -9,8 +9,110 @@
 // Response: { success: true, request_id, access_token, patient_url }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { nextAvailableSlots } from '../_shared/availability.ts';
-import { formatSlotsForSms } from '../_shared/preoffered-slots.ts';
+// NOTE: these used to import from ../_shared/. Inlined below because the MCP
+// edge-function deploy path doesn't bundle relative module imports cleanly.
+// Single source of truth for the library versions still lives at
+// supabase/functions/_shared/availability.ts and _shared/preoffered-slots.ts —
+// keep these two copies in sync with the originals when that file changes.
+
+type SupabaseClient = ReturnType<typeof createClient>;
+
+interface Slot { date: string; time: string; label: string }
+
+function fmtTime(h: number, m: number): string {
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${hr}:${String(m).padStart(2, '0')} ${period}`;
+}
+function baseGrid(): string[] {
+  const g: string[] = [];
+  for (let h = 6; h < 12; h++) { g.push(fmtTime(h, 0)); g.push(fmtTime(h, 30)); }
+  return g;
+}
+function nowET(): Date { return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })); }
+function isoDate(d: Date): string { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function parseTime(t: string): { h: number; m: number } {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
+  if (!m) return { h: 0, m: 0 };
+  let h = parseInt(m[1], 10);
+  const mn = parseInt(m[2], 10);
+  const p = m[3].toUpperCase();
+  if (p === 'PM' && h !== 12) h += 12;
+  if (p === 'AM' && h === 12) h = 0;
+  return { h, m: mn };
+}
+function slotsAllowedForDate(dateIso: string, rules: any): string[] {
+  const grid = baseGrid();
+  const date = new Date(dateIso + 'T12:00:00');
+  const dow = date.getDay();
+  if (!Array.isArray(rules) || rules.length === 0) return dow === 0 ? [] : grid;
+  const rule = rules.find((r: any) => Array.isArray(r.dayOfWeek) && r.dayOfWeek.includes(dow));
+  if (!rule) return [];
+  return grid.filter(t => {
+    const { h, m } = parseTime(t);
+    const total = h * 60 + m;
+    return total >= rule.startHour * 60 && total < rule.endHour * 60;
+  });
+}
+async function getAvailableSlotsForDate(sb: SupabaseClient, _orgId: string, dateIso: string, rules: any) {
+  const allowed = slotsAllowedForDate(dateIso, rules);
+  if (allowed.length === 0) return baseGrid().map(t => ({ time: t, available: false }));
+  const dayStart = `${dateIso}T00:00:00`;
+  const dayEnd = `${dateIso}T23:59:59`;
+  const [apptResp, blockResp] = await Promise.all([
+    sb.from('appointments').select('appointment_time, status, duration_minutes, service_type').gte('appointment_date', dayStart).lte('appointment_date', dayEnd).neq('status', 'cancelled'),
+    sb.from('time_blocks' as any).select('start_date, end_date').lte('start_date', dateIso).gte('end_date', dateIso),
+  ]);
+  const BUF = 30, DUR = 30, FOOTPRINT = DUR + BUF;
+  const isBooked = (t: string): boolean => {
+    const { h: th, m: tm } = parseTime(t); const sMin = th * 60 + tm;
+    for (const a of apptResp.data || []) {
+      if (!a.appointment_time) continue;
+      const { h, m } = parseTime(String(a.appointment_time));
+      const aStart = h * 60 + m;
+      const dur = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : DUR;
+      const buf = a.service_type === 'in-office' ? 0 : BUF;
+      const aEnd = aStart + dur + buf;
+      if (sMin >= aStart && sMin < aEnd) return true;
+      if (sMin > aStart - FOOTPRINT && sMin < aStart) return true;
+    }
+    return false;
+  };
+  const fullyBlocked = (blockResp.data || []).length > 0;
+  const now = nowET();
+  const isToday = isoDate(now) === dateIso;
+  const hasLead = (t: string) => {
+    if (!isToday) return true;
+    const { h, m } = parseTime(t); return (h * 60 + m) >= (now.getHours() * 60 + now.getMinutes()) + 120;
+  };
+  return baseGrid().map(t => {
+    if (fullyBlocked) return { time: t, available: false };
+    if (!allowed.includes(t)) return { time: t, available: false };
+    if (!hasLead(t)) return { time: t, available: false };
+    if (isBooked(t)) return { time: t, available: false };
+    return { time: t, available: true };
+  });
+}
+async function nextAvailableSlots(sb: SupabaseClient, orgId: string, drawByIso: string, rules: any, count = 3): Promise<Slot[]> {
+  const results: Slot[] = [];
+  const drawBy = new Date(drawByIso + 'T23:59:59');
+  const d = new Date(nowET()); d.setDate(d.getDate() + 1); d.setHours(0, 0, 0, 0);
+  while (results.length < count && d.getTime() <= drawBy.getTime()) {
+    const di = isoDate(d);
+    const slots = await getAvailableSlotsForDate(sb, orgId, di, rules);
+    const first = slots.find(s => s.available);
+    if (first) {
+      const dateLabel = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      results.push({ date: di, time: first.time, label: `${dateLabel} ${first.time.replace(':00 ', '').toLowerCase()}` });
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return results;
+}
+function formatSlotsForSms(slots: Slot[]): string {
+  if (slots.length === 0) return '';
+  return slots.map((s, i) => `${i + 1}) ${s.label}`).join(' · ');
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -62,8 +164,12 @@ Deno.serve(async (req) => {
     const {
       organization_id, patient_name, patient_email, patient_phone,
       lab_order_file_path, draw_by_date, next_doctor_appt_date,
-      next_doctor_appt_notes, admin_notes,
+      next_doctor_appt_notes, admin_notes, billed_to,
     } = body || {};
+
+    // Validate billed_to if provided
+    const billedToClean: 'org' | 'patient' | null =
+      billed_to === 'org' || billed_to === 'patient' ? billed_to : null;
 
     if (!organization_id || !patient_name || !draw_by_date) {
       return new Response(JSON.stringify({ error: 'organization_id, patient_name, draw_by_date required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -124,6 +230,7 @@ Deno.serve(async (req) => {
         next_doctor_appt_notes: next_doctor_appt_notes?.trim() || null,
         admin_notes: admin_notes?.trim() || null,
         access_token: accessToken,
+        billed_to: billedToClean,
       })
       .select('*')
       .single();
@@ -202,17 +309,15 @@ Deno.serve(async (req) => {
     }
 
     // ── SMS ──────────────────────────────────────────────────────────────
-    // Pre-offer 3 quick-reply slots, now filtered by LIVE availability +
-    // the org's time_window_rules. Never offer a slot that's already taken.
-    const { data: orgRules } = await admin
-      .from('organizations').select('time_window_rules').eq('id', organization_id).maybeSingle();
-    const slots = await nextAvailableSlots(admin, organization_id, draw_by_date, orgRules?.time_window_rules, 3);
-    const slotsLine = slots.length > 0 ? `Reply ${formatSlotsForSms(slots)}. ` : '';
-
+    // Authentic, warm, professional. Frames the patient's appointment as
+    // exclusive: "your private booking link." No "Reply 1/2/3" friction.
     if (patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
       try {
-        const providerLast = providerDisplayName.split(' ').slice(-1)[0];
-        const smsBody = `ConveLabs: ${providerLast} at ${org.name} ordered your bloodwork by ${fmtDate(draw_by_date).replace(',', '')}${next_doctor_appt_date ? ` (before your ${fmtDate(next_doctor_appt_date).replace(',', '')} visit)` : ''}. ${slotsLine}Or pick a time: ${patientUrl}`;
+        const drawShort = fmtDate(draw_by_date).replace(',', '');
+        const nextShort = next_doctor_appt_date ? fmtDate(next_doctor_appt_date).replace(',', '') : '';
+        const fastingPart = fasting ? ' Fasting required — no food 12h before.' : '';
+        const nextVisitPart = nextShort ? ` to have results ready for your ${nextShort} visit` : '';
+        const smsBody = `Hi ${patientFirstName} — this is ConveLabs. ${org.name} has ordered your bloodwork through us.${fastingPart} Please schedule before ${drawShort}${nextVisitPart}. Your private booking link: ${patientUrl} · We look forward to serving you.`;
         const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
         const fd = new URLSearchParams({ To: normalizePhone(patient_phone), From: TWILIO_FROM, Body: smsBody });
         await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
@@ -225,8 +330,6 @@ Deno.serve(async (req) => {
 
     await admin.from('patient_lab_requests').update({
       patient_notified_at: new Date().toISOString(),
-      preoffered_slots: slots,
-      preoffered_slots_at: new Date().toISOString(),
     }).eq('id', inserted.id);
 
     return new Response(JSON.stringify({
