@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Home, Building2, Heart, Check, FlaskConical, Syringe, Handshake } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BookingFormValues } from '@/types/appointmentTypes';
 
 interface VisitTypeSelectorProps {
@@ -48,10 +47,10 @@ const VISIT_TYPES = [
   },
   {
     id: 'provider-partner',
-    name: 'Provider Partners',
-    subtitle: 'Select your provider',
+    name: 'Is your doctor one of these?',
+    subtitle: 'Discounted rate — partnered practices',
     price: null,
-    description: 'Booking through one of our partner practices? Select your provider for special pricing.',
+    description: 'Restoration Place, Elite Medical Concierge, NaturaMed, ND Wellness, Aristotle Education. Tap to pick yours.',
     icon: Handshake,
     gradient: 'from-emerald-500/10 to-emerald-600/5',
     borderColor: 'border-emerald-200 hover:border-emerald-400',
@@ -155,15 +154,18 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
         {VISIT_TYPES.map((type) => {
           const Icon = type.icon;
           const isSelected = selectedType === type.id || (type.id === 'provider-partner' && selectedType?.startsWith('partner-'));
+          const isPartnerCardExpanded = type.id === 'provider-partner' && (isSelected || showPartnerSelect);
 
           return (
             <div
               key={type.id}
               onClick={() => handleSelect(type.id)}
               className={`relative border-2 rounded-2xl p-5 cursor-pointer transition-all duration-300 backdrop-blur-sm ${
+                type.id === 'provider-partner' && isPartnerCardExpanded ? 'sm:col-span-2 lg:col-span-3' : ''
+              } ${
                 isSelected
-                  ? `bg-gradient-to-br ${type.gradient} ${type.selectedBorder} shadow-lg scale-[1.02]`
-                  : `bg-white/70 ${type.borderColor} hover:shadow-md hover:scale-[1.01]`
+                  ? `bg-gradient-to-br ${type.gradient} ${type.selectedBorder} shadow-lg`
+                  : `bg-white/70 ${type.borderColor} hover:shadow-md`
               }`}
               style={{
                 backdropFilter: 'blur(12px)',
@@ -204,31 +206,52 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
                 {type.description}
               </p>
 
-              {/* Subtle glass shine effect */}
-              <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/40 via-transparent to-transparent pointer-events-none" />
+              {/* INLINE partner picker — expands INSIDE the selected card (no scrolling on mobile) */}
+              {isPartnerCardExpanded && (
+                <div
+                  className="mt-4 pt-4 border-t-2 border-emerald-200 space-y-3"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <label className="text-sm font-semibold text-emerald-900 flex items-center gap-1.5">
+                    <Check className="h-4 w-4" /> Which practice is yours?
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {PROVIDER_PARTNERS.map((partner) => {
+                      const isPicked = selectedPartner === partner.id || selectedType === `partner-${partner.id}`;
+                      return (
+                        <button
+                          key={partner.id}
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handlePartnerSelect(partner.id); }}
+                          className={`text-left p-3 rounded-lg border-2 transition-all active:scale-[0.98] ${
+                            isPicked
+                              ? 'border-emerald-500 bg-white shadow-md'
+                              : 'border-emerald-200 bg-white/80 hover:border-emerald-400 hover:bg-white'
+                          }`}
+                        >
+                          <div className="font-semibold text-sm text-gray-900">{partner.name}</div>
+                          <div className="text-emerald-700 font-bold text-base mt-0.5">${partner.price}<span className="text-xs text-gray-500 font-normal"> / visit</span></div>
+                          {isPicked && (
+                            <div className="inline-flex items-center gap-1 text-[10px] text-emerald-700 mt-1 font-semibold"><Check className="h-3 w-3" /> Selected</div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-emerald-800 bg-emerald-50 rounded-lg p-2">
+                    <strong>Not sure?</strong> If your doctor's office isn't listed, tap outside and pick <strong>Mobile Blood Draw</strong> instead.
+                  </p>
+                </div>
+              )}
+
+              {/* Subtle glass shine effect — hidden when expanded to not overlap content */}
+              {!isPartnerCardExpanded && (
+                <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/40 via-transparent to-transparent pointer-events-none" />
+              )}
             </div>
           );
         })}
       </div>
-
-      {/* Provider Partner dropdown */}
-      {showPartnerSelect && (
-        <div className="max-w-md mx-auto space-y-3 bg-emerald-50/80 backdrop-blur-sm border border-emerald-200 rounded-xl p-4">
-          <label className="text-sm font-medium">Select your provider</label>
-          <Select value={selectedPartner} onValueChange={handlePartnerSelect}>
-            <SelectTrigger className="bg-white/80 backdrop-blur-sm">
-              <SelectValue placeholder="Choose provider..." />
-            </SelectTrigger>
-            <SelectContent>
-              {PROVIDER_PARTNERS.map((partner) => (
-                <SelectItem key={partner.id} value={partner.id}>
-                  {partner.name} — ${partner.price}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
     </div>
   );
 };
