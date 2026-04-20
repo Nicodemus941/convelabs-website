@@ -140,13 +140,19 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     // Smart skip logic based on visit type
     if (currentStep === BookingStep.VisitType) {
       const vt = methods.getValues('serviceDetails.visitType') || '';
-      // Provider partners skip service+date — go straight to Patient Info
+      // BUG FIX 2026-04-20: provider-partner visits used to skip the date
+      // picker entirely (jumping straight to PatientInfo) — under the
+      // assumption that the provider pre-scheduled the visit. But regular
+      // web patients picking a provider-partner on the public booking page
+      // still need to pick a date + time like any other visit type. The
+      // truly pre-scheduled flow uses /lab-request/:token, not this page.
+      //
+      // So: partner visits now auto-set service to the partner and continue
+      // to ServiceAndDate, just like every other visit type.
       if (vt.startsWith('partner-')) {
         methods.setValue('serviceDetails.selectedService', vt);
-        setCurrentStep(BookingStep.PatientInfo);
-        return;
       }
-      // Therapeutic and specialty-kit skip service selection
+      // Therapeutic and specialty-kit skip service selection (not date picker)
       if (['therapeutic', 'specialty-kit', 'in-office'].includes(vt)) {
         methods.setValue('serviceDetails.selectedService', vt);
       }
@@ -159,14 +165,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   const handleBack = () => {
     prevStepRef.current = currentStep;
-    const vt = methods.getValues('serviceDetails.visitType') || '';
-
-    // If on Patient Info and was a provider partner, go back to Visit Type
-    if (currentStep === BookingStep.PatientInfo && vt.startsWith('partner-')) {
-      setCurrentStep(BookingStep.VisitType);
-      return;
-    }
-
+    // Simple walkback — every visit type now uses the same step sequence
+    // (VisitType → ServiceAndDate → PatientInfo → LocationAndLabOrder → Checkout).
+    // The prior "partner- skip" path was removed because it left patients
+    // unable to pick a date; back-walk must mirror the forward flow.
     setCurrentStep(prev => prev - 1);
   };
 
