@@ -80,6 +80,17 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   // Must be defined before useEffects that reference it
   const serviceId = getValues('serviceDetails.visitType') || getValues('serviceDetails.selectedService');
 
+  // Hormozi "don't pitch what doesn't fit" — these partner flows are typically
+  // one-time draws (student physicals, specialty panels), so membership upsell
+  // has near-zero conversion and adds checkout friction. Existing members still
+  // get their tier discount via TIER_PRICING; we just don't pitch NEW signups
+  // here. Right audience, right offer.
+  const ONE_TIME_DRAW_SERVICES = new Set([
+    'partner-nd-wellness',
+    'partner-aristotle-education',
+  ]);
+  const suppressMembershipUpsell = ONE_TIME_DRAW_SERVICES.has(String(serviceId));
+
   // Auto-detect membership by patient email (no auth calls — avoid lock)
   React.useEffect(() => {
     const email = getValues('patientDetails.email');
@@ -303,8 +314,10 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
-        {/* Inline Hormozi upsell — non-members only, and only if no bundle already picked */}
-        {memberTier === 'none' && !bundledSubscription && breakdown.servicePrice >= 50 && (
+        {/* Inline Hormozi upsell — non-members only, and only if no bundle already picked.
+            Also suppressed on one-time-draw partner flows (ND Wellness, Aristotle)
+            where the audience rarely returns — upsell would just hurt conversion. */}
+        {memberTier === 'none' && !bundledSubscription && breakdown.servicePrice >= 50 && !suppressMembershipUpsell && (
           <SubscribeAtCheckoutCard
             patientEmail={String(watch('patientDetails.email') || '')}
             patientName={`${watch('patientDetails.firstName') || ''} ${watch('patientDetails.lastName') || ''}`.trim()}
