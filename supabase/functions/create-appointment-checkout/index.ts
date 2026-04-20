@@ -786,9 +786,10 @@ Deno.serve(async (req) => {
       line_items: lineItems,
       metadata,
       ...(sessionMode === 'payment' ? { payment_intent_data: { metadata } } : { subscription_data: { metadata } }),
-      success_url: metadata.service_type === 'membership'
-        ? `${origin}/dashboard/patient?membership=success`
-        : `${origin}/book-now?status=success&session_id={CHECKOUT_SESSION_ID}`,
+      // Hormozi trust ceremony: every paid booking lands on /welcome where
+      // the patient sees a clear "you paid ✓ · benefits" page. Prevents the
+      // Suzanne-style double-charge pattern on every appointment flow.
+      success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: metadata.service_type === 'membership'
         ? `${origin}/pricing?status=cancel`
         : `${origin}/book-now?status=cancel`,
