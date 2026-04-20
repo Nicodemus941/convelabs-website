@@ -29,7 +29,12 @@ export interface PriceBreakdown {
 // Membership tiers
 export type MembershipTier = 'none' | 'member' | 'vip' | 'concierge';
 
-// Per-service pricing by membership tier
+// Per-service pricing by membership tier.
+// Hormozi rule: member's tier price is the floor — they never pay more than
+// their tier price on ANY service, including partner visits. Combined with
+// the server-side `lowest_wins` stacking rule on each partner org, this
+// guarantees every member sees their $99/$199/$399/yr benefit on every
+// single visit, regardless of referral source.
 const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
   'dev-testing':        { none: 1,   member: 1,   vip: 1,   concierge: 1 },
   'mobile':             { none: 150, member: 130, vip: 115, concierge: 99 },
@@ -39,6 +44,13 @@ const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
   'specialty-kit-genova': { none: 200, member: 180, vip: 165, concierge: 150 },
   'therapeutic':        { none: 200, member: 180, vip: 165, concierge: 150 },
   'additional':         { none: 75,  member: 55,  vip: 45,  concierge: 35 },
+  // Partner services — members must see a discount here too, otherwise the
+  // $199/yr VIP fee feels worthless when referred in by a partner practice.
+  'partner-restoration-place':       { none: 125,   member: 115,   vip: 99,    concierge: 85 },
+  'partner-naturamed':               { none: 85,    member: 80,    vip: 75,    concierge: 65 },
+  'partner-nd-wellness':             { none: 85,    member: 80,    vip: 75,    concierge: 65 },
+  'partner-elite-medical-concierge': { none: 72.25, member: 72.25, vip: 72.25, concierge: 72.25 }, // org_covers — patient pays 0; this is for display only
+  'partner-aristotle-education':     { none: 185,   member: 185,   vip: 185,   concierge: 185 },   // org_covers — patient pays 0
 };
 
 // Membership annual fees

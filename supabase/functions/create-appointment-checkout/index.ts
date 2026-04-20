@@ -22,6 +22,15 @@ const TIER_PRICING: Record<string, Record<MemberTier, number>> = {
   'specialty-kit':        { none: 185, member: 165, vip: 150, concierge: 135 },
   'specialty-kit-genova': { none: 200, member: 180, vip: 165, concierge: 150 },
   'therapeutic':          { none: 200, member: 180, vip: 165, concierge: 150 },
+  // Partner services — apply tier discounts so members always see a benefit.
+  // Combined with each org's `lowest_wins` stacking rule, the server takes
+  // min(partner_rate, member_tier_rate) → member can never pay MORE than
+  // their tier entitles them to, from any referral source.
+  'partner-restoration-place':       { none: 125,   member: 115,   vip: 99,    concierge: 85 },
+  'partner-naturamed':               { none: 85,    member: 80,    vip: 75,    concierge: 65 },
+  'partner-nd-wellness':             { none: 85,    member: 80,    vip: 75,    concierge: 65 },
+  'partner-elite-medical-concierge': { none: 72.25, member: 72.25, vip: 72.25, concierge: 72.25 },
+  'partner-aristotle-education':     { none: 185,   member: 185,   vip: 185,   concierge: 185 },
 };
 
 /**
