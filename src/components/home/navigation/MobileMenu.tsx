@@ -2,7 +2,7 @@
 import React, { useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { X, Loader2, User, LogOut, Settings, Phone, Calendar, DollarSign, MapPin, Info, Stethoscope, Star, Crown } from "lucide-react";
+import { X, Loader2, User, LogOut, Settings, Phone, Calendar, DollarSign, MapPin, Info, Stethoscope, Star, Crown, Shield, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
@@ -217,20 +217,64 @@ const MobileMenu = ({ isMenuOpen, setIsMenuOpen }: MobileMenuProps) => {
                   </button>
                 </div>
               ) : (
-                <div className="border-t pt-4 flex gap-3">
+                <div className="border-t pt-4 space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground px-1">Sign in to your portal</p>
+
+                  {/* Patient portal */}
                   <Link
-                    to="/login"
-                    className="flex-1 py-3 text-center text-foreground font-medium border rounded-xl hover:bg-muted transition-all"
+                    to="/login?redirect=/dashboard/patient"
                     onClick={handleMenuItemClick}
+                    className="flex items-center gap-3 p-3.5 rounded-xl border-2 border-blue-100 bg-blue-50/50 hover:bg-blue-50 active:scale-[0.99] transition-all"
                   >
-                    Login
+                    <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                      <User className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-gray-900">Patient Portal</div>
+                      <div className="text-[11px] text-gray-500">Appointments & records</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-gray-400" />
                   </Link>
+
+                  {/* Staff portal */}
+                  <Link
+                    to="/login?redirect=/dashboard"
+                    onClick={handleMenuItemClick}
+                    className="flex items-center gap-3 p-3.5 rounded-xl border-2 border-emerald-100 bg-emerald-50/50 hover:bg-emerald-50 active:scale-[0.99] transition-all"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                      <Shield className="h-4 w-4 text-emerald-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-gray-900">Staff Portal</div>
+                      <div className="text-[11px] text-gray-500">Admin & phlebotomist</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-gray-400" />
+                  </Link>
+
+                  {/* Provider portal */}
+                  <Link
+                    to="/provider"
+                    onClick={handleMenuItemClick}
+                    className="flex items-center gap-3 p-3.5 rounded-xl border-2 border-purple-100 bg-purple-50/50 hover:bg-purple-50 active:scale-[0.99] transition-all"
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
+                      <Stethoscope className="h-4 w-4 text-purple-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-gray-900">Provider Portal</div>
+                      <div className="text-[11px] text-gray-500">Partner orgs · SMS sign-in</div>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-gray-400" />
+                  </Link>
+
+                  {/* Create account */}
                   <Link
                     to="/signup"
-                    className="flex-1 py-3 text-center bg-conve-red text-white font-semibold rounded-xl hover:bg-conve-red-dark transition-all"
                     onClick={handleMenuItemClick}
+                    className="block text-center py-3 text-sm font-semibold text-conve-red hover:underline"
                   >
-                    Sign Up
+                    Don't have an account? Create one →
                   </Link>
                 </div>
               )}

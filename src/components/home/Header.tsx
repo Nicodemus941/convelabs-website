@@ -47,7 +47,7 @@ const Header = () => {
         {/* Desktop Navigation */}
         <DesktopNavigation />
 
-        {/* Header CTA Buttons - Desktop Only */}
+        {/* Header CTA Buttons — desktop: Membership + Book Now · tablet/mobile: Book Now only (Membership in hamburger) */}
         <div className="hidden lg:flex items-center space-x-3">
           <Link
             to="/pricing"
@@ -62,6 +62,13 @@ const Header = () => {
             Book Now
           </button>
         </div>
+        {/* Book Now always visible on tablet (md-lg) — primary revenue CTA */}
+        <button
+          onClick={() => bookingModal?.openModal('header_cta')}
+          className="hidden md:flex lg:hidden px-4 py-2 text-sm font-semibold bg-conve-red text-white rounded-md hover:bg-red-700 transition-colors mr-2"
+        >
+          Book Now
+        </button>
 
         {/* Auth Section */}
         <UserAuthSection />
