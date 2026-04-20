@@ -21,6 +21,7 @@ import CancelAppointmentModal from './CancelAppointmentModal';
 import NoShowAppointmentModal from './NoShowAppointmentModal';
 import AppointmentLabOrdersPanel from './AppointmentLabOrdersPanel';
 import StaffRefundButton from '@/components/admin/StaffRefundButton';
+import AssignOrgButton from '@/components/admin/AssignOrgButton';
 
 interface AppointmentDetailModalProps {
   appointment: any | null;
@@ -295,6 +296,15 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               </Button>
             </>
           )}
+          {/* Assign to org — admin 1-click */}
+          <AssignOrgButton
+            appointmentId={appt.id}
+            patientEmail={appt.patient_email}
+            currentOrgId={appt.organization_id}
+            currentOrgName={appt.organization_name || null}
+            onAssigned={onUpdate}
+          />
+
           {/* Staff refund button — only shows for paid appointments */}
           {appt.payment_status === 'completed' && (appt.total_amount || 0) > 0 && (
             <StaffRefundButton
