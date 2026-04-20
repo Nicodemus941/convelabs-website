@@ -649,8 +649,8 @@ const PatientProfileTab: React.FC = () => {
                 setSelectedPatient({ ...p, first_name: editForm.firstName, last_name: editForm.lastName, email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null, address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null, gate_code: editForm.gateCode || null, insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null });
                 setEditModalOpen(false);
                 // Refresh patient list (exclude soft-deleted)
-                const { data } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
-                setAllPatients(data || []);
+                const { data: refreshed } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
+                setAllPatients(refreshed || []);
               }}>Save Changes</Button>
               </div>
             </div>
