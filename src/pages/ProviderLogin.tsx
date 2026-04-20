@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Loader2, Shield, ArrowRight, AlertCircle, CheckCircle, MessageSquare, Mail } from 'lucide-react';
+import { Loader2, Shield, ArrowRight, AlertCircle, CheckCircle, MessageSquare, Mail, Sparkles, Building2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 /**
  * PROVIDER PORTAL LOGIN (`/provider`)
@@ -33,7 +34,7 @@ import { Loader2, Shield, ArrowRight, AlertCircle, CheckCircle, MessageSquare, M
  * by verify, identical to any other Supabase sign-in.
  */
 
-type View = 'login' | 'method-choice' | 'sms-code-entry' | 'email-sent';
+type View = 'login' | 'method-choice' | 'sms-code-entry' | 'email-sent' | 'claim-form' | 'claim-sent' | 'claim-not-found';
 
 const ProviderLogin: React.FC = () => {
   const [params] = useSearchParams();
@@ -47,6 +48,35 @@ const ProviderLogin: React.FC = () => {
   const [phoneHint, setPhoneHint] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState('');
   const [resendCountdown, setResendCountdown] = useState(0);
+  const [claimEmail, setClaimEmail] = useState('');
+  const [claimResult, setClaimResult] = useState<{ display_name?: string; partner_url?: string } | null>(null);
+
+  const requestClaim = async (emailInput: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/request-provider-claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailInput.trim().toLowerCase() }),
+      });
+      const j = await resp.json();
+      if (resp.status === 429) { toast.error('Too many requests — try again in a few minutes'); return; }
+      if (j.ok) {
+        setClaimResult({ display_name: j.display_name });
+        setView('claim-sent');
+      } else if (j.reason === 'not_found') {
+        setClaimResult({ partner_url: j.partner_url });
+        setView('claim-not-found');
+      } else {
+        setError(j.detail || 'Could not process request');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Could not process');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Pre-fill org name from email (public lookup, portal-enabled orgs only)
   useEffect(() => {
@@ -292,6 +322,94 @@ const ProviderLogin: React.FC = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* Claim portal views — for providers who've never activated */}
+        {view === 'claim-form' && (
+          <Card className="shadow-lg border-emerald-200 mt-3">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-5 w-5 text-emerald-600" /> Claim your portal
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Enter your practice email. If we have you on file, we'll email a one-click activation link.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={(e) => { e.preventDefault(); requestClaim(claimEmail); }} className="space-y-3">
+                <div>
+                  <Label className="text-xs">Practice email</Label>
+                  <Input type="email" value={claimEmail} onChange={e => setClaimEmail(e.target.value)} placeholder="office@practice.com" autoFocus required />
+                </div>
+                {error && (
+                  <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>
+                )}
+                <div className="flex gap-2">
+                  <Button type="button" variant="ghost" onClick={() => { setError(null); setView('login'); }}>Cancel</Button>
+                  <Button type="submit" disabled={loading || !claimEmail} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5">
+                    {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Checking…</> : <>Send my activation link →</>}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {view === 'claim-sent' && (
+          <Card className="shadow-lg border-emerald-200 mt-3">
+            <CardContent className="py-6 text-center space-y-3">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+                <CheckCircle className="h-7 w-7 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-base font-bold text-gray-900">We found you</p>
+                {claimResult?.display_name && <p className="text-sm text-gray-600 mt-1">{claimResult.display_name}</p>}
+                <p className="text-sm text-gray-600 mt-2">
+                  Activation link sent to <strong>{claimEmail}</strong>. Check your inbox (and spam) — tap the link and you're in your portal.
+                </p>
+              </div>
+              <p className="text-[11px] text-gray-500">Didn't get it in 2 min? <button onClick={() => requestClaim(claimEmail)} className="text-[#B91C1C] underline">Resend</button></p>
+              <Button variant="outline" onClick={() => setView('login')}>Back to sign in</Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {view === 'claim-not-found' && (
+          <Card className="shadow-lg border-amber-200 mt-3">
+            <CardContent className="py-6 text-center space-y-3">
+              <Building2 className="h-10 w-10 text-amber-600 mx-auto" />
+              <div>
+                <p className="text-base font-bold text-gray-900">Not on file yet — but easy to fix</p>
+                <p className="text-sm text-gray-600 mt-2">
+                  We don't have a practice registered for <strong>{claimEmail}</strong>. Two paths forward:
+                </p>
+              </div>
+              <div className="space-y-2 pt-1">
+                <Button asChild className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5">
+                  <a href={claimResult?.partner_url || '/partner-with-us'}>Partner with us → 60-second form</a>
+                </Button>
+                <Button variant="outline" onClick={() => { setClaimEmail(''); setView('claim-form'); }}>
+                  Try a different email
+                </Button>
+                <p className="text-[11px] text-gray-500 pt-1">
+                  Or call <a href="tel:+19415279169" className="text-[#B91C1C]">(941) 527-9169</a> and Nico will set you up personally.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* First-time-provider CTA — shows only on main login view */}
+        {view === 'login' && (
+          <div className="mt-3 text-center">
+            <button
+              onClick={() => { setError(null); setClaimEmail(email); setView('claim-form'); }}
+              className="text-sm text-[#B91C1C] hover:underline font-medium inline-flex items-center gap-1"
+            >
+              <Sparkles className="h-4 w-4" />
+              First time? Claim your practice's portal →
+            </button>
+          </div>
+        )}
 
         <p className="text-center text-xs text-gray-400 mt-6">
           Need help? Email <a href="mailto:info@convelabs.com" className="text-[#B91C1C] hover:underline">info@convelabs.com</a>
