@@ -34,6 +34,7 @@ export function computeReadiness(appointment: {
   lab_destination?: string | null;
   address?: string | null;
   notes?: string | null;
+  booking_source?: string | null;
 }): ReadinessResult {
   const reasons: string[] = [];
   const isDeliveryVisit = !NON_DELIVERY_SERVICES.has(appointment.service_type);
@@ -45,6 +46,22 @@ export function computeReadiness(appointment: {
       label: 'In-Office',
       reasons: [],
       colorClass: 'bg-gray-100 text-gray-600 border-gray-200',
+    };
+  }
+
+  // (2026-04-20) Admin-booked visits skip readiness checks entirely.
+  // The online booking flow REQUIRES the patient to upload a lab order + pick
+  // a lab destination before they can pay — so for online bookings, a missing
+  // field means something's actually wrong. Admin-scheduled visits (booking_
+  // source='manual') often have the order on paper, a known partner workflow,
+  // or the admin has the info offline. Showing BLOCKED for those is noise.
+  const isOnlineBooking = appointment.booking_source === 'online';
+  if (!isOnlineBooking) {
+    return {
+      status: 'na',
+      label: '',
+      reasons: [],
+      colorClass: '',
     };
   }
 
