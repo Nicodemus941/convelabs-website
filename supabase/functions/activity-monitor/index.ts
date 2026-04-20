@@ -93,11 +93,61 @@ async function sendEmail(subject: string, html: string): Promise<string | null> 
   try { return JSON.parse(body).id || null; } catch { return null; }
 }
 
+// ── CHECKOUT LIVENESS PROBE ─────────────────────────────────────────
+// Hormozi principle: "Money moves through a small number of doors. Watch
+// those doors like a hawk." After the 503 boot-error on create-checkout-
+// session that killed payments for hours before a patient reported it,
+// we probe every checkout fn every 5 minutes. Any 5xx = immediate SMS,
+// bypasses quiet hours (errors always fire).
+const CHECKOUT_FUNCTIONS = [
+  'create-checkout-session',
+  'create-appointment-checkout',
+  'create-subscription-checkout',
+  'create-addon-checkout',
+  'create-bundle-checkout',
+  'create-credit-pack-checkout',
+];
+
+async function probeCheckoutFunctions(): Promise<{ down: string[]; summary: string | null }> {
+  const down: string[] = [];
+  await Promise.all(CHECKOUT_FUNCTIONS.map(async (name) => {
+    try {
+      // OPTIONS is cheap, doesn't trigger real work, but still requires the
+      // module to boot successfully. A BOOT_ERROR 503 will show up here.
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': 'https://www.convelabs.com',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'authorization, content-type',
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+      // OPTIONS should return 2xx or 204. 5xx = dead.
+      if (resp.status >= 500) {
+        down.push(`${name}:${resp.status}`);
+      }
+    } catch (e: any) {
+      // Timeout or network error = degraded
+      down.push(`${name}:timeout`);
+    }
+  }));
+  return {
+    down,
+    summary: down.length > 0 ? `CHECKOUT DOWN: ${down.join(', ')}` : null,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // ── CHECK CHECKOUT LIVENESS FIRST (P0 signal) ───────────────
+    // Run the probe in parallel with the other queries below, but if
+    // anything is down, we alert immediately regardless of other events.
+    const checkoutProbePromise = probeCheckoutFunctions();
 
     // Watermark: time of the most recent alert (skip heartbeat rows so
     // silent intervals don't advance the cursor past unseen activity).
@@ -166,18 +216,38 @@ Deno.serve(async (req) => {
     const fList = (foundingClaims.data as any[]) || [];
     const eList = (errors.data as any[]) || [];
 
+    // ── Resolve the checkout liveness probe (fired in parallel) ─
+    const checkout = await checkoutProbePromise;
+    const checkoutDown = checkout.down.length > 0;
+
     const totalEvents = pList.length + iList.length + bList.length + mList.length + eList.length;
 
-    // ── NO NEW ACTIVITY: heartbeat + exit ──────────────────────
-    if (totalEvents === 0) {
+    // ── NO NEW ACTIVITY + CHECKOUT OK: heartbeat + exit ────────
+    if (totalEvents === 0 && !checkoutDown) {
       await supabase.from('activity_alerts_log').insert({
         alert_type: 'heartbeat',
         summary: 'No new activity',
         channel: 'none',
-        details: { since, checked_at: nowIso() },
+        details: { since, checked_at: nowIso(), checkout_probe: 'ok' },
       });
-      return new Response(JSON.stringify({ success: true, activity: false, since }), {
+      return new Response(JSON.stringify({ success: true, activity: false, checkout: 'ok', since }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── CHECKOUT DOWN: SMS IMMEDIATELY (bypasses quiet hours) ──
+    // This is P0 — every minute checkout is down, we lose money. Don't
+    // wait for a patient to complain. Don't respect 9-8 quiet hours.
+    if (checkoutDown) {
+      const urgentMsg = `🚨🚨 CHECKOUT DOWN 🚨🚨\n${checkout.summary}\n\nPatients CANNOT pay right now.\nDeploy fix ASAP: supabase functions deploy <fn>`;
+      const smsRes = await sendSMS(urgentMsg);
+      await supabase.from('activity_alerts_log').insert({
+        alert_type: 'error',
+        summary: checkout.summary || 'Checkout probe failed',
+        channel: 'sms',
+        recipients: `sms:${OWNER_PHONE}`,
+        twilio_sid: smsRes.sid,
+        details: { probe: 'checkout', down_functions: checkout.down, checked_at: nowIso() },
       });
     }
 

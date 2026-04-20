@@ -62,7 +62,10 @@ Deno.serve(async (req) => {
       // Check if this is an upgrade
       const isUpgrade = metadata.is_upgrade === 'true';
 
-      // Check if this is a Founding Member signup (before August 1st)
+      // isFoundingMember is INTENT only — the webhook calls claim_founding_seat
+      // RPC post-insert to actually assign seat number 1-50 atomically.
+      // The real "is this person a founder?" truth is founding_member_number
+      // IS NOT NULL in user_memberships. See Founding 50 system (2026-04-19).
       const isFoundingMember = metadata.founding_member === 'true';
 
       // Whitelist of known metadata.type values. Anything not on this list
@@ -400,30 +403,13 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
-    // For founding members, set the next billing date to September 1st
-    let nextBillingOverride = null;
-    if (isFoundingMember) {
-      // Check if current date is before August 1st
-      const currentDate = new Date();
-      const launchDate = new Date(currentDate.getFullYear(), 7, 1); // August 1st
-      
-      if (currentDate < launchDate) {
-        // Set next billing to September 1st
-        nextBillingOverride = new Date(currentDate.getFullYear(), 8, 1); // September 1st
-        
-        // Also update the subscription in Stripe to bill on September 1st
-        try {
-          await stripe.subscriptions.update(subscriptionId, {
-            billing_cycle_anchor: Math.floor(nextBillingOverride.getTime() / 1000),
-            proration_behavior: 'none'
-          });
-          
-          console.log(`Updated subscription ${subscriptionId} billing cycle to September 1st`);
-        } catch (stripeErr) {
-          console.error(`Failed to update Stripe subscription billing cycle: ${stripeErr.message}`);
-        }
-      }
-    }
+    // NOTE (2026-04-19): removed stale 2025-launch-era logic that forced
+    // billing_cycle_anchor to Sept 1 for "founding members" (defined as
+    // signed-up-before-Aug-1-2025). The Founding 50 concept now means
+    // "one of the first 50 VIP seats" (claim_founding_seat RPC), not a
+    // date window. Membership is active and billing cycle anchored on
+    // the payment date — the default Stripe behavior.
+    const nextBillingOverride = null;
 
     // Upsert the user membership — Stripe replays checkout.session.completed
     // on retry (or when an admin resends from the dashboard). Before we had
@@ -1494,27 +1480,11 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
-    // Founding-member Sept-1 billing anchor — mirrors handleMembershipSignup
-    // lines 369-390. Was missing here, so founding members who upgraded lost
-    // their promised Sept-1 billing date and got charged on an arbitrary day
-    // (breaking a founding-member promise → trust damage).
-    let nextBillingOverride: Date | null = null;
-    if (isFoundingMember) {
-      const currentDate = new Date();
-      const launchDate = new Date(currentDate.getFullYear(), 7, 1); // Aug 1
-      if (currentDate < launchDate) {
-        nextBillingOverride = new Date(currentDate.getFullYear(), 8, 1); // Sept 1
-        try {
-          await stripe.subscriptions.update(subscriptionId, {
-            billing_cycle_anchor: Math.floor(nextBillingOverride.getTime() / 1000),
-            proration_behavior: 'none',
-          });
-          console.log(`[upgrade] preserved founding-member Sept-1 anchor on sub ${subscriptionId}`);
-        } catch (stripeErr: any) {
-          console.error(`[upgrade] failed to re-anchor founding-member billing: ${stripeErr.message}`);
-        }
-      }
-    }
+    // NOTE (2026-04-19): removed Sept-1 billing-anchor override for this
+    // upgrade path too. Membership activates + bills on the payment date
+    // from the moment the subscription is created. Founding 50 seat-claim
+    // is handled via claim_founding_seat RPC, not a date window.
+    const nextBillingOverride: Date | null = null;
 
     // Transfer remaining credits from old plan
     const remainingCredits = currentMembership ?

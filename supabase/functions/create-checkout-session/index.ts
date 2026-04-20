@@ -238,12 +238,13 @@ Deno.serve(async (req) => {
       return corsResponse(500, { error: 'Failed to create customer' });
     }
     
-    // Check if currently in founding member period (before August 1st)
-    const currentDate = new Date();
-    const launchDate = new Date(currentDate.getFullYear(), 7, 1); // August 1st
-    const isFoundingMember = currentDate < launchDate;
-
-    console.log('Is founding member:', isFoundingMember);
+    // NOTE (2026-04-19): removed the pre-Aug-1-2025 launch-window check.
+    // "Founding Member" status is now determined server-side via the
+    // Founding 50 seat-claim RPC in stripe-webhook (claim_founding_seat),
+    // not a date window. Membership begins the moment payment clears —
+    // no more "begins August 1st" messaging anywhere.
+    const isFoundingMember = false; // kept only to satisfy downstream references; stale concept
+    console.log('Legacy isFoundingMember flag (unused — real check now in webhook):', isFoundingMember);
 
     // Define success and cancel URLs with origin or fallback
     const origin = req.headers.get('origin') || 'https://www.convelabs.com';
@@ -279,10 +280,10 @@ Deno.serve(async (req) => {
           price_data: {
             currency: 'usd',
             product_data: {
-              name: `${isEssentialCare ? 'Essential Care: ' : (isSupernovaMember && billingFrequency === 'annual' && !isEssentialCare) ? 'Supernova: ' : (isFoundingMember ? 'Founding Member: ' : '')}${isUpgrade ? 'Upgrade to ' : ''}${plan.name} Membership (${billingFrequency})`,
-              description: isConciergePlan ? 
-                `Concierge plan with ${patientCount} patients, ${plan.credits_per_year} credits/year` : 
-                `${plan.credits_per_year}${bonusCredits > 0 ? ' + ' + bonusCredits + ' bonus' : ''} credits/year${isFoundingMember ? ' - Membership begins August 1st' : ''}`,
+              name: `${isEssentialCare ? 'Essential Care: ' : (isSupernovaMember && billingFrequency === 'annual' && !isEssentialCare) ? 'Supernova: ' : ''}${isUpgrade ? 'Upgrade to ' : ''}${plan.name} Membership (${billingFrequency})`,
+              description: isConciergePlan
+                ? `Concierge plan with ${patientCount} patients, ${plan.credits_per_year} credits/year`
+                : `${plan.name} membership · ${plan.credits_per_year}${bonusCredits > 0 ? ' + ' + bonusCredits + ' bonus' : ''} credits/year · active immediately upon payment`,
             },
             unit_amount: amount,
             recurring: {

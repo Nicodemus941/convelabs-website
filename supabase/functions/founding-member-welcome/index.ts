@@ -17,6 +17,24 @@ Deno.serve(async (req) => {
     // Parse the request body
     const { userId, email, fullName, planName } = await req.json();
 
+    // ⚠️ DEPRECATED 2026-04-19: this function is not called from anywhere
+    // in the codebase. Its entire narrative ("membership begins August 1st",
+    // "next billing September 1st") is 2025-launch-era content that no
+    // longer reflects reality — memberships activate the moment payment
+    // clears. The post-visit `membership_upsell` sequence now handles
+    // welcome messaging with the Founding 50 narrative.
+    //
+    // Returning 410 Gone so if someone accidentally wires this back in,
+    // they'll see a loud error instead of a stale email going to a patient.
+    return new Response(
+      JSON.stringify({
+        error: 'founding-member-welcome is deprecated (2025-launch-era). Use post_visit_sequences membership_upsell step instead.',
+      }),
+      { status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+    // --- DEAD CODE BELOW (kept for git-history reference only) ---
+    // eslint-disable-next-line no-unreachable
     if (!userId || !email) {
       return new Response(
         JSON.stringify({ error: 'User ID and email are required' }),
