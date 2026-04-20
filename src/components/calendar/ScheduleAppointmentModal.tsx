@@ -1092,9 +1092,22 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <Input value={invoiceMemo} onChange={e => setInvoiceMemo(e.target.value)} placeholder="e.g. Patient: John Doe - Annual Wellness" />
             </div>
 
+            {/* Visible hint when the Review button is disabled — tells the
+                admin exactly what's missing so "button does nothing" never
+                appears to be a bug again. */}
+            {!canGoToStep3 && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                ⚠ Pick {(!date ? 'a Date' : '')}{(!date && !time) ? ' and ' : ''}{(!time ? 'a Time' : '')} above to continue.
+              </div>
+            )}
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
               <Button onClick={() => {
+                console.log('[schedule] Next:Review clicked', { date, time, selectedOrg: selectedOrg?.name, canGoToStep3 });
+                if (!date || !time) {
+                  toast.error('Pick a date and time before continuing');
+                  return;
+                }
                 // Partner time-window guard: reject advance if admin picked an org
                 // and the time is outside the org's allowed window.
                 if (selectedOrg && Array.isArray(selectedOrg.time_window_rules) && time && date) {
