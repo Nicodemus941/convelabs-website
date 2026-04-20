@@ -61,6 +61,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   appointment, open, onClose, onUpdate,
 }) => {
   const [patientData, setPatientData] = useState<any>(null);
+  const [staffName, setStaffName] = useState<string>('');
   const [showInsurance, setShowInsurance] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
@@ -75,6 +76,29 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   });
 
   const appt = appointment;
+
+  // Resolve assigned phleb's display name from staff_profiles (join auth.users
+  // via a view or fallback to email). Prevents the modal from showing "Assigned
+  // Staff" / hardcoded names when a real phleb is on file.
+  useEffect(() => {
+    if (!appt?.phlebotomist_id) { setStaffName(''); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('staff_profiles')
+        .select('user_id, phone')
+        .eq('user_id', appt.phlebotomist_id)
+        .maybeSingle();
+      if (!data) { setStaffName(''); return; }
+      // Hydrate display name from user_profiles / auth metadata (public.users view)
+      const { data: u } = await supabase
+        .from('users' as any)
+        .select('first_name, last_name, email')
+        .eq('id', appt.phlebotomist_id)
+        .maybeSingle();
+      const nm = u ? `${(u as any).first_name || ''} ${(u as any).last_name || ''}`.trim() || (u as any).email : '';
+      setStaffName(nm || 'Assigned Staff');
+    })();
+  }, [appt?.phlebotomist_id]);
 
   useEffect(() => {
     if (!appt) return;
@@ -439,7 +463,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               <div className="text-right">
                 <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Staff</p>
                 <p className="text-sm text-gray-900">
-                  {appt.phlebotomist_id === '91c76708-8c5b-4068-92c6-323805a3b164' ? 'Nico Jean-Baptiste' : 'Assigned Staff'}
+                  {staffName || (appt.phlebotomist_id ? 'Assigned Staff' : <span className="text-gray-400">Unassigned</span>)}
                 </p>
               </div>
             </div>
