@@ -51,15 +51,52 @@ Deno.serve(async (req) => {
       throw new Error('Appointment not found');
     }
 
-    // Parse patient name from notes if needed
-    let patientName = 'a patient';
-    if (appointment.notes) {
+    // Resolve patient name — columns are source of truth; notes is fallback
+    let patientName = (appointment.patient_name || '').trim();
+    if (!patientName && appointment.notes) {
       const match = appointment.notes.match(/Patient:\s*([^|]+)/);
       if (match) patientName = match[1].trim();
     }
+    if (!patientName) patientName = 'a patient';
 
-    // Build message
-    const message = `New ConveLabs appointment assigned: ${patientName} on ${appointment.appointment_date}${appointment.appointment_time ? ' at ' + appointment.appointment_time : ''}. Location: ${appointment.address || 'TBD'}. Open your dashboard for details.`;
+    // Format the date as "Fri, Apr 24" instead of raw ISO
+    let dateStr = appointment.appointment_date || '';
+    try {
+      const d = new Date(String(appointment.appointment_date).slice(0, 10) + 'T12:00:00');
+      dateStr = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    } catch { /* keep raw */ }
+
+    // Format the time as "8:00 AM" instead of "08:00:00"
+    let timeStr = appointment.appointment_time || '';
+    try {
+      const t = String(appointment.appointment_time || '');
+      const m = t.match(/^(\d{1,2}):(\d{2})/);
+      if (m) {
+        let h = parseInt(m[1], 10);
+        const mm = m[2];
+        const period = h >= 12 ? 'PM' : 'AM';
+        h = h > 12 ? h - 12 : h === 0 ? 12 : h;
+        timeStr = `${h}:${mm} ${period}`;
+      }
+    } catch { /* keep raw */ }
+
+    const svc = appointment.service_name || appointment.service_type || 'Blood Draw';
+    const patientPhone = appointment.patient_phone || '';
+    const revenue = appointment.total_amount ? `$${Number(appointment.total_amount).toFixed(2)}` : '';
+    const duration = appointment.duration_minutes ? ` (${appointment.duration_minutes}min)` : '';
+
+    // Build message — Hormozi rule: every piece of info the phleb needs to
+    // start the day WITHOUT opening the app. Date in human format, patient
+    // name + phone for call-ahead, address, service, revenue.
+    const parts = [
+      `🩸 New ConveLabs booking`,
+      `${patientName}${patientPhone ? ` · ${patientPhone}` : ''}`,
+      `${dateStr}${timeStr ? ' @ ' + timeStr : ''}${duration}`,
+      `${svc}${revenue ? ' · ' + revenue : ''}`,
+      `${appointment.address || 'Address TBD'}`,
+      `Dashboard: https://convelabs.com/dashboard`,
+    ];
+    const message = parts.filter(Boolean).join('\n');
 
     // Send via Twilio
     const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
