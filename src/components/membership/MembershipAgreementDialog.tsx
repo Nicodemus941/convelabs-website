@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Shield, AlertTriangle, FileText } from 'lucide-react';
 
 /**
@@ -154,12 +153,28 @@ const MembershipAgreementDialog: React.FC<Props> = ({ open, onClose, tier, onAgr
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <ScrollArea className="flex-1 px-5 py-4">
-            <pre className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap font-sans">
-              {agreementText}
-            </pre>
-          </ScrollArea>
+        {/*
+          Scrollable agreement body. CRITICAL:
+          - `min-h-0` must be present so this flex item can shrink BELOW its
+            content height — the flex default is `min-height: auto` which
+            stretches the container and swallows the overflow. Without
+            min-h-0, the inner content pushes the buttons off-screen and the
+            user cannot scroll past section 3c.
+          - Native `overflow-y-auto` is used instead of Radix ScrollArea —
+            Radix's viewport height calculation is unreliable inside nested
+            flex chains and was silently clipping the content on some
+            devices without showing a scrollbar.
+          - `overscroll-contain` prevents mobile rubber-band from scrolling
+            the page behind the modal.
+        */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
+          <pre className="text-xs text-gray-800 leading-relaxed whitespace-pre-wrap font-sans">
+            {agreementText}
+          </pre>
+          {/* Visual hint that there's more content — fades into the body */}
+          <div className="text-center text-[10px] uppercase tracking-widest text-gray-300 mt-6">
+            — End of agreement —
+          </div>
         </div>
 
         {/* Confirmations */}
