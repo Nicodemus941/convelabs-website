@@ -22,6 +22,7 @@ import NoShowAppointmentModal from './NoShowAppointmentModal';
 import AppointmentLabOrdersPanel from './AppointmentLabOrdersPanel';
 import StaffRefundButton from '@/components/admin/StaffRefundButton';
 import AssignOrgButton from '@/components/admin/AssignOrgButton';
+import MarkSpecimenDeliveredButton from '@/components/admin/MarkSpecimenDeliveredButton';
 
 interface AppointmentDetailModalProps {
   appointment: any | null;
@@ -304,6 +305,19 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             currentOrgName={appt.organization_name || null}
             onAssigned={onUpdate}
           />
+
+          {/* Mark specimen delivered — fires org notification via DB trigger */}
+          {['completed', 'specimen_delivered', 'in_progress', 'en_route'].includes(appt.status) && (
+            <MarkSpecimenDeliveredButton
+              appointmentId={appt.id}
+              alreadyDelivered={!!(appt.delivered_at || appt.specimens_delivered_at)}
+              deliveredAt={appt.delivered_at || appt.specimens_delivered_at}
+              currentLabName={appt.specimen_lab_name}
+              currentTrackingId={appt.specimen_tracking_id}
+              orgNotifiedAt={appt.org_notified_delivery_at}
+              onDelivered={onUpdate}
+            />
+          )}
 
           {/* Staff refund button — only shows for paid appointments */}
           {appt.payment_status === 'completed' && (appt.total_amount || 0) > 0 && (
