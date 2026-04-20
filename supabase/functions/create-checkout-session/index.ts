@@ -62,12 +62,20 @@ Deno.serve(async (req) => {
       return corsResponse(400, { error: 'Invalid request body' });
     }
     
-    const { 
-      planId, 
-      billingFrequency, 
-      customerId, 
-      isConciergePlan, 
-      patientCount, 
+    // ── BOOT-ERROR FIX (Hormozi P0) ─────────────────────────────
+    // Old code used `const { billingFrequency, amount }` destructure
+    // but later reassigned billingFrequency to 'annual' (line 158) and
+    // redeclared `amount` with `let amount, interval` (line 172). Two
+    // TS errors that caused Deno to refuse to boot the module. Every
+    // Stripe checkout request returned 503. Checkout has been dead
+    // since this code was deployed.
+    //
+    // Fix: split out mutables, drop unused `amount` destructure.
+    const {
+      planId,
+      customerId,
+      isConciergePlan,
+      patientCount,
       guestCheckoutEmail,
       isSupernovaMember,
       supernovaAddOnId,
@@ -75,8 +83,9 @@ Deno.serve(async (req) => {
       couponCode,
       isGiftPurchase,
       metadata,
-      amount
     } = requestBody;
+    // These get reassigned below (Essential Care forces annual) — must be let
+    let billingFrequency: string = requestBody.billingFrequency;
     
     if (!planId) {
       console.error('Missing planId');
@@ -152,10 +161,12 @@ Deno.serve(async (req) => {
       return now < expirationDate;
     };
 
-    // Check if this is the Essential Care plan - if so, force annual billing
+    // Check if this is the Essential Care plan - if so, force annual billing.
+    // NOTE: billingFrequency is a `let` (see top of fn) specifically so this
+    // reassignment compiles. Don't convert it back to const.
     const isEssentialCare = plan.name === 'Essential Care';
     if (isEssentialCare) {
-      billingFrequency = 'annual';
+      billingFrequency = 'annually';
       console.log('Essential Care plan selected, forcing annual billing');
     }
 
