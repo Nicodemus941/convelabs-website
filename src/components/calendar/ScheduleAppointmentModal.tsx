@@ -450,8 +450,18 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       if (isAfterHours) { surchargeTotal += 50; surchargeItems.push('After-hours +$50'); }
       if (isSameDay) { surchargeTotal += 100; surchargeItems.push('Same-day +$100'); }
 
-      let finalPrice = basePrice + surchargeTotal;
+      // Companion-visit fee (tier-aware, computed above in previewBaseWithAddons).
+      // CRITICAL: must be included in finalPrice so the Stripe invoice charges
+      // the full amount. Prior bug (Cheryl Hanin / Ben Tov Ofer case 2026-04-21)
+      // included it in the UI preview but not in finalPrice, so the primary
+      // invoice went out at $150 instead of $225 and admin had to create a
+      // manual make-up invoice for $75.
+      const companionFeeApplied = addCompanion ? companionPrice : 0;
+      let finalPrice = basePrice + surchargeTotal + companionFeeApplied;
       let discountNote = surchargeItems.join(', ');
+      if (companionFeeApplied > 0) {
+        discountNote += (discountNote ? ' | ' : '') + `Companion visit +$${companionFeeApplied.toFixed(2)}${companionName ? ` (${companionName})` : ''}`;
+      }
       if (memberSavings > 0) {
         discountNote += (discountNote ? ' | ' : '') + `${detectedTier.toUpperCase()} member — saved $${memberSavings.toFixed(2)}`;
       }
