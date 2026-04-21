@@ -848,7 +848,17 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   href={`/pricing?tier=${tier || 'member'}`}
                   className={`${colorBtn} text-white font-semibold rounded-lg py-3 text-center text-sm block transition`}
                 >
-                  View {tierName} membership →
+                  Become {tierName} for ${tierPrice}/yr — unlock now →
+                </a>
+                {/* Hormozi: every "no" is a conversation — but if they're ALREADY
+                    a member they just need to prove it. Login path returns to
+                    the booking flow, and the tier-detection useEffect picks up
+                    their active membership by email → slot unlocks naturally. */}
+                <a
+                  href={`/login?redirect=${encodeURIComponent(typeof window !== 'undefined' ? (window.location.pathname + window.location.search) : '/book-now')}`}
+                  className="w-full block text-center text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg py-2.5 transition hover:bg-gray-50"
+                >
+                  I'm already a {tierName} — sign in
                 </a>
                 <button
                   onClick={() => setUnlockSlot(null)}

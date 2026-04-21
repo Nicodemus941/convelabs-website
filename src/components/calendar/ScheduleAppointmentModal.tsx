@@ -667,6 +667,43 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         } catch (e) { console.warn('benefit stamp failed:', e); }
       }
 
+      // Emit upgrade_events so the Upgrades & ROI dashboard shows admin-
+      // created appointments too (previously only public-flow bookings
+      // fired these events → dashboard read zero for months). Status
+      // 'converted' immediately since admin bookings are pre-paid or
+      // invoiced — no pending intent state.
+      try {
+        if (detectedTier !== 'none' && memberSavings > 0) {
+          await supabase.from('upgrade_events' as any).insert({
+            event_type: 'membership_applied',
+            status: 'converted',
+            patient_email: patientEmail?.toLowerCase() || null,
+            patient_name: patientName || null,
+            patient_phone: patientPhone || null,
+            appointment_id: newAppt?.id || null,
+            revenue_cents: Math.round((finalPrice || 0) * 100),
+            potential_cents: Math.round((listPrice || 0) * 100),
+            discount_cents: Math.round(memberSavings * 100),
+            metadata: { tier: detectedTier, service_type: serviceType, source: 'admin_manual' },
+            converted_at: new Date().toISOString(),
+          });
+        }
+        if (redeemReferralIds.length > 0) {
+          await supabase.from('upgrade_events' as any).insert({
+            event_type: 'promo_applied',
+            status: 'converted',
+            patient_email: patientEmail?.toLowerCase() || null,
+            patient_name: patientName || null,
+            patient_phone: patientPhone || null,
+            appointment_id: newAppt?.id || null,
+            revenue_cents: Math.round((finalPrice || 0) * 100),
+            discount_cents: 0,
+            metadata: { source: 'admin_manual', credits_redeemed: redeemReferralIds.length },
+            converted_at: new Date().toISOString(),
+          });
+        }
+      } catch (e) { console.warn('upgrade_events emit failed (non-blocking):', e); }
+
       const statusMsg = isWaived ? ' (Fee waived)' : isVip ? ' (VIP)' : ' Invoice sent to patient.';
       toast.success(`Appointment scheduled!${statusMsg}${memberSavings > 0 ? ` (${detectedTier.toUpperCase()} saved $${memberSavings.toFixed(2)})` : ''}`);
       handleClose();
