@@ -47,6 +47,12 @@ interface Org {
   address_state?: string | null;
   address_zip?: string | null;
   office_phone?: string | null;
+  // Phase 4: NPI enrichment from CMS NPI Registry
+  npi_taxonomy?: string | null;
+  npi_registered_date?: string | null;
+  npi_enriched_at?: string | null;
+  followup_count?: number | null;
+  last_followup_at?: string | null;
 }
 
 interface OrgInvoice {
@@ -829,6 +835,24 @@ ConveLabs · (941) 527-9169`
                               <p className="text-xs text-muted-foreground mt-0.5">
                                 <User className="h-3 w-3 inline mr-1" />{org.ordering_physician}
                                 {org.npi && <span className="ml-2 text-gray-400">NPI {org.npi}</span>}
+                              </p>
+                            )}
+                            {org.npi_taxonomy && (
+                              <p className="text-[11px] mt-0.5">
+                                <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">
+                                  {org.npi_taxonomy}
+                                </span>
+                                {org.npi_registered_date && (
+                                  <span className="ml-2 text-gray-500">
+                                    practicing since {new Date(org.npi_registered_date).getFullYear()}
+                                  </span>
+                                )}
+                              </p>
+                            )}
+                            {org.followup_count && org.followup_count > 0 && (
+                              <p className="text-[11px] text-blue-700 mt-0.5">
+                                🔁 {org.followup_count} follow-up{org.followup_count > 1 ? 's' : ''} sent
+                                {org.last_followup_at && ` · last ${Math.floor((nowMs - new Date(org.last_followup_at).getTime()) / (1000 * 3600 * 24))}d ago`}
                               </p>
                             )}
                             {(org.address_street || org.address_city) && (
