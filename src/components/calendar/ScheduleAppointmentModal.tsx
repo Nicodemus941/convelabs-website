@@ -1142,6 +1142,52 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 </div>
               );
             })()}
+            {/* Member-hours warning — flags when the appointment's END time
+                spills past 12:00 PM (weekday members-only territory) AND
+                the patient is not a VIP/Concierge. Hormozi rule: admin
+                should know the moment they're scheduling against the
+                membership promise, not after the member complains. */}
+            {(() => {
+              if (!date || !time) return null;
+              // Parse time to hour float
+              let hh = 0, mm = 0;
+              if (time.includes('AM') || time.includes('PM')) {
+                const [tp, period] = time.split(' ');
+                const [h, m] = tp.split(':').map(Number);
+                hh = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
+                mm = m || 0;
+              } else { [hh, mm] = time.split(':').map(Number); }
+              const startHour = hh + (mm / 60);
+              const durationMap: Record<string, number> = {
+                'therapeutic': 75, 'specialty-kit': 75, 'specialty-kit-genova': 80,
+                'partner-nd-wellness': 65, 'partner-aristotle-education': 75,
+              };
+              const durationMin = durationMap[serviceType] || 60;
+              const endHour = startHour + (durationMin / 60);
+              const dow = new Date(date + 'T12:00:00').getDay();
+              const isWeekday = dow >= 1 && dow <= 5;
+              const crossesNoon = endHour > 12 && startHour < 14; // ends after noon but before VIP cutoff
+              const patientIsMember = detectedTier === 'vip' || detectedTier === 'concierge';
+              const isPartner = String(serviceType || '').startsWith('partner-');
+              if (!isWeekday || !crossesNoon || patientIsMember || isPartner) return null;
+              const endLabel = (() => {
+                const eh = Math.floor(endHour); const em = Math.round((endHour - eh) * 60);
+                const period = eh >= 12 ? 'PM' : 'AM';
+                const h12 = eh > 12 ? eh - 12 : eh === 0 ? 12 : eh;
+                return `${h12}:${String(em).padStart(2, '0')} ${period}`;
+              })();
+              return (
+                <div className="text-xs text-amber-900 bg-amber-50 border-2 border-amber-300 rounded p-2.5">
+                  <div className="font-bold mb-1">⚠ Running into member-only hours</div>
+                  <div>This visit starts at <strong>{time}</strong> and ends at <strong>{endLabel}</strong> ({durationMin} min). Mon–Fri after <strong>12:00 PM</strong> is reserved for VIP/Concierge members.</div>
+                  <div className="mt-1.5 text-[11px]">
+                    {detectedTier === 'none'
+                      ? <>This patient is a non-member. Either <strong>move the appointment earlier</strong>, <strong>upgrade them to VIP</strong>, or flip <strong>Override Availability</strong> above to book anyway.</>
+                      : <>This patient is a <strong>Member ($99/yr)</strong> tier — same window as non-members. VIP upgrade removes this restriction.</>}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
               <Button onClick={() => {

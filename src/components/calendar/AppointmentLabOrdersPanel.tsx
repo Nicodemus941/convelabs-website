@@ -122,6 +122,11 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
           failedCount++; continue;
         }
 
+        // Set uploaded_by to current user id. Required by the
+        // "Patients can upload" RLS policy and satisfies NOT NULL if set.
+        // For admins, the "Admins can manage all lab orders" policy takes
+        // precedence but uploaded_by should still be recorded for audit.
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
         const { data: inserted, error: insErr } = await supabase
           .from('appointment_lab_orders')
           .insert({
@@ -133,6 +138,7 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
             mime_type: file.type || 'application/octet-stream',
             page_count: pages,
             ocr_status: 'pending',
+            uploaded_by: currentUser?.id || null,
           })
           .select('id')
           .single();
@@ -143,7 +149,10 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
             toast.info(`${file.name} is already attached to this chart`);
             dupeCount++; continue;
           }
-          toast.error(`Failed to attach ${file.name}`);
+          // Surface the real error — was silently swallowed before, which
+          // made "upload not accepting it" appear as a UI bug
+          console.error('[lab-order insert] failed:', insErr);
+          toast.error(`Failed to attach ${file.name}: ${insErr.message}`, { duration: 8000 });
           failedCount++; continue;
         }
 
