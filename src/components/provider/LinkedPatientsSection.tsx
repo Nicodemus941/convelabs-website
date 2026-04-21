@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle } from 'lucide-react';
+import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 
 /**
@@ -78,6 +78,17 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
     });
   };
 
+  // Hormozi "minimize friction on reorder": one-click re-request for a
+  // single patient. Pre-selects just them + opens the same bulk modal
+  // so the partner gets the full knobs (fasting, draw-by, notes) without
+  // a second UI surface to maintain.
+  const requestSameAsLast = (name: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelected(new Set([name]));
+    setBulkOpen(true);
+  };
+
   const toggleAll = () => {
     if (selected.size === patients.length) setSelected(new Set());
     else setSelected(new Set(patients.map(p => p.patient_name)));
@@ -130,6 +141,24 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             message: `📋 BULK lab request from provider: ${rows.length} patient${rows.length === 1 ? '' : 's'}. Draw by ${drawBy}.${fastingRequired ? ' Fasting.' : ''} Check admin → Lab requests.`,
           },
         });
+      } catch { /* non-blocking */ }
+
+      // HIPAA-aware: send each patient a consent/notification SMS so the
+      // request doesn't land as a surprise. Patient can reply STOP to
+      // opt out of further SMS, or click the access_token link in their
+      // existing reminder cron flow to schedule. Non-blocking per patient.
+      // Quiet-hours gate is applied in send-sms-notification.
+      try {
+        for (const r of rows) {
+          if (!r.patient_phone) continue;
+          const firstName = r.patient_name.split(' ')[0] || 'there';
+          const site = typeof window !== 'undefined' ? window.location.origin : 'https://convelabs.com';
+          const link = `${site}/lab-request/${r.access_token}`;
+          const body = `Hi ${firstName}, your doctor's office requested new labs through ConveLabs. Pick a time that works for you: ${link}${fastingRequired ? ' (Fasting required.)' : ''} Reply STOP to opt out.`;
+          supabase.functions.invoke('send-sms-notification', {
+            body: { to: r.patient_phone, message: body, category: 'reminder' },
+          }).catch(() => { /* non-blocking per-patient */ });
+        }
       } catch { /* non-blocking */ }
 
       toast.success(`Submitted ${count || rows.length} lab request${(count || rows.length) === 1 ? '' : 's'}. Patients will be notified.`);
@@ -206,6 +235,20 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                       </p>
                     )}
                   </div>
+                  {/* Per-row "request same as last time" — zero-friction reorder.
+                      Hormozi: every extra click on a repeat purchase is revenue
+                      you leave with the customer. */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="flex-shrink-0 h-8 text-[11px]"
+                    onClick={(e) => requestSameAsLast(p.patient_name, e)}
+                    title="Request labs again for this patient (single-click reorder)"
+                  >
+                    <RotateCw className="h-3 w-3 sm:mr-1" />
+                    <span className="hidden sm:inline">Request again</span>
+                  </Button>
                 </label>
               );
             })}
