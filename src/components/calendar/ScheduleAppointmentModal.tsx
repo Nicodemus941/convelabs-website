@@ -102,6 +102,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [isVip, setIsVip] = useState(false);
   const [discountType, setDiscountType] = useState<'none' | 'percentage' | 'fixed' | 'waive' | 'custom'>('none');
   const [discountValue, setDiscountValue] = useState('');
+
+  // Companion-visit add-on — admin books a couple/family together in one flow.
+  // Hormozi: every time a patient books, ask "anyone else at the same address?"
+  // Tier-aware price mirrors TIER_PRICING['additional']: none=$75, member=$55,
+  // vip=$45, concierge=$35. Creates a second appointment row linked to the
+  // primary via `family_group_id` metadata so reporting stays clean.
+  const [addCompanion, setAddCompanion] = useState(false);
+  const [companionName, setCompanionName] = useState('');
+  const [companionDob, setCompanionDob] = useState('');
+  const [companionRelationship, setCompanionRelationship] = useState<'Spouse' | 'Child' | 'Parent' | 'Sibling' | 'Other'>('Spouse');
   const [invoiceMemo, setInvoiceMemo] = useState('');
   const [orgBilling, setOrgBilling] = useState(false);
 
@@ -354,11 +364,22 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   if (date === new Date().toISOString().split('T')[0]) previewSurcharges.push({ label: 'Same-Day', amount: 100 });
   const previewBasePrice = SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150;
   const previewSurchargeTotal = previewSurcharges.reduce((s, x) => s + x.amount, 0);
+  // Companion price: tier-aware. Non-member $75, Member $55, VIP $45, Concierge $35.
+  const companionPrice = (() => {
+    const tier = detectedTier;
+    if (tier === 'concierge') return 35;
+    if (tier === 'vip') return 45;
+    if (tier === 'member') return 55;
+    return 75;
+  })();
+  const companionAdd = addCompanion ? companionPrice : 0;
+
+  const previewBaseWithAddons = previewBasePrice + previewSurchargeTotal + companionAdd;
   const previewTotal = discountType === 'waive' ? 0
     : discountType === 'custom' && discountValue ? Math.max(parseFloat(discountValue) || 0, 0)
-    : discountType === 'percentage' && discountValue ? Math.round((previewBasePrice + previewSurchargeTotal) * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100
-    : discountType === 'fixed' && discountValue ? Math.max((previewBasePrice + previewSurchargeTotal) - (parseFloat(discountValue) || 0), 0)
-    : previewBasePrice + previewSurchargeTotal;
+    : discountType === 'percentage' && discountValue ? Math.round(previewBaseWithAddons * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100
+    : discountType === 'fixed' && discountValue ? Math.max(previewBaseWithAddons - (parseFloat(discountValue) || 0), 0)
+    : previewBaseWithAddons;
 
   const handleSubmit = async () => {
     console.log('handleSubmit triggered', { patientName, serviceType, date, time, discountType });
@@ -551,6 +572,54 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       }
 
       console.log('Appointment created:', newAppt.id);
+
+      // Companion visit — create a second appointment row linked to this one
+      // via family_group_id. Same address, same time, tier-aware price.
+      // Both appointments share the same phleb + time slot; phleb handles
+      // both in one visit window but each gets its own clinical chart.
+      if (addCompanion && companionName.trim()) {
+        try {
+          const familyGroupId = newAppt.id; // use primary's id as the group id
+          await supabase.from('appointments').update({ family_group_id: familyGroupId }).eq('id', newAppt.id);
+          const companionPayload: any = {
+            ...appointmentPayload,
+            patient_name: companionName.trim(),
+            patient_email: null, // companion shares billing; email/sms routes to primary
+            patient_phone: null,
+            patient_id: null, // will be back-filled if we find a tenant_patients row; otherwise standalone
+            total_amount: companionPrice,
+            service_price: companionPrice,
+            surcharge_amount: 0,
+            invoice_status: 'not_required', // billed on primary invoice, not duplicated
+            payment_status: 'completed',
+            family_group_id: familyGroupId,
+            companion_role: companionRelationship,
+            notes: `Companion of ${patientName}${companionDob ? ` · DOB ${companionDob}` : ''} · rel: ${companionRelationship} · billed on primary appt ${newAppt.id}`,
+          };
+          delete companionPayload.stripe_checkout_session_id;
+          const { error: compErr } = await supabase.from('appointments').insert([companionPayload]);
+          if (compErr) {
+            console.error('Companion appointment creation failed:', compErr);
+            toast.error(`Companion visit not created: ${compErr.message}`);
+          } else {
+            console.log('Companion appointment created for', companionName);
+            // Emit upgrade event for dashboard tracking
+            await supabase.from('upgrade_events' as any).insert({
+              event_type: 'companion_click',
+              status: 'converted',
+              patient_email: patientEmail?.toLowerCase() || null,
+              patient_name: patientName || null,
+              appointment_id: newAppt.id,
+              revenue_cents: Math.round(companionPrice * 100),
+              discount_cents: Math.round((75 - companionPrice) * 100),
+              metadata: { source: 'admin_manual', companion_name: companionName, companion_role: companionRelationship, tier: detectedTier },
+              converted_at: new Date().toISOString(),
+            }).catch(() => {});
+          }
+        } catch (e) {
+          console.warn('Companion creation exception (non-blocking):', e);
+        }
+      }
 
       // Self-healing data: if admin typed a new/corrected address or gate_code
       // for a known patient, write it back to tenant_patients so the next
@@ -969,6 +1038,47 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             <div>
               <Label>Notes</Label>
               <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Special instructions, gate code, parking..." rows={2} />
+            </div>
+
+            {/* Companion Visit add-on — couples/families booking together.
+                Tier-aware pricing so members get their rightful discount. */}
+            <div className={`border-2 rounded-lg p-3 ${addCompanion ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
+              <div className="flex items-start gap-3">
+                <Checkbox id="companion-visit" checked={addCompanion} onCheckedChange={(c) => setAddCompanion(c === true)} className="mt-1" />
+                <div className="flex-1">
+                  <label htmlFor="companion-visit" className="text-sm font-semibold cursor-pointer block">
+                    👨‍👩‍👧 Add a companion visit (+${companionPrice})
+                  </label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Same address, same time slot. {detectedTier !== 'none'
+                      ? <><strong>{detectedTier.toUpperCase()} rate</strong> — $75 for non-members, ${companionPrice} for this patient.</>
+                      : <>Available at member rate (${detectedTier === 'member' ? 55 : detectedTier === 'vip' ? 45 : detectedTier === 'concierge' ? 35 : 55}) if they join today.</>}
+                  </p>
+                </div>
+              </div>
+              {addCompanion && (
+                <div className="mt-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-[11px]">Companion name *</Label>
+                      <Input value={companionName} onChange={e => setCompanionName(e.target.value)} placeholder="Jane Smith" className="h-9" />
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Relationship</Label>
+                      <select value={companionRelationship} onChange={e => setCompanionRelationship(e.target.value as any)} className="w-full h-9 border rounded-md px-2 text-sm bg-white">
+                        <option>Spouse</option><option>Child</option><option>Parent</option><option>Sibling</option><option>Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">Companion DOB</Label>
+                    <Input type="date" value={companionDob} onChange={e => setCompanionDob(e.target.value)} className="h-9" />
+                  </div>
+                  <p className="text-[11px] text-blue-800 bg-white/60 rounded p-1.5">
+                    Creates a second appointment row linked to {patientName || 'the primary'} via family_group_id. Tubes + supplies scale; one invoice covers both.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Pricing & Invoicing */}
