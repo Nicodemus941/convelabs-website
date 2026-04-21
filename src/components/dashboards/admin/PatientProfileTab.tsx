@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
+import RecurringGapsCard from './RecurringGapsCard';
 
 const PatientProfileTab: React.FC = () => {
   const bookingModal = useBookingModalSafe();
@@ -312,6 +313,9 @@ const PatientProfileTab: React.FC = () => {
           patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
           onSuccess={() => loadPatientData(p)}
         />
+
+        {/* Recurring-series gap detector — only renders if gaps exist. */}
+        <RecurringGapsCard patientId={p.id} onGapsFilled={() => loadPatientData(p)} />
 
         {/* Patient Info Card */}
         <Card className="shadow-sm">
