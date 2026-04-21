@@ -272,7 +272,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // Bundle: patient prepays for additional future visits at a discount
       const bundleExtra = parseFloat(String((data as any).bundleExtra || 0)) || 0;
       const bundleCount = parseInt(String((data as any).bundleCount || 0), 10) || 0;
-      const finalSubtotal = Math.max(breakdown.subtotal - referralDiscount + bundleExtra, 0);
+      // Family-member add-on(s) — same tier-aware price CheckoutStep computed.
+      // CRITICAL: include in finalSubtotal so Stripe charges the patient the
+      // full amount. Prior bug (2026-04-21 admin-side analog: Ben Tov Ofer /
+      // Cheryl Hanin case) had this number in the UI total but not in the
+      // Stripe session → primary invoice missing the companion fee.
+      const familyMemberExtra = parseFloat(String((data as any).familyMemberExtra || 0)) || 0;
+      const finalSubtotal = Math.max(
+        breakdown.subtotal - referralDiscount + bundleExtra + familyMemberExtra,
+        0
+      );
 
       // Lab destination — where the specimen gets delivered after draw.
       // Collected by LabDestinationSelector into form data.labOrder.labDestination
