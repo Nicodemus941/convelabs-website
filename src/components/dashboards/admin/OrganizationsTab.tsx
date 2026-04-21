@@ -31,6 +31,22 @@ interface Org {
   locked_price_cents?: number | null;
   org_invoice_price_cents?: number | null;
   member_stacking_rule?: 'lowest_wins' | 'partner_only' | 'org_covers' | null;
+  // Partnership flywheel fields (Phase 1 migration)
+  source?: 'manual' | 'discovered_from_ocr' | 'partner_signup' | null;
+  discovered_from_lab_order?: boolean | null;
+  first_discovered_at?: string | null;
+  last_referral_at?: string | null;
+  referral_count?: number | null;
+  outreach_status?: 'untouched' | 'emailed' | 'called' | 'signed' | 'declined' | 'merged' | null;
+  outreached_at?: string | null;
+  outreach_note?: string | null;
+  npi?: string | null;
+  ordering_physician?: string | null;
+  address_street?: string | null;
+  address_city?: string | null;
+  address_state?: string | null;
+  address_zip?: string | null;
+  office_phone?: string | null;
 }
 
 interface OrgInvoice {
@@ -239,11 +255,136 @@ const OrganizationsTab: React.FC = () => {
     if (selectedOrg) fetchInvoices(selectedOrg.id);
   };
 
-  const filtered = orgs.filter(o => !searchQuery || o.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  // Directory excludes unconfirmed discovered rows — those live in the
+  // Discovered tab until the admin approves/signs them.
+  const filtered = orgs.filter(o => {
+    if (o.source === 'discovered_from_ocr' && !['signed'].includes(String(o.outreach_status))) return false;
+    return !searchQuery || o.name.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
-  // ── Organizations list view is split into two tabs: Directory + Outreach.
+  // ── Organizations list view tabs: Directory / Discovered / Outreach.
   //    Detail view (when an org is clicked) bypasses tabs entirely.
-  const [activeTab, setActiveTab] = useState<'directory' | 'outreach'>('directory');
+  const [activeTab, setActiveTab] = useState<'directory' | 'discovered' | 'outreach'>('directory');
+
+  // Discovered = auto-created from lab order OCR. Still needs admin to
+  // reach out → confirm → activate → promote to real partner.
+  const discoveredOrgs = orgs.filter(o =>
+    o.source === 'discovered_from_ocr' && o.outreach_status !== 'signed' && o.outreach_status !== 'declined' && o.outreach_status !== 'merged'
+  );
+  // Beacon: red if any discovered org has ≥3 referrals still untouched
+  // OR any untouched org with a referral within the last 48h.
+  const nowMs = Date.now();
+  const hotBeacon = discoveredOrgs.some(o => {
+    const isHot = (o.referral_count || 0) >= 3 && o.outreach_status === 'untouched';
+    const isFresh = o.last_referral_at && (nowMs - new Date(o.last_referral_at).getTime()) < 48 * 3600 * 1000 && o.outreach_status === 'untouched';
+    return isHot || isFresh;
+  });
+
+  // Outreach modal state for a single discovered org
+  const [outreachOrg, setOutreachOrg] = useState<Org | null>(null);
+  const [outreachDraftSubject, setOutreachDraftSubject] = useState('');
+  const [outreachDraftBody, setOutreachDraftBody] = useState('');
+  const [outreachSending, setOutreachSending] = useState(false);
+  const [discoveredPatientsMap, setDiscoveredPatientsMap] = useState<Record<string, string[]>>({});
+
+  // Load patient names linked to each discovered org so the outreach
+  // template can reference real names ("James, Sandra, Diana"). Runs
+  // whenever the discovered list changes.
+  useEffect(() => {
+    if (discoveredOrgs.length === 0) { setDiscoveredPatientsMap({}); return; }
+    (async () => {
+      const ids = discoveredOrgs.map(o => o.id);
+      const { data } = await supabase
+        .from('appointment_organizations' as any)
+        .select('organization_id, appointment_id')
+        .in('organization_id', ids);
+      if (!data) return;
+      const apptIds = Array.from(new Set((data as any[]).map(r => r.appointment_id).filter(Boolean)));
+      if (apptIds.length === 0) return;
+      const { data: appts } = await supabase
+        .from('appointments')
+        .select('id, patient_name')
+        .in('id', apptIds);
+      const apptName = new Map((appts || []).map((a: any) => [a.id, a.patient_name]));
+      const map: Record<string, string[]> = {};
+      for (const link of (data as any[])) {
+        const nm = apptName.get(link.appointment_id);
+        if (!nm) continue;
+        if (!map[link.organization_id]) map[link.organization_id] = [];
+        if (!map[link.organization_id].includes(nm)) map[link.organization_id].push(nm);
+      }
+      setDiscoveredPatientsMap(map);
+    })();
+  }, [discoveredOrgs.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openOutreachModal = (org: Org) => {
+    const names = discoveredPatientsMap[org.id] || [];
+    const physicianFirstName = (org.ordering_physician || '').split(',').slice(-1)[0]?.trim().split(/\s+/)[0] || 'Dr.';
+    const physicianLastName = (org.ordering_physician || '').split(',')[0]?.trim() || org.name;
+    const greetingName = (org.ordering_physician || '').includes(',')
+      ? `Dr. ${physicianLastName}`
+      : (org.ordering_physician || `the team at ${org.name}`);
+    const patientList = names.length > 0
+      ? (names.length === 1 ? names[0] : names.slice(0, 3).join(', ') + (names.length > 3 ? `, +${names.length - 3} more` : ''))
+      : 'several patients';
+
+    setOutreachDraftSubject(`Your patients are using ConveLabs — a quick partnership idea`);
+    setOutreachDraftBody(
+`Hi ${greetingName},
+
+I noticed we've drawn blood for ${names.length > 0 ? names.length : 'a handful'} of your patients recently (${patientList})${names.length > 0 ? '' : ''}.
+
+Each was paying $125-150 out of pocket for a mobile draw. We'd like to discuss a partnership rate for your practice — your patients pay $85, you get a priority line + on-site STAT draws when you need them, same-day results routing to your EMR.
+
+Thursday 2 PM or Friday 10 AM — 10 minutes either way.
+
+Thanks,
+Nico Jean-Baptiste
+ConveLabs · (941) 527-9169`
+    );
+    setOutreachOrg(org);
+  };
+
+  const sendOutreach = async () => {
+    if (!outreachOrg) return;
+    const recipient = outreachOrg.contact_email || outreachOrg.billing_email;
+    if (!recipient) {
+      toast.error('No email on file for this practice yet. Add contact_email first, or use the phone to reach out.');
+      return;
+    }
+    setOutreachSending(true);
+    try {
+      const { error: emailErr } = await supabase.functions.invoke('send-one-off-email', {
+        body: {
+          to: recipient,
+          subject: outreachDraftSubject,
+          body: outreachDraftBody.replace(/\n/g, '<br/>'),
+        },
+      });
+      if (emailErr) throw emailErr;
+      await supabase.from('organizations' as any).update({
+        outreach_status: 'emailed',
+        outreached_at: new Date().toISOString(),
+        outreach_note: `Sent to ${recipient} · subject: ${outreachDraftSubject}`,
+      }).eq('id', outreachOrg.id);
+      toast.success(`Outreach sent to ${recipient}`);
+      setOutreachOrg(null);
+      fetchOrgs();
+    } catch (e: any) {
+      toast.error(e?.message || 'Send failed');
+    } finally {
+      setOutreachSending(false);
+    }
+  };
+
+  const markDiscoveredStatus = async (org: Org, status: 'declined' | 'called' | 'signed') => {
+    await supabase.from('organizations' as any).update({
+      outreach_status: status,
+      ...(status === 'signed' ? { is_active: true } : {}),
+    }).eq('id', org.id);
+    toast.success(status === 'signed' ? `${org.name} marked active partner` : `Marked ${status}`);
+    fetchOrgs();
+  };
 
   // ── Outreach tab state ─────────────────────────────────────────
   const [inquiries, setInquiries] = useState<any[]>([]);
@@ -578,6 +719,14 @@ const OrganizationsTab: React.FC = () => {
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
         <TabsList>
           <TabsTrigger value="directory" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> Directory</TabsTrigger>
+          <TabsTrigger value="discovered" className="gap-1.5 relative">
+            <Sparkles className="h-3.5 w-3.5" /> Discovered
+            {discoveredOrgs.length > 0 && (
+              <span className={`ml-1 inline-flex items-center justify-center rounded-full text-[10px] font-bold leading-none min-w-[18px] h-[18px] px-1 ${hotBeacon ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-100 text-amber-800'}`}>
+                {discoveredOrgs.length}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="outreach" className="gap-1.5"><Megaphone className="h-3.5 w-3.5" /> Outreach</TabsTrigger>
         </TabsList>
 
@@ -610,6 +759,117 @@ const OrganizationsTab: React.FC = () => {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ─── DISCOVERED TAB ──────────────────────────────────────
+              Every lab order's ordering-provider block is parsed via
+              extractProviderBlock() in ocr-lab-order, then routed into
+              `organizations` via discover_or_link_provider_org RPC.
+              Hormozi beacon: untouched rows with ≥3 referrals pulse red. */}
+        <TabsContent value="discovered" className="space-y-4 mt-4">
+          <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white">
+            <CardContent className="p-4">
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 text-amber-600 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold text-sm">Partnership leads from lab orders</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Every lab order uploaded by a patient includes their ordering practice. We auto-extract it and surface it here so you can convert referral signal into partnership revenue.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {discoveredOrgs.length === 0 ? (
+            <Card className="shadow-sm border-dashed">
+              <CardContent className="p-12 text-center">
+                <Sparkles className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="font-semibold">No discovered practices yet</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  The moment a patient uploads a lab order, the ordering practice gets auto-captured here. Keep booking.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-3">
+              {discoveredOrgs
+                .sort((a, b) => (b.referral_count || 0) - (a.referral_count || 0))
+                .map(org => {
+                  const linkedNames = discoveredPatientsMap[org.id] || [];
+                  const lastRefDays = org.last_referral_at
+                    ? Math.floor((nowMs - new Date(org.last_referral_at).getTime()) / (1000 * 3600 * 24))
+                    : null;
+                  const isHot = (org.referral_count || 0) >= 3 && org.outreach_status === 'untouched';
+                  const statusColor = org.outreach_status === 'emailed' ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : org.outreach_status === 'called' ? 'bg-purple-50 text-purple-700 border-purple-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200';
+                  return (
+                    <Card key={org.id} className={`shadow-sm transition ${isHot ? 'ring-2 ring-red-400 border-red-200' : ''}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-start gap-4">
+                          <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0 ${isHot ? 'bg-red-100' : 'bg-amber-100'}`}>
+                            <Building2 className={`h-5 w-5 ${isHot ? 'text-red-600' : 'text-amber-600'}`} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-semibold">{org.name}</p>
+                              <Badge variant="outline" className={`text-[10px] ${statusColor}`}>
+                                {(org.outreach_status || 'untouched').toUpperCase()}
+                              </Badge>
+                              {isHot && (
+                                <Badge variant="outline" className="text-[10px] bg-red-500 text-white border-red-500 animate-pulse">
+                                  🔥 HOT LEAD
+                                </Badge>
+                              )}
+                            </div>
+                            {org.ordering_physician && (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                <User className="h-3 w-3 inline mr-1" />{org.ordering_physician}
+                                {org.npi && <span className="ml-2 text-gray-400">NPI {org.npi}</span>}
+                              </p>
+                            )}
+                            {(org.address_street || org.address_city) && (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {[org.address_street, org.address_city, org.address_state, org.address_zip].filter(Boolean).join(', ')}
+                              </p>
+                            )}
+                            {org.office_phone && (
+                              <p className="text-xs mt-0.5">
+                                <a href={`tel:${org.office_phone}`} className="text-[#B91C1C] hover:underline"><Phone className="h-3 w-3 inline mr-1" />{org.office_phone}</a>
+                              </p>
+                            )}
+                            <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
+                              <span className="font-semibold text-gray-900">{org.referral_count || 0} patient{(org.referral_count || 0) !== 1 ? 's' : ''}</span>
+                              {lastRefDays !== null && (
+                                <span>last referral {lastRefDays === 0 ? 'today' : lastRefDays === 1 ? 'yesterday' : `${lastRefDays}d ago`}</span>
+                              )}
+                            </div>
+                            {linkedNames.length > 0 && (
+                              <p className="text-[11px] text-gray-500 mt-1">Linked: {linkedNames.slice(0, 3).join(', ')}{linkedNames.length > 3 ? ` +${linkedNames.length - 3}` : ''}</p>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1.5 flex-shrink-0">
+                            <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-8 text-xs" onClick={() => openOutreachModal(org)}>
+                              <Mail className="h-3.5 w-3.5 mr-1" /> Reach out
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => markDiscoveredStatus(org, 'called')}>
+                              <Phone className="h-3.5 w-3.5 mr-1" /> Logged call
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-700 border-emerald-300" onClick={() => markDiscoveredStatus(org, 'signed')}>
+                              <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Signed
+                            </Button>
+                            <Button size="sm" variant="ghost" className="h-7 text-[11px] text-gray-500" onClick={() => markDiscoveredStatus(org, 'declined')}>
+                              Not interested
+                            </Button>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
             </div>
           )}
         </TabsContent>
@@ -803,6 +1063,67 @@ const OrganizationsTab: React.FC = () => {
           </Dialog>
         </TabsContent>
       </Tabs>
+
+      {/* Outreach modal — pre-filled Hormozi template, editable before send */}
+      <Dialog open={!!outreachOrg} onOpenChange={(v) => !v && setOutreachOrg(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-4 w-4 text-[#B91C1C]" />
+              Reach out to {outreachOrg?.name}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs">
+              <div className="font-semibold text-amber-900 mb-1">Lead signal</div>
+              <div className="text-amber-800">
+                {outreachOrg?.referral_count || 0} patient referral{(outreachOrg?.referral_count || 0) !== 1 ? 's' : ''} · discovered {outreachOrg?.first_discovered_at ? format(new Date(outreachOrg.first_discovered_at), 'MMM d') : '—'}
+                {outreachOrg?.office_phone && <span className="block mt-0.5">📞 {outreachOrg.office_phone}</span>}
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Send to</Label>
+              <Input
+                value={outreachOrg?.contact_email || outreachOrg?.billing_email || ''}
+                onChange={(e) => setOutreachOrg(outreachOrg ? { ...outreachOrg, contact_email: e.target.value } : null)}
+                placeholder="(add practice email before sending)"
+                className="h-9"
+              />
+              {!outreachOrg?.contact_email && !outreachOrg?.billing_email && (
+                <p className="text-[11px] text-amber-700 mt-1">
+                  No email on file yet. Try the office phone → ask the front desk for the practice manager's email, then paste it here.
+                </p>
+              )}
+            </div>
+            <div>
+              <Label className="text-xs">Subject</Label>
+              <Input value={outreachDraftSubject} onChange={e => setOutreachDraftSubject(e.target.value)} className="h-9" />
+            </div>
+            <div>
+              <Label className="text-xs">Message</Label>
+              <Textarea value={outreachDraftBody} onChange={e => setOutreachDraftBody(e.target.value)} rows={10} className="text-xs font-mono" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setOutreachOrg(null)}>Cancel</Button>
+            <Button
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+              onClick={async () => {
+                // If admin typed in a new email above, save it to the org first
+                if (outreachOrg && outreachOrg.contact_email) {
+                  await supabase.from('organizations' as any)
+                    .update({ contact_email: outreachOrg.contact_email })
+                    .eq('id', outreachOrg.id);
+                }
+                await sendOutreach();
+              }}
+              disabled={outreachSending || !(outreachOrg?.contact_email || outreachOrg?.billing_email)}
+            >
+              {outreachSending ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Sending…</> : <><Send className="h-4 w-4 mr-1" /> Send outreach</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Organization Modal */}
       <Dialog open={showAddOrg} onOpenChange={setShowAddOrg}>
