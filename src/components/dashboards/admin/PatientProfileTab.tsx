@@ -35,7 +35,21 @@ const PatientProfileTab: React.FC = () => {
   const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
-  const [invoiceForm, setInvoiceForm] = useState({ amount: '', description: '', memo: '' });
+  const [invoiceForm, setInvoiceForm] = useState({
+    amount: '',
+    description: '',
+    memo: '',
+    // New: explicit payer routing — patient (default) or organization.
+    // Prevents the Hormozi "ambiguous money-destination button" revenue leak.
+    recipient: 'patient' as 'patient' | 'organization',
+    // New: attach invoice to an existing appointment instead of creating a
+    // phantom. Empty string = create standalone invoice (old behavior).
+    attachAppointmentId: '' as string,
+    // New: when recipient='organization', admin can pick which org to bill.
+    // Defaults to the attached appointment's org if one is chosen.
+    orgId: '' as string,
+  });
+  const [allOrgs, setAllOrgs] = useState<any[]>([]);
   const [createPatientOpen, setCreatePatientOpen] = useState(false);
   const [newPatient, setNewPatient] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [isCreating, setIsCreating] = useState(false);
@@ -47,6 +61,13 @@ const PatientProfileTab: React.FC = () => {
   // Used to show the crown icon + tier next to member patients.
   const [memberTiers, setMemberTiers] = useState<Map<string, string>>(new Map());
   const [filter, setFilter] = useState<'all' | 'dormant' | 'incomplete' | 'members'>('all');
+
+  // Load orgs once so the invoice modal can let admin pick a billable org
+  useEffect(() => {
+    supabase.from('organizations').select('id, name, billing_email, contact_email, default_billed_to, org_invoice_price_cents, locked_price_cents')
+      .eq('is_active', true).order('name')
+      .then(({ data }) => setAllOrgs(data || []));
+  }, []);
 
   // Load all patients + appointment activity + active memberships on mount
   useEffect(() => {
@@ -657,38 +678,165 @@ const PatientProfileTab: React.FC = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Generate Invoice for Patient Modal */}
+        {/* Generate Invoice — attach to existing appointment OR standalone,
+            route to patient OR organization. Hormozi rule: make the money
+            destination explicit on every screen that touches money. */}
         <Dialog open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen}>
           <DialogContent className="max-w-md w-[95vw] sm:w-full">
             <DialogHeader><DialogTitle>Generate Invoice for {p.first_name}</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label>Amount ($) *</Label><Input type="number" min="0" step="0.01" value={invoiceForm.amount} onChange={e => setInvoiceForm(pr => ({ ...pr, amount: e.target.value }))} placeholder="150.00" /></div>
-                <div><Label>Service</Label><Input value={invoiceForm.description} onChange={e => setInvoiceForm(pr => ({ ...pr, description: e.target.value }))} placeholder="Blood Draw" /></div>
+              {/* Attach to existing appointment (optional) */}
+              <div>
+                <Label className="text-xs">Attach to appointment <span className="text-gray-400 font-normal">(optional — leave blank for standalone)</span></Label>
+                <select
+                  value={invoiceForm.attachAppointmentId}
+                  onChange={(e) => {
+                    const apptId = e.target.value;
+                    const appt = appointments.find(a => a.id === apptId);
+                    setInvoiceForm(pr => ({
+                      ...pr,
+                      attachAppointmentId: apptId,
+                      // Pre-fill amount + description from the appointment when chosen
+                      amount: appt ? String(appt.total_amount || appt.service_price || '') : pr.amount,
+                      description: appt ? (appt.service_name || appt.service_type || '') : pr.description,
+                      // If appt has an org linked, default recipient to org
+                      recipient: appt?.organization_id ? 'organization' : pr.recipient,
+                      orgId: appt?.organization_id || pr.orgId,
+                    }));
+                  }}
+                  className="mt-1 w-full h-9 text-sm border rounded-md px-2 bg-white"
+                >
+                  <option value="">— Create new / standalone invoice —</option>
+                  {appointments.filter(a => a.payment_status !== 'completed').map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.appointment_date?.substring(0, 10)} · {a.service_name || a.service_type} · ${Number(a.total_amount || 0).toFixed(2)} · {a.payment_status}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <div><Label>Memo</Label><Input value={invoiceForm.memo} onChange={e => setInvoiceForm(pr => ({ ...pr, memo: e.target.value }))} placeholder="Optional notes" /></div>
-              <p className="text-xs text-muted-foreground">Invoice will be sent to <strong>{p.email || 'no email on file'}</strong></p>
-              <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!invoiceForm.amount || !p.email}
+
+              {/* Recipient picker — Patient vs Organization */}
+              <div>
+                <Label className="text-xs">Send invoice to *</Label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button type="button"
+                    onClick={() => setInvoiceForm(pr => ({ ...pr, recipient: 'patient' }))}
+                    className={`text-left p-2 rounded border-2 text-sm ${invoiceForm.recipient === 'patient' ? 'border-[#B91C1C] bg-red-50' : 'border-gray-200'}`}>
+                    <span className="block font-semibold">Patient</span>
+                    <span className="block text-[11px] text-gray-500 truncate">{p.email || 'no email on file'}</span>
+                  </button>
+                  <button type="button"
+                    onClick={() => setInvoiceForm(pr => ({ ...pr, recipient: 'organization' }))}
+                    className={`text-left p-2 rounded border-2 text-sm ${invoiceForm.recipient === 'organization' ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200'}`}>
+                    <span className="block font-semibold">Organization</span>
+                    <span className="block text-[11px] text-gray-500">Bill a partner practice</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Org picker only shown when recipient = organization */}
+              {invoiceForm.recipient === 'organization' && (
+                <div>
+                  <Label className="text-xs">Organization *</Label>
+                  <select
+                    value={invoiceForm.orgId}
+                    onChange={(e) => setInvoiceForm(pr => ({ ...pr, orgId: e.target.value }))}
+                    className="mt-1 w-full h-9 text-sm border rounded-md px-2 bg-white">
+                    <option value="">— Select organization —</option>
+                    {allOrgs.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} {o.billing_email ? `· ${o.billing_email}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label className="text-xs">Amount ($) *</Label><Input type="number" min="0" step="0.01" value={invoiceForm.amount} onChange={e => setInvoiceForm(pr => ({ ...pr, amount: e.target.value }))} placeholder="150.00" /></div>
+                <div><Label className="text-xs">Service</Label><Input value={invoiceForm.description} onChange={e => setInvoiceForm(pr => ({ ...pr, description: e.target.value }))} placeholder="Blood Draw" /></div>
+              </div>
+              <div><Label className="text-xs">Memo</Label><Input value={invoiceForm.memo} onChange={e => setInvoiceForm(pr => ({ ...pr, memo: e.target.value }))} placeholder="Optional notes" /></div>
+
+              {(() => {
+                const selectedOrg = allOrgs.find(o => o.id === invoiceForm.orgId);
+                const recipientEmail = invoiceForm.recipient === 'organization'
+                  ? (selectedOrg?.billing_email || selectedOrg?.contact_email || '')
+                  : (p.email || '');
+                return (
+                  <p className={`text-xs ${recipientEmail ? 'text-muted-foreground' : 'text-red-600'}`}>
+                    Invoice will be sent to <strong>{recipientEmail || 'NO EMAIL ON FILE — pick a recipient with an email'}</strong>
+                    {invoiceForm.attachAppointmentId && <span className="block text-emerald-700 mt-1">✓ Attached to existing appointment</span>}
+                  </p>
+                );
+              })()}
+
+              <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+                disabled={(() => {
+                  if (!invoiceForm.amount) return true;
+                  if (invoiceForm.recipient === 'patient' && !p.email) return true;
+                  if (invoiceForm.recipient === 'organization' && !invoiceForm.orgId) return true;
+                  return false;
+                })()}
                 onClick={async () => {
                   try {
                     const amount = parseFloat(invoiceForm.amount);
-                    const { data: appt, error } = await supabase.from('appointments').insert([{
-                      appointment_date: new Date().toISOString(), patient_id: p.id,
-                      patient_name: `${p.first_name} ${p.last_name}`, patient_email: p.email,
-                      service_type: 'invoice', service_name: invoiceForm.description || 'Invoice',
-                      status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
-                      total_amount: amount, service_price: amount, booking_source: 'manual',
-                      invoice_status: 'sent', invoice_sent_at: new Date().toISOString(),
-                      invoice_due_at: new Date(Date.now() + 7*24*60*60*1000).toISOString(),
-                      payment_status: 'pending', notes: invoiceForm.memo || null,
-                    }]).select().single();
-                    if (error) throw error;
+                    const selectedOrg = allOrgs.find(o => o.id === invoiceForm.orgId);
+                    const recipientEmail = invoiceForm.recipient === 'organization'
+                      ? (selectedOrg?.billing_email || selectedOrg?.contact_email || '')
+                      : (p.email || '');
+                    const recipientName = invoiceForm.recipient === 'organization'
+                      ? (selectedOrg?.name || 'Organization')
+                      : `${p.first_name} ${p.last_name}`;
+
+                    let appointmentId = invoiceForm.attachAppointmentId;
+
+                    // Case A: attach to existing appointment — update its invoice columns
+                    if (appointmentId) {
+                      const { error: updateErr } = await supabase.from('appointments').update({
+                        total_amount: amount,
+                        service_price: amount,
+                        invoice_status: 'sent',
+                        invoice_sent_at: new Date().toISOString(),
+                        invoice_due_at: new Date(Date.now() + 7*24*60*60*1000).toISOString(),
+                        payment_status: 'pending',
+                        billed_to: invoiceForm.recipient === 'organization' ? 'org' : 'patient',
+                        ...(invoiceForm.recipient === 'organization' && invoiceForm.orgId ? { organization_id: invoiceForm.orgId } : {}),
+                        notes: invoiceForm.memo || null,
+                      }).eq('id', appointmentId);
+                      if (updateErr) throw updateErr;
+                    } else {
+                      // Case B: standalone placeholder appointment (old behavior, but now org-aware)
+                      const { data: appt, error } = await supabase.from('appointments').insert([{
+                        appointment_date: new Date().toISOString(), patient_id: p.id,
+                        patient_name: `${p.first_name} ${p.last_name}`, patient_email: p.email || null,
+                        service_type: 'invoice', service_name: invoiceForm.description || 'Invoice',
+                        status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
+                        total_amount: amount, service_price: amount, booking_source: 'manual',
+                        invoice_status: 'sent', invoice_sent_at: new Date().toISOString(),
+                        invoice_due_at: new Date(Date.now() + 7*24*60*60*1000).toISOString(),
+                        payment_status: 'pending', notes: invoiceForm.memo || null,
+                        billed_to: invoiceForm.recipient === 'organization' ? 'org' : 'patient',
+                        ...(invoiceForm.recipient === 'organization' && invoiceForm.orgId ? { organization_id: invoiceForm.orgId } : {}),
+                      }]).select().single();
+                      if (error) throw error;
+                      appointmentId = appt.id;
+                    }
+
                     await supabase.functions.invoke('send-appointment-invoice', {
-                      body: { appointmentId: appt.id, patientName: `${p.first_name} ${p.last_name}`, patientEmail: p.email, serviceName: invoiceForm.description || 'ConveLabs Service', servicePrice: amount, memo: invoiceForm.memo },
+                      body: {
+                        appointmentId,
+                        patientName: recipientName,
+                        patientEmail: recipientEmail,
+                        serviceName: invoiceForm.description || 'ConveLabs Service',
+                        servicePrice: amount,
+                        memo: invoiceForm.memo || (invoiceForm.recipient === 'organization' ? `Patient: ${p.first_name} ${p.last_name}` : ''),
+                        orgName: invoiceForm.recipient === 'organization' ? (selectedOrg?.name || undefined) : undefined,
+                      },
                     });
-                    toast.success(`Invoice for $${amount.toFixed(2)} sent to ${p.email}`);
+                    toast.success(`Invoice for $${amount.toFixed(2)} sent to ${recipientEmail}`);
                     setInvoiceModalOpen(false);
-                    loadPatientData(p); // Refresh appointments
+                    loadPatientData(p);
                   } catch (err: any) { toast.error(err.message || 'Failed'); }
                 }}>
                 Send Invoice — ${parseFloat(invoiceForm.amount || '0').toFixed(2)}

@@ -459,6 +459,21 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         discountNote += (discountNote ? ' | ' : '') + `$${parseFloat(discountValue).toFixed(2)} off`;
       }
 
+      // Hormozi: "Waive Fee" on an org-billed patient means the PATIENT pays
+      // $0, but the ORG still owes the partner rate. Previously we dropped
+      // the invoice entirely → $185/visit revenue leak for Aristotle etc.
+      // Now: isWaived=true only when there is no org to bill. When an org is
+      // selected with default_billed_to='org', we always send an invoice to
+      // the org at org_invoice_price_cents (or locked_price_cents fallback).
+      const orgCoversPatient = selectedOrg && selectedOrg.default_billed_to === 'org';
+      const orgInvoiceDollars = orgCoversPatient
+        ? (selectedOrg.org_invoice_price_cents ?? selectedOrg.locked_price_cents ?? 0) / 100
+        : 0;
+      if (orgCoversPatient && discountType === 'waive' && orgInvoiceDollars > 0) {
+        // Patient owes $0 (waive), but the org gets invoiced the partner rate.
+        finalPrice = orgInvoiceDollars;
+        discountNote += (discountNote ? ' | ' : '') + `Patient pays $0; org billed $${orgInvoiceDollars.toFixed(2)}`;
+      }
       const isWaived = finalPrice === 0;
       const invoiceDueAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
       const billingEmail = orgBilling && orgEmail ? orgEmail : patientEmail;
