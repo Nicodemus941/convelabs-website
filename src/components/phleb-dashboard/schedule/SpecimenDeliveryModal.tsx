@@ -142,6 +142,25 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         }).catch(err => console.error('SMS error:', err));
       }
 
+      // Notify ALL linked organizations on this appointment (primary + cc).
+      // send-specimen-delivery-notification loops through the
+      // appointment_organizations junction, emails each with HIPAA footer,
+      // and dedupes via notified_delivery_at. Non-blocking — a failure
+      // here won't break the phleb's workflow.
+      try {
+        await supabase.functions.invoke('send-specimen-delivery-notification', {
+          body: {
+            appointmentId,
+            specimenId: specimenId.trim(),
+            labName: labLabel,
+            tubeCount: parseInt(tubeCount) || 1,
+            deliveredAt: new Date().toISOString(),
+          },
+        });
+      } catch (orgErr) {
+        console.warn('[specimen] org notify failed (non-blocking):', orgErr);
+      }
+
       // Send email notification
       if (patientEmail) {
         await supabase.functions.invoke('send-email', {
@@ -169,7 +188,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         }).catch(err => console.error('Email error:', err));
       }
 
-      toast.success(`Specimen delivered to ${labLabel}. Patient notified.`);
+      toast.success(`Specimen delivered to ${labLabel}. Patient + linked org notified.`);
       onDelivered();
       onClose();
     } catch (err: any) {
