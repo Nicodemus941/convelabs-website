@@ -134,20 +134,39 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
   const removeOrg = async (orgId: string) => {
     const link = linkedMap.get(orgId);
     if (!link) return;
-    if (link.role === 'primary') {
-      // Clear primary via admin RPC (also clears appointments.organization_id)
-      await supabase.rpc('admin_assign_appointment_org' as any, {
-        p_appointment_id: appointmentId, p_org_id: null,
-      });
-    } else {
-      await supabase.from('appointment_organizations')
-        .delete()
+    try {
+      // ALWAYS delete the junction row first — this is what the UI reads
+      // from. Previous code skipped this step for primary links and only
+      // called the RPC (which nulls appointments.organization_id), so the
+      // junction row was orphaned and the UI kept showing the link.
+      // Explicit guard against silent RLS failure on delete.
+      const { error: delErr, count } = await supabase
+        .from('appointment_organizations')
+        .delete({ count: 'exact' })
         .eq('appointment_id', appointmentId)
         .eq('organization_id', orgId);
+      if (delErr) throw delErr;
+
+      // If the link was primary, also clear the denormalized column on
+      // appointments via the admin RPC (keeps the two in sync).
+      if (link.role === 'primary') {
+        const { error: rpcErr } = await supabase.rpc('admin_assign_appointment_org' as any, {
+          p_appointment_id: appointmentId, p_org_id: null,
+        });
+        if (rpcErr) console.warn('[unlink] RPC clear failed (junction already gone):', rpcErr);
+      }
+
+      if (count === 0) {
+        toast.info('Link was already removed');
+      } else {
+        toast.success('Removed');
+      }
+      await load();
+      onAssigned?.();
+    } catch (e: any) {
+      console.error('[unlink] failed:', e);
+      toast.error(`Remove failed: ${e?.message || 'unknown'}`);
     }
-    toast.success('Removed');
-    load();
-    onAssigned?.();
   };
 
   const promoteToPrimary = async (orgId: string) => {
