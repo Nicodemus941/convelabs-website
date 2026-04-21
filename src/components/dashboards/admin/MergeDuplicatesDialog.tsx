@@ -69,7 +69,7 @@ const MergeDuplicatesDialog: React.FC<Props> = ({ open, onClose, onMerged }) => 
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Combine className="h-5 w-5" /> Merge duplicate practices</DialogTitle>
         </DialogHeader>
@@ -92,17 +92,17 @@ const MergeDuplicatesDialog: React.FC<Props> = ({ open, onClose, onMerged }) => 
                 return (
                   <div key={i} className="border rounded-lg p-3 bg-gray-50">
                     <p className="text-[10px] uppercase text-gray-500 font-semibold mb-1">{p.similarity_reason}</p>
-                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <div className="space-y-1 sm:grid sm:grid-cols-[1fr_auto_1fr] sm:items-center sm:gap-2 sm:space-y-0">
                       <div className="text-sm font-medium truncate">{p.org_a_name}</div>
-                      <ArrowRight className="h-4 w-4 text-gray-400" />
+                      <ArrowRight className="h-4 w-4 text-gray-400 rotate-90 sm:rotate-0 mx-auto sm:mx-0" />
                       <div className="text-sm font-medium truncate">{p.org_b_name}</div>
                     </div>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex flex-col sm:flex-row gap-2 mt-2">
                       <Button size="sm" variant="outline" className="text-xs flex-1" disabled={mergingKey === keyAB} onClick={() => doMerge(p.org_a_id, p.org_b_id)}>
-                        {mergingKey === keyAB ? 'Merging…' : `Merge A → B (keep "${p.org_b_name}")`}
+                        {mergingKey === keyAB ? 'Merging…' : `Keep "${p.org_b_name.substring(0, 20)}${p.org_b_name.length > 20 ? '…' : ''}"`}
                       </Button>
                       <Button size="sm" variant="outline" className="text-xs flex-1" disabled={mergingKey === keyBA} onClick={() => doMerge(p.org_b_id, p.org_a_id)}>
-                        {mergingKey === keyBA ? 'Merging…' : `Merge B → A (keep "${p.org_a_name}")`}
+                        {mergingKey === keyBA ? 'Merging…' : `Keep "${p.org_a_name.substring(0, 20)}${p.org_a_name.length > 20 ? '…' : ''}"`}
                       </Button>
                     </div>
                   </div>

@@ -52,13 +52,13 @@ const DiscoveredZipClusters: React.FC = () => {
             const intensity = Math.round((c.total_referrals / maxRefs) * 100);
             const bg = `rgba(59, 130, 246, ${Math.max(0.08, intensity / 200)})`;
             return (
-              <div key={`${c.zip}-${i}`} className="flex items-center gap-2 py-1.5 px-2 rounded" style={{ backgroundColor: bg }}>
-                <span className="font-mono font-semibold text-sm w-16">{c.zip}</span>
-                <span className="text-sm text-gray-700 flex-1 truncate">
+              <div key={`${c.zip}-${i}`} className="flex items-center gap-2 py-1.5 px-2 rounded flex-wrap sm:flex-nowrap" style={{ backgroundColor: bg }}>
+                <span className="font-mono font-semibold text-sm w-14 sm:w-16 flex-shrink-0">{c.zip}</span>
+                <span className="text-sm text-gray-700 flex-1 min-w-0 truncate">
                   {c.city}, {c.state}
                 </span>
-                <span className="text-xs text-gray-600 whitespace-nowrap">
-                  {c.org_count} practice{c.org_count === 1 ? '' : 's'} · <strong className="text-gray-900">{c.total_referrals} referral{c.total_referrals === 1 ? '' : 's'}</strong>
+                <span className="text-[11px] sm:text-xs text-gray-600 whitespace-nowrap w-full sm:w-auto sm:text-right pl-16 sm:pl-0">
+                  {c.org_count} · <strong className="text-gray-900">{c.total_referrals} ref{c.total_referrals === 1 ? '' : 's'}</strong>
                 </span>
               </div>
             );

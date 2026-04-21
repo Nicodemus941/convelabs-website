@@ -66,11 +66,11 @@ const OrgRoiCard: React.FC<Props> = ({ orgId }) => {
             <p className="text-lg font-bold text-gray-900">{dollars(monthlyRunRate)}</p>
           </div>
         </div>
-        <div className="flex justify-between text-[11px] text-gray-500 mt-3 pt-2 border-t">
+        <div className="flex flex-col sm:flex-row sm:justify-between gap-1 text-[11px] text-gray-500 mt-3 pt-2 border-t">
           <span><Calendar className="h-3 w-3 inline mr-1" />First visit {data.first_visit_date ? new Date(data.first_visit_date).toLocaleDateString() : '—'}</span>
           <span>Last {data.last_visit_date ? new Date(data.last_visit_date).toLocaleDateString() : '—'}</span>
           {data.outstanding_cents > 0 && (
-            <span className="text-amber-700">Outstanding AR {dollars(data.outstanding_cents)}</span>
+            <span className="text-amber-700 font-medium">Outstanding AR {dollars(data.outstanding_cents)}</span>
           )}
         </div>
       </CardContent>

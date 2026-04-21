@@ -722,19 +722,21 @@ ConveLabs · (941) 527-9169`
           <h1 className="text-2xl font-bold flex items-center gap-2"><Building2 className="h-6 w-6 text-[#B91C1C]" /> Organizations</h1>
           <p className="text-sm text-muted-foreground">Manage partner organizations, billing, and outreach</p>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setShowAddOrg(true)}><Plus className="h-4 w-4" /> Add Organization</Button>
-          <Button variant="outline" size="sm" onClick={handleRunDunning} title="Send 7/14/30-day reminders for all unpaid sent invoices">
-            <Send className="h-4 w-4 mr-1" /> Run Dunning
+        <div className="flex gap-2 flex-wrap w-full sm:w-auto">
+          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1 flex-1 sm:flex-none" onClick={() => setShowAddOrg(true)}>
+            <Plus className="h-4 w-4" /> <span className="sm:inline">Add</span><span className="hidden sm:inline"> Organization</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRunDunning} className="flex-1 sm:flex-none" title="Send 7/14/30-day reminders for all unpaid sent invoices">
+            <Send className="h-4 w-4 mr-1" /> <span>Dunning</span>
           </Button>
           <Button variant="outline" size="sm" onClick={fetchOrgs}><RefreshCw className="h-4 w-4" /></Button>
         </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList>
-          <TabsTrigger value="directory" className="gap-1.5"><Building2 className="h-3.5 w-3.5" /> Directory</TabsTrigger>
-          <TabsTrigger value="discovered" className="gap-1.5 relative">
+        <TabsList className="w-full overflow-x-auto justify-start sm:justify-center sm:w-auto">
+          <TabsTrigger value="directory" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3"><Building2 className="h-3.5 w-3.5" /> Directory</TabsTrigger>
+          <TabsTrigger value="discovered" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3 relative">
             <Sparkles className="h-3.5 w-3.5" /> Discovered
             {discoveredOrgs.length > 0 && (
               <span className={`ml-1 inline-flex items-center justify-center rounded-full text-[10px] font-bold leading-none min-w-[18px] h-[18px] px-1 ${hotBeacon ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-100 text-amber-800'}`}>
@@ -742,7 +744,7 @@ ConveLabs · (941) 527-9169`
               </span>
             )}
           </TabsTrigger>
-          <TabsTrigger value="outreach" className="gap-1.5"><Megaphone className="h-3.5 w-3.5" /> Outreach</TabsTrigger>
+          <TabsTrigger value="outreach" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3"><Megaphone className="h-3.5 w-3.5" /> Outreach</TabsTrigger>
         </TabsList>
 
         {/* ─── DIRECTORY TAB (existing content) ─────────────────── */}
@@ -785,16 +787,16 @@ ConveLabs · (941) 527-9169`
               Hormozi beacon: untouched rows with ≥3 referrals pulse red. */}
         <TabsContent value="discovered" className="space-y-4 mt-4">
           <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-3">
-                <Sparkles className="h-5 w-5 text-amber-600 mt-0.5" />
-                <div className="flex-1">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap">
+                <Sparkles className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm">Partnership leads from lab orders</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Every lab order uploaded by a patient includes their ordering practice. We auto-extract it and surface it here so you can convert referral signal into partnership revenue.
                   </p>
                 </div>
-                <Button size="sm" variant="outline" className="text-xs" onClick={() => setMergeDialogOpen(true)}>
+                <Button size="sm" variant="outline" className="text-xs w-full sm:w-auto flex-shrink-0" onClick={() => setMergeDialogOpen(true)}>
                   🔗 Find duplicates
                 </Button>
               </div>
@@ -828,10 +830,10 @@ ConveLabs · (941) 527-9169`
                     : 'bg-amber-50 text-amber-700 border-amber-200';
                   return (
                     <Card key={org.id} className={`shadow-sm transition ${isHot ? 'ring-2 ring-red-400 border-red-200' : ''}`}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start gap-4">
-                          <div className={`w-11 h-11 rounded-lg flex items-center justify-center flex-shrink-0 ${isHot ? 'bg-red-100' : 'bg-amber-100'}`}>
-                            <Building2 className={`h-5 w-5 ${isHot ? 'text-red-600' : 'text-amber-600'}`} />
+                      <CardContent className="p-3 sm:p-4">
+                        <div className="flex items-start gap-3 sm:gap-4">
+                          <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-lg flex items-center justify-center flex-shrink-0 ${isHot ? 'bg-red-100' : 'bg-amber-100'}`}>
+                            <Building2 className={`h-4 w-4 sm:h-5 sm:w-5 ${isHot ? 'text-red-600' : 'text-amber-600'}`} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
@@ -889,7 +891,9 @@ ConveLabs · (941) 527-9169`
                               <p className="text-[11px] text-gray-500 mt-1">Linked: {linkedNames.slice(0, 3).join(', ')}{linkedNames.length > 3 ? ` +${linkedNames.length - 3}` : ''}</p>
                             )}
                           </div>
-                          <div className="flex flex-col gap-1.5 flex-shrink-0">
+                          {/* Actions — right rail on desktop, wrapped row on mobile.
+                              Stack-vs-grid switch at sm breakpoint (640px). */}
+                          <div className="hidden sm:flex flex-col gap-1.5 flex-shrink-0">
                             <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-8 text-xs" onClick={() => openOutreachModal(org)}>
                               <Mail className="h-3.5 w-3.5 mr-1" /> Reach out
                             </Button>
@@ -903,6 +907,21 @@ ConveLabs · (941) 527-9169`
                               Not interested
                             </Button>
                           </div>
+                        </div>
+                        {/* Mobile actions row — full width under the card content */}
+                        <div className="grid grid-cols-2 gap-1.5 mt-3 sm:hidden">
+                          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-9 text-xs col-span-2" onClick={() => openOutreachModal(org)}>
+                            <Mail className="h-3.5 w-3.5 mr-1" /> Reach out
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-8 text-[11px]" onClick={() => markDiscoveredStatus(org, 'called')}>
+                            <Phone className="h-3 w-3 mr-1" /> Logged call
+                          </Button>
+                          <Button size="sm" variant="outline" className="h-8 text-[11px] text-emerald-700 border-emerald-300" onClick={() => markDiscoveredStatus(org, 'signed')}>
+                            <CheckCircle2 className="h-3 w-3 mr-1" /> Signed
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 text-[11px] text-gray-500 col-span-2" onClick={() => markDiscoveredStatus(org, 'declined')}>
+                            Not interested
+                          </Button>
                         </div>
                       </CardContent>
                     </Card>
@@ -1106,7 +1125,7 @@ ConveLabs · (941) 527-9169`
 
       {/* Outreach modal — pre-filled Hormozi template, editable before send */}
       <Dialog open={!!outreachOrg} onOpenChange={(v) => !v && setOutreachOrg(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg w-[95vw] max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Mail className="h-4 w-4 text-[#B91C1C]" />
