@@ -17,6 +17,9 @@ import {
   Megaphone, Eye, Sparkles, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import OrgRoiCard from './OrgRoiCard';
+import DiscoveredZipClusters from './DiscoveredZipClusters';
+import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
 interface Org {
   id: string; name: string; contact_name: string | null; contact_email: string | null;
@@ -383,6 +386,8 @@ ConveLabs · (941) 527-9169`
     }
   };
 
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+
   const markDiscoveredStatus = async (org: Org, status: 'declined' | 'called' | 'signed') => {
     await supabase.from('organizations' as any).update({
       outreach_status: status,
@@ -513,6 +518,10 @@ ConveLabs · (941) 527-9169`
           <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-emerald-600">${totalPaid.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Paid</p></CardContent></Card>
           <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-red-600">${totalOutstanding.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Outstanding</p></CardContent></Card>
         </div>
+
+        {/* Partnership ROI rollup — calls get_org_roi RPC, shows lifetime
+            revenue + visit count + outstanding. Negotiation ammo. */}
+        <OrgRoiCard orgId={selectedOrg.id} />
 
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">Invoices ({invoices.length})</h2>
@@ -785,9 +794,14 @@ ConveLabs · (941) 527-9169`
                     Every lab order uploaded by a patient includes their ordering practice. We auto-extract it and surface it here so you can convert referral signal into partnership revenue.
                   </p>
                 </div>
+                <Button size="sm" variant="outline" className="text-xs" onClick={() => setMergeDialogOpen(true)}>
+                  🔗 Find duplicates
+                </Button>
               </div>
             </CardContent>
           </Card>
+
+          <DiscoveredZipClusters />
 
           {discoveredOrgs.length === 0 ? (
             <Card className="shadow-sm border-dashed">
@@ -1087,6 +1101,8 @@ ConveLabs · (941) 527-9169`
           </Dialog>
         </TabsContent>
       </Tabs>
+
+      <MergeDuplicatesDialog open={mergeDialogOpen} onClose={() => setMergeDialogOpen(false)} onMerged={fetchOrgs} />
 
       {/* Outreach modal — pre-filled Hormozi template, editable before send */}
       <Dialog open={!!outreachOrg} onOpenChange={(v) => !v && setOutreachOrg(null)}>
