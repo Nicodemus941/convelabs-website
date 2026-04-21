@@ -36,6 +36,13 @@ interface LinkedPatient {
   pending_request_count: number;
 }
 
+interface EnrollmentRow {
+  id: string;
+  patient_name: string;
+  draws_per_month_allowance: number;
+  draws_this_month: number;
+}
+
 interface Props {
   orgId: string;
   onRequestCreated?: () => void;
@@ -43,9 +50,12 @@ interface Props {
 
 const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => {
   const [patients, setPatients] = useState<LinkedPatient[]>([]);
+  const [enrollments, setEnrollments] = useState<Map<string, EnrollmentRow>>(new Map());
+  const [orgTier, setOrgTier] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [togglingName, setTogglingName] = useState<string | null>(null);
   const [labFile, setLabFile] = useState<File | null>(null);
   const [drawBy, setDrawBy] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() + 14);
@@ -58,13 +68,61 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   const load = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.rpc('get_org_linked_patients' as any);
-      if (error) throw error;
-      setPatients((data as LinkedPatient[]) || []);
+      const [{ data: linked, error: linkedErr }, { data: enroll }, { data: org }] = await Promise.all([
+        supabase.rpc('get_org_linked_patients' as any),
+        supabase.from('practice_enrollments' as any)
+          .select('id, patient_name, draws_per_month_allowance, draws_this_month')
+          .eq('organization_id', orgId)
+          .is('unenrolled_at', null),
+        supabase.from('organizations')
+          .select('subscription_tier')
+          .eq('id', orgId)
+          .maybeSingle(),
+      ]);
+      if (linkedErr) throw linkedErr;
+      setPatients((linked as LinkedPatient[]) || []);
+      const m = new Map<string, EnrollmentRow>();
+      for (const e of (enroll || []) as any[]) m.set(e.patient_name.toLowerCase(), e as EnrollmentRow);
+      setEnrollments(m);
+      setOrgTier((org as any)?.subscription_tier || null);
     } catch (e: any) {
       console.warn('[linked-patients] load failed:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleEnrollment = async (p: LinkedPatient, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!orgTier) {
+      toast.error('Your practice isn\'t on a Concierge subscription yet. Contact ConveLabs to enroll.');
+      return;
+    }
+    setTogglingName(p.patient_name);
+    try {
+      const existing = enrollments.get(p.patient_name.toLowerCase());
+      if (existing) {
+        const { error } = await supabase.rpc('unenroll_patient_from_practice' as any, {
+          p_enrollment_id: existing.id, p_reason: 'Provider unenrolled via portal',
+        });
+        if (error) throw error;
+        toast.success(`${p.patient_name} removed from subscription`);
+      } else {
+        const { error } = await supabase.rpc('enroll_patient_in_practice' as any, {
+          p_org_id: orgId,
+          p_patient_name: p.patient_name,
+          p_patient_email: p.patient_email,
+          p_patient_phone: p.patient_phone,
+        });
+        if (error) throw error;
+        toast.success(`${p.patient_name} enrolled — their next draw is covered by your subscription`);
+      }
+      await load();
+    } catch (err: any) {
+      toast.error(err?.message || 'Enrollment update failed');
+    } finally {
+      setTogglingName(null);
     }
   };
 
@@ -224,6 +282,14 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                           <AlertCircle className="h-2.5 w-2.5 mr-0.5" /> {p.pending_request_count} pending
                         </Badge>
                       )}
+                      {enrollments.has(p.patient_name.toLowerCase()) && (() => {
+                        const en = enrollments.get(p.patient_name.toLowerCase())!;
+                        return (
+                          <Badge className="text-[10px] bg-amber-500 text-white border-amber-500">
+                            👑 Enrolled · {en.draws_this_month}/{en.draws_per_month_allowance === 999 ? '∞' : en.draws_per_month_allowance}
+                          </Badge>
+                        );
+                      })()}
                     </div>
                     <p className="text-[11px] text-gray-500 truncate mt-0.5">
                       Last visit {formatDistanceToNow(new Date(p.last_visit_date), { addSuffix: true })}
@@ -235,20 +301,37 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                       </p>
                     )}
                   </div>
-                  {/* Per-row "request same as last time" — zero-friction reorder.
-                      Hormozi: every extra click on a repeat purchase is revenue
-                      you leave with the customer. */}
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="flex-shrink-0 h-8 text-[11px]"
-                    onClick={(e) => requestSameAsLast(p.patient_name, e)}
-                    title="Request labs again for this patient (single-click reorder)"
-                  >
-                    <RotateCw className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">Request again</span>
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-1 flex-shrink-0">
+                    {orgTier && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={enrollments.has(p.patient_name.toLowerCase()) ? 'default' : 'outline'}
+                        className={`h-8 text-[11px] ${enrollments.has(p.patient_name.toLowerCase()) ? 'bg-amber-500 hover:bg-amber-600 text-white' : ''}`}
+                        onClick={(e) => toggleEnrollment(p, e)}
+                        disabled={togglingName === p.patient_name}
+                        title={enrollments.has(p.patient_name.toLowerCase()) ? 'Remove from Concierge subscription' : 'Enroll in Concierge subscription — your practice covers their draws'}
+                      >
+                        {togglingName === p.patient_name
+                          ? '…'
+                          : enrollments.has(p.patient_name.toLowerCase())
+                            ? '👑 Enrolled'
+                            : '+ Enroll'}
+                      </Button>
+                    )}
+                    {/* Per-row "request same as last time" — zero-friction reorder. */}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-[11px]"
+                      onClick={(e) => requestSameAsLast(p.patient_name, e)}
+                      title="Request labs again for this patient (single-click reorder)"
+                    >
+                      <RotateCw className="h-3 w-3 sm:mr-1" />
+                      <span className="hidden sm:inline">Request again</span>
+                    </Button>
+                  </div>
                 </label>
               );
             })}

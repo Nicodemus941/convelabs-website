@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrgRoiCard from './OrgRoiCard';
+import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
 import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
@@ -522,6 +523,11 @@ ConveLabs · (941) 527-9169`
         {/* Partnership ROI rollup — calls get_org_roi RPC, shows lifetime
             revenue + visit count + outstanding. Negotiation ammo. */}
         <OrgRoiCard orgId={selectedOrg.id} />
+
+        {/* Concierge Subscription tier picker — Phase 1 of the practice-as-
+            subscription pivot. Sets tier → org gets seat cap + overage price.
+            Stripe billing wiring ships in a separate pass. */}
+        <OrgSubscriptionTierCard org={selectedOrg} onChanged={() => fetchOrgs()} />
 
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">Invoices ({invoices.length})</h2>
