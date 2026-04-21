@@ -18,6 +18,7 @@ import { format, formatDistanceToNow } from 'date-fns';
 import ProviderOnboardingModal from '@/components/provider/ProviderOnboardingModal';
 import CreateLabRequestModal from '@/components/provider/CreateLabRequestModal';
 import LabRequestTimeline from '@/components/provider/LabRequestTimeline';
+import LinkedPatientsSection from '@/components/provider/LinkedPatientsSection';
 import BAASigningModal from '@/components/provider/BAASigningModal';
 import { Activity } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
@@ -351,6 +352,9 @@ const ProviderDashboard: React.FC = () => {
             <LiveOpCard label="Total patients" value={patients.length} detail={`${team.length} team ${team.length === 1 ? 'member' : 'members'}`} icon={<Users className="h-5 w-5 text-emerald-600" />} />
           </div>
         </div>
+
+        {/* LINKED PATIENTS + BULK RE-REQUEST */}
+        <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} />
 
         {/* LAB REQUESTS */}
         <LabRequestsSection
