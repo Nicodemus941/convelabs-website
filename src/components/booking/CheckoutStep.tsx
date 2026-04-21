@@ -24,7 +24,15 @@ interface FamilyMember {
   dob: string;
   relationship: string;
 }
-const FAMILY_MEMBER_PRICE = 75;
+// Tier-aware companion pricing. Mirrors TIER_PRICING['additional'] server-side
+// so admin + public flows charge the same. Non-member $75, Member $55,
+// VIP $45, Concierge $35 — every booking reinforces the member benefit.
+const familyMemberPrice_BY_TIER: Record<string, number> = {
+  none: 75,
+  member: 55,
+  vip: 45,
+  concierge: 35,
+};
 
 interface CheckoutStepProps {
   onBack: () => void;
@@ -172,7 +180,8 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   }, tipAmount, additionalPatients.length, memberTier);
 
   const effectiveReferralDiscount = referralApplied ? referralDiscount : 0;
-  const familyMemberTotal = familyMembers.length * FAMILY_MEMBER_PRICE;
+  const familyMemberPrice = FAMILY_MEMBER_PRICE_BY_TIER[memberTier] ?? 75;
+  const familyMemberTotal = familyMembers.length * familyMemberPrice;
 
   const handleAddFamilyMember = () => {
     if (!familyForm.name.trim()) { toast.error('Please enter the family member\'s name'); return; }
@@ -180,7 +189,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     setFamilyMembers(prev => [...prev, { ...familyForm, name: familyForm.name.trim() }]);
     setFamilyForm({ name: '', dob: '', relationship: 'Spouse' });
     setShowFamilyForm(false);
-    toast.success(`Family member added (+$${FAMILY_MEMBER_PRICE})`);
+    toast.success(`Family member added (+$${familyMemberPrice})`);
   };
 
   const handleRemoveFamilyMember = (index: number) => {
@@ -221,7 +230,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     }
     if (familyMembers.length > 0) {
       const fmNames = familyMembers.map(fm => `${fm.name} (${fm.relationship}, DOB: ${fm.dob})`).join('; ');
-      noteParts.push(`FAMILY: ${familyMembers.length} member(s) @ $${FAMILY_MEMBER_PRICE} each — ${fmNames}`);
+      noteParts.push(`FAMILY: ${familyMembers.length} member(s) @ $${familyMemberPrice} each — ${fmNames}`);
     }
     methods.setValue('serviceDetails.additionalNotes', noteParts.filter(Boolean).join(' | '));
 
@@ -447,7 +456,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           <div className="flex items-center justify-between">
             <div>
               <p className="font-semibold text-sm text-blue-900">👨‍👩‍👧 Bringing a family member?</p>
-              <p className="text-xs text-blue-700">Add them to this visit for just <span className="font-bold">${FAMILY_MEMBER_PRICE}</span> each — no separate appointment needed.</p>
+              <p className="text-xs text-blue-700">
+                Add them to this visit for just <span className="font-bold">${familyMemberPrice}</span> each — no separate appointment needed.
+                {memberTier !== 'none' && (
+                  <span className="block mt-0.5 text-emerald-700 font-medium">
+                    ✓ {memberLabel} rate applied — save ${75 - familyMemberPrice} per companion
+                  </span>
+                )}
+              </p>
             </div>
           </div>
 
@@ -459,7 +475,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                 <p className="text-[11px] text-muted-foreground">{fm.relationship} · DOB: {fm.dob}</p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-xs font-semibold text-blue-800">+${FAMILY_MEMBER_PRICE}</span>
+                <span className="text-xs font-semibold text-blue-800">+${familyMemberPrice}</span>
                 <button type="button" onClick={() => handleRemoveFamilyMember(i)} className="text-red-400 hover:text-red-600 p-0.5">
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -506,7 +522,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
               </div>
               <div className="flex gap-2">
                 <Button type="button" size="sm" className="text-xs bg-blue-600 hover:bg-blue-700 text-white flex-1" onClick={handleAddFamilyMember}>
-                  <UserPlus className="h-3.5 w-3.5 mr-1" /> Confirm (+${FAMILY_MEMBER_PRICE})
+                  <UserPlus className="h-3.5 w-3.5 mr-1" /> Confirm (+${familyMemberPrice})
                 </Button>
                 <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setShowFamilyForm(false)}>
                   Cancel
@@ -516,7 +532,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           ) : (
             <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 w-full"
               onClick={() => setShowFamilyForm(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add Family Member — ${FAMILY_MEMBER_PRICE}
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add Family Member — ${familyMemberPrice}
             </Button>
           )}
         </div>
@@ -550,7 +566,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
         {familyMemberTotal > 0 && (
           <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">{familyMembers.length} family member{familyMembers.length > 1 ? 's' : ''} × ${FAMILY_MEMBER_PRICE}</span>
+            <span className="text-muted-foreground">{familyMembers.length} family member{familyMembers.length > 1 ? 's' : ''} × ${familyMemberPrice}</span>
             <span>+${familyMemberTotal.toFixed(2)}</span>
           </div>
         )}
