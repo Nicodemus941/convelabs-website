@@ -14,6 +14,9 @@ interface PatientRescheduleModalProps {
     appointment_time: string;
     service_type: string;
     reschedule_count?: number;
+    recurrence_group_id?: string | null;
+    recurrence_sequence?: number | null;
+    recurrence_total?: number | null;
   };
   open: boolean;
   onClose: () => void;
@@ -46,6 +49,12 @@ const PatientRescheduleModal: React.FC<PatientRescheduleModalProps> = ({
   const [blockedDates, setBlockedDates] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  // "Shift all remaining" — when rescheduling a recurring series visit,
+  // patient can optionally shift EVERY future visit in the group by the
+  // same day offset. Default OFF (just this one) — Hormozi: let the
+  // customer signal intent explicitly, don't assume.
+  const [shiftSeries, setShiftSeries] = useState(false);
+  const isRecurring = !!appointment.recurrence_group_id && (appointment.recurrence_total || 0) > 1;
 
   const rescheduleCount = appointment.reschedule_count || 0;
   const canReschedule = rescheduleCount < 2;
@@ -134,6 +143,41 @@ const PatientRescheduleModal: React.FC<PatientRescheduleModalProps> = ({
       }).eq('id', appointment.id);
 
       if (error) throw error;
+
+      // Shift-series: if toggled, compute the day offset between the old
+      // and new date and apply it to every FUTURE sibling visit in the
+      // same recurrence group. Only future visits — past/completed ones
+      // are immutable.
+      if (shiftSeries && appointment.recurrence_group_id) {
+        try {
+          const oldDate = new Date(appointment.appointment_date);
+          const newDateObj = new Date(newDate + 'T12:00:00');
+          const offsetDays = Math.round((newDateObj.getTime() - oldDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (offsetDays !== 0) {
+            const { data: siblings } = await supabase
+              .from('appointments')
+              .select('id, appointment_date, appointment_time, status')
+              .eq('recurrence_group_id', appointment.recurrence_group_id)
+              .neq('id', appointment.id)
+              .gte('appointment_date', new Date().toISOString())
+              .not('status', 'in', '("completed","specimen_delivered","cancelled","no_show")');
+            let shifted = 0;
+            for (const sib of (siblings || [])) {
+              const sibDate = new Date(sib.appointment_date);
+              sibDate.setDate(sibDate.getDate() + offsetDays);
+              const { error: sibErr } = await supabase.from('appointments').update({
+                appointment_date: sibDate.toISOString(),
+                rescheduled_at: new Date().toISOString(),
+                reschedule_count: 0, // patient didn't manually reschedule each
+              }).eq('id', sib.id);
+              if (!sibErr) shifted++;
+            }
+            if (shifted > 0) toast.success(`Also shifted ${shifted} future visit${shifted === 1 ? '' : 's'} by ${offsetDays > 0 ? '+' : ''}${offsetDays} days`);
+          }
+        } catch (shiftErr) {
+          console.warn('Series shift error (non-blocking):', shiftErr);
+        }
+      }
 
       // Log activity
       await supabase.from('activity_log' as any).insert({
@@ -229,12 +273,31 @@ const PatientRescheduleModal: React.FC<PatientRescheduleModalProps> = ({
             </div>
           )}
 
+          {isRecurring && newDate && (
+            <div className="rounded-lg border-2 border-blue-200 bg-blue-50 p-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={shiftSeries}
+                  onChange={(e) => setShiftSeries(e.target.checked)}
+                />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-blue-900">Shift all future visits by the same offset?</p>
+                  <p className="text-xs text-blue-700 mt-0.5">
+                    You're visit {appointment.recurrence_sequence} of {appointment.recurrence_total}. If you check this, every future visit in the series will also move by the same number of days. Past and completed visits are untouched.
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
             <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
             <Button className="flex-1 bg-[#B91C1C] hover:bg-[#991B1B] text-white"
               disabled={!newDate || !newTime || isSubmitting || isDateBlocked(newDate)}
               onClick={handleSubmit}>
-              {isSubmitting ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Rescheduling...</> : 'Confirm'}
+              {isSubmitting ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Rescheduling...</> : (shiftSeries ? 'Confirm + shift series' : 'Confirm')}
             </Button>
           </div>
         </div>
