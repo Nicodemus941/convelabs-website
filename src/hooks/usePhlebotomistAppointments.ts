@@ -53,6 +53,13 @@ export interface PhlebAppointment {
   patient_insurance: string | null;
   patient_insurance_id: string | null;
   patient_insurance_group: string | null;
+  // Partner org linkage — admin-assigned via AssignOrgButton OR from
+  // partner booking flow. Phleb card shows the name so the phleb knows
+  // to bill through the right practice + not call patient directly
+  // (for masked org_covers patients like Aristotle).
+  organization_id: string | null;
+  organization_name: string | null;
+  billed_to: 'patient' | 'org' | null;
 }
 
 export function usePhlebotomistAppointments() {
@@ -93,6 +100,21 @@ export function usePhlebotomistAppointments() {
       const { data: appts, error } = await query;
 
       if (error) throw error;
+
+      // Pre-load org names in one query (not N+1) so the phleb card can
+      // show "Billed through: Aristotle Education" etc. Fixes the gap
+      // where admin linked an org but phleb dashboard didn't show it.
+      const orgIds = Array.from(new Set((appts || [])
+        .map((a: any) => a.organization_id)
+        .filter(Boolean)));
+      const orgNameById = new Map<string, string>();
+      if (orgIds.length > 0) {
+        const { data: orgs } = await supabase
+          .from('organizations')
+          .select('id, name')
+          .in('id', orgIds);
+        for (const o of (orgs || [])) orgNameById.set(o.id, o.name);
+      }
 
       // Build set of dates that have appointments (extract yyyy-MM-dd from timestamp)
       const dates = new Set<string>();
@@ -228,6 +250,9 @@ export function usePhlebotomistAppointments() {
             patient_insurance: patientInsurance,
             patient_insurance_id: patientInsuranceId,
             patient_insurance_group: patientInsuranceGroup,
+            organization_id: appt.organization_id || null,
+            organization_name: appt.organization_id ? (orgNameById.get(appt.organization_id) || null) : null,
+            billed_to: (appt.billed_to as 'patient' | 'org') || null,
           };
         })
       );

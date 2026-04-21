@@ -158,6 +158,17 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
+                    {/* Org badge — phleb needs to know "billed through X" for
+                        masked/org-covered patients (Aristotle, Elite Medical)
+                        so they route questions + invoices correctly. */}
+                    {appointment.organization_name && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border bg-emerald-50 text-emerald-700 border-emerald-200"
+                        title={appointment.billed_to === 'org' ? `Billed to ${appointment.organization_name}` : `Partner: ${appointment.organization_name}`}
+                      >
+                        🏢 {appointment.organization_name}
+                      </span>
+                    )}
                     {/* Pre-flight readiness pill — only for delivery visits */}
                     {readiness.status !== 'na' && (
                       <span
