@@ -21,6 +21,82 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
+// ─── Provider-block extractor ─────────────────────────────────────────
+// Parses the ordering-provider section from LabCorp / Quest / Genova /
+// DUTCH lab order OCR text. Returns { practiceName, addressStreet, ...}.
+// Every field is optional — whatever we can extract, we extract.
+// Covers the 4 common layouts seen in production via trial and error.
+interface ExtractedProvider {
+  practiceName?: string;
+  orderingPhysician?: string;
+  npi?: string;
+  addressStreet?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressZip?: string;
+  officePhone?: string;
+}
+function extractProviderBlock(text: string): ExtractedProvider {
+  const out: ExtractedProvider = {};
+  if (!text) return out;
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+
+  // Helper: look at the full text with regex (preserves context across lines)
+  const full = text;
+
+  // Practice / Account name — LabCorp uses "Account Name:", Quest uses
+  // "Client Name:", Genova uses "Ordering Practitioner Name:"
+  const mName = full.match(/(?:Account Name|Client Name|Clinic Name|Practice Name|Ordering Practitioner Name)\s*:\s*([^\n]{3,100})/i);
+  if (mName) out.practiceName = mName[1].trim().replace(/\s+$/, '');
+
+  // Street address — "Address 1: ..." on LabCorp, "Address:" on Quest
+  const mStreet = full.match(/Address\s*(?:1|Line\s*1)?\s*:\s*([^\n]{5,120})/i);
+  if (mStreet) out.addressStreet = mStreet[1].trim();
+
+  // City, State Zip — comes after "City, State Zip:" on LabCorp
+  const mCSZ = full.match(/(?:City,?\s*State,?\s*Zip|City\/State\/Zip)\s*:\s*([^,]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/i);
+  if (mCSZ) {
+    out.addressCity = mCSZ[1].trim();
+    out.addressState = mCSZ[2].trim().toUpperCase();
+    out.addressZip = mCSZ[3].trim();
+  } else {
+    // Fallback: any line that looks like "City, FL 32801"
+    for (const ln of lines) {
+      const m = ln.match(/^([A-Za-z .'-]+),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+      if (m && !out.addressCity) {
+        out.addressCity = m[1].trim();
+        out.addressState = m[2].trim();
+        out.addressZip = m[3].trim();
+        break;
+      }
+    }
+  }
+
+  // Phone — first 10-digit phone in the Client/Account section
+  // Prefer one that appears near the practice address block, not the
+  // patient's phone further down.
+  const idxAccount = full.search(/(?:Account Name|Client Name|Practice Name|Ordering Practitioner Name|Client\s*\/\s*Ordering Site)/i);
+  const idxPatient = full.search(/Patient\s*(?:Information|Name)/i);
+  if (idxAccount >= 0) {
+    const windowText = full.substring(idxAccount, idxPatient > idxAccount ? idxPatient : idxAccount + 600);
+    const mPhone = windowText.match(/Phone\s*:?\s*(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/);
+    if (mPhone) out.officePhone = mPhone[1].trim();
+  }
+
+  // Ordering physician
+  const mPhys = full.match(/Ordering Physician\s*:?\s*([^\n]{3,80})/i)
+    || full.match(/Physician Name\s*:?\s*([^\n]{3,80})/i)
+    || full.match(/Physician\s*:?\s*([A-Z][A-Za-z .,'-]{3,80})/);
+  if (mPhys) out.orderingPhysician = mPhys[1].trim();
+
+  // NPI — 10-digit number, usually on its own line
+  const mNpi = full.match(/NPI\s*:?\s*(\d{10})/i);
+  if (mNpi) out.npi = mNpi[1];
+
+  return out;
+}
+
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -288,6 +364,71 @@ Deno.serve(async (req) => {
         lab_order_panels: result.panels,
         ocr_processed_at: new Date().toISOString(),
       }).eq('id', targetId);
+    }
+
+    // ─── PARTNERSHIP FLYWHEEL ────────────────────────────────────────
+    // Parse the ordering provider block from the OCR text and
+    // auto-link/discover the practice as an organization. Every lab
+    // order is a qualified partnership lead; discover_or_link_provider_org
+    // RPC handles fuzzy-match, link, or insert with outreach_status=
+    // 'untouched' so the admin beacon surfaces it.
+    // Non-blocking — failures here should not break OCR.
+    if (targetId && result.text) {
+      try {
+        const extracted = extractProviderBlock(result.text);
+        if (extracted.practiceName) {
+          const { data: linkRes } = await supabase.rpc('discover_or_link_provider_org' as any, {
+            p_appointment_id: targetId,
+            p_practice_name: extracted.practiceName,
+            p_address_street: extracted.addressStreet || null,
+            p_address_city: extracted.addressCity || null,
+            p_address_state: extracted.addressState || null,
+            p_address_zip: extracted.addressZip || null,
+            p_office_phone: extracted.officePhone || null,
+            p_ordering_physician: extracted.orderingPhysician || null,
+            p_npi: extracted.npi || null,
+            p_ocr_sample: result.text.substring(0, 500),
+          });
+          console.log(`[ocr->org] ${extracted.practiceName}:`, linkRes);
+
+          // Signal ladder: when a discovered practice hits 3+ referrals
+          // AND is still untouched, page the owner immediately. Hormozi
+          // rule: the dashboard's job is to point at the fire.
+          if (linkRes && (linkRes as any).org_id) {
+            const { data: orgRow } = await supabase
+              .from('organizations')
+              .select('id, name, referral_count, outreach_status, office_phone')
+              .eq('id', (linkRes as any).org_id)
+              .maybeSingle();
+            if (orgRow && orgRow.referral_count === 3 && orgRow.outreach_status === 'untouched') {
+              try {
+                const TWILIO_SID  = Deno.env.get('TWILIO_ACCOUNT_SID');
+                const TWILIO_AUTH = Deno.env.get('TWILIO_AUTH_TOKEN');
+                const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
+                const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+                if (TWILIO_SID && TWILIO_AUTH) {
+                  await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+                    method: 'POST',
+                    headers: {
+                      Authorization: `Basic ${btoa(`${TWILIO_SID}:${TWILIO_AUTH}`)}`,
+                      'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                      To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
+                      Body: `📈 Partnership lead: ${orgRow.name} — 3 patients in the last few weeks.${orgRow.office_phone ? ' Phone: ' + orgRow.office_phone : ''} Admin → Organizations → Discovered.`,
+                      From: TWILIO_FROM,
+                    }).toString(),
+                  });
+                }
+              } catch (smsErr) {
+                console.warn('[ocr->org] threshold SMS failed:', smsErr);
+              }
+            }
+          }
+        }
+      } catch (parseErr) {
+        console.warn('[ocr->org] parse/link failed (non-blocking):', parseErr);
+      }
     }
 
     return new Response(JSON.stringify({
