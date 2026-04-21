@@ -34,6 +34,8 @@ const PUBLIC_ENDPOINTS = [
   { name: 'send-password-reset', method: 'POST', body: { email: 'smoketest@invalid.local' } },
   { name: 'provider-otp-send', method: 'POST', body: { email: 'smoketest@invalid.local' } },
   { name: 'provider-otp-verify', method: 'POST', body: { email: 'smoketest@invalid.local', code: '000000' } },
+  { name: 'member-otp-send', method: 'POST', body: { email: 'smoketest@invalid.local' } },
+  { name: 'member-otp-verify', method: 'POST', body: { email: 'smoketest@invalid.local', code: '000000' } },
   { name: 'update-user-password', method: 'POST', body: { token: 'smoke-test-bogus', password: 'x' } },
 
   // pg_cron endpoints — invoked from Postgres, no JWT

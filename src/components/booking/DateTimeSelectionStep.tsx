@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { format, addDays, subDays } from 'date-fns';
 import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X } from 'lucide-react';
+import { toast } from 'sonner';
+import MemberOtpUnlockButton from './MemberOtpUnlockButton';
 import { useFormContext } from 'react-hook-form';
 import { 
   FormField, 
@@ -851,14 +853,27 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   Become {tierName} for ${tierPrice}/yr — unlock now →
                 </a>
                 {/* Hormozi: every "no" is a conversation — but if they're ALREADY
-                    a member they just need to prove it. Login path returns to
-                    the booking flow, and the tier-detection useEffect picks up
-                    their active membership by email → slot unlocks naturally. */}
+                    a member they just need to prove it. Two proof paths:
+                    (A) full login (slower but robust), (B) SMS OTP (faster,
+                    matches dental-office UX — most members forgot password). */}
+                <MemberOtpUnlockButton
+                  tierName={tierName}
+                  onVerified={(tier, email) => {
+                    try {
+                      sessionStorage.setItem('convelabs_member_verified', JSON.stringify({
+                        tier, email, verified_at: Date.now(),
+                      }));
+                    } catch { /* noop */ }
+                    setPatientTier(tier);
+                    setUnlockSlot(null);
+                    toast.success(`Welcome back! ${tier.toUpperCase()} slots unlocked.`);
+                  }}
+                />
                 <a
                   href={`/login?redirect=${encodeURIComponent(typeof window !== 'undefined' ? (window.location.pathname + window.location.search) : '/book-now')}`}
-                  className="w-full block text-center text-sm font-semibold text-gray-700 hover:text-gray-900 border border-gray-300 rounded-lg py-2.5 transition hover:bg-gray-50"
+                  className="w-full block text-center text-xs font-medium text-gray-600 hover:text-gray-900 border border-gray-200 rounded-lg py-2 transition hover:bg-gray-50"
                 >
-                  I'm already a {tierName} — sign in
+                  Or sign in with password →
                 </a>
                 <button
                   onClick={() => setUnlockSlot(null)}

@@ -20,6 +20,8 @@ hidden behind empty-state UIs).
 | `backfill-provider-phone-auth` | one-shot ops tool — no JWT |
 | `provider-otp-send` | public (pre-login SMS OTP send) |
 | `provider-otp-verify` | public (pre-login SMS OTP verify) |
+| `member-otp-send` | public (member self-verify to unlock tier slots on booking page) |
+| `member-otp-verify` | public (verifies the 6-digit SMS code, issues signed unlock token) |
 | `send-password-reset` | public (unauthenticated users forgot password) |
 | `update-user-password` | public (password reset completion — token-gated) |
 | `dev-test-lab-sms` | dev-only — protected by a shared secret in body |
