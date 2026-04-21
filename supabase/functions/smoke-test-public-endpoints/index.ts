@@ -13,27 +13,39 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY') || '';
 const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 
-// Each endpoint: list of "must NOT be 401" endpoints that are public
+// Full coverage — mirrors supabase/functions/_PUBLIC_FUNCTIONS.md.
+// Any new row added there must be added here too. Each entry sends a
+// deliberately-invalid body so the function's OWN validation rejects
+// with 4xx — what we care about is NOT seeing 401 (auth regression).
 const PUBLIC_ENDPOINTS = [
   // Token-gated patient endpoints — pass a bogus token so the fn runs
-  // the auth logic but rejects with 404 (which is fine, not 401)
+  // the auth logic but rejects with 404 (fine, not 401)
   { name: 'get-lab-request', method: 'POST', body: { access_token: 'smoke-test-bogus' } },
   { name: 'get-lab-request-slots', method: 'POST', body: { access_token: 'smoke-test-bogus', date: '2026-04-24' } },
   { name: 'schedule-lab-request', method: 'POST', body: { access_token: 'smoke-test-bogus' } },
   { name: 'unlock-lab-request-slot', method: 'POST', body: { access_token: 'smoke-test-bogus' } },
 
-  // Webhook endpoints — Stripe/Twilio don't send JWT. Expect 4xx because we
-  // send bogus payload, but 401 is the bug.
+  // Webhook endpoints — Stripe/Twilio don't send JWT
   { name: 'stripe-webhook', method: 'POST', body: {} },
   { name: 'twilio-inbound-sms', method: 'POST', body: {} },
+  { name: 'twilio-voice-greeting', method: 'POST', body: {} },
 
   // Provider portal pre-login endpoints — caller is unauthenticated
   { name: 'send-password-reset', method: 'POST', body: { email: 'smoketest@invalid.local' } },
   { name: 'provider-otp-send', method: 'POST', body: { email: 'smoketest@invalid.local' } },
+  { name: 'provider-otp-verify', method: 'POST', body: { email: 'smoketest@invalid.local', code: '000000' } },
+  { name: 'update-user-password', method: 'POST', body: { token: 'smoke-test-bogus', password: 'x' } },
 
   // pg_cron endpoints — invoked from Postgres, no JWT
   { name: 'send-fasting-reminders', method: 'POST', body: {} },
   { name: 'remind-lab-request-patients', method: 'POST', body: {} },
+
+  // Note: backfill-provider-phone-auth, dev-test-lab-sms, dev-twilio-recent
+  // are intentionally NOT smoke-tested. They are one-shot ops / dev tools
+  // guarded by a shared secret in the body. Calling them with a wrong body
+  // could log noise but wouldn't cause harm — however the signal-to-noise
+  // ratio isn't worth it. If one of those ever 401s, we'll find out the
+  // moment an ops person tries to run it (rare enough to not warrant a probe).
 ];
 
 interface Result { name: string; status: number; ok: boolean; error?: string }
