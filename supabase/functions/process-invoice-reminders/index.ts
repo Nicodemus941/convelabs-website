@@ -221,7 +221,31 @@ Deno.serve(async (req) => {
       .eq('is_vip', false)
       .not('status', 'eq', 'cancelled');
 
-    for (const appt of (sentAppts || [])) {
+    // Hormozi-safe: for recurring series (weekly draws, monthly physicals
+    // etc.), treat the whole group as ONE billable unit for dunning. Send
+    // a reminder for only the EARLIEST unpaid appointment in each group;
+    // the others ride along silently. Prevents the "9 reminder emails in
+    // one evening" experience that made Lawrence Carpenter want to leave.
+    const dedupeRecurringGroups = <T extends { recurrence_group_id?: string | null; appointment_date?: string }>(rows: T[]): T[] => {
+      const seen = new Map<string, T>();
+      const out: T[] = [];
+      for (const r of rows) {
+        const gid = r.recurrence_group_id;
+        if (!gid) { out.push(r); continue; }
+        const prior = seen.get(gid);
+        if (!prior || (r.appointment_date || '') < (prior.appointment_date || '')) {
+          seen.set(gid, r);
+        }
+      }
+      // Re-build: non-grouped rows + the earliest row per group
+      const grouped = new Set<string>();
+      for (const r of rows) if (r.recurrence_group_id) grouped.add(r.recurrence_group_id);
+      for (const [, v] of seen.entries()) out.push(v);
+      return out;
+    };
+    const sentApptsDedup = dedupeRecurringGroups(sentAppts || []);
+
+    for (const appt of sentApptsDedup) {
       const tier = getApptTier(appt.appointment_date, appt.appointment_time);
       const thresholdHours = REMINDER_THRESHOLDS[tier];
       const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
