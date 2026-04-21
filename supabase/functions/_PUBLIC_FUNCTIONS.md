@@ -8,6 +8,7 @@ hidden behind empty-state UIs).
 
 | Function | Why public |
 |---|---|
+| `stripe-webhook` | Stripe POSTs events — no JWT, signature-verified instead |
 | `get-lab-request` | Patient opens `/lab-request/:token` — no auth |
 | `get-lab-request-slots` | Patient picks a date — no auth |
 | `schedule-lab-request` | Patient submits booking — no auth |
@@ -58,6 +59,18 @@ payments were silently not reaching our database. Stripe retries these for
 ~3 days so some events may still be replayed when stripe-webhook went
 public again — no permanent data loss, but a good chunk of transient
 invisible failure.
+
+THIRD regression: 2026-04-20 ~15:00 ET. Supabase MCP `deploy_edge_function`
+default behavior silently sets verify_jwt=true on every redeploy (the API
+default). This was triggered during an in-session deploy and caught by the
+smoke-test cron within minutes. Redeployed via CLI with --no-verify-jwt —
+endpoint back to 400 (signature check) instead of 401 (auth reject). No
+customer payment was lost; Stripe's 3-day retry cadence covered the gap.
+
+RULE: NEVER use MCP `deploy_edge_function` for any function in the table
+above. MCP deploys default to verify_jwt=true and there is no per-deploy
+override flag. Always use `npx supabase functions deploy <name>
+--no-verify-jwt` for these.
 
 ## One-liner to redeploy ALL public edge fns
 
