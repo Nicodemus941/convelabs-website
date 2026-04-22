@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
-import { Home, Building2, Heart, Check, FlaskConical, Syringe, Handshake } from 'lucide-react';
+import { Home, Building2, Heart, Check, FlaskConical, Syringe, Handshake, ChevronDown, ChevronUp } from 'lucide-react';
 import { BookingFormValues } from '@/types/appointmentTypes';
 
 interface VisitTypeSelectorProps {
@@ -29,6 +29,7 @@ const VISIT_TYPES = [
     iconBg: 'bg-gray-500/10',
     iconColor: 'text-gray-600',
     priceColor: 'text-gray-700',
+    hidden: true, // QA-only — never shown to public
   },
   {
     id: 'mobile',
@@ -44,6 +45,7 @@ const VISIT_TYPES = [
     iconColor: 'text-[#B91C1C]',
     priceColor: 'text-[#B91C1C]',
     popular: true,
+    primary: true,
   },
   {
     id: 'provider-partner',
@@ -58,6 +60,7 @@ const VISIT_TYPES = [
     iconBg: 'bg-emerald-500/10',
     iconColor: 'text-emerald-600',
     priceColor: 'text-emerald-700',
+    primary: true,
   },
   {
     id: 'specialty-kit',
@@ -122,6 +125,12 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
   const selectedType = watch('serviceDetails.visitType');
   const [selectedPartner, setSelectedPartner] = useState('');
   const [showPartnerSelect, setShowPartnerSelect] = useState(false);
+  const [showOtherServices, setShowOtherServices] = useState(false);
+
+  // If user lands with a secondary type already selected (e.g. resuming a flow), auto-expand
+  const secondaryIds = ['specialty-kit', 'in-office', 'senior', 'therapeutic'];
+  const hasSecondarySelected = selectedType && secondaryIds.includes(selectedType);
+  const expandSecondary = showOtherServices || hasSecondarySelected;
 
   const handleSelect = (typeId: string) => {
     if (typeId === 'provider-partner') {
@@ -150,8 +159,8 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
         <p className="text-muted-foreground mt-2">Choose your preferred visit type</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {VISIT_TYPES.map((type) => {
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {VISIT_TYPES.filter((t) => (t as any).primary && !(t as any).hidden).map((type) => {
           const Icon = type.icon;
           const isSelected = selectedType === type.id || (type.id === 'provider-partner' && selectedType?.startsWith('partner-'));
           const isPartnerCardExpanded = type.id === 'provider-partner' && (isSelected || showPartnerSelect);
@@ -161,7 +170,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
               key={type.id}
               onClick={() => handleSelect(type.id)}
               className={`relative border-2 rounded-2xl p-5 cursor-pointer transition-all duration-300 backdrop-blur-sm ${
-                type.id === 'provider-partner' && isPartnerCardExpanded ? 'sm:col-span-2 lg:col-span-3' : ''
+                type.id === 'provider-partner' && isPartnerCardExpanded ? 'sm:col-span-2' : ''
               } ${
                 isSelected
                   ? `bg-gradient-to-br ${type.gradient} ${type.selectedBorder} shadow-lg`
@@ -251,6 +260,62 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
             </div>
           );
         })}
+      </div>
+
+      {/* Secondary services — collapsed by default so the primary choice isn't drowned out */}
+      <div className="border-t pt-4">
+        <button
+          type="button"
+          onClick={() => setShowOtherServices((v) => !v)}
+          className="w-full flex items-center justify-between text-left px-2 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+        >
+          <div>
+            <div className="text-sm font-semibold text-gray-900">
+              {expandSecondary ? 'Hide other services' : 'See other services'}
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              Senior 65+, Specialty Kits (DUTCH/Genova), Office Visit, Therapeutic Phlebotomy
+            </div>
+          </div>
+          {expandSecondary ? <ChevronUp className="h-5 w-5 text-gray-500" /> : <ChevronDown className="h-5 w-5 text-gray-500" />}
+        </button>
+
+        {expandSecondary && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            {VISIT_TYPES.filter((t) => !(t as any).primary && !(t as any).hidden).map((type) => {
+              const Icon = type.icon;
+              const isSelected = selectedType === type.id;
+              return (
+                <div
+                  key={type.id}
+                  onClick={() => handleSelect(type.id)}
+                  className={`relative border-2 rounded-2xl p-5 cursor-pointer transition-all duration-300 backdrop-blur-sm ${
+                    isSelected
+                      ? `bg-gradient-to-br ${type.gradient} ${type.selectedBorder} shadow-lg`
+                      : `bg-white/70 ${type.borderColor} hover:shadow-md`
+                  }`}
+                  style={{ backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+                >
+                  {isSelected && (
+                    <div className="absolute top-3 right-3 h-7 w-7 rounded-full bg-gradient-to-br from-[#B91C1C] to-[#991B1B] flex items-center justify-center shadow-md">
+                      <Check className="h-4 w-4 text-white" />
+                    </div>
+                  )}
+                  <div className={`h-12 w-12 rounded-xl ${type.iconBg} flex items-center justify-center mb-3 backdrop-blur-sm`}>
+                    <Icon className={`h-6 w-6 ${type.iconColor}`} />
+                  </div>
+                  <h3 className="font-bold text-base text-gray-900">{type.name}</h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">{type.subtitle}</p>
+                  <div className="mt-3">
+                    <span className={`text-2xl font-bold ${type.priceColor}`}>${type.price}</span>
+                    <span className="text-muted-foreground text-xs ml-1">/ visit</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2 leading-relaxed">{type.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
