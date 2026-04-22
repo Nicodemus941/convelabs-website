@@ -1,5 +1,6 @@
 import React from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { trackEvent as posthogTrack } from '@/lib/posthog';
 
 interface AnalyticsEvent {
   sessionId: string;
@@ -134,18 +135,18 @@ class AnalyticsTracker {
 
   private async trackEvent(eventType: string, eventData: any) {
     try {
-      const payload: AnalyticsEvent = {
-        sessionId: this.sessionId,
-        visitorId: this.visitorId,
-        userId: this.userId,
-        eventType,
-        eventData,
-        userAgent: navigator.userAgent,
-        referrer: document.referrer
-      };
-
-      // Analytics edge function not deployed — no-op to avoid 404 noise
-      void payload;
+      // Fire to PostHog — covers ~everything:
+      //  - page views / page leaves (autocapture + manual)
+      //  - funnel stages (zip_entered, slot_selected, booking_submitted, etc.)
+      //  - booking_intent / booking_completed for conversion cohorts
+      //  - ab_test_exposure / conversion for feature-flag analysis
+      // Session recordings run independently (configured in initPostHog).
+      posthogTrack(eventType, {
+        ...eventData,
+        session_id: this.sessionId,
+        visitor_id: this.visitorId,
+        user_id: this.userId,
+      });
     } catch (error) {
       console.warn('Analytics tracking error:', error);
     }

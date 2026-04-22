@@ -2,7 +2,12 @@
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from './AppRoutes.tsx';
+import { initPostHog } from './lib/posthog';
 import './index.css';
+
+// Initialize PostHog as early as possible so page-view events fire on first
+// render. No-op if VITE_POSTHOG_KEY isn't set (dev builds without the key).
+initPostHog();
 
 // Create a client
 const queryClient = new QueryClient({
