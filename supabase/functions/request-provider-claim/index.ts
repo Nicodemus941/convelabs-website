@@ -116,7 +116,9 @@ Deno.serve(async (req) => {
         // we also fire a branded one with the action link.
         const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalized, {
           data: { role: 'provider', org_id: orgByEmail.id, full_name: orgByEmail.contact_name || orgByEmail.name },
-          redirectTo: `${PUBLIC_SITE_URL}/dashboard/provider`,
+          // Send them to /reset-password — that page handles the recovery token,
+// prompts for a new password, then auto-routes providers to their dashboard.
+redirectTo: `${PUBLIC_SITE_URL}/reset-password`,
         });
         // Belt-and-suspenders: if invite somehow fails with already-exists, retry recovery path
         if (inviteErr) {
