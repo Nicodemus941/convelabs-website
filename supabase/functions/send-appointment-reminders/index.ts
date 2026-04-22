@@ -43,12 +43,41 @@ Deno.serve(async (req) => {
     const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
     const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 
-    // Calculate the target date: exactly 24 hours from now
-    // We want appointments happening tomorrow (24hrs ahead), NOT today
-    const now = new Date();
-    const targetDate = new Date(now);
+    // Calculate the target date in America/New_York (the business's timezone).
+    // BUG FIX (2026-04-22): previously used UTC `new Date().setDate(+1)` which,
+    // when the cron fired late-evening ET (after 8pm), had already rolled forward
+    // in UTC. Result: "tomorrow" messaging went out ~36-48 hours ahead of the
+    // actual ET appointment. Michael Morelli got "tomorrow Thursday" on Tuesday
+    // evening for a Thursday appt — 2 calendar days early. Always anchor to ET.
+    const etParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const y = etParts.find(p => p.type === 'year')!.value;
+    const m = etParts.find(p => p.type === 'month')!.value;
+    const d = etParts.find(p => p.type === 'day')!.value;
+    // Build a noon-ET anchor for "today" then add 1 calendar day
+    const todayEt = new Date(`${y}-${m}-${d}T12:00:00-04:00`);
+    const targetDate = new Date(todayEt);
     targetDate.setDate(targetDate.getDate() + 1);
-    const targetDateStr = targetDate.toISOString().split('T')[0]; // yyyy-MM-dd
+    // Re-derive target Y/M/D in ET (safe across DST)
+    const tgtParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(targetDate);
+    const targetDateStr = `${tgtParts.find(p => p.type === 'year')!.value}-${tgtParts.find(p => p.type === 'month')!.value}-${tgtParts.find(p => p.type === 'day')!.value}`;
+
+    // Format "HH:MM:SS" → "8:00 AM" (patient-friendly)
+    const formatApptTime = (t: string | null | undefined): string => {
+      if (!t) return 'your scheduled time';
+      const m = t.match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return t;
+      let h = parseInt(m[1], 10);
+      const min = m[2];
+      const period = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h}:${min} ${period}`;
+    };
 
     console.log(`Sending reminders for appointments on: ${targetDateStr}`);
 
@@ -95,7 +124,7 @@ Deno.serve(async (req) => {
         if (!patientPhone && appt.notes) { const m = appt.notes.match(/Phone:\s*([^|\s]+)/); if (m) patientPhone = m[1].trim(); }
         if (!patientEmail && appt.notes) { const m = appt.notes.match(/Email:\s*([^|\s]+)/); if (m) patientEmail = m[1].trim(); }
 
-        const appointmentTime = appt.appointment_time || 'your scheduled time';
+        const appointmentTime = formatApptTime(appt.appointment_time);
         const formattedDate = new Date(targetDateStr + 'T12:00:00').toLocaleDateString('en-US', {
           weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
         });
