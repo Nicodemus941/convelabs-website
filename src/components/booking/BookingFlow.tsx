@@ -205,7 +205,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     setCurrentStep(prev => prev - 1);
   };
 
-  const handleCheckout = async (tipAmount: number) => {
+  const handleCheckout = async (tipAmount: number, promoCode?: string | null) => {
     try {
       setIsProcessing(true);
       const data = methods.getValues();
@@ -307,6 +307,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         serviceName: service?.name || 'Blood Draw Service',
         amount: Math.round(finalSubtotal * 100),
         tipAmount: Math.round(tipAmount * 100),
+        promoCode: promoCode || null,
         appointmentDate,
         appointmentTime: data.time,
         memberTier, // server re-verifies and re-prices if mismatched

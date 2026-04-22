@@ -31,6 +31,8 @@ export interface AppointmentCheckoutParams {
     weekend?: boolean;
     additionalNotes?: string;
   };
+  /** Optional promo code entered by the patient. Server validates + applies the discount. */
+  promoCode?: string | null;
 }
 
 export interface AppointmentCheckoutResult {
@@ -68,7 +70,9 @@ export async function createAppointmentCheckoutSession(
     }
 
     if (data.error) {
-      return { error: data.error };
+      // Prefer the human-friendly message the edge fn provides (e.g. invalid
+      // promo code, $0-total guard) so toast copy stays actionable
+      return { error: (data.message as string) || (data.error as string) };
     }
 
     return { url: data.url, sessionId: data.sessionId };

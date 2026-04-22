@@ -104,6 +104,9 @@ Deno.serve(async (req) => {
       // referrer, landing page for the current booking session. Stamped on
       // the appointment row (via webhook metadata) for CAC attribution.
       attribution = {},
+      // Promo code entered at checkout (optional). Server validates via
+      // public.validate_promo_code RPC so the client cannot forge discounts.
+      promoCode = null,
     } = await req.json();
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
@@ -595,6 +598,72 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn('referral redemption failed (non-blocking):', e); }
     }
 
+    // ─── PROMO CODE REDEMPTION ──────────────────────────────────────
+    // Server-side validation only — client-supplied code alone grants
+    // nothing. RPC returns {valid, discount_type, discount_value, code_id}
+    // and enforces active/expiry/max_uses/email-restriction.
+    let promoCodeApplied: {
+      id: string; code: string; discount_type: string; discount_value: number; applied_cents: number;
+    } | null = null;
+    if (promoCode && typeof promoCode === 'string' && promoCode.trim().length > 0) {
+      try {
+        const { data: promoResult, error: promoErr } = await supabaseClient.rpc('validate_promo_code', {
+          p_code: promoCode.trim(),
+          p_email: patientDetails?.email || '',
+        });
+        if (promoErr) {
+          console.warn('[promo] validate_promo_code RPC error:', promoErr.message);
+        } else if (promoResult?.valid) {
+          const dt = promoResult.discount_type as string;
+          const dv = Number(promoResult.discount_value || 0);
+          const priorAmount = amount;
+          let appliedCents = 0;
+          if (dt === 'full_waiver') {
+            appliedCents = amount;
+            amount = 0;
+          } else if (dt === 'fixed_cents') {
+            appliedCents = Math.min(dv, amount);
+            amount = Math.max(0, amount - appliedCents);
+          } else if (dt === 'percent') {
+            const pct = Math.max(0, Math.min(100, dv));
+            appliedCents = Math.round((amount * pct) / 100);
+            amount = Math.max(0, amount - appliedCents);
+          }
+          promoCodeApplied = {
+            id: String(promoResult.code_id),
+            code: String(promoResult.code),
+            discount_type: dt,
+            discount_value: dv,
+            applied_cents: appliedCents,
+          };
+          console.log(
+            `[promo] ${patientDetails?.email} used ${promoResult.code}: ` +
+            `type=${dt} value=${dv} applied=$${appliedCents / 100} ` +
+            `priorAmount=$${priorAmount / 100} newAmount=$${amount / 100}`
+          );
+        } else {
+          console.log(`[promo] ${patientDetails?.email} invalid code "${promoCode}": ${promoResult?.reason || 'unknown'}`);
+          return new Response(
+            JSON.stringify({
+              error: 'invalid_promo_code',
+              reason: promoResult?.reason || 'not_found',
+              message:
+                promoResult?.reason === 'email_not_authorized'
+                  ? 'This promo code is not available on this account.'
+                  : promoResult?.reason === 'expired'
+                  ? 'This promo code has expired.'
+                  : promoResult?.reason === 'max_uses_reached'
+                  ? 'This promo code has reached its usage limit.'
+                  : 'Invalid promo code.',
+            }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      } catch (e: any) {
+        console.warn('[promo] validation threw (non-blocking):', e?.message);
+      }
+    }
+
     // ─── STAMP benefit_first_used_at for refund lockout ─────────────
     // The moment a patient uses ANY member benefit (discount or referral),
     // their 30-day refund window auto-closes. Done via a separate update
@@ -635,9 +704,13 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Build line items
-    const lineItems: any[] = [
-      {
+    // Build line items. Skip the visit line when amount=0 (full promo waiver
+    // or org_covers) — Stripe rejects line items with unit_amount < 50 cents,
+    // and a $0 line item adds no value. Tip (or bundled subscription) carries
+    // the session when the visit is free.
+    const lineItems: any[] = [];
+    if (amount > 0) {
+      lineItems.push({
         price_data: {
           currency: 'usd',
           product_data: {
@@ -647,8 +720,8 @@ Deno.serve(async (req) => {
           unit_amount: amount,
         },
         quantity: 1,
-      },
-    ];
+      });
+    }
 
     // Add tip as separate line item if provided
     if (tipAmount > 0) {
@@ -758,9 +831,35 @@ Deno.serve(async (req) => {
       }
     } catch (e) { console.warn('upgrade_events insert failed (non-blocking):', e); }
 
+    // ─── $0-TOTAL GUARD ────────────────────────────────────────────
+    // Stripe Checkout rejects payment-mode sessions with total < $0.50.
+    // If a promo makes the visit fully free AND there's no tip, tell the
+    // patient to add any tip (the only amount they'll be charged) so the
+    // session can go through. The promo is still applied — visit fee is
+    // zero; only the tip is collected.
+    const willHaveSubscriptionLineItem = !!(subscribeToMembership && subscribeToMembership.annualPriceCents);
+    if (!willHaveSubscriptionLineItem && amount + tipAmount < 50) {
+      return new Response(
+        JSON.stringify({
+          error: 'total_too_low',
+          message: promoCodeApplied
+            ? 'Your promo code covers the full visit fee — service is free. Please add any tip amount ($1+) so we can complete the booking. The tip is the only thing you\'ll be charged.'
+            : 'The total charge must be at least $0.50. Please adjust your selection.',
+          promo_applied: promoCodeApplied?.code || null,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Create the checkout session
     // Tag metadata with credit info for Stripe dashboard visibility
     metadata.apology_credit_applied_cents = String(apologyCreditApplied);
+    if (promoCodeApplied) {
+      metadata.promo_code = promoCodeApplied.code;
+      metadata.promo_code_id = promoCodeApplied.id;
+      metadata.promo_discount_type = promoCodeApplied.discount_type;
+      metadata.promo_applied_cents = String(promoCodeApplied.applied_cents);
+    }
     metadata.referral_credit_applied_cents = String(referralCreditApplied);
     metadata.redeemed_referral_credit_ids = referralCreditIdsToMark.join(',').substring(0, 500);
     metadata.member_benefit_used = willUseMemberBenefit ? 'true' : 'false';
