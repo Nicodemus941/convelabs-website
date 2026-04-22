@@ -91,28 +91,36 @@ const Hero = () => {
             initial="hidden"
             animate="visible"
           >
-            {/* H1 — the NFL-grade claim */}
+            {/* H1 — patient-centric, not athlete-centric. Tells the visitor
+                WHAT we do and FOR WHOM in the first three seconds. */}
             <motion.h1
               variants={itemVariants}
               className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.05] tracking-tight text-white mb-6"
             >
-              Better Than <span className="text-conve-red">NFL-Grade.</span>
+              Blood Draws at Your <span className="text-conve-red">Kitchen Table.</span>
               <br />
-              At Your Door.
+              Not a Waiting Room.
             </motion.h1>
 
-            {/* Subtitle */}
+            {/* Subtitle — the critical insurance-clarity line that answers
+                "why pay when LabCorp is free?" Immediate category separation. */}
             <motion.p
               variants={itemVariants}
-              className="text-lg sm:text-xl md:text-2xl text-white/90 max-w-2xl mx-auto mb-8 leading-relaxed"
+              className="text-lg sm:text-xl md:text-2xl text-white/90 max-w-2xl mx-auto mb-6 leading-relaxed"
             >
-              Licensed phlebotomist at your door in 60 minutes.
-              One-try blood draws. Results in 48 hours.
-              <br className="hidden sm:block" />
-              <span className="inline-flex items-center gap-1.5 mt-2 text-white font-semibold">
-                <Shield className="h-4 w-4 text-green-400" />
-                On-time — or your visit is free.
+              Your doctor ordered labs — we come to you.
+              <span className="block mt-2 text-base sm:text-lg text-white/80">
+                Your insurance still covers the tests. We're the phlebotomist who skips the drive.
               </span>
+            </motion.p>
+
+            {/* Guarantee stripe — kept but compressed to one line */}
+            <motion.p
+              variants={itemVariants}
+              className="inline-flex items-center gap-1.5 mb-8 text-white font-semibold"
+            >
+              <Shield className="h-4 w-4 text-green-400" />
+              On-time, one-try, 48-hour results — or your visit is free.
             </motion.p>
 
             {/* Dual CTA */}

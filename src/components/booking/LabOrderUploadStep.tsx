@@ -375,6 +375,29 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
               <Button variant="link" size="sm" className="px-0 h-auto text-xs" onClick={handleSkip}>Skip for now</Button>
             )}
           </div>
+
+          {/* "Don't have it yet?" — instead of letting patients bounce at this
+              step, surface the "have your doctor fax it" path prominently with
+              a clear explanation of WHY lab order is required up-front. */}
+          {!hasLabOrder && mode !== 'fax' && (
+            <div className="mt-4 p-3 rounded-lg border border-blue-200 bg-blue-50">
+              <p className="text-sm font-semibold text-blue-900">📠 Don't have your lab order in hand?</p>
+              <p className="text-xs text-blue-700 mt-0.5 mb-2">
+                We require the order before drawing so we collect the right tubes and tests.
+                The fastest path: ask your doctor's office to <strong>fax it to (941) 527-9169</strong> —
+                or pick this option and we'll contact your doctor's office directly to request it.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs border-blue-300 text-blue-800 hover:bg-blue-100"
+                onClick={handleFaxMode}
+              >
+                📠 Have my doctor fax it instead
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Insurance Upload (for Mobile & Senior) */}
