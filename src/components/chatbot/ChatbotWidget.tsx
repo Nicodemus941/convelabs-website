@@ -144,8 +144,8 @@ const ChatbotWidget: React.FC = () => {
         ...prev,
         {
           role: 'assistant',
-          content: "I'm having trouble right now — please text (941) 527-9169 and Nico will respond personally.",
-          suggestedActions: [{ label: 'Text Nico', url: 'sms:+19415279169' }],
+          content: "Let me get a human on this — text Nico at (941) 527-9169 and he'll book you same-day.",
+          suggestedActions: [{ label: 'Text Nico now', url: 'sms:+19415279169' }],
           ts: Date.now(),
         },
       ]);
@@ -207,7 +207,7 @@ const ChatbotWidget: React.FC = () => {
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-bold text-sm leading-tight">Ask Nico</p>
-              <p className="text-[11px] text-rose-100 leading-tight">Concierge mobile phlebotomy · Central FL</p>
+              <p className="text-[11px] text-rose-100 leading-tight">Licensed phlebs at your door · Same-day available</p>
             </div>
             <button
               onClick={toggleOpen}
@@ -223,11 +223,25 @@ const ChatbotWidget: React.FC = () => {
             {!hookPicked && messages.length === 0 && (
               <>
                 <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[90%] shadow-sm">
-                  <p className="text-sm text-gray-900 leading-relaxed">
-                    Hey — I'm the ConveLabs assistant. I'll help you book a blood draw, answer questions, or connect you with Nico directly.
+                  <p className="text-sm text-gray-900 leading-relaxed font-semibold">
+                    Blood draws at your kitchen table — not a waiting room.
                   </p>
-                  <p className="text-sm text-gray-900 leading-relaxed mt-2">
-                    Which one are you?
+                  <p className="text-sm text-gray-700 leading-relaxed mt-1.5">
+                    Your insurance still covers the tests. We're the phlebotomist who skips the drive. Same-day often available.
+                  </p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-gray-600">
+                    <span className="flex items-center gap-0.5">
+                      <span className="text-yellow-500">⭐</span>
+                      <span className="font-semibold text-gray-900">5.0</span>
+                      <span>· 164 reviews</span>
+                    </span>
+                    <span className="text-gray-300">·</span>
+                    <span>🏈 NFL-trusted</span>
+                    <span className="text-gray-300">·</span>
+                    <span>🛡️ HIPAA</span>
+                  </div>
+                  <p className="text-sm text-gray-900 leading-relaxed mt-3 font-medium">
+                    Which one fits you?
                   </p>
                 </div>
                 <div className="space-y-2 max-w-[90%]">
