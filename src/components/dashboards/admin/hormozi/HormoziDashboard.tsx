@@ -17,6 +17,7 @@ import OpsHealthCard from './OpsHealthCard';
 import TrendSparkline from './TrendSparkline';
 import CampaignROICard from './CampaignROICard';
 import ChatROICard from './ChatROICard';
+import TrafficCard from './TrafficCard';
 
 /**
  * HORMOZI DASHBOARD — The Accountability Screen
@@ -375,7 +376,10 @@ const HormoziDashboard: React.FC = () => {
       {/* ─── ACQUISITION (Level 0: "CAC documented per channel") ───── */}
       <section className="mb-6">
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Acquisition</h2>
-        <AcquisitionByChannel />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <AcquisitionByChannel />
+          <TrafficCard />
+        </div>
       </section>
 
       {/* ─── ATTENTION ITEMS ──────────────────────────────────────── */}
