@@ -122,73 +122,48 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         }
       } catch (e) { console.warn('Signature capture exception:', e); }
 
-      // Update appointment status + chain-of-custody fields
+      // Update appointment status + chain-of-custody fields.
+      // Stamp BOTH delivered_at (legacy) and specimens_delivered_at (canonical,
+      // used by admin dashboards). Earlier only delivered_at was being set —
+      // caused specimen-count widgets to read 0 even after deliveries fired.
+      const nowIso = new Date().toISOString();
       await supabase.from('appointments').update({
         status: 'specimen_delivered',
-        delivered_at: new Date().toISOString(),
+        delivered_at: nowIso,
+        specimens_delivered_at: nowIso,
         ...(geoStamp ? { delivery_location: geoStamp } : {}),
         ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
       }).eq('id', appointmentId);
 
-      // Send SMS notification to patient
-      if (patientPhone) {
-        await supabase.functions.invoke('send-sms-notification', {
-          body: {
-            phoneNumber: patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`,
-            notificationType: 'sample_delivered',
-            labName: labLabel,
-            trackingId: specimenId.trim(),
-          },
-        }).catch(err => console.error('SMS error:', err));
-      }
-
-      // Notify ALL linked organizations on this appointment (primary + cc).
-      // send-specimen-delivery-notification loops through the
-      // appointment_organizations junction, emails each with HIPAA footer,
-      // and dedupes via notified_delivery_at. Non-blocking — a failure
-      // here won't break the phleb's workflow.
+      // Unified patient + org notification via send-specimen-delivery-notification.
+      // Previously the modal fanned out 3 separate invokes (send-sms-notification,
+      // send-email, send-specimen-delivery-notification). The first two had .catch
+      // swallowers with no audit logging — when they silently failed (Ellen
+      // Sherman + Cliff Stein, April 22) the patient never learned their sample
+      // had been delivered. One call now handles patient SMS + patient email +
+      // all linked orgs, and writes rows to sms_notifications / email_send_log
+      // so every send is auditable.
+      let patientNotified = false;
       try {
-        await supabase.functions.invoke('send-specimen-delivery-notification', {
+        const { data: notifyRes } = await supabase.functions.invoke('send-specimen-delivery-notification', {
           body: {
             appointmentId,
             specimenId: specimenId.trim(),
             labName: labLabel,
             tubeCount: parseInt(tubeCount) || 1,
-            deliveredAt: new Date().toISOString(),
+            deliveredAt: nowIso,
           },
         });
+        patientNotified = !!(notifyRes?.patient_sms_sent || notifyRes?.patient_email_sent);
       } catch (orgErr) {
-        console.warn('[specimen] org notify failed (non-blocking):', orgErr);
+        console.warn('[specimen] notification invoke failed (non-blocking):', orgErr);
       }
 
-      // Send email notification
-      if (patientEmail) {
-        await supabase.functions.invoke('send-email', {
-          body: {
-            to: patientEmail,
-            subject: `Specimen Delivered to ${labLabel} - Tracking ID: ${specimenId.trim()}`,
-            html: `<div style="font-family:Arial;max-width:600px;margin:0 auto;">
-              <div style="background:#B91C1C;color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-                <h2 style="margin:0;">Specimen Delivered</h2>
-              </div>
-              <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
-                <p>Hi ${patientName},</p>
-                <p>Your specimens have been successfully delivered to <strong>${labLabel}</strong>.</p>
-                <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:16px 0;">
-                  <p style="margin:0;font-size:14px;"><strong>Lab-Generated Tracking ID:</strong></p>
-                  <p style="margin:4px 0 0;font-size:20px;font-weight:700;color:#166534;">${specimenId.trim()}</p>
-                  <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">Lab: ${labLabel}${labAddress ? ' | ' + labAddress : ''}</p>
-                  <p style="margin:4px 0 0;font-size:12px;color:#6b7280;">Tubes: ${tubeCount}${tubeTypes ? ' (' + tubeTypes + ')' : ''}</p>
-                </div>
-                <p style="font-size:13px;color:#6b7280;">Your results will be available through your lab's patient portal. If your provider does not see results, provide them with the tracking ID above.</p>
-                <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810<br>(941) 527-9169</p>
-              </div>
-            </div>`,
-          },
-        }).catch(err => console.error('Email error:', err));
-      }
-
-      toast.success(`Specimen delivered to ${labLabel}. Patient + linked org notified.`);
+      toast.success(
+        patientNotified
+          ? `Specimen delivered to ${labLabel}. Patient + linked org notified.`
+          : `Specimen delivered to ${labLabel}. Saved — retrying notifications in background.`
+      );
       onDelivered();
       onClose();
     } catch (err: any) {
