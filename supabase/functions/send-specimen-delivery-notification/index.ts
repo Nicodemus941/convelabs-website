@@ -17,6 +17,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { renderSpecimenDelivered } from '../_shared/patient-email-templates.ts';
+import { logOrgEmail } from '../_shared/email-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -156,11 +157,13 @@ Deno.serve(async (req) => {
 
         patientEmailSent = mgRes.ok;
 
-        await supabase.from('email_send_log').insert({
-          to_email: appt.patient_email,
-          campaign_tag: 'specimen_delivered_patient',
-          sent_at: new Date().toISOString(),
-        }).then(() => {}, (e) => console.warn('[specimen-notify] email log insert failed:', e));
+        await logOrgEmail(supabase, {
+          appointmentId: apptId,
+          toEmail: appt.patient_email,
+          emailType: 'specimen_delivered_patient',
+          subject: `Specimen delivered to ${labLabel}${body.specimenId ? ` · Tracking ${body.specimenId}` : ''}`,
+          mailgunResponse: mgRes,
+        });
       } catch (e: any) {
         console.error('[specimen-notify] patient email failed:', e?.message);
       }
@@ -245,6 +248,17 @@ Deno.serve(async (req) => {
           method: 'POST',
           headers: { Authorization: `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
           body: fd,
+        });
+
+        // Audit log per-org so the Emails tab shows every delivery
+        // notification they received
+        await logOrgEmail(supabase, {
+          appointmentId: apptId,
+          organizationId: org.id,
+          toEmail: recipient,
+          emailType: 'specimen_delivered_org',
+          subject: `Specimen delivered for ${displayPatient}${body.labName ? ` · ${body.labName}` : ''}`,
+          mailgunResponse: mgRes,
         });
 
         if (!mgRes.ok) {

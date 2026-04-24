@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
 import { renderAppointmentConfirmation } from '../_shared/patient-email-templates.ts';
+import { logOrgEmail } from '../_shared/email-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -282,6 +283,16 @@ Deno.serve(async (req) => {
         results.email = mgRes.ok;
         if (mgRes.ok) console.log(`Confirmation email sent to ${patientEmail}`);
         else console.error(`Mailgun error: ${mgRes.status} ${await mgRes.text()}`);
+
+        // Audit log — surfaces on the org's Emails tab + powers Mailgun
+        // webhook status updates (opened/clicked/bounced) via mailgun_id.
+        await logOrgEmail(supabase, {
+          appointmentId: body.appointmentId,
+          toEmail: patientEmail,
+          emailType: 'appointment_confirmation',
+          subject: `Appointment Confirmed - ${displayDate}`,
+          mailgunResponse: mgRes,
+        });
       }
     }
 

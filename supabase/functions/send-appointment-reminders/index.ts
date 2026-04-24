@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
 import { renderAppointmentReminder } from '../_shared/patient-email-templates.ts';
+import { logOrgEmail } from '../_shared/email-log.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -218,6 +219,15 @@ Deno.serve(async (req) => {
           } else {
             console.log(`Email reminder sent for appointment ${appt.id}`);
           }
+
+          // Audit log — surfaces on the org's Emails tab
+          await logOrgEmail(supabase, {
+            appointmentId: appt.id,
+            toEmail: patientEmail,
+            emailType: 'appointment_reminder',
+            subject: `Reminder: Your ConveLabs Appointment Tomorrow at ${appointmentTime}`,
+            mailgunResponse: mgRes,
+          });
           }
         }
 
