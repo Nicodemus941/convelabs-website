@@ -558,10 +558,10 @@ ConveLabs · (941) 527-9169`
             revenue + visit count + outstanding. Negotiation ammo. */}
         <OrgRoiCard orgId={selectedOrg.id} />
 
-        {/* Concierge Subscription tier picker — Phase 1 of the practice-as-
-            subscription pivot. Sets tier → org gets seat cap + overage price.
-            Stripe billing wiring ships in a separate pass. */}
-        <OrgSubscriptionTierCard org={selectedOrg} onChanged={() => fetchOrgs()} />
+        {/* Concierge Subscription tier picker — removed from the UI per the
+            referral-first pivot (we don't charge orgs a subscription fee).
+            OrgSubscriptionTierCard.tsx remains for future re-enable if we
+            ever pivot back to practice-paid tiers. */}
 
         {/* Patients linked to this org — full list with search, filter, add */}
         <div className="pt-2">
