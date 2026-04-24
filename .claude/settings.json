@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(npm install*)",
+      "Bash(npx tsc*)",
+      "Bash(npx supabase functions deploy*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(git revert*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(ls*)",
+      "Bash(cat*)",
+      "Bash(mkdir*)",
+      "Bash(curl -s*)",
+      "Bash(curl -X OPTIONS*)",
+      "Bash(./node_modules/.bin/tsc*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$CLAUDE_TOOL_FILE_PATH\" | grep -qE 'src/.*\\.(ts|tsx)$'; then cd /c/Users/nicod/convelabs-website && ./node_modules/.bin/tsc --noEmit -p tsconfig.app.json 2>&1 | grep -E 'error TS' | head -10 || echo 'typecheck: clean'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}
