@@ -27,7 +27,7 @@ interface FamilyMember {
 // Tier-aware companion pricing. Mirrors TIER_PRICING['additional'] server-side
 // so admin + public flows charge the same. Non-member $75, Member $55,
 // VIP $45, Concierge $35 — every booking reinforces the member benefit.
-const familyMemberPrice_BY_TIER: Record<string, number> = {
+const FAMILY_MEMBER_PRICE_BY_TIER: Record<string, number> = {
   none: 75,
   member: 55,
   vip: 45,
