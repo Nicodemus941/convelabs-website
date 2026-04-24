@@ -1410,29 +1410,35 @@ ConveLabs · (941) 527-9169`
               <div><Label>Contact Name</Label><Input value={orgForm.contactName} onChange={e => setOrgForm(p => ({ ...p, contactName: e.target.value }))} /></div>
               <div><Label>Contact Phone</Label><Input value={orgForm.contactPhone} onChange={e => setOrgForm(p => ({ ...p, contactPhone: e.target.value }))} /></div>
             </div>
-            <div><Label>Contact Email</Label><Input type="email" value={orgForm.contactEmail} onChange={e => setOrgForm(p => ({ ...p, contactEmail: e.target.value }))} /></div>
+            <div>
+              <Label>Contact Email {orgForm.contactEmail ? <span className="text-emerald-600 font-normal ml-1">✓ welcome ready to send</span> : <span className="text-gray-400 font-normal ml-1">· required to send welcome</span>}</Label>
+              <Input type="email" value={orgForm.contactEmail} onChange={e => setOrgForm(p => ({ ...p, contactEmail: e.target.value }))} placeholder="dr.sher@practicename.com" />
+            </div>
             <div><Label>Billing Email</Label><Input type="email" value={orgForm.billingEmail} onChange={e => setOrgForm(p => ({ ...p, billingEmail: e.target.value }))} placeholder="Where invoices get sent" /></div>
             <div><Label>Billing Address</Label><Input value={orgForm.billingAddress} onChange={e => setOrgForm(p => ({ ...p, billingAddress: e.target.value }))} /></div>
             <div><Label>Notes</Label><Textarea value={orgForm.notes} onChange={e => setOrgForm(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
           </div>
           <DialogFooter className="gap-2 flex-col sm:flex-row">
-            <Button variant="outline" onClick={() => setShowAddOrg(false)} className="w-full sm:w-auto">Cancel</Button>
+            <Button variant="outline" onClick={() => setShowAddOrg(false)} className="w-full sm:w-auto" disabled={saving}>
+              Cancel
+            </Button>
             <Button
               variant="outline"
               onClick={() => handleAddOrg(false)}
               disabled={saving}
               className="w-full sm:w-auto"
+              title="Save the org row but don't email them yet — you can send the welcome later from the org card"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save only'}
             </Button>
             <Button
-              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white w-full sm:w-auto"
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white w-full sm:w-auto gap-1.5"
               onClick={() => handleAddOrg(true)}
               disabled={saving || !orgForm.contactEmail.trim()}
-              title={!orgForm.contactEmail.trim() ? 'Add a contact email to enable' : 'Save org + send Hormozi welcome email'}
+              title={!orgForm.contactEmail.trim() ? 'Enter a contact email first' : 'Save the org AND fire the luxury welcome email now'}
             >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
-              Save &amp; send welcome email
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Save &amp; Send Welcome
             </Button>
           </DialogFooter>
         </DialogContent>
