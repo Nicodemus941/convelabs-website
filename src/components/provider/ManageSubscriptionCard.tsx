@@ -96,22 +96,22 @@ const ManageSubscriptionCard: React.FC<Props> = ({ orgId, orgName }) => {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Plan summary */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-white border rounded-lg p-3 text-center">
+        {/* Plan summary — 2-col on narrow mobile, 3-col once there's room */}
+        <div className="grid grid-cols-2 xs:grid-cols-3 gap-2">
+          <div className="bg-white border rounded-lg p-2.5 sm:p-3 text-center">
             <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Monthly</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">${monthly.toLocaleString()}</p>
+            <p className="text-base sm:text-lg font-bold text-gray-900 mt-0.5">${monthly.toLocaleString()}</p>
             <p className="text-[10px] text-gray-500">${perSeat}/patient</p>
           </div>
-          <div className="bg-white border rounded-lg p-3 text-center">
+          <div className="bg-white border rounded-lg p-2.5 sm:p-3 text-center">
             <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Seats used</p>
-            <p className={`text-lg font-bold mt-0.5 ${full ? 'text-red-600' : nearFull ? 'text-amber-600' : 'text-emerald-600'}`}>
+            <p className={`text-base sm:text-lg font-bold mt-0.5 ${full ? 'text-red-600' : nearFull ? 'text-amber-600' : 'text-emerald-600'}`}>
               {status.active_seats}/{status.seat_cap || 0}
             </p>
             <p className="text-[10px] text-gray-500">{status.seats_remaining} left</p>
           </div>
-          <div className="bg-white border rounded-lg p-3 text-center">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Since</p>
+          <div className="bg-white border rounded-lg p-2.5 sm:p-3 text-center col-span-2 xs:col-span-1">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Member since</p>
             <p className="text-sm font-semibold text-gray-900 mt-1">
               {status.started_at ? format(new Date(status.started_at), 'MMM yyyy') : '—'}
             </p>

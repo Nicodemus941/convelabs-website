@@ -84,7 +84,7 @@ const OrgSubscriptionStatusCard: React.FC<Props> = ({ orgId }) => {
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-3">
+        <div className="grid grid-cols-2 xs:grid-cols-3 gap-2 mb-3">
           <div className="bg-white border rounded-lg p-2.5 text-center">
             <div className="flex items-center justify-center gap-1 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
               <DollarSign className="h-3 w-3" /> Monthly
@@ -99,7 +99,7 @@ const OrgSubscriptionStatusCard: React.FC<Props> = ({ orgId }) => {
             <p className="text-base font-bold text-gray-900 mt-0.5">{status.active_seats}/{status.seat_cap || 0}</p>
             <p className="text-[10px] text-gray-500">{status.seats_remaining} left</p>
           </div>
-          <div className="bg-white border rounded-lg p-2.5 text-center">
+          <div className="bg-white border rounded-lg p-2.5 text-center col-span-2 xs:col-span-1">
             <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Utilization</p>
             <p className="text-base font-bold text-gray-900 mt-0.5">{Math.round(usage * 100)}%</p>
             <p className="text-[10px] text-gray-500">of seats in use</p>

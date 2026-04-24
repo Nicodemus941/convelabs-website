@@ -19,6 +19,12 @@ export default {
 			}
 		},
 		extend: {
+			screens: {
+				// Extra-small breakpoint (480px) — between stock mobile and
+				// sm:640. Lets us pack 3-col KPI grids once we have enough
+				// width without forcing 2-col on 375px iPhone SE.
+				xs: '480px',
+			},
 			colors: {
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',

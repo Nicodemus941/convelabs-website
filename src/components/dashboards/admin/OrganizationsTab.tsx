@@ -609,22 +609,30 @@ ConveLabs · (941) 527-9169`
     const totalOutstanding = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + i.amount, 0);
 
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-3 flex-wrap">
-          <Button variant="ghost" size="sm" onClick={() => setSelectedOrg(null)}>← Back</Button>
-          <div className="flex-1 min-w-[200px]">
+      <div className="space-y-4 sm:space-y-6">
+        {/* Top row: back button — always visible, always alone on mobile */}
+        <Button variant="ghost" size="sm" onClick={() => setSelectedOrg(null)} className="gap-1 -ml-2">
+          ← Back
+        </Button>
+
+        {/* Identity + actions: stacks vertically below 640px, side-by-side above */}
+        <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-2xl font-bold">{selectedOrg.name}</h1>
+              <h1 className="text-xl sm:text-2xl font-bold leading-tight break-words">{selectedOrg.name}</h1>
               {selectedOrg.portal_enabled && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[10px]">Portal enabled</Badge>}
               {!selectedOrg.is_active && <Badge className="bg-gray-200 text-gray-600 hover:bg-gray-200 text-[10px]">Inactive</Badge>}
               {(selectedOrg as any).welcomed_at && <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]">✓ Welcomed</Badge>}
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-words">
               {selectedOrg.contact_name ? `${selectedOrg.contact_name} · ` : ''}
-              {selectedOrg.contact_email || 'No email'} · {selectedOrg.contact_phone || 'No phone'}
+              {selectedOrg.contact_email || 'No email'}
+              {selectedOrg.contact_phone && <span> · {selectedOrg.contact_phone}</span>}
             </p>
           </div>
-          <div className="flex gap-2 flex-wrap">
+
+          {/* Actions — full-width on mobile, right-aligned on desktop */}
+          <div className="flex gap-2 flex-shrink-0 flex-col xs:flex-row sm:flex-row w-full sm:w-auto">
             {selectedOrg.contact_email && (
               <Button
                 size="sm"
@@ -636,34 +644,38 @@ ConveLabs · (941) 527-9169`
                   console.log('[send-welcome click]', { orgId: selectedOrg.id, recipient: selectedOrg.contact_email, resend: alreadyWelcomed });
                   handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, alreadyWelcomed);
                 }}
-                className={(selectedOrg as any).welcomed_at
-                  ? 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 gap-1.5'
-                  : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 shadow-sm'}
+                className={`gap-1.5 w-full sm:w-auto ${(selectedOrg as any).welcomed_at
+                  ? 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
+                  : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white shadow-sm'}`}
                 title={(selectedOrg as any).welcomed_at ? 'Resend the welcome email' : 'Send the branded welcome email now'}
               >
                 <Send className="h-3.5 w-3.5" />
                 {(selectedOrg as any).welcomed_at ? 'Resend welcome' : 'Send welcome'}
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5">
+            <Button variant="outline" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5 w-full sm:w-auto">
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
           </div>
         </div>
 
         <Tabs defaultValue="overview">
-          <TabsList className="w-full overflow-x-auto justify-start sm:justify-center sm:w-auto">
-            <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><TrendingUp className="h-3.5 w-3.5" /> Overview</TabsTrigger>
-            <TabsTrigger value="patients" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><User className="h-3.5 w-3.5" /> Patients</TabsTrigger>
-            <TabsTrigger value="staff" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><Users className="h-3.5 w-3.5" /> Staff</TabsTrigger>
-            <TabsTrigger value="services" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><FlaskConical className="h-3.5 w-3.5" /> Services</TabsTrigger>
-            <TabsTrigger value="invoices" className="gap-1 text-xs sm:text-sm px-2 sm:px-3">
-              <FileText className="h-3.5 w-3.5" /> Invoices
-              {invoices.length > 0 && <span className="ml-1 text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded-full">{invoices.length}</span>}
-            </TabsTrigger>
-            <TabsTrigger value="notes" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><StickyNote className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-            <TabsTrigger value="activity" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><Activity className="h-3.5 w-3.5" /> Activity</TabsTrigger>
-          </TabsList>
+          {/* Horizontally scrollable tab rail on mobile — swipe to reveal
+              Staff/Services/Notes/Activity without cramping the labels. */}
+          <div className="-mx-2 sm:mx-0 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <TabsList className="inline-flex min-w-max px-2 sm:px-0 gap-0.5">
+              <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><TrendingUp className="h-3.5 w-3.5" /> Overview</TabsTrigger>
+              <TabsTrigger value="patients" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><User className="h-3.5 w-3.5" /> Patients</TabsTrigger>
+              <TabsTrigger value="staff" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><Users className="h-3.5 w-3.5" /> Staff</TabsTrigger>
+              <TabsTrigger value="services" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><FlaskConical className="h-3.5 w-3.5" /> Services</TabsTrigger>
+              <TabsTrigger value="invoices" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap">
+                <FileText className="h-3.5 w-3.5" /> Invoices
+                {invoices.length > 0 && <span className="ml-1 text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded-full">{invoices.length}</span>}
+              </TabsTrigger>
+              <TabsTrigger value="notes" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><StickyNote className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+              <TabsTrigger value="activity" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><Activity className="h-3.5 w-3.5" /> Activity</TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* ─── OVERVIEW ─────────────────────────────────────────── */}
           <TabsContent value="overview" className="space-y-4 mt-4">
@@ -1537,29 +1549,29 @@ ConveLabs · (941) 527-9169`
 
       {/* Add Organization Modal — luxury redesign */}
       <Dialog open={showAddOrg} onOpenChange={(v) => { if (!saving) setShowAddOrg(v); }}>
-        <DialogContent className="max-w-lg p-0 overflow-hidden max-h-[92vh] overflow-y-auto">
+        <DialogContent className="max-w-lg w-[calc(100vw-1.5rem)] sm:w-full p-0 overflow-hidden max-h-[92vh] overflow-y-auto">
           {/* Hero */}
-          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] px-6 py-5 text-white">
+          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] px-4 sm:px-6 py-4 sm:py-5 text-white">
             <div className="flex items-center gap-3">
-              <div className="h-11 w-11 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center">
+              <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0">
                 <Building2 className="h-5 w-5 text-white" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] tracking-[0.25em] uppercase text-rose-100" style={{ fontFamily: 'Georgia, serif' }}>
                   New partner practice
                 </p>
-                <DialogTitle className="text-xl font-normal text-white leading-tight" style={{ fontFamily: 'Georgia, serif' }}>
+                <DialogTitle className="text-lg sm:text-xl font-normal text-white leading-tight" style={{ fontFamily: 'Georgia, serif' }}>
                   Register an organization
                 </DialogTitle>
               </div>
             </div>
-            <p className="mt-3 text-[13px] leading-relaxed text-rose-50/90">
+            <p className="mt-3 text-[12px] sm:text-[13px] leading-relaxed text-rose-50/90">
               Register the practice and — if they're ready — fire the welcome email right away. The link they get activates their provider portal in one click.
             </p>
           </div>
 
           {/* Body */}
-          <div className="px-6 py-5 space-y-5">
+          <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
 
             {/* Section 1 — Identity */}
             <div>
@@ -1650,19 +1662,36 @@ ConveLabs · (941) 527-9169`
                   ) : (
                     <div className="space-y-2">
                       {orgForm.ccEmails.map((r, i) => (
-                        <div key={i} className="flex gap-2 items-start">
-                          <Input
-                            type="email"
-                            value={r.email}
-                            onChange={(e) => setOrgForm(p => {
-                              const next = [...p.ccEmails];
-                              next[i] = { ...next[i], email: e.target.value };
-                              return { ...p, ccEmails: next };
-                            })}
-                            placeholder="email@practicename.com"
-                            className="flex-1 h-9 text-sm"
-                            disabled={saving}
-                          />
+                        <div key={i} className="bg-gray-50 border border-gray-200 rounded-md p-2 sm:p-0 sm:bg-transparent sm:border-0 sm:rounded-none">
+                          <div className="flex gap-2 items-center">
+                            <Input
+                              type="email"
+                              value={r.email}
+                              onChange={(e) => setOrgForm(p => {
+                                const next = [...p.ccEmails];
+                                next[i] = { ...next[i], email: e.target.value };
+                                return { ...p, ccEmails: next };
+                              })}
+                              placeholder="email@practicename.com"
+                              inputMode="email"
+                              className="flex-1 h-9 text-sm min-w-0"
+                              disabled={saving}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setOrgForm(p => ({
+                                ...p,
+                                ccEmails: p.ccEmails.filter((_, idx) => idx !== i),
+                              }))}
+                              disabled={saving}
+                              className="h-9 w-9 p-0 text-gray-400 hover:text-red-600 flex-shrink-0"
+                              aria-label="Remove recipient"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
                           <Input
                             value={r.label}
                             onChange={(e) => setOrgForm(p => {
@@ -1671,23 +1700,9 @@ ConveLabs · (941) 527-9169`
                               return { ...p, ccEmails: next };
                             })}
                             placeholder="Role (MA, billing…)"
-                            className="w-32 h-9 text-sm"
+                            className="h-8 text-sm mt-1.5 sm:mt-0 sm:ml-0"
                             disabled={saving}
                           />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setOrgForm(p => ({
-                              ...p,
-                              ccEmails: p.ccEmails.filter((_, idx) => idx !== i),
-                            }))}
-                            disabled={saving}
-                            className="h-9 w-9 p-0 text-gray-400 hover:text-red-600"
-                            aria-label="Remove recipient"
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
                         </div>
                       ))}
                       <p className="text-[11px] text-gray-500">
@@ -1763,8 +1778,8 @@ ConveLabs · (941) 527-9169`
             </div>
           </div>
 
-          {/* Footer */}
-          <DialogFooter className="gap-2 flex-col sm:flex-row px-6 pb-6 pt-2 bg-gray-50 border-t">
+          {/* Footer — buttons full-width + stacked on mobile, inline on desktop */}
+          <DialogFooter className="gap-2 flex-col-reverse sm:flex-row px-4 sm:px-6 pb-4 sm:pb-6 pt-3 bg-gray-50 border-t">
             <Button variant="outline" onClick={() => setShowAddOrg(false)} className="w-full sm:w-auto" disabled={saving}>
               Cancel
             </Button>

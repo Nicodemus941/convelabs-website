@@ -296,19 +296,19 @@ const PatientDetailDrawer: React.FC<Props> = ({
                 />
               )}
 
-              {/* KPI strip */}
+              {/* KPI strip — tighter padding on mobile */}
               <div className="grid grid-cols-3 gap-2">
-                <div className="bg-gray-50 border rounded-lg p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total visits</p>
-                  <p className="text-xl font-bold text-gray-900 mt-1">{appointments.length}</p>
+                <div className="bg-gray-50 border rounded-lg p-2 sm:p-3 text-center">
+                  <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total visits</p>
+                  <p className="text-lg sm:text-xl font-bold text-gray-900 mt-1">{appointments.length}</p>
                 </div>
-                <div className="bg-gray-50 border rounded-lg p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Completed</p>
-                  <p className="text-xl font-bold text-emerald-700 mt-1">{completedCount}</p>
+                <div className="bg-gray-50 border rounded-lg p-2 sm:p-3 text-center">
+                  <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Completed</p>
+                  <p className="text-lg sm:text-xl font-bold text-emerald-700 mt-1">{completedCount}</p>
                 </div>
-                <div className="bg-gray-50 border rounded-lg p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total spent</p>
-                  <p className="text-xl font-bold text-gray-900 mt-1">${totalSpent.toFixed(0)}</p>
+                <div className="bg-gray-50 border rounded-lg p-2 sm:p-3 text-center">
+                  <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total spent</p>
+                  <p className="text-lg sm:text-xl font-bold text-gray-900 mt-1">${totalSpent.toFixed(0)}</p>
                 </div>
               </div>
 
