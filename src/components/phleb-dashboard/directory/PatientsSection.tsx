@@ -21,14 +21,24 @@ const PatientsSection: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
+        // Also pull the current session so the error banner can tell the user
+        // whether they're authenticated + as which role.
+        const { data: sess } = await supabase.auth.getSession();
+        const uid = sess?.session?.user?.id || 'no-session';
+        const role = (sess?.session?.user?.user_metadata as any)?.role || 'unknown';
         const { data, error } = await supabase.rpc('get_phleb_served_patients' as any);
-        if (error) throw error;
+        if (error) {
+          // Supabase PostgrestError shape
+          throw new Error(
+            `RPC failed · status=${(error as any).code || 'n/a'} · ${error.message || 'no message'} · hint: ${(error as any).hint || 'n/a'} · as user ${uid} (role: ${role})`
+          );
+        }
         // eslint-disable-next-line no-console
-        console.log(`[phleb-directory] Patients RPC returned ${data?.length ?? 0} rows`);
+        console.log(`[phleb-directory] Patients RPC returned ${data?.length ?? 0} rows (uid=${uid}, role=${role})`);
         setRows((data || []) as PatientListRow[]);
       } catch (e: any) {
         console.error('[phleb-directory] Patients load failed:', e);
-        setErr(e?.message || 'Failed to load patients');
+        setErr(e?.message || String(e) || 'Failed to load patients');
       } finally { setLoading(false); }
     })();
   }, []);
@@ -52,12 +62,27 @@ const PatientsSection: React.FC = () => {
       {err && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 flex items-start gap-2">
           <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-red-800">
+          <div className="text-xs text-red-800 flex-1 min-w-0">
             <p className="font-semibold">Couldn't load patients</p>
-            <p className="mt-0.5 opacity-90">{err}</p>
-            <p className="mt-1 text-red-600">
-              If you're logged in as admin and this is empty, hard-refresh (Ctrl+Shift+R). If you're a phleb and have no appointments assigned, the list will fill as visits roll in.
+            <p className="mt-1 font-mono text-[11px] break-all bg-white/60 rounded px-1.5 py-1 border border-red-100">
+              {err}
             </p>
+            <div className="mt-2 flex gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => { setErr(null); setLoading(true); setRows([]); window.location.reload(); }}
+                className="text-[11px] underline font-semibold text-red-700"
+              >
+                Retry (reload page)
+              </button>
+              <button
+                type="button"
+                onClick={async () => { await supabase.auth.signOut(); window.location.href = '/provider-login'; }}
+                className="text-[11px] underline font-semibold text-red-700"
+              >
+                Sign out + back in
+              </button>
+            </div>
           </div>
         </div>
       )}
