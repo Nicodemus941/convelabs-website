@@ -16,6 +16,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { renderSpecimenDelivered } from '../_shared/patient-email-templates.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -132,23 +133,13 @@ Deno.serve(async (req) => {
     if (appt.patient_email && MAILGUN_API_KEY) {
       try {
         const labLabel = body.labName || 'the lab';
-        const html = `<div style="font-family:Arial;max-width:600px;margin:0 auto;">
-  <div style="background:#B91C1C;color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-    <h2 style="margin:0;">Specimen Delivered</h2>
-  </div>
-  <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
-    <p>Hi ${appt.patient_name || 'there'},</p>
-    <p>Your specimens have been successfully delivered to <strong>${labLabel}</strong>.</p>
-    ${body.specimenId ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin:16px 0;">
-      <p style="margin:0;font-size:14px;"><strong>Lab-Generated Tracking ID:</strong></p>
-      <p style="margin:4px 0 0;font-size:20px;font-weight:700;color:#166534;">${body.specimenId}</p>
-      <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">Lab: ${labLabel}</p>
-      ${body.tubeCount ? `<p style="margin:4px 0 0;font-size:12px;color:#6b7280;">Tubes: ${body.tubeCount}</p>` : ''}
-    </div>` : ''}
-    <p style="font-size:13px;color:#6b7280;">Your results will be available through your lab's patient portal. If your provider does not see results, share the tracking ID above.</p>
-    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810 · (941) 527-9169</p>
-  </div>
-</div>`;
+        const html = renderSpecimenDelivered({
+          patientName: appt.patient_name || 'there',
+          labName: labLabel,
+          trackingId: body.specimenId || undefined,
+          tubeCount: body.tubeCount || undefined,
+          resultsTimeline: '48-72 hours',
+        });
 
         const fd = new FormData();
         fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);

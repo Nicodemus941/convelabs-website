@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
+import { renderAppointmentConfirmation } from '../_shared/patient-email-templates.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -175,33 +176,45 @@ Deno.serve(async (req) => {
       if (!emailCheck.safe) {
         console.warn(`HIPAA guard blocked email to ${patientEmail}: ${emailCheck.reason}`);
       } else {
-        const emailHtml = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-          <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:28px;border-radius:12px 12px 0 0;text-align:center;">
-            <h1 style="margin:0;font-size:22px;">Appointment Confirmed!</h1>
-            <p style="margin:6px 0 0;opacity:0.9;">ConveLabs Mobile Phlebotomy</p>
-          </div>
-          <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
-            <p>Hi ${firstName},</p>
-            <p>Your appointment has been confirmed! Here are the details:</p>
-            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0;">
-              <table style="width:100%;font-size:14px;">
-                <tr><td style="padding:6px 0;color:#6b7280;">Service</td><td style="padding:6px 0;font-weight:600;text-align:right;">${serviceName}</td></tr>
-                <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;text-align:right;">${displayDate}</td></tr>
-                ${displayTime ? `<tr><td style="padding:6px 0;color:#6b7280;">Time</td><td style="padding:6px 0;font-weight:600;text-align:right;">${displayTime}</td></tr>` : ''}
-                ${address && address !== 'TBD' ? `<tr><td style="padding:6px 0;color:#6b7280;">Location</td><td style="padding:6px 0;font-weight:600;text-align:right;">${address}</td></tr>` : ''}
-                ${!isWaived ? `<tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Amount</td><td style="padding:10px 0 6px;font-weight:700;font-size:18px;text-align:right;color:#B91C1C;">$${Number(totalAmount).toFixed(2)}</td></tr>` : '<tr style="border-top:1px solid #e5e7eb;"><td style="padding:10px 0 6px;font-weight:600;">Amount</td><td style="padding:10px 0 6px;font-weight:700;text-align:right;color:#059669;">Complimentary</td></tr>'}
-              </table>
-            </div>
-            ${buildPrepHtml()}
-            <p style="font-size:13px;color:#6b7280;"><strong>What to expect:</strong> A licensed phlebotomist will arrive at your location during your scheduled time window. Please have your lab order and insurance card ready.</p>
-            <p style="font-size:13px;color:#6b7280;">Need to reschedule? Call us at <a href="tel:+19415279169" style="color:#B91C1C;">(941) 527-9169</a></p>
-            <div style="text-align:center;margin:20px 0;">
-              <a href="${visitUrl}" style="display:inline-block;background:#B91C1C;color:white;padding:12px 32px;border-radius:10px;text-decoration:none;font-weight:700;">View My Appointment</a>
-            </div>
-            <p style="text-align:center;margin:8px 0 20px;font-size:12px;color:#666;word-break:break-all">Or copy this link:<br><a href="${visitUrl}" style="color:#B91C1C;text-decoration:underline">${visitUrl}</a></p>
-            <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
-          </div>
-        </div>`;
+        // Detect fasting requirement up front (used by the luxury template).
+        // The sophisticated buildPrepHtml() still runs below to APPEND any
+        // special-prep cards (24hr urine, glucose tolerance, etc.) that the
+        // OCR'd lab order flagged — injected right before the footer.
+        const panels: string[] = ((body as any).__labOrderPanels || []) as string[];
+        const ocrText: string = String((body as any).__labOrderOcrText || '');
+        const everything = [...panels.map(p => String(p).toLowerCase()), ocrText.toLowerCase()].join(' ');
+        const fastingRequired = /\bfasting\b|\bfasted\b|\bnpo\b|lipid|cholesterol|\bcmp\b|comprehensive\s*metabolic|\bbmp\b|basic\s*metabolic|\bglucose\b(?!\s*tolerance)|fasting\s*insulin|iron\s*panel|ferritin|\bhepatic\b/.test(everything);
+
+        let emailHtml = renderAppointmentConfirmation({
+          patientName: firstName || patientName || 'there',
+          appointmentDate: displayDate || undefined,
+          appointmentTime: displayTime || undefined,
+          serviceName: serviceName || undefined,
+          address: (address && address !== 'TBD') ? address : undefined,
+          manageUrl: visitUrl,
+          fastingRequired,
+        });
+
+        // Append any extra special-prep cards the OCR logic detected (24h urine,
+        // glucose tolerance tests, etc). We inject right before </body> so the
+        // luxury shell stays intact.
+        const extraPrepHtml = buildPrepHtml();
+        if (extraPrepHtml) {
+          emailHtml = emailHtml.replace('</body>', `<!-- extra prep --><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf7f2;"><tr><td align="center" style="padding:0 16px 32px;"><table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;"><tr><td>${extraPrepHtml}</td></tr></table></td></tr></table></body>`);
+        }
+
+        // If waived, surface that subtly at top of body
+        if (isWaived) {
+          emailHtml = emailHtml.replace(
+            'Your appointment with ConveLabs is <strong>confirmed</strong>',
+            'Your appointment with ConveLabs is <strong>confirmed</strong> · <span style="color:#059669;font-weight:600;">Complimentary</span>'
+          );
+        } else if (totalAmount > 0) {
+          emailHtml = emailHtml.replace(
+            'Your appointment with ConveLabs is <strong>confirmed</strong>',
+            `Your appointment with ConveLabs is <strong>confirmed</strong> · <span style="color:#111827;font-weight:600;">$${Number(totalAmount).toFixed(2)}</span>`
+          );
+        }
 
         const formData = new FormData();
         formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
