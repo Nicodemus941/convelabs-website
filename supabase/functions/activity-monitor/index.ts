@@ -108,29 +108,40 @@ const CHECKOUT_FUNCTIONS = [
   'create-credit-pack-checkout',
 ];
 
+// Single probe — OPTIONS preflight. Cheap, doesn't trigger real work,
+// but still requires the module to boot. Returns null on success,
+// a ":CODE" / ":timeout" suffix on failure.
+async function probeOnce(name: string, timeoutMs: number): Promise<string | null> {
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+      method: 'OPTIONS',
+      headers: {
+        'Origin': 'https://www.convelabs.com',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization, content-type',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (resp.status >= 500) return `${name}:${resp.status}`;
+    return null;
+  } catch {
+    return `${name}:timeout`;
+  }
+}
+
 async function probeCheckoutFunctions(): Promise<{ down: string[]; summary: string | null }> {
   const down: string[] = [];
+  // Hysteresis: a single slow cold-start on Supabase edge fns (occasionally
+  // 6-8s) was triggering false "CHECKOUT DOWN" pages. Require two consecutive
+  // failures with a 2s breather between attempts. First try uses 6s; retry
+  // uses 8s (functions are warm by then).
   await Promise.all(CHECKOUT_FUNCTIONS.map(async (name) => {
-    try {
-      // OPTIONS is cheap, doesn't trigger real work, but still requires the
-      // module to boot successfully. A BOOT_ERROR 503 will show up here.
-      const resp = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
-        method: 'OPTIONS',
-        headers: {
-          'Origin': 'https://www.convelabs.com',
-          'Access-Control-Request-Method': 'POST',
-          'Access-Control-Request-Headers': 'authorization, content-type',
-        },
-        signal: AbortSignal.timeout(5000),
-      });
-      // OPTIONS should return 2xx or 204. 5xx = dead.
-      if (resp.status >= 500) {
-        down.push(`${name}:${resp.status}`);
-      }
-    } catch (e: any) {
-      // Timeout or network error = degraded
-      down.push(`${name}:timeout`);
-    }
+    const first = await probeOnce(name, 6000);
+    if (!first) return; // healthy on first try
+    // Wait 2s then retry once — cold-start should be done
+    await new Promise(r => setTimeout(r, 2000));
+    const second = await probeOnce(name, 8000);
+    if (second) down.push(second);
   }));
   return {
     down,
