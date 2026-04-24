@@ -172,13 +172,13 @@ const OrganizationsTab: React.FC = () => {
   useEffect(() => { fetchOrgs(); }, [fetchOrgs]);
   useEffect(() => { if (selectedOrg) fetchInvoices(selectedOrg.id); }, [selectedOrg, fetchInvoices]);
 
-  const handleAddOrg = async () => {
+  // Save the org row — no email auto-fires. Admin triggers the welcome
+  // sequence manually via a per-row button (see handleSendWelcome below).
+  // `sendWelcomeImmediately` = user clicked "Save & send welcome" CTA.
+  const handleAddOrg = async (sendWelcomeImmediately = false) => {
     if (!orgForm.name.trim()) { toast.error('Organization name required'); return; }
     setSaving(true);
     try {
-      // Insert + return the new row so we can immediately fire the welcome email.
-      // portal_enabled=true up front so the activation magic-link lands on a
-      // portal they can actually use.
       const { data: newOrg, error } = await supabase.from('organizations' as any).insert({
         name: orgForm.name, contact_name: orgForm.contactName || null,
         contact_email: orgForm.contactEmail || null, contact_phone: orgForm.contactPhone || null,
@@ -188,27 +188,10 @@ const OrganizationsTab: React.FC = () => {
       }).select('id, contact_email').single();
       if (error) throw error;
 
-      // Fire the Hormozi-structured welcome email (patient-outcome + provider-ease
-      // framing, no sell). Edge fn mints the activation link, sends branded email,
-      // stamps welcomed_at. Only fires if contact_email is present; otherwise
-      // admin can hit "Send welcome" later after filling it in.
-      if ((newOrg as any)?.contact_email) {
-        try {
-          const { data: res, error: welcomeErr } = await supabase.functions.invoke('send-org-welcome', {
-            body: { organization_id: (newOrg as any).id },
-          });
-          if (welcomeErr || (res as any)?.error) {
-            console.warn('[org-welcome] send failed:', welcomeErr || (res as any)?.error);
-            toast.success('Organization added — welcome email failed, resend from row menu');
-          } else {
-            toast.success(`Organization added — welcome email sent to ${(newOrg as any).contact_email}`);
-          }
-        } catch (e: any) {
-          console.warn('[org-welcome] invoke threw:', e?.message);
-          toast.success('Organization added (welcome email skipped)');
-        }
+      if (sendWelcomeImmediately && (newOrg as any)?.contact_email) {
+        await handleSendWelcome((newOrg as any).id, (newOrg as any).contact_email);
       } else {
-        toast.success('Organization added — add contact email to send welcome');
+        toast.success('Organization added');
       }
 
       setShowAddOrg(false);
@@ -216,6 +199,29 @@ const OrganizationsTab: React.FC = () => {
       fetchOrgs();
     } catch (err: any) { toast.error(err.message || 'Failed'); }
     finally { setSaving(false); }
+  };
+
+  // Fires the send-org-welcome edge fn for a specific org. Idempotent —
+  // if already welcomed, the server returns skipped:true unless resend=true.
+  const handleSendWelcome = async (orgId: string, recipient: string | null, resend = false) => {
+    if (!recipient) { toast.error('Add a contact email before sending'); return; }
+    const verb = resend ? 'Resending' : 'Sending';
+    toast.info(`${verb} welcome email to ${recipient}…`);
+    try {
+      const { data, error } = await supabase.functions.invoke('send-org-welcome', {
+        body: { organization_id: orgId, resend },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).message || (data as any).error);
+      if ((data as any)?.skipped) {
+        toast.info('Already welcomed — use "Resend" to send again');
+        return;
+      }
+      toast.success(`Welcome email sent to ${recipient}`);
+      fetchOrgs();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to send welcome email');
+    }
   };
 
   const handleAddInvoice = async () => {
@@ -793,22 +799,53 @@ ConveLabs · (941) 527-9169`
             <Card className="shadow-sm border-dashed"><CardContent className="p-12 text-center"><Building2 className="h-12 w-12 text-gray-300 mx-auto mb-3" /><p className="font-semibold">No organizations</p><p className="text-sm text-muted-foreground">Add an organization to start billing.</p></CardContent></Card>
           ) : (
             <div className="grid gap-3">
-              {filtered.map(org => (
-                <Card key={org.id} className="shadow-sm cursor-pointer hover:shadow-md transition" onClick={() => setSelectedOrg(org)}>
-                  <CardContent className="p-4 flex items-center gap-4">
-                    <div className="w-11 h-11 rounded-lg bg-[#B91C1C]/10 flex items-center justify-center"><Building2 className="h-5 w-5 text-[#B91C1C]" /></div>
-                    <div className="flex-1">
-                      <p className="font-semibold">{org.name}</p>
-                      <div className="flex gap-3 text-xs text-muted-foreground">
-                        {org.contact_name && <span><User className="h-3 w-3 inline mr-1" />{org.contact_name}</span>}
-                        {org.contact_email && <span><Mail className="h-3 w-3 inline mr-1" />{org.contact_email}</span>}
-                        {org.contact_phone && <span><Phone className="h-3 w-3 inline mr-1" />{org.contact_phone}</span>}
+              {filtered.map(org => {
+                const welcomed = !!(org as any).welcomed_at;
+                return (
+                  <Card key={org.id} className="shadow-sm hover:shadow-md transition">
+                    <CardContent className="p-4 flex items-center gap-4">
+                      <div
+                        className="flex items-center gap-4 flex-1 cursor-pointer min-w-0"
+                        onClick={() => setSelectedOrg(org)}
+                      >
+                        <div className="w-11 h-11 rounded-lg bg-[#B91C1C]/10 flex items-center justify-center flex-shrink-0"><Building2 className="h-5 w-5 text-[#B91C1C]" /></div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-semibold truncate">{org.name}</p>
+                            {welcomed && (
+                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] flex-shrink-0">
+                                ✓ Welcomed
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
+                            {org.contact_name && <span><User className="h-3 w-3 inline mr-1" />{org.contact_name}</span>}
+                            {org.contact_email && <span><Mail className="h-3 w-3 inline mr-1" />{org.contact_email}</span>}
+                            {org.contact_phone && <span><Phone className="h-3 w-3 inline mr-1" />{org.contact_phone}</span>}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <Badge variant="outline" className={org.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{org.is_active ? 'Active' : 'Inactive'}</Badge>
-                  </CardContent>
-                </Card>
-              ))}
+
+                      {/* Send welcome CTA — manual trigger so admin controls timing.
+                          Shows "Send welcome" if never sent, "Resend" if already welcomed. */}
+                      {org.contact_email && (
+                        <Button
+                          size="sm"
+                          variant={welcomed ? 'outline' : 'default'}
+                          onClick={(e) => { e.stopPropagation(); handleSendWelcome(org.id, org.contact_email, welcomed); }}
+                          className={welcomed ? 'text-xs flex-shrink-0' : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs flex-shrink-0'}
+                          title={welcomed ? 'Resend Hormozi welcome email' : 'Send Hormozi welcome email'}
+                        >
+                          <Send className="h-3 w-3 mr-1" />
+                          {welcomed ? 'Resend' : 'Send welcome'}
+                        </Button>
+                      )}
+
+                      <Badge variant="outline" className={org.is_active ? 'bg-emerald-50 text-emerald-700 flex-shrink-0' : 'bg-gray-50 text-gray-500 flex-shrink-0'}>{org.is_active ? 'Active' : 'Inactive'}</Badge>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </TabsContent>
@@ -1232,10 +1269,24 @@ ConveLabs · (941) 527-9169`
             <div><Label>Billing Address</Label><Input value={orgForm.billingAddress} onChange={e => setOrgForm(p => ({ ...p, billingAddress: e.target.value }))} /></div>
             <div><Label>Notes</Label><Textarea value={orgForm.notes} onChange={e => setOrgForm(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
           </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowAddOrg(false)}>Cancel</Button>
-            <Button className="bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={handleAddOrg} disabled={saving}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add Organization'}
+          <DialogFooter className="gap-2 flex-col sm:flex-row">
+            <Button variant="outline" onClick={() => setShowAddOrg(false)} className="w-full sm:w-auto">Cancel</Button>
+            <Button
+              variant="outline"
+              onClick={() => handleAddOrg(false)}
+              disabled={saving}
+              className="w-full sm:w-auto"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save only'}
+            </Button>
+            <Button
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white w-full sm:w-auto"
+              onClick={() => handleAddOrg(true)}
+              disabled={saving || !orgForm.contactEmail.trim()}
+              title={!orgForm.contactEmail.trim() ? 'Add a contact email to enable' : 'Save org + send Hormozi welcome email'}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Send className="h-4 w-4 mr-1" />}
+              Save &amp; send welcome email
             </Button>
           </DialogFooter>
         </DialogContent>
