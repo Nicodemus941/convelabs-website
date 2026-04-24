@@ -80,6 +80,7 @@ Deno.serve(async (req) => {
         'bundle_payment',
         'subscription_payment',
         'credit_pack',
+        'org_subscription',
       ]);
       if (metadata.type && !KNOWN_TYPES.has(metadata.type)) {
         throw new Error(
@@ -106,6 +107,10 @@ Deno.serve(async (req) => {
       // Handle credit pack purchases
       else if (metadata.type === 'credit_pack') {
         await handleCreditPackPurchase(session);
+      }
+      // Handle org-subscription checkout (practice-pays-per-seat plan)
+      else if (metadata.type === 'org_subscription') {
+        await handleOrgSubscriptionActivated(session);
       }
       // Handle membership upgrades
       else if (isUpgrade) {
@@ -289,6 +294,46 @@ async function handleBundlePayment(session: any) {
     }
   } catch (e) {
     console.warn('[bundle_payment] owner SMS non-blocking fail:', e);
+  }
+}
+
+/**
+ * Activates an org-level subscription (practice-pays-per-seat plan).
+ * Stamps the organizations row with subscription status + seats + price
+ * so the provider dashboard + admin view reflect the new state instantly.
+ */
+async function handleOrgSubscriptionActivated(session: any) {
+  try {
+    const meta = session.metadata || {};
+    const orgId = meta.organization_id;
+    const seatCap = parseInt(meta.seat_cap || '0', 10) || 0;
+    const perSeatCents = parseInt(meta.per_seat_cents || '8500', 10) || 8500;
+    const priceCents = seatCap * perSeatCents;
+
+    if (!orgId) {
+      console.error('[org-subscription-activated] missing organization_id', session.id);
+      return;
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') || '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+    );
+
+    await supabase.from('organizations').update({
+      subscription_status: 'active',
+      subscription_tier: 'per_patient',
+      subscription_started_at: new Date().toISOString(),
+      subscription_seat_cap: seatCap,
+      subscription_per_seat_cents: perSeatCents,
+      subscription_price_cents: priceCents,
+      stripe_customer_id: session.customer,
+      stripe_subscription_id: session.subscription,
+    }).eq('id', orgId);
+
+    console.log(`[org-subscription] activated org=${orgId} seats=${seatCap} $${priceCents/100}/mo`);
+  } catch (e: any) {
+    console.error('[org-subscription-activated] error:', e?.message);
   }
 }
 

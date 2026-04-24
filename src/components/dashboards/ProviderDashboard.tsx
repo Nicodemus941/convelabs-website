@@ -19,6 +19,7 @@ import ProviderOnboardingModal from '@/components/provider/ProviderOnboardingMod
 import CreateLabRequestModal from '@/components/provider/CreateLabRequestModal';
 import LabRequestTimeline from '@/components/provider/LabRequestTimeline';
 import LinkedPatientsSection from '@/components/provider/LinkedPatientsSection';
+import SubscribeYourPracticeCard from '@/components/provider/SubscribeYourPracticeCard';
 import BAASigningModal from '@/components/provider/BAASigningModal';
 import { Activity } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
@@ -352,6 +353,13 @@ const ProviderDashboard: React.FC = () => {
             <LiveOpCard label="Total patients" value={patients.length} detail={`${team.length} team ${team.length === 1 ? 'member' : 'members'}`} icon={<Users className="h-5 w-5 text-emerald-600" />} />
           </div>
         </div>
+
+        {/* SUBSCRIBE YOUR PRACTICE — appears when the org isn't yet on an
+            active subscription. Once active, the dashboard should show a
+            "Manage subscription" card instead (future phase). */}
+        {org.subscription_status !== 'active' && (
+          <SubscribeYourPracticeCard orgName={org.name} />
+        )}
 
         {/* LINKED PATIENTS + BULK RE-REQUEST */}
         <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} />
