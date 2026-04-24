@@ -103,7 +103,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
     e.preventDefault();
     e.stopPropagation();
     if (!orgTier) {
-      toast.error('Your practice isn\'t on a Concierge subscription yet. Contact ConveLabs to enroll.');
+      toast.error('Your practice isn\'t on a subscription yet. Subscribe from the card above.');
       return;
     }
     setTogglingName(p.patient_name);
@@ -116,14 +116,33 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
         if (error) throw error;
         toast.success(`${p.patient_name} removed from subscription`);
       } else {
-        const { error } = await supabase.rpc('enroll_patient_in_practice' as any, {
+        const { data, error } = await supabase.rpc('enroll_patient_in_practice' as any, {
           p_org_id: orgId,
           p_patient_name: p.patient_name,
           p_patient_email: p.patient_email,
           p_patient_phone: p.patient_phone,
         });
         if (error) throw error;
-        toast.success(`${p.patient_name} enrolled — their next draw is covered by your subscription`);
+        // RPC returns structured reason codes; surface them clearly
+        const result = data as any;
+        if (result && result.ok === false) {
+          if (result.reason === 'seats_full') {
+            toast.error(
+              `Seats full — ${result.active_count}/${result.seat_cap} patients enrolled. Upgrade from "Manage plan" to add more seats.`,
+              { duration: 8000 }
+            );
+          } else if (result.reason === 'no_active_subscription') {
+            toast.error('Subscribe your practice first to enroll patients.');
+          } else {
+            toast.error(`Could not enroll: ${result.reason || 'unknown'}`);
+          }
+          return;
+        }
+        toast.success(
+          result?.seats_remaining !== undefined
+            ? `${p.patient_name} enrolled — ${result.seats_remaining} seat${result.seats_remaining === 1 ? '' : 's'} left`
+            : `${p.patient_name} enrolled — their next draw is covered by your subscription`
+        );
       }
       await load();
     } catch (err: any) {

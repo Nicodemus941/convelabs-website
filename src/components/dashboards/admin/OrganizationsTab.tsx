@@ -22,6 +22,7 @@ import OrgRoiCard from './OrgRoiCard';
 import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
 import OrgPatientsTab from '@/components/admin/OrgPatientsTab';
 import OrgNotesTab from '@/components/admin/OrgNotesTab';
+import OrgSubscriptionStatusCard from '@/components/admin/OrgSubscriptionStatusCard';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
 import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
@@ -602,6 +603,7 @@ ConveLabs · (941) 527-9169`
 
           {/* ─── OVERVIEW ─────────────────────────────────────────── */}
           <TabsContent value="overview" className="space-y-4 mt-4">
+            <OrgSubscriptionStatusCard orgId={selectedOrg.id} />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-[#B91C1C]">${totalInvoiced.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Total Invoiced</p></CardContent></Card>
               <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-emerald-600">${totalPaid.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Paid</p></CardContent></Card>

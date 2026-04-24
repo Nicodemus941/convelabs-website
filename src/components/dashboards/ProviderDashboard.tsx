@@ -20,6 +20,7 @@ import CreateLabRequestModal from '@/components/provider/CreateLabRequestModal';
 import LabRequestTimeline from '@/components/provider/LabRequestTimeline';
 import LinkedPatientsSection from '@/components/provider/LinkedPatientsSection';
 import SubscribeYourPracticeCard from '@/components/provider/SubscribeYourPracticeCard';
+import ManageSubscriptionCard from '@/components/provider/ManageSubscriptionCard';
 import BAASigningModal from '@/components/provider/BAASigningModal';
 import { Activity } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
@@ -354,10 +355,10 @@ const ProviderDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* SUBSCRIBE YOUR PRACTICE — appears when the org isn't yet on an
-            active subscription. Once active, the dashboard should show a
-            "Manage subscription" card instead (future phase). */}
-        {org.subscription_status !== 'active' && (
+        {/* SUBSCRIPTION CARD — toggles between enroll / manage based on status */}
+        {org.subscription_status === 'active' ? (
+          <ManageSubscriptionCard orgId={org.id} orgName={org.name} />
+        ) : (
           <SubscribeYourPracticeCard orgName={org.name} />
         )}
 
