@@ -628,7 +628,14 @@ ConveLabs · (941) 527-9169`
             {selectedOrg.contact_email && (
               <Button
                 size="sm"
-                onClick={() => handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, !!(selectedOrg as any).welcomed_at)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const alreadyWelcomed = !!(selectedOrg as any).welcomed_at;
+                  // eslint-disable-next-line no-console
+                  console.log('[send-welcome click]', { orgId: selectedOrg.id, recipient: selectedOrg.contact_email, resend: alreadyWelcomed });
+                  handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, alreadyWelcomed);
+                }}
                 className={(selectedOrg as any).welcomed_at
                   ? 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 gap-1.5'
                   : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 shadow-sm'}
