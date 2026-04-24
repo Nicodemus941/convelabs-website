@@ -320,7 +320,7 @@ Deno.serve(async (req) => {
     // "Nicodemme Jean-Baptiste" as display name — the "Nico" nickname lives
     // in the body signature; email From headers get finicky with inner quotes
     fd.append('from', `Nicodemme Jean-Baptiste <nico@${MAILGUN_DOMAIN}>`);
-    fd.append('h:Reply-To', 'nico@convelabs.com');
+    fd.append('h:Reply-To', 'info@convelabs.com');
     fd.append('to', recipient);
     for (const cc of ccList) fd.append('cc', cc);
     fd.append('subject', `${org.contact_name ? 'Dr. ' + org.contact_name.split(' ').slice(-1)[0] + ' — ' : ''}your patient referral tool is live`);

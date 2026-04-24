@@ -70,7 +70,7 @@ async function sendOrgOverdueDigest(org: any, patients: any[]) {
 
   const fd = new FormData();
   fd.append('from', `ConveLabs <nico@${MAILGUN_DOMAIN}>`);
-  fd.append('h:Reply-To', 'nico@convelabs.com');
+  fd.append('h:Reply-To', 'info@convelabs.com');
   fd.append('to', recipient);
   fd.append('subject', `⚠ ${patients.length} overdue lab${patients.length === 1 ? '' : 's'} — ${org.name}`);
   fd.append('html', html);
