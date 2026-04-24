@@ -13,13 +13,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   Building2, Plus, Search, RefreshCw, Send, DollarSign, Mail,
-  Phone, User, FileText, Loader2, Download, Pencil, Power,
+  Phone, User, Users, FileText, Loader2, Download, Pencil, Power,
   Megaphone, Eye, Sparkles, CheckCircle2, AlertCircle,
+  TrendingUp, FlaskConical, StickyNote, Activity,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import OrgRoiCard from './OrgRoiCard';
 import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
 import OrgPatientsTab from '@/components/admin/OrgPatientsTab';
+import OrgNotesTab from '@/components/admin/OrgNotesTab';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
 import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
@@ -301,9 +303,45 @@ const OrganizationsTab: React.FC = () => {
 
   // Directory excludes unconfirmed discovered rows — those live in the
   // Discovered tab until the admin approves/signs them.
-  const filtered = orgs.filter(o => {
+  const [listFilter, setListFilter] = useState<'all' | 'welcomed' | 'cold' | 'inactive'>('all');
+  const [sortBy, setSortBy] = useState<'recent' | 'name' | 'welcomed_first'>('recent');
+
+  const directoryBase = orgs.filter(o => {
     if (o.source === 'discovered_from_ocr' && !['signed'].includes(String(o.outreach_status))) return false;
-    return !searchQuery || o.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return true;
+  });
+
+  // KPI counts for the strip (based on directoryBase — everything in the directory)
+  const kpi = {
+    total: directoryBase.length,
+    active: directoryBase.filter(o => o.is_active).length,
+    welcomed: directoryBase.filter(o => !!(o as any).welcomed_at).length,
+    cold: directoryBase.filter(o => !(o as any).welcomed_at && !!o.contact_email && o.is_active).length,
+  };
+
+  const filtered = directoryBase.filter(o => {
+    // Chip filter
+    if (listFilter === 'welcomed' && !(o as any).welcomed_at) return false;
+    if (listFilter === 'cold') {
+      if ((o as any).welcomed_at) return false;
+      if (!o.contact_email) return false;
+      if (!o.is_active) return false;
+    }
+    if (listFilter === 'inactive' && o.is_active) return false;
+    // Search
+    if (searchQuery && !o.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+    return true;
+  }).sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    if (sortBy === 'welcomed_first') {
+      const aw = (a as any).welcomed_at ? 1 : 0;
+      const bw = (b as any).welcomed_at ? 1 : 0;
+      if (aw !== bw) return bw - aw;
+    }
+    // Default: most-recently-updated first
+    const ad = new Date((a as any).updated_at || (a as any).created_at || 0).getTime();
+    const bd = new Date((b as any).updated_at || (b as any).created_at || 0).getTime();
+    return bd - ad;
   });
 
   // ── Organizations list view tabs: Directory / Discovered / Outreach.
@@ -548,36 +586,73 @@ ConveLabs · (941) 527-9169`
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-[#B91C1C]">${totalInvoiced.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Total Invoiced</p></CardContent></Card>
-          <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-emerald-600">${totalPaid.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Paid</p></CardContent></Card>
-          <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-red-600">${totalOutstanding.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Outstanding</p></CardContent></Card>
-        </div>
+        <Tabs defaultValue="overview">
+          <TabsList className="w-full overflow-x-auto justify-start sm:justify-center sm:w-auto">
+            <TabsTrigger value="overview" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><TrendingUp className="h-3.5 w-3.5" /> Overview</TabsTrigger>
+            <TabsTrigger value="patients" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><User className="h-3.5 w-3.5" /> Patients</TabsTrigger>
+            <TabsTrigger value="staff" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><Users className="h-3.5 w-3.5" /> Staff</TabsTrigger>
+            <TabsTrigger value="services" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><FlaskConical className="h-3.5 w-3.5" /> Services</TabsTrigger>
+            <TabsTrigger value="invoices" className="gap-1 text-xs sm:text-sm px-2 sm:px-3">
+              <FileText className="h-3.5 w-3.5" /> Invoices
+              {invoices.length > 0 && <span className="ml-1 text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded-full">{invoices.length}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="notes" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><StickyNote className="h-3.5 w-3.5" /> Notes</TabsTrigger>
+            <TabsTrigger value="activity" className="gap-1 text-xs sm:text-sm px-2 sm:px-3"><Activity className="h-3.5 w-3.5" /> Activity</TabsTrigger>
+          </TabsList>
 
-        {/* Partnership ROI rollup — calls get_org_roi RPC, shows lifetime
-            revenue + visit count + outstanding. Negotiation ammo. */}
-        <OrgRoiCard orgId={selectedOrg.id} />
+          {/* ─── OVERVIEW ─────────────────────────────────────────── */}
+          <TabsContent value="overview" className="space-y-4 mt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-[#B91C1C]">${totalInvoiced.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Total Invoiced</p></CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-emerald-600">${totalPaid.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Paid</p></CardContent></Card>
+              <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-red-600">${totalOutstanding.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Outstanding</p></CardContent></Card>
+            </div>
+            <OrgRoiCard orgId={selectedOrg.id} />
+          </TabsContent>
 
-        {/* Concierge Subscription tier picker — removed from the UI per the
-            referral-first pivot (we don't charge orgs a subscription fee).
-            OrgSubscriptionTierCard.tsx remains for future re-enable if we
-            ever pivot back to practice-paid tiers. */}
+          {/* ─── PATIENTS ─────────────────────────────────────────── */}
+          <TabsContent value="patients" className="mt-4">
+            <OrgPatientsTab orgId={selectedOrg.id} orgName={selectedOrg.name} />
+          </TabsContent>
 
-        {/* Patients linked to this org — full list with search, filter, add */}
-        <div className="pt-2">
-          <OrgPatientsTab orgId={selectedOrg.id} orgName={selectedOrg.name} />
-        </div>
+          {/* ─── STAFF (stub) ─────────────────────────────────────── */}
+          <TabsContent value="staff" className="mt-4">
+            <Card className="shadow-sm border-dashed">
+              <CardContent className="p-10 text-center">
+                <Users className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                <p className="font-semibold text-sm">Staff management — coming soon</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                  Invite org staff with scoped roles (Admin / MA / Front desk), see who has portal access, revoke access. Phase 2 of the org console rollout.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold">Invoices ({invoices.length})</h2>
-          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setShowAddInvoice(true)}>
-            <Plus className="h-4 w-4" /> Create Invoice
-          </Button>
-        </div>
+          {/* ─── SERVICES (stub) ──────────────────────────────────── */}
+          <TabsContent value="services" className="mt-4">
+            <Card className="shadow-sm border-dashed">
+              <CardContent className="p-10 text-center">
+                <FlaskConical className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                <p className="font-semibold text-sm">Custom services — coming soon</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                  Define per-org services with custom pricing (e.g. "Monthly Hormone Panel — $145"). One-click presets from common templates. Phase 2 of the org console rollout.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-        {invoices.length === 0 ? (
-          <Card className="shadow-sm border-dashed"><CardContent className="p-8 text-center"><FileText className="h-10 w-10 text-gray-300 mx-auto mb-2" /><p className="text-muted-foreground">No invoices yet</p></CardContent></Card>
-        ) : (
+          {/* ─── INVOICES ─────────────────────────────────────────── */}
+          <TabsContent value="invoices" className="space-y-3 mt-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold">Invoices ({invoices.length})</h2>
+              <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setShowAddInvoice(true)}>
+                <Plus className="h-4 w-4" /> Create Invoice
+              </Button>
+            </div>
+
+            {invoices.length === 0 ? (
+              <Card className="shadow-sm border-dashed"><CardContent className="p-8 text-center"><FileText className="h-10 w-10 text-gray-300 mx-auto mb-2" /><p className="text-muted-foreground">No invoices yet</p></CardContent></Card>
+            ) : (
           <div className="overflow-x-auto">
             <Table className="min-w-[600px]">
               <TableHeader><TableRow><TableHead>Patient</TableHead><TableHead>Service</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Sent</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
@@ -608,6 +683,26 @@ ConveLabs · (941) 527-9169`
             </Table>
           </div>
         )}
+          </TabsContent>
+
+          {/* ─── NOTES ────────────────────────────────────────────── */}
+          <TabsContent value="notes" className="mt-4">
+            <OrgNotesTab orgId={selectedOrg.id} />
+          </TabsContent>
+
+          {/* ─── ACTIVITY (stub) ──────────────────────────────────── */}
+          <TabsContent value="activity" className="mt-4">
+            <Card className="shadow-sm border-dashed">
+              <CardContent className="p-10 text-center">
+                <Activity className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                <p className="font-semibold text-sm">Activity timeline — coming soon</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+                  Chronological feed of every event for this org: visits completed, specimens delivered with tracking IDs, welcome email sent, reminder cadences fired. Phase 2 of the org console rollout.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* Edit Organization Modal — covers contact info + billing + partner rules */}
         <Dialog open={showEditOrg} onOpenChange={setShowEditOrg}>
@@ -793,10 +888,53 @@ ConveLabs · (941) 527-9169`
         </TabsList>
 
         {/* ─── DIRECTORY TAB (existing content) ─────────────────── */}
-        <TabsContent value="directory" className="space-y-6 mt-4">
-          <div className="relative max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search organizations..." className="pl-9" />
+        <TabsContent value="directory" className="space-y-4 mt-4">
+          {/* KPI strip — at-a-glance org health */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-gray-900">{kpi.total}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total orgs</p></CardContent></Card>
+            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-emerald-600">{kpi.active}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Active</p></CardContent></Card>
+            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-[#B91C1C]">{kpi.welcomed}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Welcomed</p></CardContent></Card>
+            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-amber-600">{kpi.cold}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Cold</p></CardContent></Card>
+          </div>
+
+          {/* Search + sort row */}
+          <div className="flex gap-2 items-center flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search organizations..." className="pl-9" />
+            </div>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="h-10 text-sm border border-gray-200 rounded-md px-3 bg-white focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/30"
+              title="Sort"
+            >
+              <option value="recent">Most recent</option>
+              <option value="name">Name A–Z</option>
+              <option value="welcomed_first">Welcomed first</option>
+            </select>
+          </div>
+
+          {/* Filter chips */}
+          <div className="flex gap-2 flex-wrap">
+            {([
+              { v: 'all', label: 'All', n: kpi.total },
+              { v: 'welcomed', label: '✓ Welcomed', n: kpi.welcomed },
+              { v: 'cold', label: 'Cold (no welcome sent)', n: kpi.cold },
+              { v: 'inactive', label: 'Inactive', n: kpi.total - kpi.active },
+            ] as const).map(c => (
+              <button
+                key={c.v}
+                type="button"
+                onClick={() => setListFilter(c.v as any)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                  listFilter === c.v ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
+                }`}
+              >
+                {c.label}
+                <span className={`px-1.5 rounded-full text-[10px] ${listFilter === c.v ? 'bg-white/20' : 'bg-gray-100 text-gray-600'}`}>{c.n}</span>
+              </button>
+            ))}
           </div>
 
           {loading ? (
