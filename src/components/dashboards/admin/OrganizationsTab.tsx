@@ -1400,42 +1400,182 @@ ConveLabs · (941) 527-9169`
         </DialogContent>
       </Dialog>
 
-      {/* Add Organization Modal */}
-      <Dialog open={showAddOrg} onOpenChange={setShowAddOrg}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Organization</DialogTitle></DialogHeader>
-          <div className="space-y-3">
-            <div><Label>Organization Name *</Label><Input value={orgForm.name} onChange={e => setOrgForm(p => ({ ...p, name: e.target.value }))} /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Contact Name</Label><Input value={orgForm.contactName} onChange={e => setOrgForm(p => ({ ...p, contactName: e.target.value }))} /></div>
-              <div><Label>Contact Phone</Label><Input value={orgForm.contactPhone} onChange={e => setOrgForm(p => ({ ...p, contactPhone: e.target.value }))} /></div>
+      {/* Add Organization Modal — luxury redesign */}
+      <Dialog open={showAddOrg} onOpenChange={(v) => { if (!saving) setShowAddOrg(v); }}>
+        <DialogContent className="max-w-lg p-0 overflow-hidden max-h-[92vh] overflow-y-auto">
+          {/* Hero */}
+          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] px-6 py-5 text-white">
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center">
+                <Building2 className="h-5 w-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] tracking-[0.25em] uppercase text-rose-100" style={{ fontFamily: 'Georgia, serif' }}>
+                  New partner practice
+                </p>
+                <DialogTitle className="text-xl font-normal text-white leading-tight" style={{ fontFamily: 'Georgia, serif' }}>
+                  Register an organization
+                </DialogTitle>
+              </div>
             </div>
-            <div>
-              <Label>Contact Email {orgForm.contactEmail ? <span className="text-emerald-600 font-normal ml-1">✓ welcome ready to send</span> : <span className="text-gray-400 font-normal ml-1">· required to send welcome</span>}</Label>
-              <Input type="email" value={orgForm.contactEmail} onChange={e => setOrgForm(p => ({ ...p, contactEmail: e.target.value }))} placeholder="dr.sher@practicename.com" />
-            </div>
-            <div><Label>Billing Email</Label><Input type="email" value={orgForm.billingEmail} onChange={e => setOrgForm(p => ({ ...p, billingEmail: e.target.value }))} placeholder="Where invoices get sent" /></div>
-            <div><Label>Billing Address</Label><Input value={orgForm.billingAddress} onChange={e => setOrgForm(p => ({ ...p, billingAddress: e.target.value }))} /></div>
-            <div><Label>Notes</Label><Textarea value={orgForm.notes} onChange={e => setOrgForm(p => ({ ...p, notes: e.target.value }))} rows={2} /></div>
+            <p className="mt-3 text-[13px] leading-relaxed text-rose-50/90">
+              Register the practice and — if they're ready — fire the welcome email right away. The link they get activates their provider portal in one click.
+            </p>
           </div>
-          <DialogFooter className="gap-2 flex-col sm:flex-row">
+
+          {/* Body */}
+          <div className="px-6 py-5 space-y-5">
+
+            {/* Section 1 — Identity */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#B91C1C] mb-3" style={{ fontFamily: 'Georgia, serif' }}>
+                · Practice identity
+              </p>
+              <div>
+                <Label className="text-xs font-semibold">Organization name <span className="text-red-500">*</span></Label>
+                <Input
+                  value={orgForm.name}
+                  onChange={e => setOrgForm(p => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Elite Medical Concierge"
+                  autoFocus
+                  className="mt-1"
+                  disabled={saving}
+                />
+              </div>
+            </div>
+
+            {/* Section 2 — Primary contact */}
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#B91C1C] mb-3" style={{ fontFamily: 'Georgia, serif' }}>
+                · Primary contact
+              </p>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs font-semibold">Contact name</Label>
+                    <Input
+                      value={orgForm.contactName}
+                      onChange={e => setOrgForm(p => ({ ...p, contactName: e.target.value }))}
+                      placeholder="Dr. Monica Sher"
+                      className="mt-1"
+                      disabled={saving}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold">Contact phone</Label>
+                    <Input
+                      type="tel"
+                      value={orgForm.contactPhone}
+                      onChange={e => setOrgForm(p => ({ ...p, contactPhone: e.target.value }))}
+                      placeholder="(407) 555-1234"
+                      className="mt-1"
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-xs font-semibold">Contact email</Label>
+                    {orgForm.contactEmail
+                      ? <span className="text-[11px] text-emerald-700 font-semibold inline-flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> welcome ready</span>
+                      : <span className="text-[11px] text-gray-400">required to send welcome</span>}
+                  </div>
+                  <Input
+                    type="email"
+                    value={orgForm.contactEmail}
+                    onChange={e => setOrgForm(p => ({ ...p, contactEmail: e.target.value }))}
+                    placeholder="dr.sher@practicename.com"
+                    className={`transition ${orgForm.contactEmail ? 'border-emerald-300 bg-emerald-50/30' : ''}`}
+                    disabled={saving}
+                  />
+                  <p className="mt-1 text-[11px] text-gray-500">This is where the activation link lands. Double-check spelling before sending.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3 — Billing */}
+            <details className="border border-gray-200 rounded-lg group">
+              <summary className="cursor-pointer select-none px-4 py-3 flex items-center justify-between hover:bg-gray-50">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-700" style={{ fontFamily: 'Georgia, serif' }}>
+                  · Billing &amp; notes
+                </span>
+                <span className="text-[11px] text-gray-400 group-open:hidden">Optional · tap to expand</span>
+                <span className="text-[11px] text-gray-400 hidden group-open:inline">Collapse ↑</span>
+              </summary>
+              <div className="px-4 pb-4 pt-1 space-y-3 border-t">
+                <div>
+                  <Label className="text-xs font-semibold">Billing email</Label>
+                  <Input
+                    type="email"
+                    value={orgForm.billingEmail}
+                    onChange={e => setOrgForm(p => ({ ...p, billingEmail: e.target.value }))}
+                    placeholder="Where invoices get sent (if different)"
+                    className="mt-1"
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Billing address</Label>
+                  <Input
+                    value={orgForm.billingAddress}
+                    onChange={e => setOrgForm(p => ({ ...p, billingAddress: e.target.value }))}
+                    placeholder="Street, city, state, zip"
+                    className="mt-1"
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Internal notes</Label>
+                  <Textarea
+                    value={orgForm.notes}
+                    onChange={e => setOrgForm(p => ({ ...p, notes: e.target.value }))}
+                    rows={2}
+                    placeholder="How you met, referral source, anything the team should know"
+                    className="mt-1"
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+            </details>
+
+            {/* Preview panel — shows exactly what will happen on Save & Send */}
+            <div className={`rounded-lg p-3.5 border transition ${
+              orgForm.contactEmail
+                ? 'bg-emerald-50/60 border-emerald-200'
+                : 'bg-amber-50/60 border-amber-200'
+            }`}>
+              <p className="text-[10px] font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5" style={{ fontFamily: 'Georgia, serif' }}>
+                {orgForm.contactEmail
+                  ? <><Send className="h-3 w-3 text-emerald-700" /><span className="text-emerald-900">Ready to welcome</span></>
+                  : <><AlertCircle className="h-3 w-3 text-amber-700" /><span className="text-amber-900">Next step</span></>}
+              </p>
+              <p className={`text-xs leading-relaxed ${orgForm.contactEmail ? 'text-emerald-900' : 'text-amber-900'}`}>
+                {orgForm.contactEmail
+                  ? <>Clicking <strong>Save &amp; Send Welcome</strong> creates the org and emails <strong>{orgForm.contactEmail}</strong> the branded activation link immediately. They click → set a password → land in their provider dashboard.</>
+                  : <>Add a contact email above to enable the welcome email. If you just want to register the org for later, use <strong>Save only</strong>.</>}
+              </p>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <DialogFooter className="gap-2 flex-col sm:flex-row px-6 pb-6 pt-2 bg-gray-50 border-t">
             <Button variant="outline" onClick={() => setShowAddOrg(false)} className="w-full sm:w-auto" disabled={saving}>
               Cancel
             </Button>
             <Button
               variant="outline"
               onClick={() => handleAddOrg(false)}
-              disabled={saving}
+              disabled={saving || !orgForm.name.trim()}
               className="w-full sm:w-auto"
-              title="Save the org row but don't email them yet — you can send the welcome later from the org card"
+              title="Save the row but don't email them — you can send the welcome later from the org card"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save only'}
             </Button>
             <Button
-              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white w-full sm:w-auto gap-1.5"
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white w-full sm:w-auto gap-1.5 shadow-sm"
               onClick={() => handleAddOrg(true)}
-              disabled={saving || !orgForm.contactEmail.trim()}
-              title={!orgForm.contactEmail.trim() ? 'Enter a contact email first' : 'Save the org AND fire the luxury welcome email now'}
+              disabled={saving || !orgForm.name.trim() || !orgForm.contactEmail.trim()}
+              title={!orgForm.contactEmail.trim() ? 'Enter a contact email first' : 'Save and fire the welcome email right now'}
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Save &amp; Send Welcome
