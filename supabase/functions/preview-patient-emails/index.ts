@@ -25,7 +25,7 @@ const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 async function send(to: string, subject: string, html: string, tag: string) {
   const fd = new FormData();
   // Same sender format as the working org-welcome email (good reputation)
-  fd.append('from', `Nico Ferdinand <nico@${MAILGUN_DOMAIN}>`);
+  fd.append('from', `Nicodemme Jean-Baptiste <nico@${MAILGUN_DOMAIN}>`);
   fd.append('h:Reply-To', 'nico@convelabs.com');
   fd.append('to', to);
   fd.append('subject', subject);

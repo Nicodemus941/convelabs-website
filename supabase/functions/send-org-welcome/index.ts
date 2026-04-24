@@ -244,7 +244,7 @@ function buildHtml(params: {
         </table>
 
         <!-- Signature -->
-        <p style="margin:24px 0 4px;color:#111827;font-size:15px;">— Nico Ferdinand</p>
+        <p style="margin:24px 0 4px;color:#111827;font-size:15px;">— Nicodemme &ldquo;Nico&rdquo; Jean-Baptiste</p>
         <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.6;">Founder, ConveLabs<br>(941) 527-9169 · I read every reply</p>
       </td></tr>
 
@@ -317,7 +317,9 @@ Deno.serve(async (req) => {
       : [];
 
     const fd = new FormData();
-    fd.append('from', `Nico Ferdinand <nico@${MAILGUN_DOMAIN}>`);
+    // "Nicodemme Jean-Baptiste" as display name — the "Nico" nickname lives
+    // in the body signature; email From headers get finicky with inner quotes
+    fd.append('from', `Nicodemme Jean-Baptiste <nico@${MAILGUN_DOMAIN}>`);
     fd.append('h:Reply-To', 'nico@convelabs.com');
     fd.append('to', recipient);
     for (const cc of ccList) fd.append('cc', cc);
