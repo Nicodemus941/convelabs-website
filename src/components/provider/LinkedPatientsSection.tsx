@@ -9,9 +9,10 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw, Search, UserPlus } from 'lucide-react';
+import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw, Search, UserPlus, History } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import AddPatientModal from '@/components/shared/AddPatientModal';
+import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 
 /**
  * LinkedPatientsSection — Phase 1 of the org patient-list feature.
@@ -68,6 +69,8 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   // Search + add-patient — shipped alongside the admin Org drawer Patients tab
   const [searchQ, setSearchQ] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [focusedPatient, setFocusedPatient] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -360,6 +363,23 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                       <RotateCw className="h-3 w-3 sm:mr-1" />
                       <span className="hidden sm:inline">Request again</span>
                     </Button>
+                    {/* Full patient history + edit */}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-[11px]"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setFocusedPatient(p.patient_name);
+                        setDetailOpen(true);
+                      }}
+                      title="View full history + edit patient"
+                    >
+                      <History className="h-3 w-3 sm:mr-1" />
+                      <span className="hidden sm:inline">History</span>
+                    </Button>
                   </div>
                 </label>
               );
@@ -429,6 +449,17 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
         organizationId={orgId}
         onCreated={() => { setAddOpen(false); load(); }}
       />
+
+      {/* Patient detail drawer — full history + edit */}
+      {focusedPatient && (
+        <PatientDetailDrawer
+          open={detailOpen}
+          onOpenChange={(v) => { setDetailOpen(v); if (!v) setTimeout(load, 300); }}
+          patientName={focusedPatient}
+          organizationId={orgId}
+          canEdit={true}
+        />
+      )}
     </>
   );
 };

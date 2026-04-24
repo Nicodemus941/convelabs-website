@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import PatientSearchList, { PatientListRow } from '@/components/shared/PatientSearchList';
 import AddPatientModal from '@/components/shared/AddPatientModal';
+import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -25,6 +26,8 @@ const OrgPatientsTab: React.FC<Props> = ({ orgId, orgName }) => {
   const [patients, setPatients] = useState<PatientListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [focusedPatient, setFocusedPatient] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,10 +61,7 @@ const OrgPatientsTab: React.FC<Props> = ({ orgId, orgName }) => {
         loading={loading}
         emptyMessage="No patients linked to this org yet. Add one to get started."
         onAddPatient={() => setAddOpen(true)}
-        onRowClick={(p) => {
-          // Future: open detail drawer with full visit history
-          toast.info(`${p.patient_name} · ${p.visit_count || 0} visit${p.visit_count === 1 ? '' : 's'} · last ${p.last_service || 'visit'}`);
-        }}
+        onRowClick={(p) => { setFocusedPatient(p.patient_name); setDetailOpen(true); }}
       />
 
       <AddPatientModal
@@ -70,6 +70,16 @@ const OrgPatientsTab: React.FC<Props> = ({ orgId, orgName }) => {
         organizationId={orgId}
         onCreated={load}
       />
+
+      {focusedPatient && (
+        <PatientDetailDrawer
+          open={detailOpen}
+          onOpenChange={(v) => { setDetailOpen(v); if (!v) setTimeout(load, 300); }}
+          patientName={focusedPatient}
+          organizationId={orgId}
+          canEdit={true}
+        />
+      )}
     </div>
   );
 };
