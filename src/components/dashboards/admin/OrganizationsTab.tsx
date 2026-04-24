@@ -23,6 +23,7 @@ import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
 import OrgPatientsTab from '@/components/admin/OrgPatientsTab';
 import OrgNotesTab from '@/components/admin/OrgNotesTab';
 import OrgSubscriptionStatusCard from '@/components/admin/OrgSubscriptionStatusCard';
+import OrgCommunicationsTab from '@/components/admin/OrgCommunicationsTab';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
 import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
@@ -673,7 +674,7 @@ ConveLabs · (941) 527-9169`
                 {invoices.length > 0 && <span className="ml-1 text-[10px] bg-gray-200 text-gray-700 px-1.5 py-0.5 rounded-full">{invoices.length}</span>}
               </TabsTrigger>
               <TabsTrigger value="notes" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><StickyNote className="h-3.5 w-3.5" /> Notes</TabsTrigger>
-              <TabsTrigger value="activity" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><Activity className="h-3.5 w-3.5" /> Activity</TabsTrigger>
+              <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm px-2.5 sm:px-3 whitespace-nowrap"><Mail className="h-3.5 w-3.5" /> Emails</TabsTrigger>
             </TabsList>
           </div>
 
@@ -768,17 +769,9 @@ ConveLabs · (941) 527-9169`
             <OrgNotesTab orgId={selectedOrg.id} />
           </TabsContent>
 
-          {/* ─── ACTIVITY (stub) ──────────────────────────────────── */}
-          <TabsContent value="activity" className="mt-4">
-            <Card className="shadow-sm border-dashed">
-              <CardContent className="p-10 text-center">
-                <Activity className="h-10 w-10 text-gray-300 mx-auto mb-2" />
-                <p className="font-semibold text-sm">Activity timeline — coming soon</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                  Chronological feed of every event for this org: visits completed, specimens delivered with tracking IDs, welcome email sent, reminder cadences fired. Phase 2 of the org console rollout.
-                </p>
-              </CardContent>
-            </Card>
+          {/* ─── EMAILS (communication log) ───────────────────────── */}
+          <TabsContent value="emails" className="mt-4">
+            <OrgCommunicationsTab orgId={selectedOrg.id} />
           </TabsContent>
         </Tabs>
 

@@ -335,18 +335,39 @@ Deno.serve(async (req) => {
     if (!mgRes.ok) {
       const errBody = await mgRes.text().catch(() => '');
       console.error('[org-welcome] mailgun failed', mgRes.status, errBody.slice(0, 200));
+      // Log the failure too so admin can see it in the email log
+      await admin.from('email_send_log').insert({
+        organization_id: org.id,
+        to_email: recipient,
+        cc_emails: ccList,
+        email_type: 'org_welcome',
+        campaign_tag: 'org_welcome',
+        subject: `${org.contact_name ? 'Dr. ' + org.contact_name.split(' ').slice(-1)[0] + ' — ' : ''}your patient referral tool is live`,
+        status: 'failed',
+        sent_at: new Date().toISOString(),
+      } as any).then(() => {}, () => {});
       return new Response(JSON.stringify({ error: 'mailgun_failed', status: mgRes.status }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Stamp welcomed_at + audit log
+    // Parse Mailgun response to capture message id
+    const mgJson = await mgRes.json().catch(() => ({} as any));
+    const mgId = String((mgJson as any)?.id || '').replace(/[<>]/g, '') || null;
+
+    // Stamp welcomed_at + rich audit log (org-scoped, searchable)
     await admin.from('organizations').update({ welcomed_at: new Date().toISOString() }).eq('id', org.id);
     await admin.from('email_send_log').insert({
+      organization_id: org.id,
       to_email: recipient,
+      cc_emails: ccList,
+      email_type: 'org_welcome',
       campaign_tag: 'org_welcome',
+      subject: `${org.contact_name ? 'Dr. ' + org.contact_name.split(' ').slice(-1)[0] + ' — ' : ''}your patient referral tool is live`,
+      status: 'sent',
+      mailgun_id: mgId,
       sent_at: new Date().toISOString(),
-    }).then(() => {}, () => {});
+    } as any).then(() => {}, () => {});
 
     return new Response(JSON.stringify({ ok: true, sent_to: recipient, activation_url: activationUrl }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
