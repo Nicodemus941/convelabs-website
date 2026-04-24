@@ -534,8 +534,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         duration_minutes: duration,
         booking_source: 'manual',
         is_vip: isVip,
-        invoice_status: isWaived ? 'not_required' : 'sent',
-        invoice_sent_at: isWaived ? null : new Date().toISOString(),
+        // FIX (2026-04-24 / Blake Hutton case): previously stamped 'sent' +
+        // invoice_sent_at unconditionally at INSERT time, even when the Stripe
+        // call below never ran (e.g., no email) or failed silently. That lied
+        // to the admin — dashboard showed "invoice sent" while Stripe had no
+        // invoice. Now we stamp intent markers and let the edge-fn callback
+        // flip to 'sent' only on confirmed success.
+        invoice_status: isWaived
+          ? 'not_required'
+          : billingEmail ? 'pending_send' : 'missing_email',
+        invoice_sent_at: null,
         invoice_due_at: isWaived ? null : invoiceDueAt,
         payment_status: isWaived ? 'completed' : 'pending',
         gate_code: gateCode || null,
@@ -652,29 +660,61 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         }
       }
 
-      // Send Stripe invoice (non-blocking)
+      // Send Stripe invoice (non-blocking) — flip invoice_status to 'sent'
+      // ONLY on confirmed success from the edge fn. On failure, stamp a
+      // diagnostic status so admin can see the row isn't actually invoiced.
       if (newAppt && !isWaived && billingEmail) {
-        supabase.functions.invoke('send-appointment-invoice', {
-          body: {
-            appointmentId: newAppt.id,
-            patientName: orgBilling ? orgName : patientName,
-            patientEmail: billingEmail,
-            patientPhone,
-            serviceType,
-            serviceName: svc?.label || serviceType,
-            servicePrice: finalPrice,
-            appointmentDate: date,
-            appointmentTime: time,
-            address: [address, city, zipcode].filter(Boolean).join(', ') || 'TBD',
-            isVip,
-            memo: invoiceMemo || (orgBilling ? `Patient: ${patientName}` : ''),
-            orgName: orgBilling ? orgName : undefined,
-          },
-        }).then(() => {
-          console.log('Invoice sent for appointment', newAppt.id);
-        }).catch(err => {
-          console.error('Invoice send error:', err);
-        });
+        (async () => {
+          try {
+            const { data, error } = await supabase.functions.invoke('send-appointment-invoice', {
+              body: {
+                appointmentId: newAppt.id,
+                patientName: orgBilling ? orgName : patientName,
+                patientEmail: billingEmail,
+                patientPhone,
+                serviceType,
+                serviceName: svc?.label || serviceType,
+                servicePrice: finalPrice,
+                appointmentDate: date,
+                appointmentTime: time,
+                address: [address, city, zipcode].filter(Boolean).join(', ') || 'TBD',
+                isVip,
+                memo: invoiceMemo || (orgBilling ? `Patient: ${patientName}` : ''),
+                orgName: orgBilling ? orgName : undefined,
+              },
+            });
+            if (error || (data as any)?.error) {
+              const msg = (data as any)?.error || error?.message || 'unknown';
+              console.error('Invoice send failed:', msg);
+              await supabase.from('appointments').update({
+                invoice_status: 'failed',
+              }).eq('id', newAppt.id);
+              toast.error(`Invoice didn't go out: ${msg}. Fix in the row and resend.`);
+              return;
+            }
+            // Success — confirm flip to 'sent' + stamp timestamp. (The edge
+            // fn may have already done this, but we stamp here too as the
+            // idempotent source of truth from the client side.)
+            await supabase.from('appointments').update({
+              invoice_status: 'sent',
+              invoice_sent_at: new Date().toISOString(),
+              invoice_due_at: invoiceDueAt,
+            }).eq('id', newAppt.id);
+            console.log('Invoice sent for appointment', newAppt.id);
+          } catch (err: any) {
+            console.error('Invoice send error:', err);
+            await supabase.from('appointments').update({
+              invoice_status: 'failed',
+            }).eq('id', newAppt.id);
+            toast.error(`Invoice send crashed: ${err?.message || 'unknown'}`);
+          }
+        })();
+      } else if (newAppt && !isWaived && !billingEmail) {
+        // No email to send to — loud warning so admin fixes it
+        toast.warning(
+          `⚠ No email on file for ${patientName}. Invoice NOT sent. Add an email to the patient, then use Resend from their row.`,
+          { duration: 10000 }
+        );
       }
 
       // Send ALL notifications (non-blocking)
