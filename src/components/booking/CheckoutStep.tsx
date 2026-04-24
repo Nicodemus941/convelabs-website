@@ -18,6 +18,7 @@ import { toast } from '@/components/ui/sonner';
 import { Shield, Gift, Tag, Plus, Layers, X, UserPlus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 
 interface FamilyMember {
   name: string;
@@ -506,12 +507,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs font-medium">Date of Birth *</Label>
-                  <Input
-                    type="date"
-                    value={familyForm.dob}
-                    onChange={e => setFamilyForm(f => ({ ...f, dob: e.target.value }))}
-                    className="mt-1 h-9 text-sm"
-                  />
+                  <div className="mt-1">
+                    <DateOfBirthInput
+                      value={familyForm.dob}
+                      onChange={(iso) => setFamilyForm(f => ({ ...f, dob: iso }))}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label className="text-xs font-medium">Relationship</Label>

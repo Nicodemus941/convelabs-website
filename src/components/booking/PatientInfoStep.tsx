@@ -18,6 +18,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Form, FormField, FormItem, FormControl, FormMessage } from '@/components/ui/form';
 import { BookingFormValues } from '@/types/appointmentTypes';
+import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 
 interface PatientInfoStepProps {
   onNext: () => void;
@@ -296,49 +297,34 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
               <FormField
                 control={control}
                 name="patientDetails.dateOfBirth"
-                render={({ field, fieldState }) => (
-                  <FormItem className="space-y-2">
-                    <label className="text-sm font-medium">Date of Birth</label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={"outline"}
-                            className={cn(
-                              "w-full justify-start text-left font-normal",
-                              !field.value && "text-muted-foreground"
-                            )}
-                          >
-                            {field.value ? (
-                              format(new Date(field.value), "MMMM d, yyyy")
-                            ) : (
-                              <span>Select date</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value ? new Date(field.value) : undefined}
-                          onSelect={field.onChange}
-                          disabled={(date) => date > new Date()}
-                          captionLayout="dropdown-buttons"
-                          fromYear={1920}
-                          toYear={new Date().getFullYear()}
-                          initialFocus
-                          className="p-3 pointer-events-auto"
+                render={({ field, fieldState }) => {
+                  // Field can hold either a Date object (from the legacy
+                  // calendar picker) or an ISO yyyy-mm-dd string (what we
+                  // emit now). Normalize to ISO before passing in.
+                  const iso = (() => {
+                    if (!field.value) return '';
+                    if (field.value instanceof Date) {
+                      const y = field.value.getFullYear();
+                      const m = String(field.value.getMonth() + 1).padStart(2, '0');
+                      const d = String(field.value.getDate()).padStart(2, '0');
+                      return `${y}-${m}-${d}`;
+                    }
+                    return String(field.value);
+                  })();
+                  return (
+                    <FormItem className="space-y-2">
+                      <label className="text-sm font-medium">Date of Birth</label>
+                      <FormControl>
+                        <DateOfBirthInput
+                          value={iso}
+                          onChange={field.onChange}
+                          error={!!fieldState.error}
                         />
-                      </PopoverContent>
-                    </Popover>
-                    {fieldState.error && (
-                      <FormMessage>
-                        {fieldState.error.message}
-                      </FormMessage>
-                    )}
-                  </FormItem>
-                )}
+                      </FormControl>
+                      {fieldState.error && <FormMessage>{fieldState.error.message}</FormMessage>}
+                    </FormItem>
+                  );
+                }}
               />
               
               <FormField
