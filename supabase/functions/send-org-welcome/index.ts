@@ -260,7 +260,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: org } = await admin.from('organizations')
-      .select('id, name, contact_name, contact_email, billing_email, portal_enabled, welcomed_at')
+      .select('id, name, contact_name, contact_email, billing_email, cc_emails, portal_enabled, welcomed_at')
       .eq('id', organization_id)
       .maybeSingle();
 
@@ -299,10 +299,16 @@ Deno.serve(async (req) => {
     }
 
     const html = buildHtml({ orgName: org.name, contactName: org.contact_name, activationUrl });
+    // CC any additional staff emails stored on the org row
+    const ccList: string[] = Array.isArray((org as any).cc_emails)
+      ? ((org as any).cc_emails as string[]).filter(e => e && e.includes('@') && e.toLowerCase() !== recipient.toLowerCase())
+      : [];
+
     const fd = new FormData();
     fd.append('from', `Nico Ferdinand <nico@${MAILGUN_DOMAIN}>`);
     fd.append('h:Reply-To', 'nico@convelabs.com');
     fd.append('to', recipient);
+    for (const cc of ccList) fd.append('cc', cc);
     fd.append('subject', `${org.contact_name ? 'Dr. ' + org.contact_name.split(' ').slice(-1)[0] + ' — ' : ''}your patient referral tool is live`);
     fd.append('html', html);
     fd.append('o:tag', 'org_welcome');

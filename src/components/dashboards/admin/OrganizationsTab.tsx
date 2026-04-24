@@ -14,7 +14,7 @@ import { format } from 'date-fns';
 import {
   Building2, Plus, Search, RefreshCw, Send, DollarSign, Mail,
   Phone, User, Users, FileText, Loader2, Download, Pencil, Power,
-  Megaphone, Eye, Sparkles, CheckCircle2, AlertCircle,
+  Megaphone, Eye, Sparkles, CheckCircle2, AlertCircle, X,
   TrendingUp, FlaskConical, StickyNote, Activity,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -81,7 +81,11 @@ const OrganizationsTab: React.FC = () => {
   const [showEditOrg, setShowEditOrg] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [orgForm, setOrgForm] = useState({ name: '', contactName: '', contactEmail: '', contactPhone: '', billingEmail: '', billingAddress: '', notes: '' });
+  const [orgForm, setOrgForm] = useState<{
+    name: string; contactName: string; contactEmail: string; contactPhone: string;
+    billingEmail: string; billingAddress: string; notes: string;
+    ccEmails: { email: string; label: string }[];
+  }>({ name: '', contactName: '', contactEmail: '', contactPhone: '', billingEmail: '', billingAddress: '', notes: '', ccEmails: [] });
   const [invoiceForm, setInvoiceForm] = useState({ patientName: '', serviceType: '', amount: '', memo: '' });
 
   // Full edit form — covers everything including partner rules
@@ -183,11 +187,19 @@ const OrganizationsTab: React.FC = () => {
     if (!orgForm.name.trim()) { toast.error('Organization name required'); return; }
     setSaving(true);
     try {
+      // Clean CC emails: dedupe, lowercase, drop empties + the primary contact
+      const ccClean = Array.from(new Set(
+        orgForm.ccEmails
+          .map(r => (r.email || '').trim().toLowerCase())
+          .filter(e => e && e.includes('@') && e !== orgForm.contactEmail.trim().toLowerCase())
+      ));
+
       const { data: newOrg, error } = await supabase.from('organizations' as any).insert({
         name: orgForm.name, contact_name: orgForm.contactName || null,
         contact_email: orgForm.contactEmail || null, contact_phone: orgForm.contactPhone || null,
         billing_email: orgForm.billingEmail || null, billing_address: orgForm.billingAddress || null,
         notes: orgForm.notes || null,
+        cc_emails: ccClean,
         portal_enabled: true,
       }).select('id, contact_email').single();
       if (error) throw error;
@@ -199,7 +211,7 @@ const OrganizationsTab: React.FC = () => {
       }
 
       setShowAddOrg(false);
-      setOrgForm({ name: '', contactName: '', contactEmail: '', contactPhone: '', billingEmail: '', billingAddress: '', notes: '' });
+      setOrgForm({ name: '', contactName: '', contactEmail: '', contactPhone: '', billingEmail: '', billingAddress: '', notes: '', ccEmails: [] });
       fetchOrgs();
     } catch (err: any) { toast.error(err.message || 'Failed'); }
     finally { setSaving(false); }
@@ -1489,6 +1501,77 @@ ConveLabs · (941) 527-9169`
                     disabled={saving}
                   />
                   <p className="mt-1 text-[11px] text-gray-500">This is where the activation link lands. Double-check spelling before sending.</p>
+                </div>
+
+                {/* CC additional staff — dynamic list */}
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs font-semibold">
+                      Also CC staff <span className="text-gray-400 font-normal">· optional</span>
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setOrgForm(p => ({ ...p, ccEmails: [...p.ccEmails, { email: '', label: '' }] }))}
+                      disabled={saving}
+                      className="h-7 text-xs text-[#B91C1C] hover:text-[#991B1B]"
+                    >
+                      <Plus className="h-3 w-3 mr-0.5" /> Add recipient
+                    </Button>
+                  </div>
+                  {orgForm.ccEmails.length === 0 ? (
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      Primary contact receives the welcome. Add extra staff (MA, front desk, billing) to CC on all outreach and operational notifications.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {orgForm.ccEmails.map((r, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <Input
+                            type="email"
+                            value={r.email}
+                            onChange={(e) => setOrgForm(p => {
+                              const next = [...p.ccEmails];
+                              next[i] = { ...next[i], email: e.target.value };
+                              return { ...p, ccEmails: next };
+                            })}
+                            placeholder="email@practicename.com"
+                            className="flex-1 h-9 text-sm"
+                            disabled={saving}
+                          />
+                          <Input
+                            value={r.label}
+                            onChange={(e) => setOrgForm(p => {
+                              const next = [...p.ccEmails];
+                              next[i] = { ...next[i], label: e.target.value };
+                              return { ...p, ccEmails: next };
+                            })}
+                            placeholder="Role (MA, billing…)"
+                            className="w-32 h-9 text-sm"
+                            disabled={saving}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setOrgForm(p => ({
+                              ...p,
+                              ccEmails: p.ccEmails.filter((_, idx) => idx !== i),
+                            }))}
+                            disabled={saving}
+                            className="h-9 w-9 p-0 text-gray-400 hover:text-red-600"
+                            aria-label="Remove recipient"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-gray-500">
+                        {orgForm.ccEmails.filter(r => r.email.trim()).length} extra recipient{orgForm.ccEmails.filter(r => r.email.trim()).length === 1 ? '' : 's'} · they'll be CC'd on welcome + outreach emails
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
