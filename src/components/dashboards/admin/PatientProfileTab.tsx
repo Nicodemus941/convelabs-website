@@ -611,32 +611,66 @@ const PatientProfileTab: React.FC = () => {
               <Button
                 variant="outline"
                 className="h-10 px-4 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
-                onClick={async () => {
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+
+                  // eslint-disable-next-line no-console
+                  console.log('[delete-patient] click fired for', p.id, `${p.first_name} ${p.last_name}`);
+
                   const reason = window.prompt(
                     `Delete patient "${p.first_name} ${p.last_name}"?\n\n` +
                     `Patients with appointment history are SOFT-deleted (hidden but audit-preserved for HIPAA).\n` +
                     `Patients with no history are removed permanently.\n\n` +
                     `Enter a short reason (min 3 chars):`
                   );
-                  if (!reason || reason.trim().length < 3) return;
-                  const { data, error } = await supabase.rpc('delete_patient', {
-                    p_patient_id: p.id,
-                    p_reason: reason.trim(),
-                    p_hard_delete: true, // let server downgrade to soft if unsafe
-                  });
-                  if (error) { toast.error(`Delete failed: ${error.message}`); return; }
-                  if ((data as any)?.action === 'hard_delete') {
-                    toast.success('Patient permanently deleted (no history)');
-                  } else {
-                    toast.success(`Patient soft-deleted${(data as any)?.note ? ` · ${(data as any).note}` : ''}`);
+                  if (!reason || reason.trim().length < 3) {
+                    console.log('[delete-patient] cancelled — no/short reason');
+                    return;
                   }
-                  setEditModalOpen(false);
-                  // Refresh list, excluding soft-deleted
-                  const { data: refreshed } = await supabase
-                    .from('tenant_patients').select('*').is('deleted_at', null)
-                    .order('first_name').limit(500);
-                  setAllPatients(refreshed || []);
-                  setSelectedPatient(null);
+
+                  // Verify caller's role from JWT so we can explain failures
+                  const { data: sess } = await supabase.auth.getSession();
+                  const role = (sess?.session?.user?.user_metadata as any)?.role
+                    || (sess?.session?.user?.app_metadata as any)?.role
+                    || 'unknown';
+                  const uid = sess?.session?.user?.id || 'no-session';
+                  console.log('[delete-patient] calling RPC as', { uid, role });
+
+                  try {
+                    const { data, error } = await supabase.rpc('delete_patient', {
+                      p_patient_id: p.id,
+                      p_reason: reason.trim(),
+                      p_hard_delete: true,
+                    });
+
+                    console.log('[delete-patient] RPC response', { data, error });
+
+                    if (error) {
+                      const details = `code=${(error as any).code || 'n/a'} · ${error.message || 'no message'}${(error as any).hint ? ' · hint: ' + (error as any).hint : ''} · role=${role}`;
+                      toast.error(`Delete failed: ${details}`, { duration: 12000 });
+                      return;
+                    }
+                    if ((data as any)?.action === 'hard_delete') {
+                      toast.success('Patient permanently deleted (no history)');
+                    } else {
+                      toast.success(`Patient soft-deleted${(data as any)?.note ? ` · ${(data as any).note}` : ''}`);
+                    }
+                    setEditModalOpen(false);
+                    const { data: refreshed, error: refErr } = await supabase
+                      .from('tenant_patients').select('*').is('deleted_at', null)
+                      .order('first_name').limit(500);
+                    if (refErr) {
+                      console.error('[delete-patient] refresh failed', refErr);
+                      toast.warning('Delete succeeded but list refresh failed — reload the page');
+                    } else {
+                      setAllPatients(refreshed || []);
+                    }
+                    setSelectedPatient(null);
+                  } catch (err: any) {
+                    console.error('[delete-patient] threw', err);
+                    toast.error(`Delete crashed: ${err?.message || String(err)}`, { duration: 12000 });
+                  }
                 }}
               >
                 Delete Patient
