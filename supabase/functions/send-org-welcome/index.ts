@@ -116,8 +116,15 @@ function buildHtml(params: {
       <!-- Body -->
       <tr><td style="padding:36px 32px 24px;">
         <p style="margin:0 0 16px;color:#111827;font-size:16px;line-height:1.6;">Hi ${greeting} — Nico here, founder of ConveLabs.</p>
-        <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;"><strong>${orgName}</strong> is now in our provider network — which means any patient you see today can have their blood drawn at their kitchen table, on their schedule, with their insurance.</p>
-        <p style="margin:0 0 28px;color:#374151;font-size:15px;line-height:1.7;">You don't pay us anything. Your patients don't lose their LabCorp or Quest coverage. They just skip the waiting room.</p>
+        <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;"><strong>${orgName}</strong> is now in our provider network — which means any patient you see today can have their blood drawn at their kitchen table, on their schedule.</p>
+        <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.7;">You don't pay us anything. Your practice stays out of the billing loop. We just help your patients actually show up to their blood work.</p>
+
+        <!-- Billing clarity — up front so no surprises -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;margin-bottom:28px;">
+          <tr><td style="padding:14px 18px;">
+            <p style="margin:0;color:#78350f;font-size:13px;line-height:1.6;"><strong style="color:#92400e;">One thing to know:</strong> we don't bill insurance for our service. Your patient pays a flat out-of-pocket fee for the at-home draw (their insurance still covers the actual lab tests via LabCorp / Quest / AdventHealth). Most patients tell us it's cheaper than their copay + time off work.</p>
+          </td></tr>
+        </table>
 
         <!-- What patients get -->
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf7f2;border-radius:12px;margin-bottom:24px;">
@@ -126,7 +133,7 @@ function buildHtml(params: {
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr><td style="padding:6px 0;color:#374151;font-size:14px;">🏠&nbsp;&nbsp;Licensed phlebotomist at their door</td></tr>
               <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📅&nbsp;&nbsp;Same-day or morning/evening slots</td></tr>
-              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">💳&nbsp;&nbsp;Their existing insurance — no out-of-pocket jump</td></tr>
+              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">💳&nbsp;&nbsp;Their insurance still covers the lab tests</td></tr>
               <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📲&nbsp;&nbsp;SMS tracking from draw → lab → results</td></tr>
               <tr><td style="padding:6px 0;color:#374151;font-size:14px;">⭐&nbsp;&nbsp;<strong>5.0</strong> · 164 reviews · NFL-trusted</td></tr>
             </table>
@@ -146,6 +153,51 @@ function buildHtml(params: {
           </td></tr>
         </table>
 
+        <!-- Reminder flywheel — the #1 provider pain-point fix -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:2px solid #B91C1C;border-radius:12px;margin-bottom:28px;">
+          <tr><td style="padding:20px 22px;">
+            <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#B91C1C;font-weight:bold;margin-bottom:6px;">★ The no-show killer</div>
+            <p style="margin:0 0 12px;color:#111827;font-size:15px;line-height:1.6;font-weight:600;">We stop your patients from forgetting their blood work.</p>
+            <p style="margin:0 0 12px;color:#374151;font-size:14px;line-height:1.7;">Every referred patient gets auto-reminders to schedule with us — SMS + email, on a cadence you control. You pick the deadline: "draw required within 7 days of their next appointment" or "2 weeks before follow-up."</p>
+            <p style="margin:0 0 12px;color:#374151;font-size:14px;line-height:1.7;"><strong style="color:#B91C1C;">If the patient doesn't schedule by your deadline</strong>, your dashboard lights up with an overdue flag and your team gets an email with the patient's name and last reminder date. Your MA or front desk can reach out while there's still time to reschedule the appointment or get the labs done — no more "we'll have to reschedule you, your labs aren't back."</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:14px;">
+              <tr>
+                <td style="width:33%;text-align:center;padding:10px 6px;background:#fef2f2;border-radius:8px;">
+                  <div style="font-size:22px;margin-bottom:4px;">📩</div>
+                  <div style="font-size:11px;color:#991B1B;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;">Patient reminded</div>
+                  <div style="font-size:11px;color:#6b7280;margin-top:2px;">SMS + email</div>
+                </td>
+                <td style="width:4%;"></td>
+                <td style="width:29%;text-align:center;padding:10px 6px;background:#fef2f2;border-radius:8px;">
+                  <div style="font-size:22px;margin-bottom:4px;">⏰</div>
+                  <div style="font-size:11px;color:#991B1B;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;">Deadline hits</div>
+                  <div style="font-size:11px;color:#6b7280;margin-top:2px;">You set it</div>
+                </td>
+                <td style="width:4%;"></td>
+                <td style="width:30%;text-align:center;padding:10px 6px;background:#fef2f2;border-radius:8px;">
+                  <div style="font-size:22px;margin-bottom:4px;">🔔</div>
+                  <div style="font-size:11px;color:#991B1B;font-weight:bold;text-transform:uppercase;letter-spacing:0.5px;">You're notified</div>
+                  <div style="font-size:11px;color:#6b7280;margin-top:2px;">Team follows up</div>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+
+        <!-- From collection to lab — visibility chain -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;margin-bottom:28px;">
+          <tr><td style="padding:20px 22px;">
+            <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#075985;font-weight:bold;margin-bottom:12px;">From draw → lab — you stay in the loop</div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="padding:6px 0;color:#0c4a6e;font-size:14px;line-height:1.6;"><strong>✓ Draw complete</strong> — you see it the minute the phleb finishes</td></tr>
+              <tr><td style="padding:6px 0;color:#0c4a6e;font-size:14px;line-height:1.6;"><strong>✓ En route to lab</strong> — carrier + expected drop-off time on your dashboard</td></tr>
+              <tr><td style="padding:6px 0;color:#0c4a6e;font-size:14px;line-height:1.6;"><strong>✓ Specimen delivered</strong> — you get an email with the <strong>lab-generated tracking ID</strong> the moment it's accepted at LabCorp / Quest / AdventHealth</td></tr>
+              <tr><td style="padding:6px 0;color:#0c4a6e;font-size:14px;line-height:1.6;"><strong>✓ Results rail</strong> — results flow to you via your normal lab results pipeline, same as always</td></tr>
+            </table>
+            <p style="margin:12px 0 0;color:#075985;font-size:13px;line-height:1.6;">That tracking ID is your receipt. If a patient ever says "I don't see my results" or your team needs to locate a sample, you have the ID one click away.</p>
+          </td></tr>
+        </table>
+
         <!-- CTA 1 -->
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
           <tr><td align="center">
@@ -156,6 +208,8 @@ function buildHtml(params: {
         <p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#6b7280;font-weight:bold;">What you'll see inside</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
           <tr><td style="padding:6px 0;color:#374151;font-size:14px;">👤&nbsp;&nbsp;<strong>"Refer a patient"</strong> — send their booking link in one tap</td></tr>
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">⏰&nbsp;&nbsp;<strong>Reminder cadence per patient</strong> — set the deadline for their draw</td></tr>
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">🚨&nbsp;&nbsp;<strong>Overdue alerts</strong> — see which patients haven't scheduled yet</td></tr>
           <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📋&nbsp;&nbsp;Next-appointment reminders per patient</td></tr>
           <tr><td style="padding:6px 0;color:#374151;font-size:14px;">🔔&nbsp;&nbsp;"Sample delivered" pings — with tracking ID</td></tr>
           <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📊&nbsp;&nbsp;Every patient you've referred, in one list</td></tr>
@@ -165,9 +219,9 @@ function buildHtml(params: {
         <!-- FAQ -->
         <p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#6b7280;font-weight:bold;">Three quick answers</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
-          <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Do my patients pay more?</strong><br><span style="color:#6b7280;">No — their insurance still covers it.</span></td></tr>
+          <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Do you bill insurance?</strong><br><span style="color:#6b7280;">No — our at-home draw fee is out-of-pocket for the patient. Their insurance still covers the actual lab tests via the lab's normal rail.</span></td></tr>
           <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Does my practice pay anything?</strong><br><span style="color:#6b7280;">No. Ever.</span></td></tr>
-          <tr><td style="padding:8px 0;color:#374151;font-size:13px;"><strong>What if they already have Quest?</strong><br><span style="color:#6b7280;">We deliver to Quest too.</span></td></tr>
+          <tr><td style="padding:8px 0;color:#374151;font-size:13px;"><strong>What if they already have Quest?</strong><br><span style="color:#6b7280;">We deliver to Quest too. Results rail stays intact.</span></td></tr>
         </table>
 
         <!-- CTA 2 -->
