@@ -63,28 +63,40 @@ async function mintActivationLink(email: string, orgId: string, orgName: string,
     return data.properties.action_link;
   }
 
-  const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalized, {
-    data: { role: 'provider', org_id: orgId, full_name: contactName || orgName, org_name: orgName },
-    redirectTo: `${PUBLIC_SITE_URL}/reset-password`,
+  // SKIP inviteUserByEmail entirely — it depends on Supabase's built-in SMTP
+  // which is not configured for this project (we use Mailgun). When SMTP is
+  // misconfigured, inviteUserByEmail returns an empty {} error and doesn't
+  // create the user at all (observed 2026-04-24 for Solomon Healthcare).
+  //
+  // Instead: createUser with email_confirm=true (so no confirmation email is
+  // attempted) THEN generate a recovery link. Supabase generateLink({type:
+  // 'recovery'}) only needs the user to exist and returns an action_link
+  // directly — we mail it ourselves via Mailgun, bypassing Supabase SMTP.
+  const { data: createData, error: createErr } = await admin.auth.admin.createUser({
+    email: normalized,
+    email_confirm: true,
+    user_metadata: { role: 'provider', org_id: orgId, full_name: contactName || orgName, org_name: orgName },
   });
 
-  if (inviteErr) {
-    const msg = String(inviteErr.message || '').toLowerCase();
-    if (/already|registered|exists|duplicate/.test(msg) || (inviteErr as any)?.status === 422) {
-      const { data, error } = await admin.auth.admin.generateLink({
-        type: 'recovery',
-        email: normalized,
-        options: { redirectTo: `${PUBLIC_SITE_URL}/reset-password` },
-      });
-      if (error || !data?.properties?.action_link) throw new Error(`fallback recovery failed: ${error?.message}`);
-      return data.properties.action_link;
+  if (createErr) {
+    // If the error really is "already exists", try listing again and proceed
+    // (race between findAuthUserByEmail pagination and createUser). If not,
+    // surface the full context.
+    const msg = String(createErr.message || '').toLowerCase();
+    if (!/already|registered|exists|duplicate/.test(msg)) {
+      throw new Error(`createUser failed: ${createErr.message || JSON.stringify(createErr)}`);
     }
-    throw new Error(`invite failed: ${inviteErr.message}`);
   }
 
-  return (inviteData as any)?.properties?.action_link
-      || (inviteData as any)?.action_link
-      || `${PUBLIC_SITE_URL}/reset-password`;
+  const { data: recData, error: recErr } = await admin.auth.admin.generateLink({
+    type: 'recovery',
+    email: normalized,
+    options: { redirectTo: `${PUBLIC_SITE_URL}/reset-password` },
+  });
+  if (recErr || !recData?.properties?.action_link) {
+    throw new Error(`recovery link failed after create: ${recErr?.message || 'no action_link'}`);
+  }
+  return recData.properties.action_link;
 }
 
 function buildHtml(params: {

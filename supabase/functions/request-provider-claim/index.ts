@@ -112,35 +112,38 @@ Deno.serve(async (req) => {
         }
         claimUrl = linkData.properties.action_link;
       } else {
-        // Net-new user — invite creates the row + sends Supabase's default email;
-        // we also fire a branded one with the action link.
-        const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalized, {
-          data: { role: 'provider', org_id: orgByEmail.id, full_name: orgByEmail.contact_name || orgByEmail.name },
-          // Send them to /reset-password — that page handles the recovery token,
-// prompts for a new password, then auto-routes providers to their dashboard.
-redirectTo: `${PUBLIC_SITE_URL}/reset-password`,
+        // Net-new user — createUser with email_confirm=true to skip Supabase's
+        // built-in SMTP (which isn't configured on this project — we use
+        // Mailgun), THEN generate a recovery link and mail it ourselves.
+        // inviteUserByEmail used to hang/return empty {} errors when SMTP
+        // was misconfigured (seen 2026-04-24 Solomon Healthcare bug).
+        const { error: createErr } = await admin.auth.admin.createUser({
+          email: normalized,
+          email_confirm: true,
+          user_metadata: { role: 'provider', org_id: orgByEmail.id, full_name: orgByEmail.contact_name || orgByEmail.name },
         });
-        // Belt-and-suspenders: if invite somehow fails with already-exists, retry recovery path
-        if (inviteErr) {
-          const msg = String(inviteErr.message || '').toLowerCase();
-          const looksAlreadyRegistered = /already|registered|exists|duplicate/.test(msg) || (inviteErr as any)?.status === 422;
-          if (looksAlreadyRegistered) {
-            const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
-              type: 'recovery',
-              email: normalized,
-              options: { redirectTo: `${PUBLIC_SITE_URL}/dashboard/provider` },
-            });
-            if (linkErr || !linkData?.properties?.action_link) {
-              return new Response(JSON.stringify({ ok: false, reason: 'link_failed', detail: linkErr?.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-            }
-            claimUrl = linkData.properties.action_link;
-          } else {
-            console.error('[request-provider-claim] invite failed', inviteErr);
-            return new Response(JSON.stringify({ ok: false, reason: 'invite_failed', detail: inviteErr.message || 'unknown' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        if (createErr) {
+          const msg = String(createErr.message || '').toLowerCase();
+          if (!/already|registered|exists|duplicate/.test(msg)) {
+            return new Response(JSON.stringify({
+              ok: false, reason: 'create_failed',
+              detail: createErr.message || JSON.stringify(createErr),
+            }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
-        } else {
-          claimUrl = `${PUBLIC_SITE_URL}/dashboard/provider`;
+          // Already exists (race with findAuthUserByEmail) → fall through
         }
+        const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+          type: 'recovery',
+          email: normalized,
+          options: { redirectTo: `${PUBLIC_SITE_URL}/reset-password` },
+        });
+        if (linkErr || !linkData?.properties?.action_link) {
+          return new Response(JSON.stringify({
+            ok: false, reason: 'link_failed',
+            detail: linkErr?.message || 'no action_link',
+          }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        claimUrl = linkData.properties.action_link;
       }
     } else {
       // Referring provider (not yet an org) — mint claim token + send /join link
