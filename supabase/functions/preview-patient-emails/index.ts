@@ -24,7 +24,9 @@ const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 
 async function send(to: string, subject: string, html: string, tag: string) {
   const fd = new FormData();
-  fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+  // Same sender format as the working org-welcome email (good reputation)
+  fd.append('from', `Nico Ferdinand <nico@${MAILGUN_DOMAIN}>`);
+  fd.append('h:Reply-To', 'nico@convelabs.com');
   fd.append('to', to);
   fd.append('subject', subject);
   fd.append('html', html);
@@ -35,10 +37,12 @@ async function send(to: string, subject: string, html: string, tag: string) {
     headers: { Authorization: `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
     body: fd,
   });
+  const bodyText = await res.text();
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`mailgun ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(`mailgun ${res.status}: ${bodyText.slice(0, 300)}`);
   }
+  // Mailgun returns a JSON body with id on success; log for traceability
+  console.log(`[preview] ${tag} → ${to} | mailgun ${res.status} ${bodyText.slice(0, 150)}`);
   return true;
 }
 
@@ -70,7 +74,7 @@ Deno.serve(async (req) => {
     // 1. Confirmation
     await send(
       to,
-      '[PREVIEW] Your ConveLabs appointment is confirmed',
+      'Preview:Your ConveLabs appointment is confirmed',
       renderAppointmentConfirmation({
         ...common,
         manageUrl: 'https://www.convelabs.com/dashboard',
@@ -82,7 +86,7 @@ Deno.serve(async (req) => {
     // 2. Reminder
     await send(
       to,
-      '[PREVIEW] Reminder: your ConveLabs appointment is tomorrow at 8:00 AM',
+      'Preview:Reminder: your ConveLabs appointment is tomorrow at 8:00 AM',
       renderAppointmentReminder({
         ...common,
         hasLabOrder: false,
@@ -96,7 +100,7 @@ Deno.serve(async (req) => {
     // 3. Specimen delivered
     await send(
       to,
-      '[PREVIEW] Your specimens have been delivered to LabCorp',
+      'Preview:Your specimens have been delivered to LabCorp',
       renderSpecimenDelivered({
         ...common,
         labName: 'LabCorp',

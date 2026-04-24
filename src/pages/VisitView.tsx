@@ -10,6 +10,7 @@ import {
   Users, MessageSquare, Repeat, Sparkles,
 } from 'lucide-react';
 import SubscribeSeriesModal from '@/components/visit/SubscribeSeriesModal';
+import LabOrderTokenUpload from '@/components/visit/LabOrderTokenUpload';
 import Header from '@/components/home/Header';
 import Footer from '@/components/home/Footer';
 import { formatAppointmentDate, formatAppointmentTime, formatAppointmentDateTime } from '@/lib/appointmentDate';
@@ -54,6 +55,7 @@ interface Visit {
   recurrence_sequence?: number | null;
   recurrence_total?: number | null;
   visit_bundle_id?: string | null;
+  lab_order_file_path?: string | null;
 }
 
 const VisitView: React.FC = () => {
@@ -73,7 +75,7 @@ const VisitView: React.FC = () => {
       try {
         const { data, error: fetchError } = await supabase
           .from('appointments')
-          .select('id, view_token, appointment_date, appointment_time, service_type, service_name, status, address, zipcode, total_amount, tip_amount, patient_name, patient_email, patient_phone, gate_code, notes, recurrence_group_id, recurrence_sequence, recurrence_total, visit_bundle_id')
+          .select('id, view_token, appointment_date, appointment_time, service_type, service_name, status, address, zipcode, total_amount, tip_amount, patient_name, patient_email, patient_phone, gate_code, notes, recurrence_group_id, recurrence_sequence, recurrence_total, visit_bundle_id, lab_order_file_path')
           .eq('view_token', token)
           .maybeSingle();
         if (fetchError) throw fetchError;
@@ -281,6 +283,17 @@ const VisitView: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Lab order upload — appears when none on file; turns into "✓ on file" once uploaded */}
+        {visit.status !== 'cancelled' && visit.status !== 'completed' && (
+          <div className="mb-6">
+            <LabOrderTokenUpload
+              viewToken={visit.view_token}
+              alreadyUploaded={!!visit.lab_order_file_path}
+              onUploaded={(newPath) => setVisit(v => v ? { ...v, lab_order_file_path: newPath } : v)}
+            />
+          </div>
+        )}
 
         {/* Action buttons */}
         <div className="grid grid-cols-2 gap-3 mb-6">

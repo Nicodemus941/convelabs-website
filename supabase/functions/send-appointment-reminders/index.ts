@@ -183,6 +183,12 @@ Deno.serve(async (req) => {
           if (!emailCheck.safe) {
             console.warn(`HIPAA guard blocked email to ${patientEmail}: ${emailCheck.reason}`);
           } else {
+          // Tokenized visit URL — no login needed. Single entry point for upload,
+          // reschedule, calendar add, etc. Falls back to dashboard if no token.
+          const visitUrl = (appt as any).view_token
+            ? `https://convelabs.com/visit/${(appt as any).view_token}`
+            : 'https://convelabs.com/login?redirect=/dashboard/patient';
+
           const emailHtml = renderAppointmentReminder({
             patientName,
             appointmentDate: formattedDate,
@@ -190,8 +196,8 @@ Deno.serve(async (req) => {
             serviceName: (appt.service_name || appt.service_type || 'Mobile Blood Draw').toString().replace(/_/g, ' '),
             address: appt.address || undefined,
             hasLabOrder,
-            uploadUrl: 'https://convelabs.com/dashboard',
-            manageUrl: 'https://convelabs.com/login?redirect=/dashboard/patient',
+            uploadUrl: visitUrl,
+            manageUrl: visitUrl,
           });
 
           const mgFormData = new FormData();
