@@ -51,6 +51,13 @@ const AddPatientModal: React.FC<Props> = ({ open, onOpenChange, organizationId, 
 
     setSubmitting(true);
     try {
+      // Compute the overdue deadline from the cadence the provider picked.
+      // e.g. cadence=7 → deadline = now + 7 days. The cron fn flips
+      // overdue_flagged_at once the deadline passes with no completed visit.
+      const days = parseInt(reminderDays || '7', 10) || 7;
+      const deadlineAt = new Date();
+      deadlineAt.setDate(deadlineAt.getDate() + days);
+
       const { data: newPatient, error } = await supabase.from('tenant_patients').insert({
         first_name: firstName.trim(),
         last_name: lastName.trim(),
@@ -58,7 +65,9 @@ const AddPatientModal: React.FC<Props> = ({ open, onOpenChange, organizationId, 
         phone: phone.trim() || null,
         date_of_birth: dob || null,
         organization_id: organizationId,
-      }).select('id').single();
+        lab_reminder_cadence_days: days,
+        lab_reminder_deadline_at: deadlineAt.toISOString(),
+      } as any).select('id').single();
 
       if (error) throw error;
 

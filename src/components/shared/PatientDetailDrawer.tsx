@@ -48,6 +48,10 @@ interface PatientProfile {
   email: string | null;
   phone: string | null;
   date_of_birth: string | null;
+  lab_reminder_cadence_days?: number | null;
+  lab_reminder_deadline_at?: string | null;
+  lab_reminder_last_sent_at?: string | null;
+  overdue_flagged_at?: string | null;
 }
 
 interface SpecimenRow {
@@ -96,7 +100,7 @@ const PatientDetailDrawer: React.FC<Props> = ({
       const firstName = nameParts[0] || '';
       const lastName = nameParts.slice(1).join(' ') || '';
       const { data: tp } = await supabase.from('tenant_patients')
-        .select('id, first_name, last_name, email, phone, date_of_birth')
+        .select('id, first_name, last_name, email, phone, date_of_birth, lab_reminder_cadence_days, lab_reminder_deadline_at, lab_reminder_last_sent_at, overdue_flagged_at')
         .ilike('first_name', firstName)
         .ilike('last_name', lastName || '%')
         .limit(1)
@@ -283,6 +287,15 @@ const PatientDetailDrawer: React.FC<Props> = ({
 
           {!loading && (
             <>
+              {/* Reminder cadence / overdue status + quick actions */}
+              {profile && (
+                <ReminderCadenceCard
+                  profile={profile}
+                  organizationId={organizationId}
+                  onChanged={load}
+                />
+              )}
+
               {/* KPI strip */}
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-gray-50 border rounded-lg p-3 text-center">
@@ -390,6 +403,162 @@ const PatientDetailDrawer: React.FC<Props> = ({
         </div>
       </SheetContent>
     </Sheet>
+  );
+};
+
+// ────────────────────────────────────────────────────────────
+// ReminderCadenceCard — shown in the drawer body
+// ────────────────────────────────────────────────────────────
+interface ReminderCardProps {
+  profile: PatientProfile;
+  organizationId: string;
+  onChanged: () => void;
+}
+
+const ReminderCadenceCard: React.FC<ReminderCardProps> = ({ profile, organizationId, onChanged }) => {
+  const [editing, setEditing] = useState(false);
+  const [days, setDays] = useState(String(profile.lab_reminder_cadence_days || 7));
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const deadline = profile.lab_reminder_deadline_at ? new Date(profile.lab_reminder_deadline_at) : null;
+  const isOverdue = deadline && deadline.getTime() < Date.now();
+  const flagged = !!profile.overdue_flagged_at;
+
+  const updateCadence = async () => {
+    const n = parseInt(days, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 365) {
+      toast.error('Pick a cadence between 1 and 365 days');
+      return;
+    }
+    setSaving(true);
+    try {
+      const newDeadline = new Date();
+      newDeadline.setDate(newDeadline.getDate() + n);
+      const { error } = await supabase.from('tenant_patients').update({
+        lab_reminder_cadence_days: n,
+        lab_reminder_deadline_at: newDeadline.toISOString(),
+        overdue_flagged_at: null, // reset overdue if we're resetting the clock
+      } as any).eq('id', profile.id);
+      if (error) throw error;
+      toast.success(`Reminder deadline set to ${n} days from today`);
+      setEditing(false);
+      onChanged();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update cadence');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sendBookingLink = async () => {
+    if (!profile.email && !profile.phone) {
+      toast.error('Patient has no phone or email — add one first');
+      return;
+    }
+    setSending(true);
+    try {
+      // Use the existing patient-lab-request infrastructure: create a row and
+      // the patient gets a text/email with the booking link. Simpler than
+      // spinning up a one-off notification path.
+      const { data, error } = await supabase.from('patient_lab_requests').insert({
+        organization_id: organizationId,
+        patient_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
+        patient_email: profile.email,
+        patient_phone: profile.phone,
+        draw_by_date: new Date(Date.now() + 14 * 86400 * 1000).toISOString().substring(0, 10),
+        status: 'pending_schedule',
+        access_token: crypto.randomUUID(),
+      } as any).select('id, access_token').single();
+      if (error) throw error;
+
+      // Stamp last_sent_at so we don't double-remind
+      await supabase.from('tenant_patients').update({
+        lab_reminder_last_sent_at: new Date().toISOString(),
+      } as any).eq('id', profile.id);
+
+      // Fire the SMS/email
+      await supabase.functions.invoke('remind-lab-request-patients', {
+        body: { lab_request_id: (data as any).id },
+      }).catch((e) => console.warn('remind invoke error (non-fatal):', e));
+
+      toast.success('Booking link sent');
+      onChanged();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to send booking link');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const tone = isOverdue
+    ? { bg: 'bg-red-50', border: 'border-red-200', label: 'text-red-900', body: 'text-red-800' }
+    : flagged
+    ? { bg: 'bg-amber-50', border: 'border-amber-200', label: 'text-amber-900', body: 'text-amber-800' }
+    : { bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'text-emerald-900', body: 'text-emerald-800' };
+
+  return (
+    <div className={`${tone.bg} ${tone.border} border rounded-lg p-4`}>
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div>
+          <p className={`text-[10px] font-bold uppercase tracking-wider ${tone.label}`} style={{ fontFamily: 'Georgia, serif' }}>
+            {isOverdue ? '⚠ Overdue' : flagged ? 'Flagged earlier' : 'Reminder cadence'}
+          </p>
+          <p className={`text-sm ${tone.body} mt-0.5 leading-relaxed`}>
+            {profile.lab_reminder_cadence_days
+              ? <>Lab deadline <strong>{deadline ? format(deadline, 'MMM d, yyyy') : '—'}</strong> · cadence: every <strong>{profile.lab_reminder_cadence_days} days</strong></>
+              : <>No reminder cadence set yet.</>}
+          </p>
+          {profile.lab_reminder_last_sent_at && (
+            <p className={`text-[11px] ${tone.body} opacity-80 mt-0.5`}>
+              Last reminded {formatDistanceToNow(new Date(profile.lab_reminder_last_sent_at), { addSuffix: true })}
+            </p>
+          )}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setEditing(v => !v)} className="text-xs flex-shrink-0">
+          {editing ? 'Close' : 'Adjust'}
+        </Button>
+      </div>
+
+      {editing && (
+        <div className="bg-white border rounded-md p-3 mb-2">
+          <Label className="text-xs font-semibold">Remind / deadline in</Label>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <select
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+              disabled={saving}
+              className="h-8 text-sm border rounded-md px-2 bg-white"
+            >
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+              <option value="30">30 days</option>
+              <option value="60">60 days</option>
+              <option value="90">90 days</option>
+            </select>
+            <Button size="sm" onClick={updateCadence} disabled={saving} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs">
+              {saving ? <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Saving…</> : 'Save'}
+            </Button>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-2">
+            Resets the deadline clock and clears any overdue flag. The patient will receive reminders before the new deadline.
+          </p>
+        </div>
+      )}
+
+      <div className="flex gap-2 flex-wrap">
+        <Button
+          size="sm"
+          onClick={sendBookingLink}
+          disabled={sending}
+          className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5 flex-1 sm:flex-none"
+        >
+          {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+          Send booking link now
+        </Button>
+      </div>
+    </div>
   );
 };
 
