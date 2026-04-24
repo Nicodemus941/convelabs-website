@@ -23,7 +23,11 @@ const OrganizationsSection: React.FC = () => {
       try {
         const { data, error } = await supabase.rpc('get_phleb_served_orgs' as any);
         if (error) throw error;
+        // eslint-disable-next-line no-console
+        console.log(`[phleb-directory] Orgs RPC returned ${data?.length ?? 0} rows`);
         setRows((data || []) as Row[]);
+      } catch (e: any) {
+        console.error('[phleb-directory] Orgs load failed:', e);
       } finally { setLoading(false); }
     })();
   }, []);
