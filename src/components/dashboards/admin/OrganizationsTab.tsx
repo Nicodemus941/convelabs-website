@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner';
 import OrgRoiCard from './OrgRoiCard';
 import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
+import OrgPatientsTab from '@/components/admin/OrgPatientsTab';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
 import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
@@ -561,6 +562,11 @@ ConveLabs · (941) 527-9169`
             subscription pivot. Sets tier → org gets seat cap + overage price.
             Stripe billing wiring ships in a separate pass. */}
         <OrgSubscriptionTierCard org={selectedOrg} onChanged={() => fetchOrgs()} />
+
+        {/* Patients linked to this org — full list with search, filter, add */}
+        <div className="pt-2">
+          <OrgPatientsTab orgId={selectedOrg.id} orgName={selectedOrg.name} />
+        </div>
 
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">Invoices ({invoices.length})</h2>

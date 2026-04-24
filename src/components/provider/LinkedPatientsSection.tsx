@@ -9,8 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw } from 'lucide-react';
+import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw, Search, UserPlus } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
+import AddPatientModal from '@/components/shared/AddPatientModal';
 
 /**
  * LinkedPatientsSection — Phase 1 of the org patient-list feature.
@@ -64,6 +65,9 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   const [notes, setNotes] = useState('');
   const [fastingRequired, setFastingRequired] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Search + add-patient — shipped alongside the admin Org drawer Patients tab
+  const [searchQ, setSearchQ] = useState('');
+  const [addOpen, setAddOpen] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -247,13 +251,16 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               Patients who've had a draw at ConveLabs through your practice. Select multiple and request labs in one click.
             </CardDescription>
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={toggleAll} className="text-xs flex-1 sm:flex-none">
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" variant="outline" onClick={() => setAddOpen(true)} className="text-xs gap-1.5">
+              <UserPlus className="h-3.5 w-3.5" /> Add patient
+            </Button>
+            <Button size="sm" variant="outline" onClick={toggleAll} className="text-xs">
               {selected.size === patients.length ? 'Deselect all' : 'Select all'}
             </Button>
             <Button
               size="sm"
-              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs flex-1 sm:flex-none"
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs"
               onClick={() => setBulkOpen(true)}
               disabled={selected.size === 0}
             >
@@ -261,9 +268,31 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             </Button>
           </div>
         </CardHeader>
+        {/* Search — filters the list in-place */}
+        <div className="px-6 pb-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            <Input
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              placeholder="Search by name, email, or phone…"
+              className="pl-9 h-9 text-sm"
+            />
+          </div>
+        </div>
         <CardContent className="p-0">
           <div className="divide-y">
-            {patients.map(p => {
+            {patients
+              .filter(p => {
+                const q = searchQ.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  (p.patient_name || '').toLowerCase().includes(q) ||
+                  (p.patient_email || '').toLowerCase().includes(q) ||
+                  (p.patient_phone || '').replace(/\D/g, '').includes(q.replace(/\D/g, ''))
+                );
+              })
+              .map(p => {
               const isSelected = selected.has(p.patient_name);
               return (
                 <label
@@ -392,6 +421,14 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Add Patient modal — shared with the admin Org drawer */}
+      <AddPatientModal
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        organizationId={orgId}
+        onCreated={() => { setAddOpen(false); load(); }}
+      />
     </>
   );
 };
