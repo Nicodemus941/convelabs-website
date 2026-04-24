@@ -30,6 +30,8 @@ interface Org {
   id: string; name: string; contact_name: string | null; contact_email: string | null;
   contact_phone: string | null; billing_email: string | null; billing_address: string | null;
   notes: string | null; is_active: boolean; created_at: string;
+  cc_emails?: string[] | null;       // additional staff recipients
+  welcomed_at?: string | null;        // set once the welcome email fires
   // Partner-rule fields (added by earlier migrations)
   portal_enabled?: boolean | null;
   default_billed_to?: 'patient' | 'org' | null;
@@ -89,20 +91,38 @@ const OrganizationsTab: React.FC = () => {
   const [invoiceForm, setInvoiceForm] = useState({ patientName: '', serviceType: '', amount: '', memo: '' });
 
   // Full edit form — covers everything including partner rules
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<{
+    name: string; contactName: string; contactEmail: string; contactPhone: string;
+    billingEmail: string; billingAddress: string; notes: string;
+    isActive: boolean; portalEnabled: boolean;
+    defaultBilledTo: 'patient' | 'org';
+    allowBillOverride: boolean;
+    showPatientNameOnAppointment: boolean;
+    lockedServiceType: string;
+    lockedPriceDollars: string;
+    orgInvoicePriceDollars: string;
+    memberStackingRule: 'lowest_wins' | 'partner_only' | 'org_covers';
+    ccEmails: { email: string; label: string }[];
+  }>({
     name: '', contactName: '', contactEmail: '', contactPhone: '',
     billingEmail: '', billingAddress: '', notes: '',
     isActive: true, portalEnabled: false,
-    defaultBilledTo: 'patient' as 'patient' | 'org',
+    defaultBilledTo: 'patient',
     allowBillOverride: true,
     showPatientNameOnAppointment: true,
     lockedServiceType: '',
     lockedPriceDollars: '',
     orgInvoicePriceDollars: '',
-    memberStackingRule: 'lowest_wins' as 'lowest_wins' | 'partner_only' | 'org_covers',
+    memberStackingRule: 'lowest_wins',
+    ccEmails: [],
   });
 
   const openEditModal = (org: Org) => {
+    // Hydrate existing cc_emails into editable rows; keep label empty since
+    // we only stored the address (phase 2 could add a labels table).
+    const existingCcs: { email: string; label: string }[] = Array.isArray((org as any).cc_emails)
+      ? ((org as any).cc_emails as string[]).map(e => ({ email: e, label: '' }))
+      : [];
     setEditForm({
       name: org.name || '',
       contactName: org.contact_name || '',
@@ -120,6 +140,7 @@ const OrganizationsTab: React.FC = () => {
       lockedPriceDollars: org.locked_price_cents != null ? (org.locked_price_cents / 100).toFixed(2) : '',
       orgInvoicePriceDollars: org.org_invoice_price_cents != null ? (org.org_invoice_price_cents / 100).toFixed(2) : '',
       memberStackingRule: (org.member_stacking_rule as any) || 'lowest_wins',
+      ccEmails: existingCcs,
     });
     setShowEditOrg(true);
   };
@@ -129,6 +150,13 @@ const OrganizationsTab: React.FC = () => {
     if (!editForm.name.trim()) { toast.error('Organization name required'); return; }
     setSaving(true);
     try {
+      // Clean CC emails: dedupe, lowercase, drop empties + the primary contact
+      const ccClean = Array.from(new Set(
+        editForm.ccEmails
+          .map(r => (r.email || '').trim().toLowerCase())
+          .filter(e => e && e.includes('@') && e !== editForm.contactEmail.trim().toLowerCase())
+      ));
+
       const payload = {
         name: editForm.name.trim(),
         contact_name: editForm.contactName.trim() || null,
@@ -137,6 +165,7 @@ const OrganizationsTab: React.FC = () => {
         billing_email: editForm.billingEmail.trim() || null,
         billing_address: editForm.billingAddress.trim() || null,
         notes: editForm.notes.trim() || null,
+        cc_emails: ccClean,
         is_active: editForm.isActive,
         portal_enabled: editForm.portalEnabled,
         default_billed_to: editForm.defaultBilledTo,
@@ -588,15 +617,31 @@ ConveLabs · (941) 527-9169`
               <h1 className="text-2xl font-bold">{selectedOrg.name}</h1>
               {selectedOrg.portal_enabled && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[10px]">Portal enabled</Badge>}
               {!selectedOrg.is_active && <Badge className="bg-gray-200 text-gray-600 hover:bg-gray-200 text-[10px]">Inactive</Badge>}
+              {(selectedOrg as any).welcomed_at && <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]">✓ Welcomed</Badge>}
             </div>
             <p className="text-sm text-muted-foreground">
               {selectedOrg.contact_name ? `${selectedOrg.contact_name} · ` : ''}
               {selectedOrg.contact_email || 'No email'} · {selectedOrg.contact_phone || 'No phone'}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5">
-            <Pencil className="h-3.5 w-3.5" /> Edit
-          </Button>
+          <div className="flex gap-2 flex-wrap">
+            {selectedOrg.contact_email && (
+              <Button
+                size="sm"
+                onClick={() => handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, !!(selectedOrg as any).welcomed_at)}
+                className={(selectedOrg as any).welcomed_at
+                  ? 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 gap-1.5'
+                  : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 shadow-sm'}
+                title={(selectedOrg as any).welcomed_at ? 'Resend the welcome email' : 'Send the branded welcome email now'}
+              >
+                <Send className="h-3.5 w-3.5" />
+                {(selectedOrg as any).welcomed_at ? 'Resend welcome' : 'Send welcome'}
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5">
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </Button>
+          </div>
         </div>
 
         <Tabs defaultValue="overview">
@@ -743,6 +788,77 @@ ConveLabs · (941) 527-9169`
                 <div>
                   <Label>Contact Email</Label>
                   <Input type="email" value={editForm.contactEmail} onChange={e => setEditForm(p => ({ ...p, contactEmail: e.target.value }))} />
+                </div>
+
+                {/* CC additional staff — parity with Add Org modal */}
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="text-xs font-semibold">
+                      Also CC staff <span className="text-gray-400 font-normal">· optional</span>
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditForm(p => ({ ...p, ccEmails: [...p.ccEmails, { email: '', label: '' }] }))}
+                      disabled={saving}
+                      className="h-7 text-xs text-[#B91C1C] hover:text-[#991B1B]"
+                    >
+                      <Plus className="h-3 w-3 mr-0.5" /> Add recipient
+                    </Button>
+                  </div>
+                  {editForm.ccEmails.length === 0 ? (
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      Primary contact gets the welcome. Add extra staff (MA, front desk, billing) to CC on welcome + outreach emails.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {editForm.ccEmails.map((r, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <Input
+                            type="email"
+                            value={r.email}
+                            onChange={(e) => setEditForm(p => {
+                              const next = [...p.ccEmails];
+                              next[i] = { ...next[i], email: e.target.value };
+                              return { ...p, ccEmails: next };
+                            })}
+                            placeholder="email@practicename.com"
+                            className="flex-1 h-9 text-sm"
+                            disabled={saving}
+                          />
+                          <Input
+                            value={r.label}
+                            onChange={(e) => setEditForm(p => {
+                              const next = [...p.ccEmails];
+                              next[i] = { ...next[i], label: e.target.value };
+                              return { ...p, ccEmails: next };
+                            })}
+                            placeholder="Role"
+                            className="w-28 h-9 text-sm"
+                            disabled={saving}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setEditForm(p => ({
+                              ...p,
+                              ccEmails: p.ccEmails.filter((_, idx) => idx !== i),
+                            }))}
+                            disabled={saving}
+                            className="h-9 w-9 p-0 text-gray-400 hover:text-red-600"
+                            aria-label="Remove recipient"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                      <p className="text-[11px] text-gray-500">
+                        {editForm.ccEmails.filter(r => r.email.trim()).length} extra recipient{editForm.ccEmails.filter(r => r.email.trim()).length === 1 ? '' : 's'} will be CC'd on welcome + outreach emails
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
