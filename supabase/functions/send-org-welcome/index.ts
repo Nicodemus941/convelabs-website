@@ -1,0 +1,288 @@
+/**
+ * SEND-ORG-WELCOME
+ *
+ * Fires immediately after a new organization is created from the admin
+ * OrganizationsTab. Builds a Hormozi-structured "force-multiplier gift"
+ * welcome email (patient-outcome + provider-ease framing, zero sell),
+ * mints an activation magic link, and emails it via Mailgun.
+ *
+ * Activation link strategy (mirrors request-provider-claim):
+ *  - If auth.users row exists → generate 'recovery' magic link
+ *  - If not → inviteUserByEmail
+ *  - Either way → redirect to /reset-password so they set a password,
+ *    then get routed to /dashboard/provider
+ *
+ * Body: { organization_id: string, resend?: boolean }
+ *   - resend=true bypasses the "already welcomed" guard (welcomed_at stamp)
+ *
+ * Idempotent: a successful send stamps organizations.welcomed_at; re-invokes
+ * without resend=true return ok:true, skipped:true.
+ */
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const PUBLIC_SITE_URL = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
+const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY') || '';
+const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+async function findAuthUserByEmail(email: string): Promise<string | null> {
+  try {
+    for (let page = 1; page <= 10; page++) {
+      const { data } = await admin.auth.admin.listUsers({ page, perPage: 100 });
+      if (!data?.users?.length) return null;
+      const hit = data.users.find((u: any) => (u.email || '').toLowerCase() === email);
+      if (hit) return hit.id;
+      if (data.users.length < 100) return null;
+    }
+  } catch { /* noop */ }
+  return null;
+}
+
+async function mintActivationLink(email: string, orgId: string, orgName: string, contactName: string | null): Promise<string> {
+  const normalized = email.trim().toLowerCase();
+  const existingId = await findAuthUserByEmail(normalized);
+
+  if (existingId) {
+    const { data, error } = await admin.auth.admin.generateLink({
+      type: 'recovery',
+      email: normalized,
+      options: { redirectTo: `${PUBLIC_SITE_URL}/reset-password` },
+    });
+    if (error || !data?.properties?.action_link) {
+      throw new Error(`recovery link failed: ${error?.message || 'unknown'}`);
+    }
+    return data.properties.action_link;
+  }
+
+  const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(normalized, {
+    data: { role: 'provider', org_id: orgId, full_name: contactName || orgName, org_name: orgName },
+    redirectTo: `${PUBLIC_SITE_URL}/reset-password`,
+  });
+
+  if (inviteErr) {
+    const msg = String(inviteErr.message || '').toLowerCase();
+    if (/already|registered|exists|duplicate/.test(msg) || (inviteErr as any)?.status === 422) {
+      const { data, error } = await admin.auth.admin.generateLink({
+        type: 'recovery',
+        email: normalized,
+        options: { redirectTo: `${PUBLIC_SITE_URL}/reset-password` },
+      });
+      if (error || !data?.properties?.action_link) throw new Error(`fallback recovery failed: ${error?.message}`);
+      return data.properties.action_link;
+    }
+    throw new Error(`invite failed: ${inviteErr.message}`);
+  }
+
+  return (inviteData as any)?.properties?.action_link
+      || (inviteData as any)?.action_link
+      || `${PUBLIC_SITE_URL}/reset-password`;
+}
+
+function buildHtml(params: {
+  orgName: string;
+  contactName: string | null;
+  activationUrl: string;
+}): string {
+  const { orgName, contactName, activationUrl } = params;
+  const greeting = contactName ? `Dr. ${contactName.split(' ').slice(-1)[0]}` : 'there';
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Welcome to ConveLabs</title>
+</head>
+<body style="margin:0;padding:0;background:#faf7f2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf7f2;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+
+      <!-- Hero header -->
+      <tr><td style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);padding:40px 32px;text-align:center;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:13px;letter-spacing:4px;text-transform:uppercase;color:#fecaca;margin-bottom:8px;">ConveLabs</div>
+        <h1 style="margin:0;color:#ffffff;font-family:Georgia,'Times New Roman',serif;font-size:30px;line-height:1.2;font-weight:normal;">The tool your patients will thank you for.</h1>
+      </td></tr>
+
+      <!-- Body -->
+      <tr><td style="padding:36px 32px 24px;">
+        <p style="margin:0 0 16px;color:#111827;font-size:16px;line-height:1.6;">Hi ${greeting} — Nico here, founder of ConveLabs.</p>
+        <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;"><strong>${orgName}</strong> is now in our provider network — which means any patient you see today can have their blood drawn at their kitchen table, on their schedule, with their insurance.</p>
+        <p style="margin:0 0 28px;color:#374151;font-size:15px;line-height:1.7;">You don't pay us anything. Your patients don't lose their LabCorp or Quest coverage. They just skip the waiting room.</p>
+
+        <!-- What patients get -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf7f2;border-radius:12px;margin-bottom:24px;">
+          <tr><td style="padding:20px 22px;">
+            <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#B91C1C;font-weight:bold;margin-bottom:12px;">What your patients get</div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">🏠&nbsp;&nbsp;Licensed phlebotomist at their door</td></tr>
+              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📅&nbsp;&nbsp;Same-day or morning/evening slots</td></tr>
+              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">💳&nbsp;&nbsp;Their existing insurance — no out-of-pocket jump</td></tr>
+              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📲&nbsp;&nbsp;SMS tracking from draw → lab → results</td></tr>
+              <tr><td style="padding:6px 0;color:#374151;font-size:14px;">⭐&nbsp;&nbsp;<strong>5.0</strong> · 164 reviews · NFL-trusted</td></tr>
+            </table>
+          </td></tr>
+        </table>
+
+        <!-- What you do in 30s -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-bottom:28px;">
+          <tr><td style="padding:20px 22px;">
+            <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#166534;font-weight:bold;margin-bottom:12px;">What you do — in 30 seconds</div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr><td style="padding:6px 0;color:#15803d;font-size:14px;"><strong>1️⃣</strong>&nbsp;&nbsp;Click "Refer this patient" in your dashboard</td></tr>
+              <tr><td style="padding:6px 0;color:#15803d;font-size:14px;"><strong>2️⃣</strong>&nbsp;&nbsp;Enter name + phone — we text them the booking link</td></tr>
+              <tr><td style="padding:6px 0;color:#15803d;font-size:14px;"><strong>3️⃣</strong>&nbsp;&nbsp;Get a ping the moment their specimen hits the lab</td></tr>
+            </table>
+            <p style="margin:12px 0 0;color:#166534;font-size:13px;line-height:1.6;">That's it. We handle the draw, the delivery, the follow-up. You just stop losing patients to "I'll go next week."</p>
+          </td></tr>
+        </table>
+
+        <!-- CTA 1 -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+          <tr><td align="center">
+            <a href="${activationUrl}" style="display:inline-block;background:#B91C1C;color:#ffffff;padding:16px 40px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;letter-spacing:0.3px;box-shadow:0 4px 12px rgba(185,28,28,0.25);">Activate my dashboard →</a>
+          </td></tr>
+        </table>
+
+        <p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#6b7280;font-weight:bold;">What you'll see inside</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">👤&nbsp;&nbsp;<strong>"Refer a patient"</strong> — send their booking link in one tap</td></tr>
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📋&nbsp;&nbsp;Next-appointment reminders per patient</td></tr>
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">🔔&nbsp;&nbsp;"Sample delivered" pings — with tracking ID</td></tr>
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">📊&nbsp;&nbsp;Every patient you've referred, in one list</td></tr>
+          <tr><td style="padding:6px 0;color:#374151;font-size:14px;">👥&nbsp;&nbsp;Add your staff (MA, front desk) — zero seat cost</td></tr>
+        </table>
+
+        <!-- FAQ -->
+        <p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#6b7280;font-weight:bold;">Three quick answers</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
+          <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Do my patients pay more?</strong><br><span style="color:#6b7280;">No — their insurance still covers it.</span></td></tr>
+          <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Does my practice pay anything?</strong><br><span style="color:#6b7280;">No. Ever.</span></td></tr>
+          <tr><td style="padding:8px 0;color:#374151;font-size:13px;"><strong>What if they already have Quest?</strong><br><span style="color:#6b7280;">We deliver to Quest too.</span></td></tr>
+        </table>
+
+        <!-- CTA 2 -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+          <tr><td align="center">
+            <a href="${activationUrl}" style="display:inline-block;background:#B91C1C;color:#ffffff;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">Activate my dashboard</a>
+          </td></tr>
+        </table>
+
+        <!-- Signature -->
+        <p style="margin:24px 0 4px;color:#111827;font-size:15px;">— Nico Ferdinand</p>
+        <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.6;">Founder, ConveLabs<br>(941) 527-9169 · I read every reply</p>
+      </td></tr>
+
+      <!-- Footer -->
+      <tr><td style="background:#faf7f2;padding:20px 32px;text-align:center;border-top:1px solid #f3f4f6;">
+        <p style="margin:0;color:#9ca3af;font-size:11px;line-height:1.6;">ConveLabs, Inc. · 1800 Pembrook Dr, Suite 300, Orlando FL 32810<br>Licensed mobile phlebotomy · HIPAA compliant</p>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  try {
+    const { organization_id, resend } = await req.json();
+    if (!organization_id) {
+      return new Response(JSON.stringify({ error: 'organization_id required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const { data: org } = await admin.from('organizations')
+      .select('id, name, contact_name, contact_email, billing_email, portal_enabled, welcomed_at')
+      .eq('id', organization_id)
+      .maybeSingle();
+
+    if (!org) {
+      return new Response(JSON.stringify({ error: 'organization_not_found' }), {
+        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (org.welcomed_at && !resend) {
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: 'already_welcomed' }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const recipient = org.contact_email || org.billing_email;
+    if (!recipient) {
+      return new Response(JSON.stringify({ error: 'no_contact_email', message: 'Add a contact_email before welcoming this org.' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Make sure portal is enabled so the activation link actually lands somewhere
+    if (!org.portal_enabled) {
+      await admin.from('organizations').update({ portal_enabled: true }).eq('id', org.id);
+    }
+
+    // Mint activation magic link
+    const activationUrl = await mintActivationLink(recipient, org.id, org.name, org.contact_name);
+
+    // Build + send email
+    if (!MAILGUN_API_KEY) {
+      return new Response(JSON.stringify({ error: 'mailgun_not_configured' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const html = buildHtml({ orgName: org.name, contactName: org.contact_name, activationUrl });
+    const fd = new FormData();
+    fd.append('from', `Nico Ferdinand <nico@${MAILGUN_DOMAIN}>`);
+    fd.append('h:Reply-To', 'nico@convelabs.com');
+    fd.append('to', recipient);
+    fd.append('subject', `${org.contact_name ? 'Dr. ' + org.contact_name.split(' ').slice(-1)[0] + ' — ' : ''}your patient referral tool is live`);
+    fd.append('html', html);
+    fd.append('o:tag', 'org_welcome');
+    fd.append('o:tracking-clicks', 'yes');
+
+    const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+      body: fd,
+    });
+
+    if (!mgRes.ok) {
+      const errBody = await mgRes.text().catch(() => '');
+      console.error('[org-welcome] mailgun failed', mgRes.status, errBody.slice(0, 200));
+      return new Response(JSON.stringify({ error: 'mailgun_failed', status: mgRes.status }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Stamp welcomed_at + audit log
+    await admin.from('organizations').update({ welcomed_at: new Date().toISOString() }).eq('id', org.id);
+    await admin.from('email_send_log').insert({
+      to_email: recipient,
+      campaign_tag: 'org_welcome',
+      sent_at: new Date().toISOString(),
+    }).then(() => {}, () => {});
+
+    return new Response(JSON.stringify({ ok: true, sent_to: recipient, activation_url: activationUrl }), {
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  } catch (e: any) {
+    console.error('[org-welcome] unhandled:', e?.message);
+    return new Response(JSON.stringify({ error: 'unhandled', message: e?.message || String(e) }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+});

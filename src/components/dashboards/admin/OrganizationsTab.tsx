@@ -176,14 +176,41 @@ const OrganizationsTab: React.FC = () => {
     if (!orgForm.name.trim()) { toast.error('Organization name required'); return; }
     setSaving(true);
     try {
-      const { error } = await supabase.from('organizations' as any).insert({
+      // Insert + return the new row so we can immediately fire the welcome email.
+      // portal_enabled=true up front so the activation magic-link lands on a
+      // portal they can actually use.
+      const { data: newOrg, error } = await supabase.from('organizations' as any).insert({
         name: orgForm.name, contact_name: orgForm.contactName || null,
         contact_email: orgForm.contactEmail || null, contact_phone: orgForm.contactPhone || null,
         billing_email: orgForm.billingEmail || null, billing_address: orgForm.billingAddress || null,
         notes: orgForm.notes || null,
-      });
+        portal_enabled: true,
+      }).select('id, contact_email').single();
       if (error) throw error;
-      toast.success('Organization added');
+
+      // Fire the Hormozi-structured welcome email (patient-outcome + provider-ease
+      // framing, no sell). Edge fn mints the activation link, sends branded email,
+      // stamps welcomed_at. Only fires if contact_email is present; otherwise
+      // admin can hit "Send welcome" later after filling it in.
+      if ((newOrg as any)?.contact_email) {
+        try {
+          const { data: res, error: welcomeErr } = await supabase.functions.invoke('send-org-welcome', {
+            body: { organization_id: (newOrg as any).id },
+          });
+          if (welcomeErr || (res as any)?.error) {
+            console.warn('[org-welcome] send failed:', welcomeErr || (res as any)?.error);
+            toast.success('Organization added — welcome email failed, resend from row menu');
+          } else {
+            toast.success(`Organization added — welcome email sent to ${(newOrg as any).contact_email}`);
+          }
+        } catch (e: any) {
+          console.warn('[org-welcome] invoke threw:', e?.message);
+          toast.success('Organization added (welcome email skipped)');
+        }
+      } else {
+        toast.success('Organization added — add contact email to send welcome');
+      }
+
       setShowAddOrg(false);
       setOrgForm({ name: '', contactName: '', contactEmail: '', contactPhone: '', billingEmail: '', billingAddress: '', notes: '' });
       fetchOrgs();
