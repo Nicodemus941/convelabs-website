@@ -726,6 +726,24 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   {/* After-hours toggle removed 2026-04-25 — business hours
                       simplified to 6 AM – 6 PM Mon–Sun for all tiers. */}
 
+                  {/* Persistent waitlist escape — surfaced on every date so
+                      patients who can't find a time can still leave a lead.
+                      Without this, the JoinWaitlistButton only appeared
+                      inside the tier-unlock modal which (post-uniform-hours)
+                      almost never opens. */}
+                  {selectedDate && (
+                    <div className="mt-3 text-center">
+                      <JoinWaitlistButton
+                        dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+                        desiredTime={field.value || undefined}
+                        variant="subtle"
+                      />
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Don't see a time that works? We'll text you when one opens up.
+                      </p>
+                    </div>
+                  )}
+
                   <FormDescription>
                     {isStat
                       ? "Next available within operating hours (+$100)"
