@@ -677,39 +677,73 @@ const PatientProfileTab: React.FC = () => {
               </Button>
               <div className="flex gap-3">
               <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
-              <Button className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold" onClick={async () => {
-                const { data, error } = await supabase.from('tenant_patients').update({
-                  first_name: editForm.firstName, last_name: editForm.lastName,
-                  email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
-                  address: editForm.address || null,
-                  city: editForm.city || null,
-                  state: editForm.state || null,
-                  zipcode: editForm.zipcode || null,
-                  gate_code: editForm.gateCode || null,
-                  insurance_provider: editForm.insuranceProvider || null,
-                  insurance_member_id: editForm.insuranceMemberId || null,
-                  insurance_group_number: editForm.insuranceGroup || null,
-                }).eq('id', p.id).select();
-                // Surface the exact DB error — usually the org-email trigger or
-                // a unique constraint. Previously errors were swallowed on some
-                // paths so the admin saw "nothing happened" with no feedback.
-                if (error) {
-                  console.error('[patient update] failed:', error);
-                  toast.error(`Update failed: ${error.message}`);
-                  return;
+              <Button className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold" onClick={async (e) => {
+                // Every step logged + try/catch around the entire flow. Previously
+                // a network drop / Supabase 5xx / unhandled throw would die silently
+                // and the admin would see "Save did nothing" with no diagnostic.
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[patient-save] click fired for', p.id, 'email:', editForm.email);
+                try {
+                  const updatePayload: any = {
+                    first_name: editForm.firstName, last_name: editForm.lastName,
+                    email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
+                    address: editForm.address || null,
+                    city: editForm.city || null,
+                    state: editForm.state || null,
+                    zipcode: editForm.zipcode || null,
+                    gate_code: editForm.gateCode || null,
+                    insurance_provider: editForm.insuranceProvider || null,
+                    insurance_member_id: editForm.insuranceMemberId || null,
+                    insurance_group_number: editForm.insuranceGroup || null,
+                  };
+                  console.log('[patient-save] payload:', updatePayload);
+                  const { data, error } = await supabase.from('tenant_patients').update(updatePayload).eq('id', p.id).select();
+                  console.log('[patient-save] response:', { data, error });
+
+                  if (error) {
+                    console.error('[patient-save] DB error:', error);
+                    toast.error(
+                      `Update failed — code ${error.code || 'n/a'}: ${error.message || 'no message'}${error.hint ? ` · hint: ${error.hint}` : ''}`,
+                      { duration: 12000 }
+                    );
+                    return;
+                  }
+                  if (!data || data.length === 0) {
+                    // Diagnose role for the user
+                    const { data: { session } } = await supabase.auth.getSession();
+                    const role = (session?.user as any)?.user_metadata?.role || 'unknown';
+                    toast.error(
+                      `Update returned 0 rows — likely a permissions issue. You're signed in as: ${role}. Need super_admin / admin / office_manager.`,
+                      { duration: 12000 }
+                    );
+                    return;
+                  }
+                  toast.success('Patient info updated');
+                  setSelectedPatient({
+                    ...p,
+                    first_name: editForm.firstName, last_name: editForm.lastName,
+                    email: editForm.email, phone: editForm.phone,
+                    date_of_birth: editForm.dob || null,
+                    address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null,
+                    gate_code: editForm.gateCode || null,
+                    insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null,
+                  });
+                  setEditModalOpen(false);
+                  try {
+                    const { data: refreshed } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
+                    setAllPatients(refreshed || []);
+                  } catch (refreshErr: any) {
+                    console.warn('[patient-save] refresh failed (save itself OK):', refreshErr);
+                    toast.warning('Saved, but list refresh failed — reload to see the latest.');
+                  }
+                } catch (err: any) {
+                  console.error('[patient-save] threw:', err);
+                  toast.error(
+                    `Save crashed: ${err?.message || String(err)}. Open DevTools Console for the full trace.`,
+                    { duration: 12000 }
+                  );
                 }
-                // RLS can silently filter out an update → 0 rows returned with
-                // no error. Catch that explicitly so admin knows to check role.
-                if (!data || data.length === 0) {
-                  toast.error('Update returned 0 rows — likely a permissions issue. Are you signed in as super_admin?');
-                  return;
-                }
-                toast.success('Patient info updated');
-                setSelectedPatient({ ...p, first_name: editForm.firstName, last_name: editForm.lastName, email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null, address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null, gate_code: editForm.gateCode || null, insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null });
-                setEditModalOpen(false);
-                // Refresh patient list (exclude soft-deleted)
-                const { data: refreshed } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
-                setAllPatients(refreshed || []);
               }}>Save Changes</Button>
               </div>
             </div>
