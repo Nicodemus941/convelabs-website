@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { MessageCircle, X, Send, Loader2, Sparkles, Heart, Building2, Link as LinkIcon, Phone, ExternalLink } from 'lucide-react';
+import { MessageCircle, X, Send, Loader2, Sparkles, Heart, Building2, Link as LinkIcon, Phone, ExternalLink, Crown } from 'lucide-react';
 
 /**
  * ChatbotWidget — "Ask Nico" landing-page assistant.
@@ -41,7 +41,15 @@ function getOrCreateVisitorId(): string {
 }
 
 // Welcome hook — Hormozi Layer 1
-const HOOK_OPTIONS: Array<{ icon: React.ComponentType<{ className?: string }>; label: string; intentMessage: string; leadPath: 'patient' | 'provider' | 'lab_request' }> = [
+// Order = revenue priority: VIP first (highest LTV), then patient (most volume),
+// then doctor-link (already-converted), then provider (B2B).
+const HOOK_OPTIONS: Array<{ icon: React.ComponentType<{ className?: string }>; label: string; intentMessage: string; leadPath: 'patient' | 'provider' | 'lab_request' | 'vip' }> = [
+  {
+    icon: Crown,
+    label: 'Tell me about VIP membership',
+    intentMessage: 'Tell me about VIP membership and the Founding 50',
+    leadPath: 'vip',
+  },
   {
     icon: Heart,
     label: 'I need labs drawn at home',
@@ -49,16 +57,16 @@ const HOOK_OPTIONS: Array<{ icon: React.ComponentType<{ className?: string }>; l
     leadPath: 'patient',
   },
   {
-    icon: Building2,
-    label: "I'm a provider/practice",
-    intentMessage: "I'm a provider looking into partnering with ConveLabs",
-    leadPath: 'provider',
-  },
-  {
     icon: LinkIcon,
     label: 'I got a link from my doctor',
     intentMessage: 'My doctor sent me a link to book through ConveLabs',
     leadPath: 'lab_request',
+  },
+  {
+    icon: Building2,
+    label: "I'm a provider/practice",
+    intentMessage: "I'm a provider looking into partnering with ConveLabs",
+    leadPath: 'provider',
   },
 ];
 
