@@ -41,7 +41,36 @@ enum BookingStep {
   Confirmation = 5,
 }
 
-const STEP_LABELS = ['Visit Type', 'Service & Date', 'Patient Info', 'Location', 'Checkout'];
+// 7 markers, one per actual on-screen surface. Two of the BookingStep enum
+// values map to two display markers each:
+//   ServiceAndDate (1) → 'Service' (1) when !showDatePicker, 'Date & Time' (2) when showDatePicker
+//   LocationAndLabOrder (3) → 'Address' (4) when !showLabOrder, 'Lab Order' (5) when showLabOrder
+// Visit types that skip ServiceSelectionStep (specialty-kit / in-office /
+// therapeutic) jump from display 0 to display 2 directly.
+const STEP_LABELS = ['Visit Type', 'Service', 'Date & Time', 'Patient Info', 'Address', 'Lab Order', 'Checkout'];
+
+/**
+ * Compute the display marker index (0..6) from the internal step state.
+ * Keeps progress UI honest with the actual screen the patient is looking at.
+ */
+function computeDisplayStep(
+  step: number,
+  showDatePicker: boolean,
+  showLabOrder: boolean,
+  visitType: string | undefined,
+): number {
+  if (step === 0) return 0; // Visit Type
+  if (step === 1) {
+    // Skipped service selection? Always at "Date & Time"
+    const skipsService = ['specialty-kit', 'in-office', 'therapeutic'].includes(visitType || '');
+    if (skipsService) return 2;
+    return showDatePicker ? 2 : 1; // Service vs Date & Time
+  }
+  if (step === 2) return 3; // Patient Info
+  if (step === 3) return showLabOrder ? 5 : 4; // Address vs Lab Order
+  if (step === 4) return 6; // Checkout
+  return 6;
+}
 
 const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCancel }) => {
   const { currentTenant } = useTenant();
@@ -199,11 +228,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   const handleBack = () => {
     prevStepRef.current = currentStep;
-    // Simple walkback — every visit type now uses the same step sequence
-    // (VisitType → ServiceAndDate → PatientInfo → LocationAndLabOrder → Checkout).
-    // The prior "partner- skip" path was removed because it left patients
-    // unable to pick a date; back-walk must mirror the forward flow.
-    setCurrentStep(prev => prev - 1);
+    const target = currentStep - 1;
+    // Restore the SECOND sub-screen of any combined step we're walking back
+    // into — the patient was last on the date picker (not the service tile)
+    // and was last on the lab-order step (not the address step). Without this,
+    // hitting Back from PatientInfo dumps them on Service, not Date & Time,
+    // which feels like the back button is broken.
+    if (target === BookingStep.ServiceAndDate) setShowDatePicker(true);
+    if (target === BookingStep.LocationAndLabOrder) setShowLabOrder(true);
+    setCurrentStep(target);
   };
 
   const handleCheckout = async (tipAmount: number, promoCode?: string | null) => {
@@ -385,7 +418,13 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   };
 
   const totalSteps = STEP_LABELS.length;
-  const progressPercent = Math.min(((currentStep) / (totalSteps - 1)) * 100, 100);
+  const displayStep = computeDisplayStep(
+    currentStep,
+    showDatePicker,
+    showLabOrder,
+    methods.getValues('serviceDetails.visitType') || '',
+  );
+  const progressPercent = Math.min((displayStep / (totalSteps - 1)) * 100, 100);
 
   return (
     <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 md:px-0">
@@ -397,18 +436,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
               {STEP_LABELS.map((step, index) => (
                 <div key={step} className={`flex items-center ${index < STEP_LABELS.length - 1 ? 'flex-1' : ''}`}>
                   <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
-                    index <= currentStep
+                    index <= displayStep
                       ? 'bg-conve-red text-white'
                       : 'bg-muted text-muted-foreground'
                   }`}>
                     {index + 1}
                   </div>
                   <div className={`ml-2 text-sm font-medium ${
-                    index <= currentStep ? 'text-foreground' : 'text-muted-foreground'
+                    index <= displayStep ? 'text-foreground' : 'text-muted-foreground'
                   }`}>{step}</div>
                   {index < STEP_LABELS.length - 1 && (
                     <div className={`flex-1 h-px mx-4 transition-colors ${
-                      index < currentStep ? 'bg-conve-red' : 'bg-muted'
+                      index < displayStep ? 'bg-conve-red' : 'bg-muted'
                     }`} />
                   )}
                 </div>
@@ -422,7 +461,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             <div className="md:hidden mb-6 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">
-                  Step {currentStep + 1} of {totalSteps}: {STEP_LABELS[currentStep]}
+                  Step {displayStep + 1} of {totalSteps}: {STEP_LABELS[displayStep]}
                 </span>
                 <PriceEstimateBadge />
               </div>
