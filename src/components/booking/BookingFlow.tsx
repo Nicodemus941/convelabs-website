@@ -32,24 +32,6 @@ interface BookingFlowProps {
   onCancel?: () => void;
 }
 
-/**
- * Subtle escape hatch shown below the calendar on the mobile path.
- * Most patients (95%+) want a mobile draw, so we land them there directly;
- * the rare specialty-kit / in-office / therapeutic patient clicks this to
- * jump back to the visit-type selector.
- */
-const OtherVisitTypesLink: React.FC<{ onPick: () => void }> = ({ onPick }) => (
-  <div className="text-center mt-4 pb-4">
-    <button
-      type="button"
-      onClick={onPick}
-      className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-    >
-      Need specialty kit, in-office, or therapeutic phlebotomy instead? →
-    </button>
-  </div>
-);
-
 enum BookingStep {
   VisitType = 0,
   ServiceAndDate = 1,
@@ -66,13 +48,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const { user } = useAuth();
   const { getAllServiceOptions } = useAvailableServices();
 
-  // SIMPLIFIED 2026-04-25 (Hormozi: capture commitment before friction).
-  // 95%+ of bookings are mobile blood draws. Land patient on the calendar
-  // directly; visit-type chooser is exposed via a "Need something else?" link.
-  const [currentStep, setCurrentStep] = useState(BookingStep.ServiceAndDate);
-  // True until the patient explicitly visits VisitTypeSelector. While true,
-  // DateTimeSelectionStep hides its Back button (no meaningful previous).
-  const [calendarIsEntry, setCalendarIsEntry] = useState(true);
+  // Patient lands at the beginning of the wizard (VisitTypeSelector).
+  const [currentStep, setCurrentStep] = useState(BookingStep.VisitType);
   const [isProcessing, setIsProcessing] = useState(false);
   const [bookingComplete, setBookingComplete] = useState(false);
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
@@ -94,9 +71,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     agreementId: string;
     memberTierAfter: 'member' | 'vip' | 'concierge';
   } | null>(null);
-  // Sub-step within combined steps. Date picker shown by default — service
-  // selection is skipped on the mobile path (the canonical 95% case).
-  const [showDatePicker, setShowDatePicker] = useState(true);
+  // Sub-step within combined steps
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLabOrder, setShowLabOrder] = useState(false);
 
   // Animation direction
@@ -115,11 +91,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         phone: '',
       },
       serviceDetails: {
-        // Default to mobile — the 95% case. Patient lands on the slot picker
-        // directly; if they need something else, the "Other visit types" link
-        // sends them back to VisitTypeSelector.
-        visitType: 'mobile',
-        selectedService: 'mobile',
+        visitType: '',
+        selectedService: '',
         sameDay: false,
         weekend: false,
         fasting: false,
@@ -482,10 +455,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
               {/* Step 2: Service & Date (combined) */}
               {currentStep === BookingStep.ServiceAndDate && (() => {
-                const vt = methods.getValues('serviceDetails.visitType') || 'mobile';
-                // Visit types that skip the service picker. 'mobile' added
-                // 2026-04-25 — the 95% case lands directly on the calendar.
-                const skipServiceSelection = ['mobile', 'specialty-kit', 'in-office', 'therapeutic'].includes(vt);
+                const vt = methods.getValues('serviceDetails.visitType') || '';
+                // These visit types skip service selection (we know what they're booking)
+                const skipServiceSelection = ['specialty-kit', 'in-office', 'therapeutic'].includes(vt);
 
                 if (skipServiceSelection && !showDatePicker) {
                   // Auto-set service to match visit type and go to date picker
@@ -493,19 +465,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                     methods.setValue('serviceDetails.selectedService', vt);
                   }
                   return (
-                    <>
-                      <DateTimeSelectionStep
-                        onNext={handleNext}
-                        onBack={
-                          calendarIsEntry
-                            ? undefined
-                            : () => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }
-                        }
-                      />
-                      <OtherVisitTypesLink
-                        onPick={() => { setCalendarIsEntry(false); prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
-                      />
-                    </>
+                    <DateTimeSelectionStep
+                      onNext={handleNext}
+                      onBack={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                    />
                   );
                 }
 
@@ -529,15 +492,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                 }
 
                 return (
-                  <>
-                    <DateTimeSelectionStep
-                      onNext={handleNext}
-                      onBack={() => setShowDatePicker(false)}
-                    />
-                    <OtherVisitTypesLink
-                      onPick={() => { setCalendarIsEntry(false); prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
-                    />
-                  </>
+                  <DateTimeSelectionStep
+                    onNext={handleNext}
+                    onBack={() => setShowDatePicker(false)}
+                  />
                 );
               })()}
 
