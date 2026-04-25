@@ -48,21 +48,30 @@ const SAME_DAY_LEAD_MIN = 90;
 //                  weekend 12:00 PM close → last appt 10:00 AM
 //   Quest          weekday 3:30 PM close → drop by 3:00 → last appt 1:30 PM
 //                  weekend 12:00 PM close → last appt 10:00 AM
-//   AdventHealth   24/7 → no cap, default grid end (6:30 PM last slot)
-//   Orlando Health 24/7 → no cap
+//   AdventHealth   24/7 → no cap; patient grid extends to 8 PM Mon-Sun
 // `null` cutoff means "no cap, use default grid end".
+// (Orlando Health intentionally not supported — 2026-04-25)
 type LabCutoff = { weekdayLastMin: number | null; weekendLastMin: number | null };
 const LAB_CUTOFFS: Record<string, LabCutoff> = {
   'labcorp':           { weekdayLastMin: 12 * 60 + 30, weekendLastMin: 10 * 60 },
   'labcorp_extended':  { weekdayLastMin: 14 * 60,      weekendLastMin: 10 * 60 },
   'quest':             { weekdayLastMin: 13 * 60 + 30, weekendLastMin: 10 * 60 },
   'quest_diagnostics': { weekdayLastMin: 13 * 60 + 30, weekendLastMin: 10 * 60 },
+  // AdventHealth accepts specimens 24/7 — patients can book Mon-Sun up to
+  // 8 PM (last slot 7:30 PM). Day-of-week + tier gating are bypassed when
+  // adventhealth is the destination (see ADVENT_HEALTH_KEYS handling below).
   'adventhealth':      { weekdayLastMin: null,         weekendLastMin: null },
-  'orlando_health':    { weekdayLastMin: null,         weekendLastMin: null },
   // Specialty kit shipments (UPS/FedEx) need same-day pickup
   'ups':               { weekdayLastMin: 14 * 60,      weekendLastMin: null },
   'fedex':             { weekdayLastMin: 14 * 60,      weekendLastMin: null },
 };
+
+// Destinations that operate 7 days a week with extended hours. When picked,
+// the slot picker uses a 6 AM - 7:30 PM grid (end hour 20) and ignores the
+// standard Sunday block + tier-gating windows. The specimen routes only to
+// the named lab — never to LabCorp/Quest.
+const ADVENT_HEALTH_KEYS = new Set(['adventhealth']);
+const ADVENT_HEALTH_GRID_END = 20; // last slot 7:30 PM
 
 function normalizeLabKey(s: string | null | undefined): string | null {
   if (!s) return null;
@@ -71,8 +80,7 @@ function normalizeLabKey(s: string | null | undefined): string | null {
 
 /**
  * Returns the latest minute-of-day slot can START to make the lab cutoff.
- * Returns null when no cap applies (Advent / Orlando Health 24/7, or no
- * destination provided).
+ * Returns null when no cap applies (AdventHealth 24/7 or no destination).
  */
 function lastSlotMinForLab(labDest: string | null | undefined, dateIso: string): number | null {
   const key = normalizeLabKey(labDest);
@@ -90,13 +98,18 @@ function formatTime(h: number, m: number): string {
   return `${hr}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-function baseGrid(): string[] {
+function baseGrid(endHour: number = DEFAULT_GRID_END): string[] {
   const grid: string[] = [];
-  for (let h = DEFAULT_GRID_START; h < DEFAULT_GRID_END; h++) {
+  for (let h = DEFAULT_GRID_START; h < endHour; h++) {
     grid.push(formatTime(h, 0));
     grid.push(formatTime(h, 30));
   }
   return grid;
+}
+
+export function isAdventHealthDestination(dest: string | null | undefined): boolean {
+  const k = normalizeLabKey(dest);
+  return !!k && ADVENT_HEALTH_KEYS.has(k);
 }
 
 // ET date helpers
@@ -170,10 +183,16 @@ export async function getAvailableSlotsForDate(
   timeWindowRules: any,
   labDestination?: string | null,
 ): Promise<AvailableSlot[]> {
-  const allowed = slotsAllowedForDate(dateIso, timeWindowRules);
+  // AdventHealth bypass: 7-day extended hours (6 AM - 7:30 PM, Sun included).
+  // Org time_window_rules and standard Sunday block are ignored — the lab
+  // accepts specimens 24/7 so patient-side hours can run wide.
+  const isAdvent = isAdventHealthDestination(labDestination);
+  const gridEnd = isAdvent ? ADVENT_HEALTH_GRID_END : DEFAULT_GRID_END;
+  const localGrid = baseGrid(gridEnd);
+  const allowed = isAdvent ? localGrid : slotsAllowedForDate(dateIso, timeWindowRules);
   if (allowed.length === 0) {
     // Day entirely out of window — return the grid all disabled with reason
-    return baseGrid().map(t => ({ time: t, available: false, reason: 'outside_window' }));
+    return localGrid.map(t => ({ time: t, available: false, reason: 'outside_window' }));
   }
 
   // Load conflicts: appointments on this date for this org OR anywhere in our system
@@ -244,7 +263,7 @@ export async function getAvailableSlotsForDate(
 
   // Lab destination cutoff — slots after the lab's drop-off cutoff are
   // operationally unbookable for that destination. Returns null cap when
-  // the destination is 24/7 (Advent / Orlando Health) or unknown.
+  // the destination is AdventHealth (24/7) or unknown.
   const labCutoffMin = lastSlotMinForLab(labDestination, dateIso);
   const fitsLabCutoff = (t: string) => {
     if (labCutoffMin === null) return true;
@@ -252,7 +271,7 @@ export async function getAvailableSlotsForDate(
     return h * 60 + m <= labCutoffMin;
   };
 
-  return baseGrid().map(t => {
+  return localGrid.map(t => {
     if (fullyBlocked) return { time: t, available: false, reason: 'blocked' };
     if (!allowed.includes(t)) return { time: t, available: false, reason: 'outside_window' };
     if (!hasEnoughLead(t)) return { time: t, available: false, reason: 'past' };
@@ -342,6 +361,21 @@ export async function nextAvailableSlots(
  * appointment to re-check availability at write time. If the slot got taken
  * in the seconds between page-load and submit, we catch it here.
  */
+/**
+ * Returns true when the daily 5 PM unlock sweep has stamped the given date —
+ * meaning tier gating should be DROPPED (formerly VIP-only afternoon slots
+ * become bookable by anyone). Callers should query this before calling
+ * withTierGating and skip the gating step when true.
+ */
+export async function isDateUnlocked(supabase: SupabaseClient, dateIso: string): Promise<boolean> {
+  const { data } = await supabase
+    .from('slot_unlocks' as any)
+    .select('unlock_date')
+    .eq('unlock_date', dateIso)
+    .maybeSingle();
+  return !!data;
+}
+
 export async function isSlotStillAvailable(
   supabase: SupabaseClient,
   orgId: string,

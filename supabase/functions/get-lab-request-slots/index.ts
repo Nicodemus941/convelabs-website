@@ -8,7 +8,7 @@
 // Response: { slots: [{time, available, reason?, requires_tier?, unlock_price_cents?, visit_savings_cents?}, ...] }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { getAvailableSlotsForDate, withTierGating } from '../_shared/availability.ts';
+import { getAvailableSlotsForDate, withTierGating, isDateUnlocked, isAdventHealthDestination } from '../_shared/availability.ts';
 import { minTierForSlot, slotUnlockOffer } from '../_shared/tier-gating.ts';
 import { lookupTierByEmail } from '../_shared/lookup-tier-by-email.ts';
 
@@ -25,7 +25,7 @@ const TIER_ORDER = ['none', 'regular_member', 'vip', 'concierge'];
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const { access_token, date, current_tier } = await req.json();
+    const { access_token, date, current_tier, lab_destination } = await req.json();
     if (!access_token || !date) return new Response(JSON.stringify({ error: 'access_token and date required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -51,8 +51,10 @@ Deno.serve(async (req) => {
 
     const orgCovers = org?.default_billed_to === 'org' || org?.member_stacking_rule === 'org_covers';
 
-    // 1. Base availability: real bookings, buffers, org time-window rules
-    let slots = await getAvailableSlotsForDate(admin, request.organization_id, date, org?.time_window_rules);
+    // 1. Base availability: real bookings, buffers, org time-window rules.
+    //    When destination is AdventHealth, picker auto-extends to 7-day, 6 AM - 7:30 PM.
+    let slots = await getAvailableSlotsForDate(admin, request.organization_id, date, org?.time_window_rules, lab_destination || null);
+    const advent = isAdventHealthDestination(lab_destination);
 
     // Phase 2 fix for the "member sees locked slots" bug on the anonymous
     // lab-request page: derive tier server-side from the token's patient_email
@@ -65,9 +67,14 @@ Deno.serve(async (req) => {
       ? detectedTier
       : clientTier;
 
-    // 2. Tier gating — only applied when patient is paying (no point locking
-    //    slots behind a membership upsell if the org is footing the bill).
-    if (!orgCovers) {
+    // 2. Tier gating — only applied when patient is paying AND the date hasn't
+    //    been unlocked by the daily 5 PM sweep. Once a date is in slot_unlocks,
+    //    all tier-locked slots open to everyone (waitlist gets first crack via
+    //    the unlock-tomorrow-slots cron 30 min before the public sweep).
+    const unlocked = await isDateUnlocked(admin, date);
+    // Tier gating skipped for AdventHealth destination — extended hours are
+    // open to all patients since the lab itself is open 24/7.
+    if (!orgCovers && !unlocked && !advent) {
       slots = withTierGating(slots, date, effectiveTier, 'mobile', {
         minTierForSlot,
         slotUnlockOffer,
@@ -79,7 +86,8 @@ Deno.serve(async (req) => {
       slots,
       draw_by_date: request.draw_by_date,
       org_covers: orgCovers,
-      detected_tier: detectedTier,  // so the UI can show "Welcome back, VIP member" badge
+      detected_tier: detectedTier,
+      date_unlocked: unlocked, // UI can show "Slots opened — first come first served" banner
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
