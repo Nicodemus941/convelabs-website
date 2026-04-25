@@ -35,6 +35,7 @@ const PatientProfileTab: React.FC = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+  const [savingPatient, setSavingPatient] = useState(false);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({
     amount: '',
@@ -677,12 +678,15 @@ const PatientProfileTab: React.FC = () => {
               </Button>
               <div className="flex gap-3">
               <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
-              <Button className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold" onClick={async (e) => {
-                // Every step logged + try/catch around the entire flow. Previously
-                // a network drop / Supabase 5xx / unhandled throw would die silently
-                // and the admin would see "Save did nothing" with no diagnostic.
+              <Button
+                type="button"
+                disabled={savingPatient}
+                className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+                onClick={async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                if (savingPatient) return;
+                setSavingPatient(true);
                 console.log('[patient-save] click fired for', p.id, 'email:', editForm.email);
                 try {
                   const updatePayload: any = {
@@ -743,8 +747,10 @@ const PatientProfileTab: React.FC = () => {
                     `Save crashed: ${err?.message || String(err)}. Open DevTools Console for the full trace.`,
                     { duration: 12000 }
                   );
+                } finally {
+                  setSavingPatient(false);
                 }
-              }}>Save Changes</Button>
+              }}>{savingPatient ? 'Saving…' : 'Save Changes'}</Button>
               </div>
             </div>
           </DialogContent>
