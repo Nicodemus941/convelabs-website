@@ -440,12 +440,49 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     }
   }, [selectedDate]);
 
-  // Choose windows based on service type + after-hours toggle
-  const baseWindows = isWeekend
+  // Lab destination — synced bidirectionally with form's labOrder.labDestination
+  // (the same field set on step 6's LabDestinationSelector). Pre-asking it here
+  // lets the slot grid expose AdventHealth's afternoon hours immediately and
+  // hide non-bookable post-cutoff slots for LabCorp / Quest.
+  const labDestination = methods.watch('labOrder.labDestination' as any) as string | undefined;
+  const isAdventHealth = labDestination === 'adventhealth';
+  const isLabCorp = labDestination === 'labcorp' || labDestination === 'labcorp_extended';
+  const isQuest = labDestination === 'quest' || labDestination === 'quest_diagnostics';
+  const destinationPicked = !!labDestination && labDestination !== 'pending-doctor-confirmation';
+
+  // Choose windows based on service type + after-hours toggle + destination.
+  // AdventHealth → full grid (6 AM – 5:30 PM, 7 days). LabCorp/Quest → cap by cutoff.
+  // Unspecified → only show the universal subset (6 AM – 1:30 PM) so we never
+  // show a slot that won't actually work post-checkout.
+  let baseWindows = isWeekend
     ? weekendWindows
     : isRoutine
     ? routineWindows
     : allDayWindows;
+
+  // Filter to lab-cutoff for LabCorp / Quest
+  if (isLabCorp || isQuest) {
+    const cutoffMin = isLabCorp ? (12 * 60 + 30) : (13 * 60 + 30);
+    baseWindows = baseWindows.filter(w => {
+      const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(w.time);
+      if (!m) return true;
+      let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
+      if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+      if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+      return h * 60 + mm <= cutoffMin;
+    });
+  }
+  // No destination picked yet → cap at 1:30 PM (universal — works for all labs).
+  if (!destinationPicked) {
+    baseWindows = baseWindows.filter(w => {
+      const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(w.time);
+      if (!m) return true;
+      let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
+      if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+      if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+      return h * 60 + mm <= (13 * 60 + 30);
+    });
+  }
 
   const activeWindows = (!isWeekend && showAfterHours)
     ? [...baseWindows, ...afterHoursWindows]
@@ -461,6 +498,50 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         <CardDescription>Choose when you'd like our phlebotomist to visit</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Lab destination picker — surfaced here so the slot grid can adjust
+            in real time. AdventHealth opens the afternoon. LabCorp / Quest cap
+            at their drop-off cutoff. "Not sure" shows the universal subset. */}
+        <div className="bg-gradient-to-br from-gray-50 to-blue-50 border border-gray-200 rounded-lg p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-700">Where will your specimen go?</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              { id: 'adventhealth', label: 'AdventHealth', sub: '24/7 — full hours' },
+              { id: 'labcorp', label: 'LabCorp', sub: 'Closes 2:30 PM' },
+              { id: 'quest', label: 'Quest', sub: 'Closes 3:30 PM' },
+              { id: 'pending-doctor-confirmation', label: 'Not sure yet', sub: '6 AM – 1:30 PM' },
+            ].map(opt => {
+              const selected = labDestination === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => methods.setValue('labOrder.labDestination' as any, opt.id, { shouldDirty: true })}
+                  className={`text-left rounded-lg border-2 p-2.5 transition ${
+                    selected
+                      ? 'bg-white border-[#B91C1C] shadow-sm'
+                      : 'bg-white border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <div className={`text-sm font-semibold ${selected ? 'text-[#B91C1C]' : 'text-gray-900'}`}>{opt.label}</div>
+                  <div className="text-[10px] text-gray-500 mt-0.5">{opt.sub}</div>
+                </button>
+              );
+            })}
+          </div>
+          {!destinationPicked && (
+            <p className="text-[11px] text-gray-500 mt-2">
+              Pick a lab so we can show all hours that work. AdventHealth deliveries unlock our afternoon slots up to 6 PM.
+            </p>
+          )}
+          {isAdventHealth && (
+            <p className="text-[11px] text-emerald-700 mt-2 font-medium">
+              ✓ AdventHealth — afternoon hours unlocked, 7 days a week.
+            </p>
+          )}
+        </div>
+
         {/* Availability indicator removed — was showing "X phlebotomists in your area" */}
         <div className="grid md:grid-cols-2 gap-6">
           <div>
@@ -618,14 +699,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         let tierLocked = false;
                         let tierReason: string | undefined;
                         let tierUnlockTier: MemberTier | undefined;
-                        if (selectedDate) {
+                        // AdventHealth bypasses tier gating — the lab is 24/7
+                        // and the destination handles operational routing.
+                        if (selectedDate && !isAdventHealth) {
                           const hhmm = normalizeTime(window.time);
                           if (hhmm) {
                             const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                            // isFasting is now service-driven, not a pre-9am heuristic:
-                            //   - FASTING service selected → always isFasting=true (must be 6-9am)
-                            //   - ROUTINE service selected → always isFasting=false (9am+ windows)
-                            //   - Fallback for unclassified services → old pre-9am heuristic
                             const isFasting = isFastingService
                               ? true
                               : isRoutine
