@@ -287,70 +287,57 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const maxPerSlot = staffCount || 1;
         const slotCounts = new Map<string, number>();
 
+        // Bug fix 2026-04-25: align with server's availability.ts. Previously
+        // this used 0-min buffer for non-extended-area cities, while the server
+        // uses 30-min buffer for ALL mobile appointments. Result: Blake's
+        // 10:00 × 75-min appt blocked through 11:15 here but 11:45 on server.
+        // Patient saw 11:30 as available, the last-mile guard rejected at
+        // booking time. Now both layers use identical bidirectional blocking.
+        const BUFFER_MIN_MOBILE = 30;
+        const BUFFER_MIN_OFFICE = 0;
+        const DEFAULT_DURATION_MIN = 30;
+        const NEW_APPT_FOOTPRINT_MIN = 60; // new 30-min slot + 30-min buffer
+
         data?.forEach((appt: any) => {
-          // Use appointment_time (local time like "6:30 AM" or "10:30:00") instead of UTC timestamp
-          let startHour = 0;
-          let startMin = 0;
-
-          if (appt.appointment_time) {
-            const timeStr = String(appt.appointment_time);
-            // Handle "6:30 AM" format
-            if (timeStr.includes('AM') || timeStr.includes('PM')) {
-              const [timePart, period] = timeStr.split(' ');
-              const [h, m] = timePart.split(':').map(Number);
-              startHour = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
-              startMin = m || 0;
-            }
-            // Handle "10:30:00" 24h format
-            else if (timeStr.includes(':')) {
-              const parts = timeStr.split(':').map(Number);
-              startHour = parts[0] || 0;
-              startMin = parts[1] || 0;
-            }
+          if (!appt.appointment_time) return;
+          // Parse start time → minutes-of-day
+          let startHour = 0, startMin = 0;
+          const timeStr = String(appt.appointment_time);
+          const ampm = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(timeStr.trim());
+          if (ampm) {
+            let h = parseInt(ampm[1], 10);
+            const m = parseInt(ampm[2], 10);
+            const p = ampm[3].toUpperCase();
+            if (p === 'PM' && h !== 12) h += 12;
+            if (p === 'AM' && h === 12) h = 0;
+            startHour = h; startMin = m;
           } else {
-            // Fallback to timestamp (less reliable due to timezone)
-            const dt = new Date(appt.appointment_date);
-            startHour = dt.getUTCHours();
-            startMin = dt.getUTCMinutes();
+            const parts = timeStr.split(':').map(Number);
+            startHour = parts[0] || 0; startMin = parts[1] || 0;
+          }
+          const apptStartMin = startHour * 60 + startMin;
+
+          const duration = (appt.duration_minutes && appt.duration_minutes > 0) ? appt.duration_minutes : DEFAULT_DURATION_MIN;
+          const buffer = appt.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+          const apptEndMin = apptStartMin + duration + buffer;
+
+          // BACKWARD block (the busy span of the appointment itself):
+          //   block every 30-min slot where apptStart <= slot < apptEnd
+          for (let t = apptStartMin; t < apptEndMin; t += 30) {
+            const h = Math.floor(t / 60);
+            const m = t % 60;
+            slotCounts.set(toSlotKey(h, m), (slotCounts.get(toSlotKey(h, m)) || 0) + 1);
           }
 
-          // Get duration for this appointment type — prefer DURATION_MAP over DB default of 30
-          const mappedDuration = DURATION_MAP[appt.service_type || 'mobile'] || 60;
-          const duration = (appt.duration_minutes && appt.duration_minutes > 30) ? appt.duration_minutes : mappedDuration;
-          // Travel buffer ONLY for extended area cities (30min)
-          // No travel buffer for standard Orlando metro area
-          const EXTENDED_AREA_CITIES = ['eustis', 'sanford', 'celebration', 'kissimmee', 'lake nona', 'clermont', 'montverde', 'geneva', 'tavares', 'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola', 'daytona beach', 'deland', 'debary', 'orange city'];
-          const apptCity = (appt.address || '').toLowerCase();
-          const isExtendedArea = EXTENDED_AREA_CITIES.some(city => apptCity.includes(city));
-          const travelBuffer = isExtendedArea ? 30 : 0;
-
-          // Block FORWARD: service duration + travel buffer (if extended area)
-          const forwardBlockedMinutes = duration + travelBuffer;
-          const forwardSlots = Math.ceil(forwardBlockedMinutes / 30);
-          let fwdMin = startMin < 30 ? 0 : 30;
-          let fwdHour = startHour;
-
-          for (let i = 0; i < forwardSlots; i++) {
-            const key = toSlotKey(fwdHour, fwdMin);
-            slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
-            fwdMin += 30;
-            if (fwdMin >= 60) { fwdMin = 0; fwdHour += 1; }
-          }
-
-          // Block BACKWARD: earlier slots where a new 60-min booking would overlap this appointment
-          // 8:30 AM booking (60min) runs to 9:30, overlaps 9:00 → block 8:30
-          // 8:00 AM booking (60min) runs to 9:00, ends at start → OK, not blocked
-          const newBookingDuration = 60; // standard service duration
-          const backwardSlots = Math.ceil(newBookingDuration / 30) - 1; // 60/30 - 1 = 1 slot back
-          let bwdMin = (startMin < 30 ? 0 : 30);
-          let bwdHour = startHour;
-
-          for (let i = 0; i < backwardSlots; i++) {
-            bwdMin -= 30;
-            if (bwdMin < 0) { bwdMin = 30; bwdHour -= 1; }
-            if (bwdHour < 6) break; // don't block before operating hours (6 AM)
-            const key = toSlotKey(bwdHour, bwdMin);
-            slotCounts.set(key, (slotCounts.get(key) || 0) + 1);
+          // FORWARD block (slots before this appt where a new draw would bleed in):
+          //   block slots where apptStart - NEW_APPT_FOOTPRINT < slot < apptStart
+          //   e.g., 10:00 appt blocks 9:30 (new 30+30 footprint ends at 10:30, overlaps).
+          //   But NOT 9:00 (a 9:00 + 30 + 30 = 10:00, ends exactly at apptStart, OK).
+          for (let t = apptStartMin - NEW_APPT_FOOTPRINT_MIN + 30; t < apptStartMin; t += 30) {
+            if (t < 0 || Math.floor(t / 60) < 6) continue;
+            const h = Math.floor(t / 60);
+            const m = t % 60;
+            slotCounts.set(toSlotKey(h, m), (slotCounts.get(toSlotKey(h, m)) || 0) + 1);
           }
         });
 
