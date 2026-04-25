@@ -30,8 +30,10 @@ export interface TimeWindowRule {
 // silently killed all afternoon bookings — visitor lands at 1 PM looking
 // for a 4 PM same-day, sees zero options, bounces. The org's
 // time_window_rules and lab destination cutoff further restrict per-date.
+// Hormozi simplification 2026-04-25: business hours are now Mon–Sun 6 AM – 6 PM
+// for everyone. Last bookable slot start = 5:30 PM, ending at 6 PM.
 const DEFAULT_GRID_START = 6;  // 6:00 AM
-const DEFAULT_GRID_END = 19;   // up to (but not including) 7:00 PM (last slot 6:30 PM)
+const DEFAULT_GRID_END = 18;   // up to (but not including) 6:00 PM (last slot 5:30 PM)
 
 // Minimum lead time for same-day bookings — phleb mobilization buffer.
 // Was 120 min ("can't mobilize phleb in < 2h"); user confirmed 90 min is
@@ -139,9 +141,9 @@ export function slotsAllowedForDate(dateIso: string, timeWindowRules: any): stri
   const date = new Date(dateIso + 'T12:00:00');
   const dow = date.getDay();
 
-  // If no rules, return full grid (but day-of-week sanity: no Sundays)
+  // No org rules → Mon–Sun 6 AM – 6 PM (per uniform business hours 2026-04-25)
   if (!Array.isArray(timeWindowRules) || timeWindowRules.length === 0) {
-    return dow === 0 ? [] : grid;
+    return grid;
   }
 
   // Find the rule that includes this day-of-week

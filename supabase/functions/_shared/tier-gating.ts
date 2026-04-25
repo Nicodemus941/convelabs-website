@@ -13,13 +13,13 @@ const TIER_WINDOWS: Record<Tier, {
   saturday: { start: number; end: number } | null;
   sunday: boolean;
 }> = {
-  // Routine non-fasting hours extended to 1:30 PM (last bookable start) per
-  // owner 2026-04-25. Anything 2 PM+ is VIP-only until the daily 5 PM unlock
-  // sweep opens it to the public.
-  none:           { weekday: { start: 9, end: 14 }, saturday: null,                  sunday: false },
-  regular_member: { weekday: { start: 6, end: 14 }, saturday: { start: 6, end: 9 },  sunday: false },
-  vip:            { weekday: { start: 6, end: 19 }, saturday: { start: 6, end: 11 }, sunday: false },
-  concierge:      { weekday: { start: 6, end: 20 }, saturday: { start: 6, end: 20 }, sunday: true  },
+  // Hormozi simplification 2026-04-25: tier is a pricing lever, not an
+  // access lever. Everyone gets Mon–Sun 6 AM – 6 PM. Per-visit price
+  // differs by tier (TIER_VISIT_PRICE_CENTS below).
+  none:           { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
+  regular_member: { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
+  vip:            { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
+  concierge:      { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
 };
 
 const TIER_ORDER: Tier[] = ['none', 'regular_member', 'vip', 'concierge'];

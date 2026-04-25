@@ -104,17 +104,11 @@ interface DateTimeSelectionStepProps {
   considerDistance?: boolean;
 }
 
-// Operational hours (Hormozi tiered membership):
-//   Non-member:      Mon-Fri 6-9am (fasting) + 9am-1:30pm (non-fasting). No Saturday.
-//   Regular Member:  Mon-Fri 6am-1:30pm + Saturday 6-9am.
-//   VIP:             Mon-Fri 6am-2pm + Saturday 6-11am.
-//   Concierge:       any day 6am-8pm + Sunday by request.
-// After-hours (5:30-8pm) is Concierge-only in-window. Non-Concierge requests
-// go through the after-hours toggle with a $50 surcharge for VIP, rejected
-// for lower tiers server-side.
-//
-// allDayWindows shows ALL possible slots the app renders; disallowed slots
-// are visually greyed out per tier (see `disabledByTier` below).
+// Operational hours (simplified 2026-04-25):
+//   ALL TIERS, ALL DAYS: 6 AM – 6 PM (Mon–Sun). Last slot start: 5:30 PM.
+// Tier becomes a pricing/perks lever, not an access lever. Per-visit price
+// drops as the tier rises — see TIER_VISIT_PRICE_CENTS in tier-gating.ts.
+// Real constraint = phleb's actual calendar (live availability + buffers).
 const allDayWindows = [
   { time: "6:00 AM", label: "6:00 - 6:30 AM" },
   { time: "6:30 AM", label: "6:30 - 7:00 AM" },
@@ -140,8 +134,6 @@ const allDayWindows = [
   { time: "4:30 PM", label: "4:30 - 5:00 PM" },
   { time: "5:00 PM", label: "5:00 - 5:30 PM" },
   { time: "5:30 PM", label: "5:30 - 6:00 PM" },
-  { time: "6:00 PM", label: "6:00 - 6:30 PM" },
-  { time: "6:30 PM", label: "6:30 - 7:00 PM" },
 ];
 
 // Routine blood draws — now match non-fasting non-member window (9am-1:30pm)
@@ -486,7 +478,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let prev = subDays(field.value, 1);
-                            while (prev >= today && (isHoliday(prev) || prev.getDay() === 0 || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
+                            while (prev >= today && (isHoliday(prev) || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
                             if (prev >= today) field.onChange(prev);
                           }
                         }}
@@ -603,8 +595,6 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         return null;
                       })()}
                     </div>
-                  ) : isSunday ? (
-                    <p className="text-sm text-muted-foreground py-4">No appointments available on Sundays.</p>
                   ) : (
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                       {activeWindows.map((window) => {
@@ -731,56 +721,17 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     <p className="text-xs text-muted-foreground mt-1">Checking availability...</p>
                   )}
 
-                  {/* After-hours toggle — weekdays only, not for STAT or weekend */}
-                  {!isWeekend && !isSunday && !isStat && (
-                    <div className="mt-3">
-                      {!showAfterHours ? (
-                        <button
-                          type="button"
-                          onClick={() => setShowAfterHours(true)}
-                          className="text-sm text-[#B91C1C] hover:text-[#991B1B] font-medium hover:underline"
-                        >
-                          Need an after-hours appointment? →
-                        </button>
-                      ) : (
-                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-amber-900">After-Hours Slots Available</p>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowAfterHours(false);
-                                // Clear selection if an after-hours slot was selected
-                                const currentTime = field.value;
-                                if (currentTime && afterHoursWindows.some(w => w.time === currentTime)) {
-                                  field.onChange('');
-                                }
-                              }}
-                              className="text-xs text-amber-600 hover:text-amber-800 underline"
-                            >
-                              Hide
-                            </button>
-                          </div>
-                          <p className="text-xs text-amber-700">After-hours (5:30 PM – 8:00 PM) is <strong>Concierge-included</strong>. VIP members can request after-hours with a $50 surcharge. Regular + non-members: please pick a weekday morning slot.</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  {/* After-hours toggle removed 2026-04-25 — business hours
+                      simplified to 6 AM – 6 PM Mon–Sun for all tiers. */}
 
                   <FormDescription>
                     {isStat
                       ? "Next available within operating hours (+$100)"
-                      : isSunday
-                      ? "Sundays — Concierge members only (on request). Non-Concierge patients: pick a weekday."
-                      : isWeekend
-                      ? "Saturday — Regular members 6–9 AM · VIP 6–11 AM · Concierge full hours. Non-members: weekday booking only."
                       : isSameDay
-                      ? "Same-day booking (+$100 surcharge) · 90-min lead time · Concierge only"
+                      ? "Same-day booking (+$100 surcharge) · 90-min lead time"
                       : isRoutine
-                      ? "Routine non-fasting hours: 9 AM – 1:30 PM"
-                      : showAfterHours
-                      ? "After-hours (5:30 PM – 8 PM) — Concierge in-window, VIP on request (+$50)"
-                      : "Mon–Fri · fasting 6–9 AM · routine 9 AM–1:30 PM · 2 PM–6:30 PM is VIP (auto-opens to public 5 PM the day before if any slots remain)"}
+                      ? "Routine non-fasting hours: 9 AM – 6 PM"
+                      : "Open Mon–Sun · 6 AM – 6 PM · fasting slots 6–9 AM · routine 9 AM–6 PM"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>

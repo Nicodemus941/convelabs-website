@@ -5,13 +5,13 @@
  * morning fasting slots are the genuinely scarce resource, so tiers unlock
  * windows of the day progressively:
  *
- *   Non-member:  9am–1:30pm non-fasting, 6am–9am fasting ONLY (Mon–Fri)
- *   Regular:     6am–1:30pm Mon–Fri + 6am–9am Saturday
- *   VIP:         6am–6:30pm Mon–Fri + 6am–11am Saturday  (2pm+ is VIP-only
- *                until daily 5pm-prior unlock opens it to everyone)
- *   Concierge:   anytime, any day (incl. same-day + Sunday-by-request)
- *   AdventHealth destination:  6am–7:30pm Mon–Sun (specimen routes only to
- *                AdventHealth; bypasses tier windows entirely)
+ * SIMPLIFIED 2026-04-25 (Hormozi: "every rule you add is a customer you lose"):
+ *   ALL TIERS: 6 AM – 6 PM, Monday through Sunday.
+ *   Tier becomes a PRICING lever (cheaper visit price + perks), not an
+ *   access lever. The phleb's actual calendar — appointments + buffers —
+ *   is the real constraint.
+ *
+ *   AdventHealth destination still extends to 7:30 PM (lab is 24/7).
  *
  * The server (create-appointment-checkout) MUST mirror this logic — this
  * file is the source of truth for the frontend; the server duplicates
@@ -42,52 +42,17 @@ export interface BookingWindow {
 // TIER RULES
 // ─────────────────────────────────────────────────────────────
 
-const NON_MEMBER: BookingWindow[] = [
-  // Mon–Fri: fasting 6–9am, non-fasting 9am–1:30pm (extended 2026-04-25)
-  ...[1, 2, 3, 4, 5].map(d => ({
-    dayOfWeek: d,
-    fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting' }],
-    nonFastingRanges: [{ start: '09:00', end: '13:30', label: 'Routine (9 AM – 1:30 PM)' }],
-  })),
-  // Sat/Sun: no non-member booking
-];
-
-const REGULAR: BookingWindow[] = [
-  ...[1, 2, 3, 4, 5].map(d => ({
-    dayOfWeek: d,
-    fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting' }],
-    nonFastingRanges: [{ start: '06:00', end: '13:30', label: 'Morning + early afternoon' }],
-  })),
-  // Saturday 6–9am only
-  {
-    dayOfWeek: 6,
-    fastingRanges: [{ start: '06:00', end: '09:00', label: 'Saturday morning fasting' }],
-    nonFastingRanges: [{ start: '06:00', end: '09:00', label: 'Saturday morning' }],
-  },
-];
-
-const VIP: BookingWindow[] = [
-  ...[1, 2, 3, 4, 5].map(d => ({
-    dayOfWeek: d,
-    fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting' }],
-    nonFastingRanges: [{ start: '06:00', end: '18:30', label: 'All day (until 6:30 PM)' }],
-  })),
-  // Saturday 6–11am
-  {
-    dayOfWeek: 6,
-    fastingRanges: [{ start: '06:00', end: '09:00', label: 'Saturday morning fasting' }],
-    nonFastingRanges: [{ start: '06:00', end: '11:00', label: 'Saturday morning' }],
-  },
-];
-
-const CONCIERGE: BookingWindow[] = [
-  // Every day, all day — 6am–8pm on-demand
-  ...[0, 1, 2, 3, 4, 5, 6].map(d => ({
-    dayOfWeek: d,
-    fastingRanges: [{ start: '06:00', end: '20:00', label: 'Concierge — anytime' }],
-    nonFastingRanges: [{ start: '06:00', end: '20:00', label: 'Concierge — anytime' }],
-  })),
-];
+// All tiers now share the same Mon–Sun 6 AM – 6 PM window.
+// (Concierge keeps the same window — same access, lower per-visit price.)
+const UNIFORM_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
+  dayOfWeek: d,
+  fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
+  nonFastingRanges: [{ start: '06:00', end: '18:00', label: '6 AM – 6 PM' }],
+}));
+const NON_MEMBER = UNIFORM_HOURS;
+const REGULAR = UNIFORM_HOURS;
+const VIP = UNIFORM_HOURS;
+const CONCIERGE = UNIFORM_HOURS;
 
 const TIER_RULES: Record<MemberTier, BookingWindow[]> = {
   'none': NON_MEMBER,
