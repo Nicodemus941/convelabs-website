@@ -70,6 +70,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // 95%+ of bookings are mobile blood draws. Land patient on the calendar
   // directly; visit-type chooser is exposed via a "Need something else?" link.
   const [currentStep, setCurrentStep] = useState(BookingStep.ServiceAndDate);
+  // True until the patient explicitly visits VisitTypeSelector. While true,
+  // DateTimeSelectionStep hides its Back button (no meaningful previous).
+  const [calendarIsEntry, setCalendarIsEntry] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [bookingComplete, setBookingComplete] = useState(false);
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
@@ -493,10 +496,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                     <>
                       <DateTimeSelectionStep
                         onNext={handleNext}
-                        onBack={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                        onBack={
+                          calendarIsEntry
+                            ? undefined
+                            : () => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }
+                        }
                       />
                       <OtherVisitTypesLink
-                        onPick={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                        onPick={() => { setCalendarIsEntry(false); prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
                       />
                     </>
                   );
@@ -528,7 +535,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                       onBack={() => setShowDatePicker(false)}
                     />
                     <OtherVisitTypesLink
-                      onPick={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                      onPick={() => { setCalendarIsEntry(false); prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
                     />
                   </>
                 );

@@ -100,7 +100,9 @@ function isBlockedByAdmin(date: Date, blockedRanges: { start: string; end: strin
 
 interface DateTimeSelectionStepProps {
   onNext: () => void;
-  onBack: () => void;
+  /** Optional. When omitted, the Back button hides — used when the calendar
+   *  is the entry point of the booking flow (Hormozi simplification). */
+  onBack?: () => void;
   considerDistance?: boolean;
 }
 
@@ -740,14 +742,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           </div>
         </div>
         
-        <div className="flex justify-between">
-          <Button type="button" variant="outline" onClick={onBack}>
-            <ChevronLeft className="mr-2 h-4 w-4" /> Back
-          </Button>
-          <Button 
-            type="button" 
+        <div className={`flex ${onBack ? 'justify-between' : 'justify-end'}`}>
+          {onBack && (
+            <Button type="button" variant="outline" onClick={onBack}>
+              <ChevronLeft className="mr-2 h-4 w-4" /> Back
+            </Button>
+          )}
+          <Button
+            type="button"
             onClick={() => {
-              console.log('Continue button clicked, canContinue:', canContinue);
               if (canContinue) {
                 onNext();
               }
