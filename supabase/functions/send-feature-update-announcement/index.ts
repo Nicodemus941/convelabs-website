@@ -36,7 +36,7 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const PUBLIC_SITE = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
 const EXPECTED_LIVE_TOKEN = 'feature-update-2026-04-25';
 const CAMPAIGN_KEY = 'patient_feature_update_2026_04_25';
-const SUBJECT = 'New: extended hours, waitlist alerts, fasting reminders + your patient portal';
+const SUBJECT = 'New ConveLabs Hours';
 
 // ─── HTML EMAIL ────────────────────────────────────────────────────────
 
@@ -265,12 +265,20 @@ Deno.serve(async (req) => {
     // ─── TEST MODE: send ONE email to info@convelabs.com only ─────────
     if (mode === 'test') {
       const testEmail = body?.testEmail || 'info@convelabs.com';
-      const unsubscribeUrl = `${PUBLIC_SITE}/unsubscribe?email=${encodeURIComponent(testEmail)}`;
-      const result = await sendOne(testEmail, body?.firstName || 'Nico', unsubscribeUrl);
+      // Pull the real first_name from tenant_patients so the test preview
+      // shows the same personalization patients will receive in live mode.
+      let firstName = body?.firstName || '';
+      if (!firstName) {
+        const { data } = await supabase.from('tenant_patients').select('first_name').ilike('email', testEmail).limit(1).maybeSingle();
+        firstName = ((data as any)?.first_name || '').trim();
+      }
+      const unsubscribeUrl = `mailto:info@convelabs.com?subject=${encodeURIComponent('Unsubscribe me')}&body=${encodeURIComponent('Please remove ' + testEmail + ' from ConveLabs marketing emails.')}`;
+      const result = await sendOne(testEmail, firstName, unsubscribeUrl);
       return new Response(JSON.stringify({
         success: true,
         mode: 'test',
         sent_to: testEmail,
+        first_name_used: firstName || '(none — used "there" greeting)',
         mailgun_id: result.mailgunId,
         subject: SUBJECT,
         note: 'Check your inbox. If it looks good, fire mode=live with the live token.',
@@ -361,7 +369,7 @@ Deno.serve(async (req) => {
     let failed = 0;
     const failures: any[] = [];
     for (const q of sendQueue) {
-      const unsubscribeUrl = `${PUBLIC_SITE}/unsubscribe?email=${encodeURIComponent(q.email)}`;
+      const unsubscribeUrl = `mailto:info@convelabs.com?subject=${encodeURIComponent('Unsubscribe me')}&body=${encodeURIComponent('Please remove ' + q.email + ' from ConveLabs marketing emails.')}`;
       try {
         const r = await sendOne(q.email, q.firstName, unsubscribeUrl);
         await supabase.from('campaign_sends').insert({
