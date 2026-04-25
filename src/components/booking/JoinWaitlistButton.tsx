@@ -103,8 +103,8 @@ const JoinWaitlistButton: React.FC<Props> = ({
   return (
     <>
       {trigger}
-      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4" onClick={() => !submitting && setOpen(false)}>
-        <div className="relative max-w-md w-full bg-white rounded-xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/50 sm:px-4" onClick={() => !submitting && setOpen(false)}>
+        <div className="relative max-w-md w-full bg-white rounded-t-2xl sm:rounded-xl p-5 sm:p-6 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
           <button onClick={() => !submitting && setOpen(false)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-700">
             <X className="h-4 w-4" />
           </button>
@@ -134,17 +134,17 @@ const JoinWaitlistButton: React.FC<Props> = ({
                 <input
                   type="email" placeholder="your@email.com" value={email}
                   onChange={e => setEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:border-[#B91C1C] focus:outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-base sm:text-sm focus:border-[#B91C1C] focus:outline-none min-h-[48px]"
                 />
                 <input
                   type="tel" placeholder="(optional) phone for SMS" value={phone}
                   onChange={e => setPhone(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:border-[#B91C1C] focus:outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-base sm:text-sm focus:border-[#B91C1C] focus:outline-none min-h-[48px]"
                 />
                 <input
                   type="text" placeholder="(optional) your name" value={name}
                   onChange={e => setName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:border-[#B91C1C] focus:outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-3 text-base sm:text-sm focus:border-[#B91C1C] focus:outline-none min-h-[48px]"
                 />
               </div>
               <button

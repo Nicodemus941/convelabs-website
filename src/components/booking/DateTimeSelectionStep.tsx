@@ -501,9 +501,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         {/* Lab destination picker — surfaced here so the slot grid can adjust
             in real time. AdventHealth opens the afternoon. LabCorp / Quest cap
             at their drop-off cutoff. "Not sure" shows the universal subset. */}
-        <div className="bg-gradient-to-br from-gray-50 to-blue-50 border border-gray-200 rounded-lg p-4">
+        <div className="bg-gradient-to-br from-gray-50 to-blue-50 border border-gray-200 rounded-lg p-3 sm:p-4">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-gray-700">Where will your specimen go?</span>
+            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-gray-700">Where will your specimen go?</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
@@ -518,25 +518,25 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   key={opt.id}
                   type="button"
                   onClick={() => methods.setValue('labOrder.labDestination' as any, opt.id, { shouldDirty: true })}
-                  className={`text-left rounded-lg border-2 p-2.5 transition ${
+                  className={`text-left rounded-lg border-2 p-3 min-h-[60px] active:scale-[0.98] transition ${
                     selected
                       ? 'bg-white border-[#B91C1C] shadow-sm'
                       : 'bg-white border-gray-200 hover:border-gray-400'
                   }`}
                 >
-                  <div className={`text-sm font-semibold ${selected ? 'text-[#B91C1C]' : 'text-gray-900'}`}>{opt.label}</div>
-                  <div className="text-[10px] text-gray-500 mt-0.5">{opt.sub}</div>
+                  <div className={`text-sm font-semibold leading-tight ${selected ? 'text-[#B91C1C]' : 'text-gray-900'}`}>{opt.label}</div>
+                  <div className="text-[11px] text-gray-500 mt-1 leading-tight">{opt.sub}</div>
                 </button>
               );
             })}
           </div>
           {!destinationPicked && (
-            <p className="text-[11px] text-gray-500 mt-2">
+            <p className="text-xs text-gray-600 mt-2 leading-snug">
               Pick a lab so we can show all hours that work. AdventHealth deliveries unlock our afternoon slots up to 6 PM.
             </p>
           )}
           {isAdventHealth && (
-            <p className="text-[11px] text-emerald-700 mt-2 font-medium">
+            <p className="text-xs text-emerald-700 mt-2 font-medium leading-snug">
               ✓ AdventHealth — afternoon hours unlocked, 7 days a week.
             </p>
           )}
@@ -679,7 +679,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       })()}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 sm:gap-2">
                       {activeWindows.map((window) => {
                         const isSelected = field.value === window.time;
                         const isBooked = bookedSlots.has(window.time);
@@ -734,7 +734,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             key={window.time}
                             type="button"
                             title={tierLocked ? (tierReason || `Unlock with ${(tierUnlockTier || '').toUpperCase()}`) : isBooked ? 'Already booked' : isHeldByOther ? 'Being booked by someone else' : isPastOrTooSoon ? 'Too soon for same-day' : ''}
-                            className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all ${
+                            className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all min-h-[48px] active:scale-95 ${
                               isUnavailable
                                 ? 'bg-gray-50 text-gray-300 line-through cursor-not-allowed border-gray-100'
                                 : tierLocked

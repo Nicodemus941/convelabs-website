@@ -93,7 +93,7 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
                 )}
               />
               
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <FormField
                   control={control}
                   name="locationDetails.city"

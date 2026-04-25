@@ -432,27 +432,30 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         {/* Progress indicator — desktop */}
         {currentStep < BookingStep.Confirmation && (
           <>
-            <div className="hidden md:flex justify-between items-center mb-6">
+            {/* Desktop progress bar — labels hidden on tablet (md), shown
+                from lg up. Numbered circles visible at all desktop sizes
+                so the patient still sees position. */}
+            <div className="hidden md:flex justify-between items-center mb-6 gap-1">
               {STEP_LABELS.map((step, index) => (
                 <div key={step} className={`flex items-center ${index < STEP_LABELS.length - 1 ? 'flex-1' : ''}`}>
-                  <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-medium transition-colors ${
+                  <div className={`flex items-center justify-center w-7 h-7 lg:w-8 lg:h-8 rounded-full text-xs lg:text-sm font-medium transition-colors flex-shrink-0 ${
                     index <= displayStep
                       ? 'bg-conve-red text-white'
                       : 'bg-muted text-muted-foreground'
                   }`}>
                     {index + 1}
                   </div>
-                  <div className={`ml-2 text-sm font-medium ${
+                  <div className={`hidden lg:block ml-2 text-xs lg:text-sm font-medium truncate ${
                     index <= displayStep ? 'text-foreground' : 'text-muted-foreground'
                   }`}>{step}</div>
                   {index < STEP_LABELS.length - 1 && (
-                    <div className={`flex-1 h-px mx-4 transition-colors ${
+                    <div className={`flex-1 h-px mx-2 lg:mx-3 transition-colors min-w-[12px] ${
                       index < displayStep ? 'bg-conve-red' : 'bg-muted'
                     }`} />
                   )}
                 </div>
               ))}
-              <div className="ml-4">
+              <div className="ml-2 lg:ml-4 flex-shrink-0">
                 <PriceEstimateBadge />
               </div>
             </div>
