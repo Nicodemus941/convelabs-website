@@ -151,14 +151,73 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       try {
         const { data } = await supabase
           .from('appointments')
-          .select('appointment_time, status')
+          .select('appointment_time, status, duration_minutes, service_type')
           .gte('appointment_date', `${date}T00:00:00`)
           .lte('appointment_date', `${date}T23:59:59`)
           .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']);
         if (cancelled) return;
+
+        // Bug fix 2026-04-25: previously this only marked the EXACT start
+        // time as TAKEN. A 10:00 AM × 75-min specialty-kit appointment was
+        // leaving 10:30, 11:00, 11:30 selectable when they're inside the
+        // appointment's busy window. Mirror availability.ts's bidirectional
+        // duration-aware blocking:
+        //   BACKWARD: 10:00 → 11:45 (start + duration + 30min mobile buffer)
+        //   FORWARD:  09:00 → 10:00 (a new 60-min slot ending at start)
+        const BUFFER_MIN_MOBILE = 30;
+        const BUFFER_MIN_OFFICE = 0;
+        const DEFAULT_DURATION_MIN = 30;
+        const NEW_APPT_FOOTPRINT_MIN = 60; // new 30-min slot + 30-min buffer
+
+        const parseTimeStr = (t: string): number => {
+          // Handles both "09:00:00" (24h) and "9:00 AM" (12h)
+          const ampm = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
+          if (ampm) {
+            let h = parseInt(ampm[1], 10);
+            const m = parseInt(ampm[2], 10);
+            const p = ampm[3].toUpperCase();
+            if (p === 'PM' && h !== 12) h += 12;
+            if (p === 'AM' && h === 12) h = 0;
+            return h * 60 + m;
+          }
+          const mil = /^(\d{1,2}):(\d{2})/.exec(t.trim());
+          if (mil) return parseInt(mil[1], 10) * 60 + parseInt(mil[2], 10);
+          return -1;
+        };
+        const formatTime12 = (mins: number): string => {
+          const h = Math.floor(mins / 60);
+          const m = mins % 60;
+          const period = h >= 12 ? 'PM' : 'AM';
+          const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+          return `${hr}:${String(m).padStart(2, '0')} ${period}`;
+        };
+
         const booked = new Set<string>();
-        for (const row of (data || [])) {
-          if (row.appointment_time) booked.add(String(row.appointment_time));
+        for (const row of (data || []) as any[]) {
+          if (!row.appointment_time) continue;
+          const startMin = parseTimeStr(String(row.appointment_time));
+          if (startMin < 0) continue;
+          const duration = (row.duration_minutes && row.duration_minutes > 0) ? row.duration_minutes : DEFAULT_DURATION_MIN;
+          const buffer = row.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+          const apptEndMin = startMin + duration + buffer;
+          // Backward block: every 30-min slot from start (inclusive) to end (exclusive)
+          for (let t = startMin; t < apptEndMin; t += 30) {
+            // Add both 24h ("10:00:00") and 12h ("10:00 AM") variants so any
+            // matcher in the slot-render code will hit.
+            const h = Math.floor(t / 60), m = t % 60;
+            booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
+            booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+            booked.add(formatTime12(t));
+          }
+          // Forward block: a new 30-min appointment starting < 60 min before
+          // this one would bleed into it. Block (startMin - 60, startMin).
+          for (let t = startMin - NEW_APPT_FOOTPRINT_MIN + 30; t < startMin; t += 30) {
+            if (t < 0) continue;
+            const h = Math.floor(t / 60), m = t % 60;
+            booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
+            booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+            booked.add(formatTime12(t));
+          }
         }
         setBookedTimesOnDate(booked);
       } catch (e) {
