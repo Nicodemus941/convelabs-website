@@ -111,68 +111,73 @@ interface DateTimeSelectionStepProps {
 // Tier becomes a pricing/perks lever, not an access lever. Per-visit price
 // drops as the tier rises — see TIER_VISIT_PRICE_CENTS in tier-gating.ts.
 // Real constraint = phleb's actual calendar (live availability + buffers).
-const allDayWindows = [
-  { time: "6:00 AM", label: "6:00 - 6:30 AM" },
-  { time: "6:30 AM", label: "6:30 - 7:00 AM" },
-  { time: "7:00 AM", label: "7:00 - 7:30 AM" },
-  { time: "7:30 AM", label: "7:30 - 8:00 AM" },
-  { time: "8:00 AM", label: "8:00 - 8:30 AM" },
-  { time: "8:30 AM", label: "8:30 - 9:00 AM" },
-  { time: "9:00 AM", label: "9:00 - 9:30 AM" },
-  { time: "9:30 AM", label: "9:30 - 10:00 AM" },
-  { time: "10:00 AM", label: "10:00 - 10:30 AM" },
-  { time: "10:30 AM", label: "10:30 - 11:00 AM" },
-  { time: "11:00 AM", label: "11:00 - 11:30 AM" },
-  { time: "11:30 AM", label: "11:30 AM - 12:00 PM" },
-  { time: "12:00 PM", label: "12:00 - 12:30 PM" },
-  { time: "12:30 PM", label: "12:30 - 1:00 PM" },
-  { time: "1:00 PM", label: "1:00 - 1:30 PM" },
-  { time: "1:30 PM", label: "1:30 - 2:00 PM" },
-  { time: "2:00 PM", label: "2:00 - 2:30 PM" },
-  { time: "2:30 PM", label: "2:30 - 3:00 PM" },
-  { time: "3:00 PM", label: "3:00 - 3:30 PM" },
-  { time: "3:30 PM", label: "3:30 - 4:00 PM" },
-  { time: "4:00 PM", label: "4:00 - 4:30 PM" },
-  { time: "4:30 PM", label: "4:30 - 5:00 PM" },
-  { time: "5:00 PM", label: "5:00 - 5:30 PM" },
-  { time: "5:30 PM", label: "5:30 - 6:00 PM" },
-];
+// 15-min increments per owner request 2026-04-25 — patients can now pick
+// :00, :15, :30, :45 of every hour. Generated programmatically (was 24
+// hand-typed entries at 30-min intervals).
+const STEP_MIN = 15;
+const GRID_START_HOUR = 6;
+const GRID_END_HOUR = 18; // last slot starts at 5:45 PM, ends 6 PM
+function fmt(h: number, m: number): string {
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${hr}:${String(m).padStart(2, '0')} ${period}`;
+}
+const allDayWindows = (() => {
+  const out: { time: string; label: string }[] = [];
+  for (let h = GRID_START_HOUR; h < GRID_END_HOUR; h++) {
+    for (let m = 0; m < 60; m += STEP_MIN) {
+      const startH = h, startM = m;
+      const endTotalMin = h * 60 + m + 30; // each booking is a 30-min slot
+      const endH = Math.floor(endTotalMin / 60);
+      const endM = endTotalMin % 60;
+      out.push({
+        time: fmt(startH, startM),
+        label: `${fmt(startH, startM).replace(/:00 /, ' ')} – ${fmt(endH, endM).replace(/:00 /, ' ')}`,
+      });
+    }
+  }
+  return out;
+})();
 
-// Routine blood draws — now match non-fasting non-member window (9am-1:30pm)
+// Helper: parse "9:15 AM" → 24h-minutes-of-day (e.g. 555)
+function timeToMinOfDay(t: string): number {
+  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
+  if (!m) return 0;
+  let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
+  const p = m[3].toUpperCase();
+  if (p === 'PM' && h !== 12) h += 12;
+  if (p === 'AM' && h === 12) h = 0;
+  return h * 60 + mm;
+}
+
+// Routine blood draws — non-fasting non-member window (9am-1:30pm).
+// 15-min step compatible (filters by minutes-of-day, not by string).
 const routineWindows = allDayWindows.filter(w => {
-  const hour = parseInt(w.time);
-  const isPM = w.time.includes('PM');
-  const hour24 = isPM && hour !== 12 ? hour + 12 : (!isPM && hour === 12 ? 0 : hour);
-  // 9:00 .. 13:30 (last slot start 1:30 PM)
-  if (hour24 < 9) return false;
-  if (hour24 < 13) return true;
-  if (hour24 === 13 && w.time.startsWith('1:30')) return true;
-  return false;
+  const min = timeToMinOfDay(w.time);
+  return min >= 9 * 60 && min <= 13 * 60 + 30;  // 9:00 ... 1:30 PM
 });
 
-// Saturday — VIP gets 6am-11am, Regular gets 6-9am. Show up to 10:30 start
-// (11am end) and the tier-disable logic handles the rest.
-const weekendWindows = [
-  { time: "6:00 AM", label: "6:00 - 6:30 AM" },
-  { time: "6:30 AM", label: "6:30 - 7:00 AM" },
-  { time: "7:00 AM", label: "7:00 - 7:30 AM" },
-  { time: "7:30 AM", label: "7:30 - 8:00 AM" },
-  { time: "8:00 AM", label: "8:00 - 8:30 AM" },
-  { time: "8:30 AM", label: "8:30 - 9:00 AM" },
-  { time: "9:00 AM", label: "9:00 - 9:30 AM" },
-  { time: "9:30 AM", label: "9:30 - 10:00 AM" },
-  { time: "10:00 AM", label: "10:00 - 10:30 AM" },
-  { time: "10:30 AM", label: "10:30 - 11:00 AM" },
-];
+// Saturday — VIP 6am-11am, Regular 6-9am. Show up to 10:45 start (11am end).
+const weekendWindows = allDayWindows.filter(w => {
+  const min = timeToMinOfDay(w.time);
+  return min >= 6 * 60 && min < 11 * 60;
+});
 
-// After-hours windows (5:30 PM - 8:00 PM) — only shown when user requests it
-const afterHoursWindows = [
-  { time: "5:30 PM", label: "5:30 - 6:00 PM" },
-  { time: "6:00 PM", label: "6:00 - 6:30 PM" },
-  { time: "6:30 PM", label: "6:30 - 7:00 PM" },
-  { time: "7:00 PM", label: "7:00 - 7:30 PM" },
-  { time: "7:30 PM", label: "7:30 - 8:00 PM" },
-];
+// After-hours windows (5:30 PM - 8:00 PM at 15-min increments) — only shown
+// when user requests it via the after-hours toggle. 11 slots: 5:30, 5:45,
+// 6:00, 6:15, 6:30, 6:45, 7:00, 7:15, 7:30, 7:45.
+const afterHoursWindows = (() => {
+  const out: { time: string; label: string }[] = [];
+  for (let totalMin = 17 * 60 + 30; totalMin < 20 * 60; totalMin += STEP_MIN) {
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    const endMin = totalMin + 30;
+    const eh = Math.floor(endMin / 60);
+    const em = endMin % 60;
+    out.push({ time: fmt(h, m), label: `${fmt(h, m)} – ${fmt(eh, em)}` });
+  }
+  return out;
+})();
 
 // Services that use routine hours (9am-1:30pm) — FORCES isFasting=false at the slot level
 const ROUTINE_SERVICES = ['routine-blood-draw'];
@@ -321,19 +326,18 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           const buffer = appt.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
           const apptEndMin = apptStartMin + duration + buffer;
 
-          // BACKWARD block (the busy span of the appointment itself):
-          //   block every 30-min slot where apptStart <= slot < apptEnd
-          for (let t = apptStartMin; t < apptEndMin; t += 30) {
+          // BACKWARD block — every 15-min slot where apptStart <= slot < apptEnd.
+          // 15-min step matches the new grid so :15 and :45 slots inside a busy
+          // window are marked TAKEN (was 30-min, missed every other slot).
+          for (let t = apptStartMin; t < apptEndMin; t += 15) {
             const h = Math.floor(t / 60);
             const m = t % 60;
             slotCounts.set(toSlotKey(h, m), (slotCounts.get(toSlotKey(h, m)) || 0) + 1);
           }
 
-          // FORWARD block (slots before this appt where a new draw would bleed in):
-          //   block slots where apptStart - NEW_APPT_FOOTPRINT < slot < apptStart
-          //   e.g., 10:00 appt blocks 9:30 (new 30+30 footprint ends at 10:30, overlaps).
-          //   But NOT 9:00 (a 9:00 + 30 + 30 = 10:00, ends exactly at apptStart, OK).
-          for (let t = apptStartMin - NEW_APPT_FOOTPRINT_MIN + 30; t < apptStartMin; t += 30) {
+          // FORWARD block — slots within (apptStart - 60min, apptStart) where a
+          // new 30-min draw + 30-min buffer would overlap the existing appt.
+          for (let t = apptStartMin - NEW_APPT_FOOTPRINT_MIN + 15; t < apptStartMin; t += 15) {
             if (t < 0 || Math.floor(t / 60) < 6) continue;
             const h = Math.floor(t / 60);
             const m = t % 60;

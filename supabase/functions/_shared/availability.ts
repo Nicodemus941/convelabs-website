@@ -101,10 +101,17 @@ function formatTime(h: number, m: number): string {
 }
 
 function baseGrid(endHour: number = DEFAULT_GRID_END): string[] {
+  // 15-min increments per owner request 2026-04-25 — patients can now book
+  // :15 and :45 of the hour in addition to :00 and :30. The bidirectional
+  // duration-aware blocking automatically respects every slot in the grid,
+  // so a 30-min draw at 10:00 still blocks 10:15 / 10:30 (and 10:45 via
+  // the 30-min buffer), no other code needed.
   const grid: string[] = [];
   for (let h = DEFAULT_GRID_START; h < endHour; h++) {
     grid.push(formatTime(h, 0));
+    grid.push(formatTime(h, 15));
     grid.push(formatTime(h, 30));
+    grid.push(formatTime(h, 45));
   }
   return grid;
 }

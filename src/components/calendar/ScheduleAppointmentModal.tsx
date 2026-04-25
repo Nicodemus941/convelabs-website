@@ -32,16 +32,28 @@ const SERVICE_TYPES = [
   { value: 'partner-aristotle-education', label: 'Aristotle Education', price: 185 },
 ];
 
-const TIME_SLOTS = [
-  '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-  '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-  '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM',
-  '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM',
-];
-
-const AFTER_HOURS_SLOTS = [
-  '5:30 PM', '6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM',
-];
+// 15-min increments per owner 2026-04-25 — :00, :15, :30, :45 of every hour.
+function _fmtSlot(h: number, m: number): string {
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${hr}:${String(m).padStart(2, '0')} ${period}`;
+}
+const TIME_SLOTS: string[] = (() => {
+  const out: string[] = [];
+  // 6:00 AM .. 5:00 PM (last regular-hours slot 5:00 PM ends 5:30)
+  for (let totalMin = 6 * 60; totalMin <= 17 * 60; totalMin += 15) {
+    out.push(_fmtSlot(Math.floor(totalMin / 60), totalMin % 60));
+  }
+  return out;
+})();
+const AFTER_HOURS_SLOTS: string[] = (() => {
+  const out: string[] = [];
+  // 5:15 PM .. 8:00 PM
+  for (let totalMin = 17 * 60 + 15; totalMin <= 20 * 60; totalMin += 15) {
+    out.push(_fmtSlot(Math.floor(totalMin / 60), totalMin % 60));
+  }
+  return out;
+})();
 
 interface PatientResult {
   id: string;
@@ -200,18 +212,18 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
           const duration = (row.duration_minutes && row.duration_minutes > 0) ? row.duration_minutes : DEFAULT_DURATION_MIN;
           const buffer = row.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
           const apptEndMin = startMin + duration + buffer;
-          // Backward block: every 30-min slot from start (inclusive) to end (exclusive)
-          for (let t = startMin; t < apptEndMin; t += 30) {
-            // Add both 24h ("10:00:00") and 12h ("10:00 AM") variants so any
-            // matcher in the slot-render code will hit.
+          // BACKWARD block — every 15-min slot from start (inclusive) to
+          // start+duration+buffer (exclusive). 15-min step matches the new
+          // grid so :15 and :45 inside the busy span are also flagged TAKEN.
+          for (let t = startMin; t < apptEndMin; t += 15) {
             const h = Math.floor(t / 60), m = t % 60;
             booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
             booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
             booked.add(formatTime12(t));
           }
-          // Forward block: a new 30-min appointment starting < 60 min before
-          // this one would bleed into it. Block (startMin - 60, startMin).
-          for (let t = startMin - NEW_APPT_FOOTPRINT_MIN + 30; t < startMin; t += 30) {
+          // FORWARD block — a new 30-min draw + 30-min buffer (60-min footprint)
+          // starting in (startMin - 60, startMin) would bleed into this appt.
+          for (let t = startMin - NEW_APPT_FOOTPRINT_MIN + 15; t < startMin; t += 15) {
             if (t < 0) continue;
             const h = Math.floor(t / 60), m = t % 60;
             booked.add(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
