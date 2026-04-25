@@ -12,6 +12,7 @@ import { format } from 'date-fns';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import DOBVerifyGate from '@/components/patient/DOBVerifyGate';
 import NotifyProviderConsentModal from '@/components/patient/NotifyProviderConsentModal';
+import JoinWaitlistButton from '@/components/booking/JoinWaitlistButton';
 
 /**
  * PATIENT LAB REQUEST BOOKING PAGE (/lab-request/:token)
@@ -125,6 +126,7 @@ const PatientLabRequestPage: React.FC = () => {
   // Live availability state
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [dateUnlocked, setDateUnlocked] = useState(false);
   const [orgCovers, setOrgCovers] = useState(false);
 
   // Unlock modal state
@@ -178,6 +180,7 @@ const PatientLabRequestPage: React.FC = () => {
         if (!resp.ok) throw new Error(j.error || 'Failed to load slots');
         setSlots(j.slots || []);
         setOrgCovers(!!j.org_covers);
+        setDateUnlocked(!!j.date_unlocked);
         // If the currently-selected time is no longer available, clear it
         if (time && !(j.slots || []).some((s: Slot) => s.time === time && s.available)) {
           setTime('');
@@ -600,11 +603,19 @@ const PatientLabRequestPage: React.FC = () => {
                     );
                   })}
                 </div>
+                {/* 5pm-prior unlock — when the daily sweep opens VIP-only slots
+                    to the public for tomorrow, the API flags date_unlocked. */}
+                {dateUnlocked && (
+                  <div className="mt-2 bg-gradient-to-r from-emerald-50 to-blue-50 border border-emerald-200 rounded-lg p-2.5 text-xs text-emerald-900 flex items-center gap-2">
+                    <span>🟢</span>
+                    <span className="flex-1"><strong>Slots opened</strong> — afternoon times for this day are now first come, first served.</span>
+                  </div>
+                )}
                 {/* Nudge: if first several slots are locked, surface an unlock callout */}
                 {slots.some(s => s.reason === 'tier_locked') && (
                   <div className="mt-2 bg-gradient-to-r from-amber-50 to-red-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex items-center gap-2">
                     <span>⚡</span>
-                    <span className="flex-1">Early morning slots unlock with a membership · tap any 🔒 slot to see the math</span>
+                    <span className="flex-1">Early morning slots unlock with a membership · tap any 🔒 slot to see the math · or join the waitlist for a 5 PM-prior alert.</span>
                   </div>
                 )}
                 {availableSlots.length > 0 && (
@@ -765,6 +776,21 @@ const PatientLabRequestPage: React.FC = () => {
                 <Button variant="outline" className="w-full" onClick={() => setUnlockSlot(null)}>
                   Skip — pick an available slot
                 </Button>
+                {/* Waitlist escape — capture the lead even if they won't upgrade.
+                    At 5 PM the day before, if VIP-only slots are still open they
+                    get notified BEFORE the slot opens to public traffic. */}
+                <JoinWaitlistButton
+                  dateIso={date}
+                  desiredTime={unlockSlot.time}
+                  requiredTier={tier}
+                  organizationId={request?.organization_id}
+                  labRequestId={request?.id}
+                  accessToken={token}
+                  defaultEmail={request?.patient_email || emailOverride}
+                  defaultPhone={request?.patient_phone || phoneOverride}
+                  defaultName={request?.patient_name}
+                  variant="subtle"
+                />
               </div>
               <p className="text-[11px] text-gray-500 text-center">47% of ConveLabs patients are members — early slots fill fast.</p>
             </div>

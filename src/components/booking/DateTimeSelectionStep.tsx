@@ -4,6 +4,7 @@ import { format, addDays, subDays } from 'date-fns';
 import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 import MemberOtpUnlockButton from './MemberOtpUnlockButton';
+import JoinWaitlistButton from './JoinWaitlistButton';
 import { useFormContext } from 'react-hook-form';
 import { 
   FormField, 
@@ -104,8 +105,8 @@ interface DateTimeSelectionStepProps {
 }
 
 // Operational hours (Hormozi tiered membership):
-//   Non-member:      Mon-Fri 6-9am (fasting) + 9am-12pm (non-fasting). No Saturday.
-//   Regular Member:  Mon-Fri 6am-12pm + Saturday 6-9am.
+//   Non-member:      Mon-Fri 6-9am (fasting) + 9am-1:30pm (non-fasting). No Saturday.
+//   Regular Member:  Mon-Fri 6am-1:30pm + Saturday 6-9am.
 //   VIP:             Mon-Fri 6am-2pm + Saturday 6-11am.
 //   Concierge:       any day 6am-8pm + Sunday by request.
 // After-hours (5:30-8pm) is Concierge-only in-window. Non-Concierge requests
@@ -143,12 +144,16 @@ const allDayWindows = [
   { time: "6:30 PM", label: "6:30 - 7:00 PM" },
 ];
 
-// Routine blood draws — now match non-fasting member window (9am-12pm)
+// Routine blood draws — now match non-fasting non-member window (9am-1:30pm)
 const routineWindows = allDayWindows.filter(w => {
   const hour = parseInt(w.time);
   const isPM = w.time.includes('PM');
   const hour24 = isPM && hour !== 12 ? hour + 12 : (!isPM && hour === 12 ? 0 : hour);
-  return hour24 >= 9 && hour24 < 12;
+  // 9:00 .. 13:30 (last slot start 1:30 PM)
+  if (hour24 < 9) return false;
+  if (hour24 < 13) return true;
+  if (hour24 === 13 && w.time.startsWith('1:30')) return true;
+  return false;
 });
 
 // Saturday — VIP gets 6am-11am, Regular gets 6-9am. Show up to 10:30 start
@@ -772,10 +777,10 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       : isSameDay
                       ? "Same-day booking (+$100 surcharge) · 90-min lead time · Concierge only"
                       : isRoutine
-                      ? "Routine non-fasting hours: 9 AM – 12 PM"
+                      ? "Routine non-fasting hours: 9 AM – 1:30 PM"
                       : showAfterHours
                       ? "After-hours (5:30 PM – 8 PM) — Concierge in-window, VIP on request (+$50)"
-                      : "Mon–Fri 6 AM – 1:30 PM · fasting slots 6–9 AM · non-fasting 9 AM–12 PM for non-members"}
+                      : "Mon–Fri · fasting 6–9 AM · routine 9 AM–1:30 PM · 2 PM–6:30 PM is VIP (auto-opens to public 5 PM the day before if any slots remain)"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -885,6 +890,18 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                 >
                   Or sign in with password →
                 </a>
+
+                {/* Hormozi: don't lose the lead just because they won't upgrade.
+                    The waitlist captures them for the 5 PM next-day unlock. */}
+                {selectedDate && (
+                  <JoinWaitlistButton
+                    dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+                    desiredTime={unlockSlot.time}
+                    requiredTier={tier}
+                    variant="inline"
+                  />
+                )}
+
                 <button
                   onClick={() => setUnlockSlot(null)}
                   className="w-full text-xs text-gray-600 hover:text-gray-800 py-2"

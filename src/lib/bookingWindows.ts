@@ -5,10 +5,13 @@
  * morning fasting slots are the genuinely scarce resource, so tiers unlock
  * windows of the day progressively:
  *
- *   Non-member:  9am–12pm non-fasting,  6am–9am fasting ONLY (Mon–Fri)
- *   Regular:     6am–12pm Mon–Fri + 6am–9am Saturday
- *   VIP:         6am–2pm  Mon–Fri + 6am–11am Saturday
+ *   Non-member:  9am–1:30pm non-fasting, 6am–9am fasting ONLY (Mon–Fri)
+ *   Regular:     6am–1:30pm Mon–Fri + 6am–9am Saturday
+ *   VIP:         6am–6:30pm Mon–Fri + 6am–11am Saturday  (2pm+ is VIP-only
+ *                until daily 5pm-prior unlock opens it to everyone)
  *   Concierge:   anytime, any day (incl. same-day + Sunday-by-request)
+ *   AdventHealth destination:  6am–7:30pm Mon–Sun (specimen routes only to
+ *                AdventHealth; bypasses tier windows entirely)
  *
  * The server (create-appointment-checkout) MUST mirror this logic — this
  * file is the source of truth for the frontend; the server duplicates
@@ -40,11 +43,11 @@ export interface BookingWindow {
 // ─────────────────────────────────────────────────────────────
 
 const NON_MEMBER: BookingWindow[] = [
-  // Mon–Fri: fasting 6–9am, non-fasting 9am–12pm
+  // Mon–Fri: fasting 6–9am, non-fasting 9am–1:30pm (extended 2026-04-25)
   ...[1, 2, 3, 4, 5].map(d => ({
     dayOfWeek: d,
     fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting' }],
-    nonFastingRanges: [{ start: '09:00', end: '12:00', label: 'Mid-morning' }],
+    nonFastingRanges: [{ start: '09:00', end: '13:30', label: 'Routine (9 AM – 1:30 PM)' }],
   })),
   // Sat/Sun: no non-member booking
 ];
@@ -53,7 +56,7 @@ const REGULAR: BookingWindow[] = [
   ...[1, 2, 3, 4, 5].map(d => ({
     dayOfWeek: d,
     fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting' }],
-    nonFastingRanges: [{ start: '06:00', end: '12:00', label: 'Morning' }],
+    nonFastingRanges: [{ start: '06:00', end: '13:30', label: 'Morning + early afternoon' }],
   })),
   // Saturday 6–9am only
   {
@@ -67,7 +70,7 @@ const VIP: BookingWindow[] = [
   ...[1, 2, 3, 4, 5].map(d => ({
     dayOfWeek: d,
     fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting' }],
-    nonFastingRanges: [{ start: '06:00', end: '14:00', label: 'Morning + early afternoon' }],
+    nonFastingRanges: [{ start: '06:00', end: '18:30', label: 'All day (until 6:30 PM)' }],
   })),
   // Saturday 6–11am
   {
