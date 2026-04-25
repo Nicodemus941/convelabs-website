@@ -451,10 +451,13 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const destinationPicked = !!labDestination && labDestination !== 'pending-doctor-confirmation';
 
   // Choose windows based on service type + after-hours toggle + destination.
-  // AdventHealth → full grid (6 AM – 5:30 PM, 7 days). LabCorp/Quest → cap by cutoff.
+  // AdventHealth → full grid (6 AM – 5:30 PM, 7 days) — overrides routine + weekend caps.
+  // LabCorp/Quest → cap by cutoff.
   // Unspecified → only show the universal subset (6 AM – 1:30 PM) so we never
   // show a slot that won't actually work post-checkout.
-  let baseWindows = isWeekend
+  let baseWindows = isAdventHealth
+    ? allDayWindows
+    : isWeekend
     ? weekendWindows
     : isRoutine
     ? routineWindows

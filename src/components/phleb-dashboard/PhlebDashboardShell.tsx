@@ -8,6 +8,7 @@ import { NotificationCenter } from '@/components/notifications/NotificationCente
 import { usePhlebotomistAppointments } from '@/hooks/usePhlebotomistAppointments';
 import { Calendar, MessageSquare, CheckCircle2, Settings, Home } from 'lucide-react';
 import BottomNav, { PhlebTab } from './BottomNav';
+import OnDutyToggle from './OnDutyToggle';
 import ScheduleTab from './schedule/ScheduleTab';
 import CompletedTab from './completed/CompletedTab';
 import MessagesTab from './messages/MessagesTab';
@@ -92,6 +93,7 @@ const PhlebDashboardShell: React.FC = () => {
               ))}
             </nav>
             <div className="flex items-center gap-3">
+              <OnDutyToggle variant="desktop" />
               <NotificationCenter />
               <Link to="/" className="text-xs text-gray-400 hover:text-gray-600">
                 Back to Website
@@ -108,7 +110,10 @@ const PhlebDashboardShell: React.FC = () => {
                 <p className="text-red-200 text-sm">Good {greeting},</p>
                 <h1 className="text-xl font-bold">{user?.firstName || 'Phlebotomist'}</h1>
               </div>
-              <NotificationCenter />
+              <div className="flex items-center gap-2">
+                <OnDutyToggle variant="mobile" />
+                <NotificationCenter />
+              </div>
             </div>
             <p className="text-red-100 text-sm mt-1">
               {format(new Date(), 'EEEE, MMMM d, yyyy')}
