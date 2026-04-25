@@ -80,26 +80,48 @@ async function verifyMembershipSessionCopy(sessionId: string): Promise<CheckResu
 async function smokeTestMembershipCheckout(): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
-  // 1. OPTIONS preflight
-  try {
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout-session`, {
-      method: 'OPTIONS',
-      headers: {
-        'Origin': 'https://www.convelabs.com',
-        'Access-Control-Request-Method': 'POST',
-        'Access-Control-Request-Headers': 'authorization, content-type',
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (resp.status >= 500) {
-      results.push({ step: 'options_preflight', ok: false, error: `${resp.status} (boot error?)` });
-      return results; // No point continuing if OPTIONS is dead
+  // 1. OPTIONS preflight — retry-with-hysteresis (single 503 ≠ outage).
+  // Supabase edge fns cold-boot every ~15 min if no traffic; the boot can
+  // exceed 5s and return 503 transiently. Retry twice with backoff before
+  // declaring the function dead.
+  async function tryOptions(timeoutMs: number): Promise<{ ok: boolean; status?: number; error?: string }> {
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout-session`, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': 'https://www.convelabs.com',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'authorization, content-type',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (resp.status >= 500) return { ok: false, status: resp.status };
+      return { ok: true, status: resp.status };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'timeout' };
     }
-    results.push({ step: 'options_preflight', ok: true });
-  } catch (e: any) {
-    results.push({ step: 'options_preflight', ok: false, error: e?.message || 'timeout' });
+  }
+  // Attempt 1: 6s
+  let r = await tryOptions(6000);
+  if (!r.ok) {
+    // Attempt 2: 3s wait, 9s timeout (covers cold-start)
+    await new Promise(res => setTimeout(res, 3000));
+    r = await tryOptions(9000);
+  }
+  if (!r.ok) {
+    // Attempt 3: 5s wait, 12s timeout (last chance — Supabase outage threshold)
+    await new Promise(res => setTimeout(res, 5000));
+    r = await tryOptions(12000);
+  }
+  if (!r.ok) {
+    results.push({
+      step: 'options_preflight',
+      ok: false,
+      error: r.status ? `${r.status} after 3 retries (real outage)` : `${r.error} after 3 retries`,
+    });
     return results;
   }
+  results.push({ step: 'options_preflight', ok: true });
 
   // 2. POST with valid VIP payload
   let sessionId: string | null = null;
