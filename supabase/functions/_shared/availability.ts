@@ -25,10 +25,64 @@ export interface TimeWindowRule {
   label?: string;
 }
 
-// Default business-hour grid: 6am to 11:30am in 30-min increments. The
-// org's time_window_rules will further restrict this per-date.
+// Default business-hour grid: 6 AM to 6:30 PM in 30-min increments
+// (last slot 6:30 PM, ends at 7 PM). Was 6 AM-11:30 AM previously which
+// silently killed all afternoon bookings — visitor lands at 1 PM looking
+// for a 4 PM same-day, sees zero options, bounces. The org's
+// time_window_rules and lab destination cutoff further restrict per-date.
 const DEFAULT_GRID_START = 6;  // 6:00 AM
-const DEFAULT_GRID_END = 12;   // up to (but not including) 12:00 PM
+const DEFAULT_GRID_END = 19;   // up to (but not including) 7:00 PM (last slot 6:30 PM)
+
+// Minimum lead time for same-day bookings — phleb mobilization buffer.
+// Was 120 min ("can't mobilize phleb in < 2h"); user confirmed 90 min is
+// realistic so we open another 30 min of same-day inventory.
+const SAME_DAY_LEAD_MIN = 90;
+
+// Lab destination drop-off cutoffs. Source of truth for "latest appointment
+// start time" given which lab will receive the specimen. Computed as:
+//   lab close time − 30 min drop-off buffer − 60 min visit + travel = LATEST_START
+// User-confirmed values (2026-04-25):
+//   LabCorp        weekday 2:30 PM close → drop by 2:00 → last appt 12:30 PM
+//                  weekend 12:00 PM close → drop by 11:30 → last appt 10:00 AM
+//   LabCorp (ext)  weekday 4:00 PM close → drop by 3:30 → last appt 2:00 PM
+//                  weekend 12:00 PM close → last appt 10:00 AM
+//   Quest          weekday 3:30 PM close → drop by 3:00 → last appt 1:30 PM
+//                  weekend 12:00 PM close → last appt 10:00 AM
+//   AdventHealth   24/7 → no cap, default grid end (6:30 PM last slot)
+//   Orlando Health 24/7 → no cap
+// `null` cutoff means "no cap, use default grid end".
+type LabCutoff = { weekdayLastMin: number | null; weekendLastMin: number | null };
+const LAB_CUTOFFS: Record<string, LabCutoff> = {
+  'labcorp':           { weekdayLastMin: 12 * 60 + 30, weekendLastMin: 10 * 60 },
+  'labcorp_extended':  { weekdayLastMin: 14 * 60,      weekendLastMin: 10 * 60 },
+  'quest':             { weekdayLastMin: 13 * 60 + 30, weekendLastMin: 10 * 60 },
+  'quest_diagnostics': { weekdayLastMin: 13 * 60 + 30, weekendLastMin: 10 * 60 },
+  'adventhealth':      { weekdayLastMin: null,         weekendLastMin: null },
+  'orlando_health':    { weekdayLastMin: null,         weekendLastMin: null },
+  // Specialty kit shipments (UPS/FedEx) need same-day pickup
+  'ups':               { weekdayLastMin: 14 * 60,      weekendLastMin: null },
+  'fedex':             { weekdayLastMin: 14 * 60,      weekendLastMin: null },
+};
+
+function normalizeLabKey(s: string | null | undefined): string | null {
+  if (!s) return null;
+  return String(s).toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+}
+
+/**
+ * Returns the latest minute-of-day slot can START to make the lab cutoff.
+ * Returns null when no cap applies (Advent / Orlando Health 24/7, or no
+ * destination provided).
+ */
+function lastSlotMinForLab(labDest: string | null | undefined, dateIso: string): number | null {
+  const key = normalizeLabKey(labDest);
+  if (!key) return null;
+  const cfg = LAB_CUTOFFS[key];
+  if (!cfg) return null; // unknown lab → no cap (safer than blocking)
+  const dow = new Date(dateIso + 'T12:00:00').getDay();
+  const isWeekend = dow === 0 || dow === 6;
+  return isWeekend ? cfg.weekendLastMin : cfg.weekdayLastMin;
+}
 
 function formatTime(h: number, m: number): string {
   const period = h >= 12 ? 'PM' : 'AM';
@@ -114,6 +168,7 @@ export async function getAvailableSlotsForDate(
   orgId: string,
   dateIso: string,
   timeWindowRules: any,
+  labDestination?: string | null,
 ): Promise<AvailableSlot[]> {
   const allowed = slotsAllowedForDate(dateIso, timeWindowRules);
   if (allowed.length === 0) {
@@ -175,7 +230,8 @@ export async function getAvailableSlotsForDate(
   };
   const fullyBlocked = (blockResp.data || []).length > 0;
 
-  // Also exclude "too soon" — same-day bookings cut after 11am ET (can't mobilize phleb in < 2h)
+  // Same-day lead time — phleb needs SAME_DAY_LEAD_MIN (90 min) to mobilize.
+  // Removed the prior hard 11 AM cutoff; this is the only same-day filter now.
   const now = nowET();
   const isToday = isoDate(now) === dateIso;
   const hasEnoughLead = (t: string) => {
@@ -183,13 +239,24 @@ export async function getAvailableSlotsForDate(
     const { h, m } = parseTime(t);
     const slotMin = h * 60 + m;
     const nowMin = now.getHours() * 60 + now.getMinutes();
-    return slotMin >= nowMin + 120; // need 2hr lead time
+    return slotMin >= nowMin + SAME_DAY_LEAD_MIN;
+  };
+
+  // Lab destination cutoff — slots after the lab's drop-off cutoff are
+  // operationally unbookable for that destination. Returns null cap when
+  // the destination is 24/7 (Advent / Orlando Health) or unknown.
+  const labCutoffMin = lastSlotMinForLab(labDestination, dateIso);
+  const fitsLabCutoff = (t: string) => {
+    if (labCutoffMin === null) return true;
+    const { h, m } = parseTime(t);
+    return h * 60 + m <= labCutoffMin;
   };
 
   return baseGrid().map(t => {
     if (fullyBlocked) return { time: t, available: false, reason: 'blocked' };
     if (!allowed.includes(t)) return { time: t, available: false, reason: 'outside_window' };
     if (!hasEnoughLead(t)) return { time: t, available: false, reason: 'past' };
+    if (!fitsLabCutoff(t)) return { time: t, available: false, reason: 'outside_window' };
     if (slotIsBooked(t)) return { time: t, available: false, reason: 'booked' };
     return { time: t, available: true };
   });

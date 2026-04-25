@@ -131,6 +131,16 @@ const allDayWindows = [
   { time: "12:30 PM", label: "12:30 - 1:00 PM" },
   { time: "1:00 PM", label: "1:00 - 1:30 PM" },
   { time: "1:30 PM", label: "1:30 - 2:00 PM" },
+  { time: "2:00 PM", label: "2:00 - 2:30 PM" },
+  { time: "2:30 PM", label: "2:30 - 3:00 PM" },
+  { time: "3:00 PM", label: "3:00 - 3:30 PM" },
+  { time: "3:30 PM", label: "3:30 - 4:00 PM" },
+  { time: "4:00 PM", label: "4:00 - 4:30 PM" },
+  { time: "4:30 PM", label: "4:30 - 5:00 PM" },
+  { time: "5:00 PM", label: "5:00 - 5:30 PM" },
+  { time: "5:30 PM", label: "5:30 - 6:00 PM" },
+  { time: "6:00 PM", label: "6:00 - 6:30 PM" },
+  { time: "6:30 PM", label: "6:30 - 7:00 PM" },
 ];
 
 // Routine blood draws — now match non-fasting member window (9am-12pm)
