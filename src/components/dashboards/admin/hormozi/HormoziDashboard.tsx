@@ -16,6 +16,7 @@ import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
 import TrendSparkline from './TrendSparkline';
 import CampaignROICard from './CampaignROICard';
+import CampaignEngagementCard from './CampaignEngagementCard';
 import ChatROICard from './ChatROICard';
 import TrafficCard from './TrafficCard';
 
@@ -136,6 +137,11 @@ const HormoziDashboard: React.FC = () => {
       {/* ─── ACTIVE CAMPAIGN ROI (auto-hides when none) ───────────── */}
       <section>
         <CampaignROICard />
+      </section>
+
+      {/* ─── CAMPAIGN ENGAGEMENT (live opens/clicks for the most recent broadcast) ─── */}
+      <section>
+        <CampaignEngagementCard />
       </section>
 
       {/* ─── CHATBOT ROI (auto-hides when no convos) ──────────────── */}
