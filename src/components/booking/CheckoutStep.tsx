@@ -65,6 +65,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
   const [tipAmount, setTipAmount] = useState(0);
+  const [termsFlashing, setTermsFlashing] = useState(false);
   const [showMismatchDialog, setShowMismatchDialog] = useState(false);
   const [referralCode, setReferralCode] = useState('');
   const [referralDiscount, setReferralDiscount] = useState(0);
@@ -697,12 +698,18 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           <span className="text-xs text-muted-foreground">Protected by the <a href="/guarantee" target="_blank" className="text-[#B91C1C] font-medium hover:underline">ConveLabs Guarantee</a></span>
         </div>
 
-        {/* Terms */}
+        {/* Terms — anchor id used by the Continue button to scroll-to + flash
+            when the patient tries to proceed without checking. Without this,
+            the Continue button silently disabled itself (mobile users below
+            the fold reported "the button does nothing"). */}
         <FormField
           control={methods.control}
           name="termsAccepted"
           render={({ field }) => (
-            <FormItem className="flex flex-row items-start space-x-3 space-y-0">
+            <FormItem
+              id="checkout-terms-block"
+              className={`flex flex-row items-start space-x-3 space-y-0 rounded-lg p-3 -m-3 transition-colors ${termsFlashing ? 'bg-amber-100 ring-2 ring-amber-400' : ''}`}
+            >
               <FormControl>
                 <Checkbox
                   checked={field.value || false}
@@ -729,8 +736,24 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </Button>
           <Button
             type="button"
-            onClick={handleCheckout}
-            disabled={isProcessing || !termsAccepted}
+            onClick={() => {
+              // Don't silently disable when T&C is unchecked — many mobile
+              // patients couldn't see the checkbox below the fold and reported
+              // "the Continue button does nothing." Now: scroll to the terms
+              // block, flash it amber for 1.6s, and surface a clear toast.
+              if (!termsAccepted) {
+                const el = document.getElementById('checkout-terms-block');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  setTermsFlashing(true);
+                  setTimeout(() => setTermsFlashing(false), 1600);
+                }
+                toast.error('Please check the terms-and-conditions box below to continue.', { duration: 6000 });
+                return;
+              }
+              handleCheckout();
+            }}
+            disabled={isProcessing}
             className="bg-conve-red hover:bg-conve-red-dark text-white"
           >
             {isProcessing ? (
