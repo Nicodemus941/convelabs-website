@@ -13,13 +13,16 @@ const TIER_WINDOWS: Record<Tier, {
   saturday: { start: number; end: number } | null;
   sunday: boolean;
 }> = {
-  // Hormozi simplification 2026-04-25: tier is a pricing lever, not an
-  // access lever. Everyone gets Mon–Sun 6 AM – 6 PM. Per-visit price
-  // differs by tier (TIER_VISIT_PRICE_CENTS below).
-  none:           { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
-  regular_member: { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
-  vip:            { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
-  concierge:      { weekday: { start: 6, end: 18 }, saturday: { start: 6, end: 18 }, sunday: true },
+  // Updated 2026-04-25: VIP-exclusive after-hours = 1:30 PM – 2:30 PM.
+  // Below 1:30 PM is open to everyone. AdventHealth destination overrides
+  // these windows entirely (6 AM – 6 PM Mon–Sun all tiers — handled in
+  // availability.ts via isAdventHealthDestination).
+  // The 5 PM-prior unlock cron opens 1:30-2:30 to all tiers if no VIP has
+  // booked tomorrow.
+  none:           { weekday: { start: 6, end: 13.5 }, saturday: { start: 6, end: 13.5 }, sunday: true },
+  regular_member: { weekday: { start: 6, end: 13.5 }, saturday: { start: 6, end: 13.5 }, sunday: true },
+  vip:            { weekday: { start: 6, end: 14.5 }, saturday: { start: 6, end: 14.5 }, sunday: true },
+  concierge:      { weekday: { start: 6, end: 14.5 }, saturday: { start: 6, end: 14.5 }, sunday: true },
 };
 
 const TIER_ORDER: Tier[] = ['none', 'regular_member', 'vip', 'concierge'];

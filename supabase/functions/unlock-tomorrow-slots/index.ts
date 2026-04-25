@@ -148,25 +148,41 @@ Deno.serve(async (req) => {
       .eq('unlock_date', dateIso)
       .maybeSingle();
 
-    // 2. Compute open inventory: grid - booked appointments. We only care
-    //    whether ANY tier-locked slot (>= 2 PM weekday) remains.
-    const dow = new Date(dateIso + 'T12:00:00').getDay();
-    const isWeekend = dow === 0 || dow === 6;
-    if (isWeekend) {
-      return new Response(JSON.stringify({ ok: true, skipped: true, reason: 'weekend' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    // VIP-locked window applies Mon-Sun (no weekend skip — owner 2026-04-25).
 
+    // Pull tomorrow's appointments + the booking patient's email so we can
+    // check membership tier. Owner rule 2026-04-25: unlock the VIP-only
+    // 1:30-2:30 PM window only if NO VIP has booked any slot tomorrow.
     const { data: appts } = await admin
       .from('appointments')
-      .select('appointment_time, status, duration_minutes, service_type')
+      .select('appointment_time, patient_email, status, duration_minutes, service_type')
       .gte('appointment_date', `${dateIso}T00:00:00`)
       .lte('appointment_date', `${dateIso}T23:59:59`)
       .neq('status', 'cancelled');
 
+    // For each appointment, look up the patient's tier. If anyone is VIP+,
+    // skip the unlock (a VIP has skin in the game tomorrow).
+    let anyVipBooked = false;
+    for (const a of (appts || []) as any[]) {
+      if (!a.patient_email) continue;
+      const email = String(a.patient_email).toLowerCase();
+      const { data: tp } = await admin.from('tenant_patients').select('user_id').ilike('email', email).maybeSingle();
+      if (!tp?.user_id) continue;
+      const { data: mem } = await admin.from('user_memberships').select('membership_plans(name)').eq('user_id', tp.user_id).eq('status', 'active').maybeSingle();
+      const planName = String((mem as any)?.membership_plans?.name || '').toLowerCase();
+      if (planName.includes('vip') || planName.includes('concierge')) { anyVipBooked = true; break; }
+    }
+
+    if (anyVipBooked) {
+      return new Response(JSON.stringify({
+        ok: true, date: dateIso, skipped: true, reason: 'vip_member_already_booked_tomorrow',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Compute the VIP-locked slot range (1:30 PM – 2:30 PM) and check if any
+    // are still open (i.e., no booking is sitting on them).
     const bookedMinutes = new Set<number>();
-    for (const a of appts || []) {
+    for (const a of (appts || []) as any[]) {
       if (!a.appointment_time) continue;
       const { h, m } = parseTime(String(a.appointment_time));
       const start = h * 60 + m;
@@ -178,8 +194,8 @@ Deno.serve(async (req) => {
     const tierLockedOpen = fullGrid().filter(t => {
       const { h, m } = parseTime(t);
       const min = h * 60 + m;
-      // Tier-locked weekday window per tier-gating.ts: 14:00+ is VIP-only
-      if (min < 14 * 60) return false;
+      // VIP-locked weekday window: 13:30–14:30 (last slot start 2:00 PM)
+      if (min < 13 * 60 + 30 || min > 14 * 60) return false;
       return !bookedMinutes.has(min);
     });
 

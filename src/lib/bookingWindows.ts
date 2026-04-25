@@ -5,13 +5,12 @@
  * morning fasting slots are the genuinely scarce resource, so tiers unlock
  * windows of the day progressively:
  *
- * SIMPLIFIED 2026-04-25 (Hormozi: "every rule you add is a customer you lose"):
- *   ALL TIERS: 6 AM – 6 PM, Monday through Sunday.
- *   Tier becomes a PRICING lever (cheaper visit price + perks), not an
- *   access lever. The phleb's actual calendar — appointments + buffers —
- *   is the real constraint.
- *
- *   AdventHealth destination still extends to 7:30 PM (lab is 24/7).
+ * Updated 2026-04-25 (after VIP carve-out for 1:30–2:30 PM):
+ *   Non-member / Regular: Mon–Sun 6 AM – 1:30 PM
+ *   VIP / Concierge:      Mon–Sun 6 AM – 2:30 PM
+ *   AdventHealth destination override: 6 AM – 6 PM Mon–Sun, ALL TIERS
+ *   5 PM-prior unlock: if no VIP has booked tomorrow by 5 PM, the 1:30–2:30
+ *   window opens to everyone (waitlist notified first).
  *
  * The server (create-appointment-checkout) MUST mirror this logic — this
  * file is the source of truth for the frontend; the server duplicates
@@ -42,17 +41,22 @@ export interface BookingWindow {
 // TIER RULES
 // ─────────────────────────────────────────────────────────────
 
-// All tiers now share the same Mon–Sun 6 AM – 6 PM window.
-// (Concierge keeps the same window — same access, lower per-visit price.)
-const UNIFORM_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
+// Non-member / Regular: 6 AM – 1:30 PM Mon-Sun
+const PUBLIC_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
   dayOfWeek: d,
   fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
-  nonFastingRanges: [{ start: '06:00', end: '18:00', label: '6 AM – 6 PM' }],
+  nonFastingRanges: [{ start: '06:00', end: '13:30', label: '6 AM – 1:30 PM' }],
 }));
-const NON_MEMBER = UNIFORM_HOURS;
-const REGULAR = UNIFORM_HOURS;
-const VIP = UNIFORM_HOURS;
-const CONCIERGE = UNIFORM_HOURS;
+// VIP / Concierge: extra hour 1:30–2:30 PM (the VIP after-hours)
+const VIP_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
+  dayOfWeek: d,
+  fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
+  nonFastingRanges: [{ start: '06:00', end: '14:30', label: '6 AM – 2:30 PM (VIP after-hours)' }],
+}));
+const NON_MEMBER = PUBLIC_HOURS;
+const REGULAR = PUBLIC_HOURS;
+const VIP = VIP_HOURS;
+const CONCIERGE = VIP_HOURS;
 
 const TIER_RULES: Record<MemberTier, BookingWindow[]> = {
   'none': NON_MEMBER,

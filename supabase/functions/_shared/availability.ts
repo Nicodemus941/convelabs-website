@@ -73,7 +73,7 @@ const LAB_CUTOFFS: Record<string, LabCutoff> = {
 // standard Sunday block + tier-gating windows. The specimen routes only to
 // the named lab — never to LabCorp/Quest.
 const ADVENT_HEALTH_KEYS = new Set(['adventhealth']);
-const ADVENT_HEALTH_GRID_END = 20; // last slot 7:30 PM
+const ADVENT_HEALTH_GRID_END = 18; // last slot 5:30 PM (closes at 6 PM)
 
 function normalizeLabKey(s: string | null | undefined): string | null {
   if (!s) return null;

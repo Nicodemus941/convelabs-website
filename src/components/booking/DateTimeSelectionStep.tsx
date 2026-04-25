@@ -750,8 +750,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       : isSameDay
                       ? "Same-day booking (+$100 surcharge) · 90-min lead time"
                       : isRoutine
-                      ? "Routine non-fasting hours: 9 AM – 6 PM"
-                      : "Open Mon–Sun · 6 AM – 6 PM · fasting slots 6–9 AM · routine 9 AM–6 PM"}
+                      ? "Routine non-fasting hours: 9 AM – 1:30 PM (extended to 6 PM if AdventHealth is your destination)"
+                      : "Open Mon–Sun · 6 AM – 1:30 PM (everyone) · 1:30–2:30 PM (VIP) · 1:30 PM – 6 PM (anyone, AdventHealth deliveries)"}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
