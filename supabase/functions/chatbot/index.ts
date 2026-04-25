@@ -52,7 +52,10 @@ const MAX_MESSAGES_PER_CONVO = 40;         // hard cap on rounds
 const MAX_CHARS_PER_USER_MESSAGE = 2000;   // input sanitization
 
 // ═══════ THE SYSTEM PROMPT (Hormozi-structured) ═══════════════════════
-const SYSTEM_PROMPT = `You are "Ask Nico" — the friendly, knowledgeable assistant on the ConveLabs landing page. ConveLabs is a concierge mobile phlebotomy practice in Central Florida, founded and operated by Nicodemme "Nico" Jean-Baptiste, a licensed phlebotomist with 15+ years of experience serving 20,000+ patients.
+// Note: this is the STATIC base. A per-request "LIVE CONTEXT" block is
+// prepended at call time with real data: Founding 50 seat count, phleb
+// on-duty status, current ET timestamp. See buildLiveContext() below.
+const BASE_SYSTEM_PROMPT = `You are "Ask Nico" — the friendly, knowledgeable assistant on the ConveLabs landing page. ConveLabs is a concierge mobile phlebotomy practice in Central Florida, founded and operated by Nicodemme "Nico" Jean-Baptiste, a licensed phlebotomist with 15+ years of experience serving 20,000+ patients.
 
 # YOUR JOB
 Help visitors understand if ConveLabs is right for them, answer their questions, and route them to the right next step. You are NOT a salesperson — you are a helpful first-touch that teaches, qualifies, and hands off.
@@ -70,9 +73,16 @@ Help visitors understand if ConveLabs is right for them, answer their questions,
 - Member tier: $99/yr membership → $130/visit
 - VIP Founding tier: $199/yr → $115/visit + free family add-on + priority booking + Founding Member badge. First 50 seats locked at $199 for life.
 - Concierge tier: $399/yr → $99/visit
-- Results available via the patient's lab portal (LabCorp / Quest / AdventHealth / Orlando Health) typically in 48 hours
-- Non-member scheduling: Mon-Fri 6am-9am fasting windows, 9am-12pm non-fasting
-- VIP and Concierge: anytime Mon-Fri 6am-2pm, Saturday 6am-11am
+- Results available via the patient's lab portal (LabCorp / Quest / AdventHealth) typically in 48 hours
+- Booking hours (Mon–Sun, all 7 days):
+   • 6:00 AM – 9:00 AM = fasting-friendly window (everyone)
+   • 9:00 AM – 1:30 PM = routine non-fasting window (everyone)
+   • 1:30 PM – 2:30 PM = VIP/Concierge exclusive ("VIP after-hours")
+     — opens to all tiers automatically at 5 PM the day before if no VIP has booked
+   • If specimen goes to AdventHealth: 6 AM – 6 PM available to ANYONE Mon–Sun (AdventHealth accepts 24/7)
+   • LabCorp drop-off cutoff: 12:30 PM. Quest cutoff: 1:30 PM.
+   • Past 6 PM: only available when the phleb is "On Duty" (toggleable status)
+- After-hours toggle: when Nico marks himself On Duty, slots past 6 PM open up. If he's off duty, after-hours bookings aren't available — but already-scheduled visits stay valid.
 - Service area: Orlando, Winter Park, Windermere, Longwood, Winter Garden, Lake Mary, Altamonte Springs, Maitland, Oviedo, Apopka, Celebration, Lake Nona, Doctor Phillips, and other Central Florida zips. If a zip isn't obviously in range, say "let me double-check coverage for that zip — I'll have Nico confirm."
 - 60+ Winter Park patients already use ConveLabs (32789 is our biggest zip)
 - Provider partners: Aristotle Education, ND Wellness, The Restoration Place (BioTE HRT), Natura Integrative and Functional Medicine, Kristen Blake Wellness, Elite Medical Concierge, Dr. Jason Littleton, Clinical Associates of Orlando
@@ -198,7 +208,65 @@ function parseActionsAndEscalation(rawText: string): {
   return { reply, actions, escalate, escalationReason };
 }
 
-async function callClaude(messages: Array<{ role: string; content: string }>): Promise<{ text: string; usage: any } | null> {
+// ═══════ LIVE CONTEXT BUILDER ═══════════════════════════════════════
+// Pulled fresh on every chatbot call. Lets the bot say specific things like
+// "13 Founding seats left" or "Nico's on duty until 9 PM tonight" instead of
+// relying on stale prompt text. Hormozi: scarcity only sells when it's real.
+async function buildLiveContext(supabase: any): Promise<string> {
+  const FOUNDING_50_CAP = 50;
+  let foundingClaimed = 0;
+  let foundingRemaining = FOUNDING_50_CAP;
+  let phlebOnDuty = false;
+  let phlebDutyThrough: string | null = null;
+
+  try {
+    const { count } = await supabase
+      .from('user_memberships')
+      .select('*', { count: 'exact', head: true })
+      .eq('founding_member', true);
+    if (typeof count === 'number') {
+      foundingClaimed = count;
+      foundingRemaining = Math.max(0, FOUNDING_50_CAP - foundingClaimed);
+    }
+  } catch (e) { console.warn('[chatbot] founding count failed:', e); }
+
+  try {
+    const { data } = await supabase
+      .from('phleb_duty_status' as any)
+      .select('on_duty, duty_through')
+      .eq('on_duty', true)
+      .gt('duty_through', new Date().toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (data?.on_duty) {
+      phlebOnDuty = true;
+      phlebDutyThrough = (data as any).duty_through;
+    }
+  } catch (e) { console.warn('[chatbot] duty status failed:', e); }
+
+  const nowET = new Date().toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'full', timeStyle: 'short' });
+
+  const lines: string[] = [
+    '## LIVE CONTEXT (current as of this turn — use these EXACT numbers, never round or invent)',
+    `- Current time (ET): ${nowET}`,
+    `- VIP Founding 50 seats: ${foundingClaimed} claimed, ${foundingRemaining} remaining out of ${FOUNDING_50_CAP}`,
+  ];
+  if (foundingRemaining > 0 && foundingRemaining <= 15) {
+    lines.push(`  → SCARCITY MANDATE: only ${foundingRemaining} Founding seats left at $199/yr (locked-for-life). When you mention VIP pricing, ALWAYS lead with the live remaining count. This is a Hormozi-grade scarcity — use it.`);
+  } else if (foundingRemaining === 0) {
+    lines.push(`  → All Founding seats are claimed. Standard VIP at $199/yr is still available, but the locked-for-life rate is gone.`);
+  }
+  if (phlebOnDuty && phlebDutyThrough) {
+    const through = new Date(phlebDutyThrough).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+    lines.push(`- Phleb on duty after-hours: YES, until ${through} ET. Patients can book past 6 PM tonight.`);
+  } else {
+    lines.push(`- Phleb on duty after-hours: NO. Bookings past 6 PM tonight aren't available unless they go through AdventHealth (24/7).`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+async function callClaude(messages: Array<{ role: string; content: string }>, liveContext: string): Promise<{ text: string; usage: any } | null> {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -209,7 +277,7 @@ async function callClaude(messages: Array<{ role: string; content: string }>): P
     body: JSON.stringify({
       model: MODEL,
       max_tokens: MAX_TOKENS_PER_MESSAGE,
-      system: SYSTEM_PROMPT,
+      system: liveContext + '\n' + BASE_SYSTEM_PROMPT,
       messages,
     }),
   });
@@ -342,9 +410,10 @@ Deno.serve(async (req) => {
       content: userMessage,
     });
 
-    // ── CALL CLAUDE ──────────────────────────────────────────────
+    // ── BUILD LIVE CONTEXT + CALL CLAUDE ─────────────────────────
+    const liveContext = await buildLiveContext(supabase);
     const claudeMessages = [...history, { role: 'user', content: userMessage }];
-    const claudeResult = await callClaude(claudeMessages);
+    const claudeResult = await callClaude(claudeMessages, liveContext);
 
     if (!claudeResult) {
       const fallback = "I'm having a hiccup — let me get Nico to reach out to you. Text (941) 527-9169 and he'll respond personally.";
