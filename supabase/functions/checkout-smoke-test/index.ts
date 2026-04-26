@@ -123,51 +123,42 @@ async function smokeTestMembershipCheckout(): Promise<CheckResult[]> {
   }
   results.push({ step: 'options_preflight', ok: true });
 
-  // 2. POST with valid VIP payload
-  let sessionId: string | null = null;
-  try {
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout-session`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SERVICE_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        planId: VIP_PLAN_ID,
-        billingFrequency: 'annually',
-        guestCheckoutEmail: TEST_EMAIL,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => '');
-      results.push({
-        step: 'post_checkout',
-        ok: false,
-        error: `HTTP ${resp.status}: ${body.substring(0, 200)}`,
+  // 2. POST — retry-with-hysteresis (3 attempts) for SUPABASE_EDGE_RUNTIME_ERROR
+  //    transients on the POST handler too. v4: was previously single-shot and
+  //    fired a false-alarm SMS at 04:30 UTC 2026-04-26 on a Supabase-platform
+  //    503. Same hysteresis pattern as OPTIONS step above.
+  async function tryPost(timeoutMs: number) {
+    try {
+      const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-checkout-session`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId: VIP_PLAN_ID, billingFrequency: 'annually', guestCheckoutEmail: TEST_EMAIL }),
+        signal: AbortSignal.timeout(timeoutMs),
       });
-      return results;
-    }
-    const data = await resp.json();
-    if (!data.sessionId || !data.url) {
-      results.push({
-        step: 'post_checkout',
-        ok: false,
-        error: 'response missing sessionId or url',
-        details: data,
-      });
-      return results;
-    }
-    sessionId = data.sessionId;
-    results.push({ step: 'post_checkout', ok: true, details: { sessionId: data.sessionId } });
-  } catch (e: any) {
-    results.push({ step: 'post_checkout', ok: false, error: e?.message || 'post failed' });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        return { ok: false, status: resp.status, body: body.substring(0, 200) };
+      }
+      const data = await resp.json();
+      if (!data.sessionId || !data.url) return { ok: false, status: 200, body: 'response missing sessionId or url' };
+      return { ok: true, sessionId: data.sessionId };
+    } catch (e: any) { return { ok: false, error: e?.message || 'timeout' }; }
+  }
+  let p: any = await tryPost(15000);
+  if (!p.ok && (p.status === 503 || p.error || (p.status && p.status >= 500))) {
+    await new Promise(res => setTimeout(res, 4000)); p = await tryPost(18000);
+  }
+  if (!p.ok && (p.status === 503 || p.error || (p.status && p.status >= 500))) {
+    await new Promise(res => setTimeout(res, 6000)); p = await tryPost(20000);
+  }
+  if (!p.ok) {
+    results.push({ step: 'post_checkout', ok: false, error: p.status ? `HTTP ${p.status} after 3 retries: ${p.body || ''}` : `${p.error} after 3 retries` });
     return results;
   }
+  results.push({ step: 'post_checkout', ok: true, details: { sessionId: p.sessionId } });
 
-  // 3. Retrieve the session + verify line-item copy
-  if (sessionId) {
-    results.push(await verifyMembershipSessionCopy(sessionId));
+  if (p.sessionId) {
+    results.push(await verifyMembershipSessionCopy(p.sessionId));
   }
 
   return results;
