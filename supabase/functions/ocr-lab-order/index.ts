@@ -36,6 +36,41 @@ interface ExtractedProvider {
   addressZip?: string;
   officePhone?: string;
 }
+// ─── Practice-name alias map ────────────────────────────────────────
+// Lab orders sometimes use abbreviations or trade names. Map them to
+// the canonical practice name so discover_or_link_provider_org links
+// to the existing organization instead of creating a duplicate.
+// Match is case-insensitive and trims whitespace + trailing words like
+// "Clinic"/"LLC"/"PLLC" before comparing.
+const PRACTICE_ALIAS_MAP: Array<{ patterns: RegExp[]; canonical: string }> = [
+  {
+    canonical: 'The Restoration Place',
+    patterns: [
+      /^trp$/i,
+      /^trp\s+clinic$/i,
+      /^trp\s+wellness$/i,
+      /^trp\s+health$/i,
+      /^the\s+restoration\s+pl(ace|c)?$/i,
+      /^restoration\s+place$/i,
+    ],
+  },
+];
+
+function normalizePracticeName(raw: string): string {
+  if (!raw) return raw;
+  const cleaned = raw.replace(/\s+/g, ' ').trim()
+    .replace(/[,.]+$/, '')
+    .replace(/\b(LLC|PLLC|PA|PC|Inc\.?|Corp\.?)\b\.?$/i, '')
+    .trim();
+  for (const alias of PRACTICE_ALIAS_MAP) {
+    if (alias.patterns.some(rx => rx.test(cleaned))) {
+      console.log(`[ocr->org] alias match: "${raw}" → "${alias.canonical}"`);
+      return alias.canonical;
+    }
+  }
+  return cleaned;
+}
+
 function extractProviderBlock(text: string): ExtractedProvider {
   const out: ExtractedProvider = {};
   if (!text) return out;
@@ -47,7 +82,7 @@ function extractProviderBlock(text: string): ExtractedProvider {
   // Practice / Account name — LabCorp uses "Account Name:", Quest uses
   // "Client Name:", Genova uses "Ordering Practitioner Name:"
   const mName = full.match(/(?:Account Name|Client Name|Clinic Name|Practice Name|Ordering Practitioner Name)\s*:\s*([^\n]{3,100})/i);
-  if (mName) out.practiceName = mName[1].trim().replace(/\s+$/, '');
+  if (mName) out.practiceName = normalizePracticeName(mName[1].trim().replace(/\s+$/, ''));
 
   // Street address — "Address 1: ..." on LabCorp, "Address:" on Quest
   const mStreet = full.match(/Address\s*(?:1|Line\s*1)?\s*:\s*([^\n]{5,120})/i);
