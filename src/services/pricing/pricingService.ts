@@ -60,11 +60,16 @@ export const MEMBERSHIP_FEES: Record<string, { name: string; fee: number; label:
   concierge: { name: 'Concierge', fee: 399, label: '$399/year' },
 };
 
-// Provider partner pricing (flat, no tiers)
+// Provider partner pricing (flat, no tiers).
+// CRITICAL: every partner referenced in VisitTypeSelector.PROVIDER_PARTNERS
+// must be in this map. Missing entries fall back to $125 (the default in
+// getServicePrice), which causes ND-Wellness/NaturaMed referrals to display
+// the wrong price at checkout.
 const PARTNER_PRICING: Record<string, number> = {
   'partner-restoration-place': 125,
   'partner-elite-medical-concierge': 72.25,
   'partner-naturamed': 85,
+  'partner-nd-wellness': 85,
   'partner-aristotle-education': 185,
 };
 
