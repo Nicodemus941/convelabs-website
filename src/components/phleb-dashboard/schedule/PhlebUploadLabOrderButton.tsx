@@ -136,11 +136,14 @@ const PhlebUploadLabOrderButton: React.FC<Props> = ({ appointmentId, onUploaded,
 
   return (
     <>
+      {/* No `capture` attribute — iOS/Android then show a chooser
+          (Take Photo / Photo Library / Files) instead of jumping
+          straight into the camera. Phlebs need both: snap a fresh
+          photo OR pick a PDF/image already on the device. */}
       <input
         ref={fileRef}
         type="file"
         accept="image/*,application/pdf"
-        capture="environment"
         className="hidden"
         onChange={onChange}
       />
