@@ -42,7 +42,7 @@ interface ExtractedProvider {
 // to the existing organization instead of creating a duplicate.
 // Match is case-insensitive and trims whitespace + trailing words like
 // "Clinic"/"LLC"/"PLLC" before comparing.
-const PRACTICE_ALIAS_MAP: Array<{ patterns: RegExp[]; canonical: string }> = [
+const PRACTICE_ALIAS_MAP: Array<{ patterns: RegExp[]; canonical: string; physicianAliases?: RegExp[] }> = [
   {
     canonical: 'The Restoration Place',
     patterns: [
@@ -52,7 +52,14 @@ const PRACTICE_ALIAS_MAP: Array<{ patterns: RegExp[]; canonical: string }> = [
       /^trp\s+health$/i,
       /^the\s+restoration\s+pl(ace|c)?$/i,
       /^restoration\s+place$/i,
+      // Account-name field on TRP scripts is sometimes the physician's
+      // name ("Cristelle Renta") because the lab account is registered
+      // to her, not the practice. Map that to TRP too.
+      /cristelle\s+renta/i,
     ],
+    // If the practice name didn't match anything but the ordering
+    // physician is one of these, route to the canonical org.
+    physicianAliases: [/cristelle\s+renta/i],
   },
 ];
 
@@ -411,6 +418,24 @@ Deno.serve(async (req) => {
     if (targetId && result.text) {
       try {
         const extracted = extractProviderBlock(result.text);
+
+        // Physician-based fallback: if the practice name is missing or
+        // didn't trigger an alias hit, but the ordering physician maps
+        // to a canonical practice (e.g. Cristelle Renta → The Restoration
+        // Place), use that as the practice name.
+        if (extracted.orderingPhysician) {
+          for (const alias of PRACTICE_ALIAS_MAP) {
+            if (alias.physicianAliases?.some(rx => rx.test(extracted.orderingPhysician!))) {
+              const isAlreadyCanonical = extracted.practiceName === alias.canonical;
+              if (!isAlreadyCanonical) {
+                console.log(`[ocr->org] physician alias: "${extracted.orderingPhysician}" → "${alias.canonical}" (was practice="${extracted.practiceName || 'none'}")`);
+                extracted.practiceName = alias.canonical;
+              }
+              break;
+            }
+          }
+        }
+
         if (!extracted.practiceName && labOrderRowId) {
           await supabase.from('appointment_lab_orders').update({
             org_match_status: 'unmatched',
