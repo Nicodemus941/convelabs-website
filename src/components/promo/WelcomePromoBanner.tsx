@@ -58,6 +58,8 @@ const WelcomePromoBanner: React.FC = () => {
   };
 
   if (dismissed) return null;
+  // Home gets the richer WelcomePromoHeroBanner instead — don't double-banner.
+  if (pathname === '/') return null;
   if (HIDDEN_PATH_PREFIXES.some(p => pathname === p || pathname.startsWith(p + '/') || pathname.startsWith(p))) {
     return null;
   }

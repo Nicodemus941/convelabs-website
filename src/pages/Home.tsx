@@ -4,6 +4,7 @@ import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/home/Header";
 import Hero from "@/components/home/Hero";
+import WelcomePromoHeroBanner from "@/components/promo/WelcomePromoHeroBanner";
 import MeetYourPhlebotomist from "@/components/home/MeetYourPhlebotomist";
 import ComparisonTable from "@/components/home/ComparisonTable";
 import ValueStack from "@/components/home/ValueStack";
@@ -205,6 +206,10 @@ const Home = () => {
 
       <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
         <Header />
+        {/* Landing-page first-time-patient $25 promo banner.
+            Sits between the site header and Hero for max visibility,
+            responsive across mobile/tablet/desktop, dismissible per session. */}
+        <WelcomePromoHeroBanner />
         <main>
           <PageTransition>
             <Hero />
