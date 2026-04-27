@@ -1,12 +1,11 @@
 -- WELCOME25 — first-time-patient promo code, $25 off the first blood draw.
 --
--- Adds:
---   • promo_codes.first_time_only flag
---   • Seeds the WELCOME25 code (active, $25 off, 1 use per email)
---   • Updates validate_promo_code() to reject the code if the email has
---     any prior paid appointment, so it stays a true new-patient incentive.
+-- Stricter first-time enforcement: a patient is considered "returning"
+-- (and therefore ineligible) if ANY of email / phone / (first+last name)
+-- matches an existing record in either appointments or tenant_patients.
+-- Phone matching ignores formatting (compares last 10 digits).
 --
--- Apply via: supabase db push  (or run in the SQL editor)
+-- Apply via: supabase db push  (or paste in the SQL editor)
 
 -- 1. first_time_only flag (idempotent)
 ALTER TABLE public.promo_codes
@@ -29,10 +28,27 @@ ON CONFLICT (code) DO UPDATE SET
   max_uses_per_email = EXCLUDED.max_uses_per_email,
   description        = EXCLUDED.description;
 
--- 3. Update validate_promo_code to enforce first_time_only
+-- Helper: normalize a phone string to its last 10 digits.
+CREATE OR REPLACE FUNCTION public._phone_last10(p text)
+RETURNS text
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT CASE
+    WHEN p IS NULL THEN NULL
+    ELSE right(regexp_replace(p, '\D', '', 'g'), 10)
+  END;
+$$;
+
+-- 3. Drop the old single-arg signature (if present) so the new one is unambiguous.
+DROP FUNCTION IF EXISTS public.validate_promo_code(text, text);
+DROP FUNCTION IF EXISTS public.validate_promo_code(text, text, text, text, text);
+
+-- 4. New validate_promo_code with name + phone + email matching
 CREATE OR REPLACE FUNCTION public.validate_promo_code(
   p_code text,
-  p_email text
+  p_email text,
+  p_phone text DEFAULT '',
+  p_first_name text DEFAULT '',
+  p_last_name text DEFAULT ''
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -44,6 +60,9 @@ DECLARE
   v_uses_by_email int;
   v_total_uses int;
   v_prior_count int;
+  v_phone_last10 text;
+  v_first_norm text;
+  v_last_norm text;
 BEGIN
   IF p_code IS NULL OR length(trim(p_code)) = 0 THEN
     RETURN jsonb_build_object('valid', false, 'reason', 'not_found');
@@ -89,16 +108,48 @@ BEGIN
     END IF;
   END IF;
 
-  -- First-time-only enforcement: any prior real appointment on this
-  -- email blocks the code. Treats anything that's already in the
-  -- system + paid as a prior visit (covers in-flight appointments
-  -- before they reach 'completed' status).
+  -- ─── First-time-only: reject on ANY identity match ──────────────
+  -- Email, phone (last 10 digits), or full-name match against either
+  -- the appointments ledger OR the tenant_patients roster makes the
+  -- buyer "returning" and ineligible. This kills the trivial dodge of
+  -- swapping email/casing/format to re-claim the new-patient discount.
   IF v_row.first_time_only = true THEN
+    v_phone_last10 := public._phone_last10(p_phone);
+    v_first_norm   := lower(trim(coalesce(p_first_name, '')));
+    v_last_norm    := lower(trim(coalesce(p_last_name, '')));
+
+    -- Match in appointments
     SELECT COUNT(*) INTO v_prior_count
     FROM public.appointments a
-    WHERE lower(a.email) = lower(p_email)
-      AND a.status IN ('completed', 'specimen_delivered', 'in_progress', 'arrived', 'en_route', 'confirmed', 'scheduled')
-      AND a.payment_status IN ('paid', 'succeeded');
+    WHERE (
+        (lower(a.email) = lower(p_email) AND length(p_email) > 0)
+     OR (v_phone_last10 IS NOT NULL AND length(v_phone_last10) = 10
+          AND public._phone_last10(a.phone) = v_phone_last10)
+     OR (length(v_first_norm) > 0 AND length(v_last_norm) > 0
+          AND lower(trim(a.first_name)) = v_first_norm
+          AND lower(trim(a.last_name))  = v_last_norm)
+    )
+    AND a.status IN ('completed', 'specimen_delivered', 'in_progress', 'arrived', 'en_route', 'confirmed', 'scheduled')
+    AND a.payment_status IN ('paid', 'succeeded');
+
+    IF v_prior_count > 0 THEN
+      RETURN jsonb_build_object('valid', false, 'reason', 'not_first_time');
+    END IF;
+
+    -- Match in tenant_patients roster (covers patients who exist in our
+    -- system but haven't yet paid for an appointment, e.g. they were
+    -- imported, family-membered, or had a previous voided visit).
+    SELECT COUNT(*) INTO v_prior_count
+    FROM public.tenant_patients tp
+    WHERE (
+        (lower(tp.email) = lower(p_email) AND length(p_email) > 0)
+     OR (v_phone_last10 IS NOT NULL AND length(v_phone_last10) = 10
+          AND public._phone_last10(tp.phone) = v_phone_last10)
+     OR (length(v_first_norm) > 0 AND length(v_last_norm) > 0
+          AND lower(trim(tp.first_name)) = v_first_norm
+          AND lower(trim(tp.last_name))  = v_last_norm)
+    );
+
     IF v_prior_count > 0 THEN
       RETURN jsonb_build_object('valid', false, 'reason', 'not_first_time');
     END IF;
@@ -114,4 +165,4 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.validate_promo_code(text, text) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.validate_promo_code(text, text, text, text, text) TO anon, authenticated, service_role;

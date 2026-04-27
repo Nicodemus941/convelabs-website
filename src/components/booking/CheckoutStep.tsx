@@ -594,9 +594,15 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                   setPromoMessage('');
                   try {
                     const email = getValues('patientDetails.email') || '';
+                    const phone = getValues('patientDetails.phone') || '';
+                    const firstName = getValues('patientDetails.firstName') || '';
+                    const lastName = getValues('patientDetails.lastName') || '';
                     const { data, error } = await supabase.rpc('validate_promo_code', {
                       p_code: promoCode.trim(),
                       p_email: email,
+                      p_phone: phone,
+                      p_first_name: firstName,
+                      p_last_name: lastName,
                     });
                     if (error) throw error;
                     if (data?.valid) {

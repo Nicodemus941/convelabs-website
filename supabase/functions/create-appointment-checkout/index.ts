@@ -631,6 +631,9 @@ Deno.serve(async (req) => {
         const { data: promoResult, error: promoErr } = await supabaseClient.rpc('validate_promo_code', {
           p_code: promoCode.trim(),
           p_email: patientDetails?.email || '',
+          p_phone: patientDetails?.phone || '',
+          p_first_name: patientDetails?.firstName || '',
+          p_last_name: patientDetails?.lastName || '',
         });
         if (promoErr) {
           console.warn('[promo] validate_promo_code RPC error:', promoErr.message);
