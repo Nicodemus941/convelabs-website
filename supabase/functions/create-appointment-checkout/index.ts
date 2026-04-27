@@ -675,6 +675,10 @@ Deno.serve(async (req) => {
                   ? 'This promo code has expired.'
                   : promoResult?.reason === 'max_uses_reached'
                   ? 'This promo code has reached its usage limit.'
+                  : promoResult?.reason === 'max_uses_per_email_reached'
+                  ? 'You\'ve already used this promo code.'
+                  : promoResult?.reason === 'not_first_time'
+                  ? 'WELCOME25 is for new patients only — looks like you\'re already in our system. Members save more with our VIP plan.'
                   : 'Invalid promo code.',
             }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

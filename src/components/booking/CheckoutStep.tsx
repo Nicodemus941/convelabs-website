@@ -547,9 +547,25 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           )}
         </div>
 
-        {/* Promo code input — server validates + applies discount at checkout */}
+        {/* Promo code input — server validates + applies discount at checkout.
+            For new patients, prominently nudges WELCOME25 ($25 off first visit). */}
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <label className="text-xs font-semibold text-gray-700 mb-1.5 block">Promo code (optional)</label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-semibold text-gray-700">Promo code (optional)</label>
+            {promoStatus !== 'valid' && !promoCode && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPromoCode('WELCOME25');
+                  setPromoStatus('idle');
+                  setPromoMessage('');
+                }}
+                className="text-[11px] font-semibold text-conve-red hover:underline"
+              >
+                New patient? Use WELCOME25 — $25 off
+              </button>
+            )}
+          </div>
           <div className="flex gap-2">
             <input
               type="text"
@@ -602,6 +618,10 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                           ? 'This code has expired.'
                           : data?.reason === 'max_uses_reached'
                           ? 'This code has reached its usage limit.'
+                          : data?.reason === 'max_uses_per_email_reached'
+                          ? 'You\'ve already used this code.'
+                          : data?.reason === 'not_first_time'
+                          ? 'WELCOME25 is for new patients only. VIP membership saves more on every visit.'
                           : 'Invalid promo code.'
                       );
                     }

@@ -10,6 +10,7 @@ import { ConversionAnalytics } from '@/components/conversion/ConversionAnalytics
 import ErrorBoundary from '@/components/ui/error-boundary';
 import { TenantProvider } from '@/contexts/tenant/TenantContext';
 import Home from '@/pages/Home';
+import WelcomePromoBanner from '@/components/promo/WelcomePromoBanner';
 
 // Lazy-load all non-landing routes to reduce initial bundle
 const About = lazy(() => import('@/pages/About'));
@@ -55,6 +56,9 @@ function App() {
               <BookingModalProvider>
                 <TenantProvider>
                   <ConversionAnalytics>
+                    {/* Site-wide $25 first-time-patient promo banner.
+                        Self-hides on dashboard/admin/staff routes. */}
+                    <WelcomePromoBanner />
                     <Suspense fallback={<PageLoader />}>
                       <Routes>
                         <Route path="/" element={<Home />} />
