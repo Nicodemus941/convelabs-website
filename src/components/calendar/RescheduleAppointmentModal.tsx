@@ -419,15 +419,18 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
             </div>
           )}
 
-          {/* Surcharge preview */}
-          {surchargeDelta !== 0 && (
-            <div className={`border rounded-lg p-3 flex items-start gap-2 text-xs ${surchargeDelta > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+          {/* Surcharge preview — owner policy 2026-04-27: patients are NOT
+              refunded for pricing deltas on reschedules. The original total
+              stands regardless of which time the visit moves to. We still
+              flag a potential UPCHARGE so the admin knows to process a new
+              after-hours surcharge in Stripe when moving INTO after-hours,
+              but the refund banner is suppressed entirely. */}
+          {surchargeDelta > 0 && (
+            <div className="border rounded-lg p-3 flex items-start gap-2 text-xs bg-amber-50 border-amber-200 text-amber-700">
               <DollarSign className="h-4 w-4 flex-shrink-0 mt-0.5" />
               <div>
                 <p className="font-semibold">
-                  {surchargeDelta > 0
-                    ? `Patient will be charged an extra $${surchargeDelta} after-hours fee`
-                    : `Patient will be refunded $${Math.abs(surchargeDelta)} (moving out of after-hours)`}
+                  Patient will be charged an extra ${surchargeDelta} after-hours fee
                 </p>
                 <p className="mt-0.5">New total will be ${Math.max(0, (appt.total_amount || 0) + surchargeDelta).toFixed(2)}. Process manually in Stripe.</p>
               </div>
