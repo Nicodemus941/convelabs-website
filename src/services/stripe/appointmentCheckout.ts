@@ -67,7 +67,36 @@ export async function createAppointmentCheckoutSession(
       },
     });
 
+    // CRITICAL: Supabase JS treats ANY non-2xx as `FunctionsHttpError`,
+    // sets `data` to null, and surfaces the error before we can inspect
+    // the structured body. That collapses our 409 slot_unavailable payload
+    // (with suggested_slots) into a generic "Edge Function returned a
+    // non-2xx status code" message and the SlotConflictModal never opens.
+    //
+    // Workaround: when the error has a `context` Response (supabase-js
+    // v2.40+), read its body and unwrap. Falls back to plain error.message
+    // if the context is missing or unreadable.
     if (error) {
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const body = await ctx.json();
+          if (body?.error === 'slot_unavailable') {
+            return {
+              error: (body.message as string) || 'That time slot was just claimed.',
+              errorCode: 'slot_unavailable',
+              suggested_slots: body.suggested_slots || [],
+              original_time: body.original_time,
+              original_date: body.original_date,
+            };
+          }
+          if (body?.error) {
+            return { error: (body.message as string) || (body.error as string), errorCode: body.error };
+          }
+        } catch (parseErr) {
+          console.warn('[checkout] could not parse error body:', parseErr);
+        }
+      }
       console.error('Error creating appointment checkout:', error);
       return { error: error.message };
     }
@@ -77,9 +106,6 @@ export async function createAppointmentCheckoutSession(
     }
 
     if (data.error) {
-      // Slot-conflict gets the structured payload through so the UI can
-      // render alternatives. Other errors (invalid promo, $0-total guard)
-      // collapse to the friendly message.
       if (data.error === 'slot_unavailable') {
         return {
           error: (data.message as string) || 'That time slot was just claimed.',
