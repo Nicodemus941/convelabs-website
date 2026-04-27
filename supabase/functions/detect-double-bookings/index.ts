@@ -234,11 +234,19 @@ Deno.serve(async (req) => {
     const pendingApptIds = new Set((existingTokens || []).map((t: any) => t.appointment_id));
 
     // Group appointments by "phleb|date" key
+    // CRITICAL: only group rows that have an assigned phlebotomist. Two
+    // unassigned bookings sitting at similar times are NOT a conflict —
+    // they still need a phleb assignment before they conflict with anyone.
+    // Bucketing them under a literal 'none' key was producing phantom
+    // double-bookings (e.g. orphan / abandoned / partner-pending rows
+    // matching against each other), firing apology SMS + $25 credits
+    // to patients whose appointments were never actually conflicting.
     type A = typeof appts[0];
     const groups = new Map<string, A[]>();
     for (const a of appts) {
+      if (!a.phlebotomist_id) continue; // skip unassigned — not a conflict
       const dateKey = (a.appointment_date || '').slice(0, 10);
-      const key = `${a.phlebotomist_id || 'none'}|${dateKey}`;
+      const key = `${a.phlebotomist_id}|${dateKey}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(a);
     }
@@ -347,11 +355,18 @@ Deno.serve(async (req) => {
             }
           }
 
-          // Also ping the owner so they know a conflict was auto-handled
+          // Also ping the owner so they know a conflict was auto-handled.
+          // Include BOTH appointment IDs + names + the date so the owner
+          // can verify against the calendar before the patient acts on
+          // the apology link.
           if (smsReady) {
+            const dateShort = (later.appointment_date || '').slice(0, 10);
             await sendSMS(
               Deno.env.get('OWNER_PHONE') || '9415279169',
-              `[Auto] Double-booking detected: ${later.patient_name} (${later.appointment_time}) was auto-notified via SMS+email to reschedule. Token: ${token.slice(0, 8)}…`,
+              `[Auto] Double-booking ${dateShort} ${later.appointment_time}: ` +
+              `LATER=${later.patient_name} (id ${later.id.slice(0, 8)}) vs ` +
+              `EARLIER=${earlier.patient_name} (id ${earlier.id.slice(0, 8)}). ` +
+              `Patient was auto-rescheduled. Token ${token.slice(0, 8)}…`,
               TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM,
             );
           }
