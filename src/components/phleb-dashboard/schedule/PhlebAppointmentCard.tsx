@@ -21,6 +21,7 @@ import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal
 import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
 import TubeLabelModal from './TubeLabelModal';
+import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
@@ -453,6 +454,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     })}
                   </div>
 
+                  {/* Phleb can add another lab order from the field */}
+                  <div className="mt-2">
+                    <PhlebUploadLabOrderButton
+                      appointmentId={appointment.id}
+                      variant="subtle"
+                      label="Add another"
+                    />
+                  </div>
+
                   {/* Detected panel chips (from OCR) — gives phleb an at-a-glance view
                       of what's being drawn without opening the file. */}
                   {panelBadges.length > 0 && (
@@ -484,9 +494,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       <FileText className="h-3.5 w-3.5 text-gray-500" />
                       Lab Orders
                     </p>
-                    <p className="text-xs text-amber-600">
-                      No lab order uploaded. Confirm with patient at visit or call office.
+                    <p className="text-xs text-amber-600 mb-2">
+                      No lab order uploaded. Capture it now — we'll match the provider automatically.
                     </p>
+                    <PhlebUploadLabOrderButton
+                      appointmentId={appointment.id}
+                      variant="primary"
+                      label="Upload Lab Order"
+                    />
                   </div>
                 )
               )}

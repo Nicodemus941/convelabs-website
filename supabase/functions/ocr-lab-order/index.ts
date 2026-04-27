@@ -376,6 +376,12 @@ Deno.serve(async (req) => {
     if (targetId && result.text) {
       try {
         const extracted = extractProviderBlock(result.text);
+        if (!extracted.practiceName && labOrderRowId) {
+          await supabase.from('appointment_lab_orders').update({
+            org_match_status: 'unmatched',
+            org_match_reason: 'no_provider_block_in_ocr',
+          }).eq('id', labOrderRowId);
+        }
         if (extracted.practiceName) {
           const { data: linkRes } = await supabase.rpc('discover_or_link_provider_org' as any, {
             p_appointment_id: targetId,
@@ -390,6 +396,48 @@ Deno.serve(async (req) => {
             p_ocr_sample: result.text.substring(0, 500),
           });
           console.log(`[ocr->org] ${extracted.practiceName}:`, linkRes);
+
+          // Write the match outcome back to the lab-order row so the phleb
+          // upload UI can render a tailored success toast ("Matched to X" vs
+          // "New lead created"). Determine action by checking the returned
+          // org's discovered_from_ocr flag + recency.
+          if (labOrderRowId && linkRes && (linkRes as any).org_id) {
+            const orgId = (linkRes as any).org_id;
+            const linkAction = (linkRes as any).action || (linkRes as any).status;
+            const linkReason = (linkRes as any).reason || (linkRes as any).match_reason;
+            let status: 'matched' | 'auto_created' | 'unmatched' = 'matched';
+            let reason: string = linkReason || 'name+zip';
+            if (linkAction === 'created' || linkAction === 'auto_created' || linkAction === 'inserted') {
+              status = 'auto_created';
+              reason = linkReason || 'discovered_from_ocr';
+            } else if (!linkAction) {
+              // Fallback: query the org row for recency + discovered flag
+              const { data: orgCheck } = await supabase
+                .from('organizations')
+                .select('created_at, discovered_from_ocr, npi')
+                .eq('id', orgId)
+                .maybeSingle();
+              if (orgCheck) {
+                const ageMs = Date.now() - new Date((orgCheck as any).created_at).getTime();
+                if ((orgCheck as any).discovered_from_ocr && ageMs < 30_000) {
+                  status = 'auto_created';
+                  reason = 'discovered_from_ocr';
+                } else if (extracted.npi && (orgCheck as any).npi === extracted.npi) {
+                  reason = 'npi_exact';
+                }
+              }
+            }
+            await supabase.from('appointment_lab_orders').update({
+              org_match_status: status,
+              org_match_reason: reason,
+              org_match_organization_id: orgId,
+            }).eq('id', labOrderRowId);
+          } else if (labOrderRowId && (!linkRes || !(linkRes as any).org_id)) {
+            await supabase.from('appointment_lab_orders').update({
+              org_match_status: 'unmatched',
+              org_match_reason: 'no_org_returned',
+            }).eq('id', labOrderRowId);
+          }
 
           // Signal ladder: when a discovered practice hits 3+ referrals
           // AND is still untouched, page the owner immediately. Hormozi
