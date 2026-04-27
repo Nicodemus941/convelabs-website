@@ -22,6 +22,7 @@ import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
 import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
+import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
@@ -52,6 +53,8 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   const [showRunningLate, setShowRunningLate] = useState(false);
   const [showTubeLabel, setShowTubeLabel] = useState(false);
   const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string }>({ open: false, path: null });
+  // Bumped after every phleb-side lab-order upload so the status list re-fetches immediately
+  const [labOrderRefreshKey, setLabOrderRefreshKey] = useState(0);
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
   // Pre-flight readiness: does this visit have everything the phleb needs?
@@ -460,8 +463,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       appointmentId={appointment.id}
                       variant="subtle"
                       label="Add another"
+                      onUploaded={() => setLabOrderRefreshKey(k => k + 1)}
                     />
                   </div>
+
+                  {/* Inline OCR + org-match status per lab order */}
+                  <LabOrderStatusList
+                    appointmentId={appointment.id}
+                    refreshKey={labOrderRefreshKey}
+                  />
 
                   {/* Detected panel chips (from OCR) — gives phleb an at-a-glance view
                       of what's being drawn without opening the file. */}
@@ -501,6 +511,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       appointmentId={appointment.id}
                       variant="primary"
                       label="Upload Lab Order"
+                      onUploaded={() => setLabOrderRefreshKey(k => k + 1)}
+                    />
+                    {/* Inline OCR + org-match status — appears the moment a row exists */}
+                    <LabOrderStatusList
+                      appointmentId={appointment.id}
+                      refreshKey={labOrderRefreshKey}
                     />
                   </div>
                 )
