@@ -338,6 +338,39 @@ export function usePhlebotomistAppointments() {
     fetchMonthAppointments();
   }, [fetchMonthAppointments]);
 
+  // Refetch when the PWA tab regains focus. Without this, an admin
+  // scheduling a manual appointment never showed up on the phleb's
+  // calendar until they navigated months or closed+reopened.
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === 'visible') {
+        fetchMonthAppointments();
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    window.addEventListener('focus', handler);
+    return () => {
+      document.removeEventListener('visibilitychange', handler);
+      window.removeEventListener('focus', handler);
+    };
+  }, [fetchMonthAppointments]);
+
+  // Realtime push: subscribe to INSERT/UPDATE on appointments scoped
+  // to this phleb. Any new manual booking by admin pushes to the PWA
+  // within seconds. Falls back gracefully if realtime is unavailable.
+  useEffect(() => {
+    if (!user?.id) return;
+    const channel = supabase
+      .channel(`appts-phleb-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${user.id}` },
+        () => { fetchMonthAppointments(); },
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id, fetchMonthAppointments]);
+
   // Online/offline status subscription — used by the offline banner
   useEffect(() => {
     return subscribeToOnlineStatus((online) => setIsOnline(online));
