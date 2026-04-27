@@ -203,7 +203,7 @@ Deno.serve(async (req) => {
     const end = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
     const { data: appts, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, phlebotomist_id, appointment_date, appointment_time, status, patient_name, patient_email, patient_phone, created_at, service_type')
+      .select('id, phlebotomist_id, appointment_date, appointment_time, status, patient_name, patient_email, patient_phone, created_at, service_type, booking_source')
       .gte('appointment_date', today.toISOString().slice(0, 10))
       .lte('appointment_date', end.toISOString().slice(0, 10))
       .in('status', ['scheduled', 'confirmed'])
@@ -266,6 +266,31 @@ Deno.serve(async (req) => {
           if (Math.abs(ti - tj) >= 45) continue; // not a conflict
 
           results.conflicts_found++;
+
+          // Owner-confirmed 2026-04-27: when EITHER side of the conflict was
+          // manually scheduled by an admin, treat the conflict as INTENDED
+          // (admin knows what they're doing — companion visits, double-up
+          // appointments, family-group draws). Skip patient apology SMS/email
+          // and the $25 credit. Owner still gets a heads-up so they can
+          // verify on the calendar.
+          const isAdminOverride = (
+            String(later.booking_source || '').toLowerCase().startsWith('manual')
+            || String(earlier.booking_source || '').toLowerCase().startsWith('manual')
+          );
+          if (isAdminOverride) {
+            if (smsReady) {
+              const dateShort = (later.appointment_date || '').slice(0, 10);
+              await sendSMS(
+                Deno.env.get('OWNER_PHONE') || '9415279169',
+                `[Auto] Manual-override double-booking ${dateShort} ${later.appointment_time}: ` +
+                `${later.patient_name} (id ${later.id.slice(0, 8)}) overlaps ` +
+                `${earlier.patient_name} (id ${earlier.id.slice(0, 8)}). ` +
+                `No patient notification fired (admin override). Verify on calendar.`,
+                TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM,
+              );
+            }
+            continue;
+          }
 
           // Victim = later-booked
           if (pendingApptIds.has(later.id)) {

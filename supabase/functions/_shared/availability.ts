@@ -211,7 +211,7 @@ export async function getAvailableSlotsForDate(
   const [apptResp, blockResp] = await Promise.all([
     supabase
       .from('appointments')
-      .select('appointment_time, status, duration_minutes, service_type')
+      .select('appointment_time, status, duration_minutes, service_type, address, family_group_id')
       .gte('appointment_date', dayStart)
       .lte('appointment_date', dayEnd)
       .neq('status', 'cancelled'),
@@ -223,21 +223,52 @@ export async function getAvailableSlotsForDate(
   ]);
 
   // BIDIRECTIONAL DURATION-AWARE BLOCKING.
-  // For each existing appointment at start S with duration D and travel
-  // buffer B, we block:
-  //   BACKWARD: slots T where S <= T < S + D + B   (slot starts during
-  //             existing appointment or its travel window)
-  //   FORWARD:  slots T where S - NEW_FOOTPRINT < T < S  (a new slot
-  //             beginning here would bleed INTO the existing appointment)
+  // Buffer math owner-confirmed 2026-04-27. Default is 0 — a regular $150
+  // mobile draw runs its `duration_minutes` and that's it. Buffer only
+  // applies to the conditions below (mirrored in src/lib/bookingBuffer.ts):
+  //   • +30 specialty-kit / specialty-kit-genova / therapeutic / partner-aristotle-education
+  //   • +30 extended-area city (additive on top of service buffer)
+  //   • +15 same-address companion (family_group_id present)
   //
-  // NEW_FOOTPRINT assumes the new appointment is 30 min + mobile buffer =
-  // 60 min. So for an 8:00 AM existing appointment, the forward block is
-  // (420, 480) — 7:00 is free (finishes by 8:00) but 7:30 is blocked
-  // (a 7:30 draw would finish at 8:00 with zero travel time).
-  const BUFFER_MIN_MOBILE = 30;
-  const BUFFER_MIN_OFFICE = 0;
-  const DEFAULT_DURATION_MIN = 30;
-  const NEW_APPT_FOOTPRINT_MIN = DEFAULT_DURATION_MIN + BUFFER_MIN_MOBILE;
+  // For each existing appointment at start S with duration D and computed
+  // buffer B we block:
+  //   BACKWARD: slots T where S <= T < S + D + B
+  //   FORWARD:  slots T where S - NEW_FOOTPRINT < T < S
+  //
+  // NEW_FOOTPRINT assumes the candidate new appointment is 60 min (mobile
+  // base) — that's how far back a new start could land while still finishing
+  // at S. Specialty/therapeutic candidates are caught by the BACKWARD block.
+  const HEAVY_SERVICE_TYPES: Record<string, true> = {
+    'specialty-kit': true,
+    'specialty-kit-genova': true,
+    'therapeutic': true,
+    'partner-aristotle-education': true,
+  };
+  const EXTENDED_AREA_CITIES = [
+    'lake nona', 'celebration', 'kissimmee', 'sanford', 'eustis',
+    'clermont', 'montverde', 'deltona', 'geneva', 'tavares',
+    'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola',
+    'daytona beach', 'deland', 'debary', 'orange city',
+  ];
+  function detectCityFromAddress(addr: string | null | undefined): string | null {
+    if (!addr) return null;
+    const parts = String(addr).split(',').map(s => s.trim()).filter(Boolean);
+    return parts.length >= 2 ? parts[1].toLowerCase() : null;
+  }
+  function isExtendedAreaCity(city: string | null | undefined): boolean {
+    if (!city) return false;
+    return EXTENDED_AREA_CITIES.includes(city.toLowerCase().trim());
+  }
+  function getBufferMinutes(a: any): number {
+    let b = 0;
+    if (a.service_type && HEAVY_SERVICE_TYPES[String(a.service_type).toLowerCase()]) b += 30;
+    if (isExtendedAreaCity(detectCityFromAddress(a.address))) b += 30;
+    if (a.family_group_id) b += 15;
+    return b;
+  }
+
+  const DEFAULT_DURATION_MIN = 60;
+  const NEW_APPT_FOOTPRINT_MIN = 60; // new 60-min slot, no buffer for the new appt itself
 
   const slotIsBooked = (t: string): boolean => {
     const { h: th, m: tm } = parseTime(t);
@@ -247,11 +278,11 @@ export async function getAvailableSlotsForDate(
       const { h, m } = parseTime(String(a.appointment_time));
       const apptStart = h * 60 + m;
       const duration = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : DEFAULT_DURATION_MIN;
-      const buffer = a.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+      const buffer = getBufferMinutes(a);
       const apptEnd = apptStart + duration + buffer;
       // Backward block (start-inclusive, end-exclusive)
       if (slotMin >= apptStart && slotMin < apptEnd) return true;
-      // Forward block (both exclusive) — 7:00 OK, 7:30 blocked for an 8:00 existing appt
+      // Forward block (both exclusive)
       if (slotMin > apptStart - NEW_APPT_FOOTPRINT_MIN && slotMin < apptStart) return true;
     }
     return false;

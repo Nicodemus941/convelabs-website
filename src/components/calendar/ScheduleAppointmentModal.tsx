@@ -10,6 +10,7 @@ import { Calendar, ArrowRight, Loader2, Crown, Search, UserPlus } from 'lucide-r
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
+import { getBufferMinutes } from '@/lib/bookingBuffer';
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -163,23 +164,17 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       try {
         const { data } = await supabase
           .from('appointments')
-          .select('appointment_time, status, duration_minutes, service_type')
+          .select('appointment_time, status, duration_minutes, service_type, address, family_group_id')
           .gte('appointment_date', `${date}T00:00:00`)
           .lte('appointment_date', `${date}T23:59:59`)
           .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']);
         if (cancelled) return;
 
-        // Bug fix 2026-04-25: previously this only marked the EXACT start
-        // time as TAKEN. A 10:00 AM × 75-min specialty-kit appointment was
-        // leaving 10:30, 11:00, 11:30 selectable when they're inside the
-        // appointment's busy window. Mirror availability.ts's bidirectional
-        // duration-aware blocking:
-        //   BACKWARD: 10:00 → 11:45 (start + duration + 30min mobile buffer)
-        //   FORWARD:  09:00 → 10:00 (a new 60-min slot ending at start)
-        const BUFFER_MIN_MOBILE = 30;
-        const BUFFER_MIN_OFFICE = 0;
-        const DEFAULT_DURATION_MIN = 30;
-        const NEW_APPT_FOOTPRINT_MIN = 60; // new 30-min slot + 30-min buffer
+        // Buffer math owner-confirmed 2026-04-27 — see src/lib/bookingBuffer.ts.
+        // Default 0; +30 specialty/therapeutic/aristotle, +30 extended-area,
+        // +15 same-address companion (family_group_id present).
+        const DEFAULT_DURATION_MIN = 60;
+        const NEW_APPT_FOOTPRINT_MIN = 60; // new 60-min slot, no buffer for the new appt itself
 
         const parseTimeStr = (t: string): number => {
           // Handles both "09:00:00" (24h) and "9:00 AM" (12h)
@@ -210,7 +205,11 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
           const startMin = parseTimeStr(String(row.appointment_time));
           if (startMin < 0) continue;
           const duration = (row.duration_minutes && row.duration_minutes > 0) ? row.duration_minutes : DEFAULT_DURATION_MIN;
-          const buffer = row.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+          const buffer = getBufferMinutes({
+            service_type: row.service_type,
+            address: row.address,
+            family_group_id: row.family_group_id,
+          });
           const apptEndMin = startMin + duration + buffer;
           // BACKWARD block — every 15-min slot from start (inclusive) to
           // start+duration+buffer (exclusive). 15-min step matches the new

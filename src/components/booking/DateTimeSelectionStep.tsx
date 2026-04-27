@@ -28,6 +28,7 @@ import { getMemberTier } from '@/lib/memberBenefits';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
+import { getBufferMinutes } from '@/lib/bookingBuffer';
 
 // US Government holidays - ConveLabs is closed on these dates
 function getBlockedHolidays(year: number): Date[] {
@@ -265,7 +266,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
         const { data, error: fetchError } = await supabase
           .from('appointments')
-          .select('appointment_date, appointment_time, service_type, duration_minutes, address, zipcode')
+          .select('appointment_date, appointment_time, service_type, duration_minutes, address, zipcode, family_group_id')
           .gte('appointment_date', `${dateStr}T00:00:00`)
           .lte('appointment_date', `${dateStr}T23:59:59`)
           .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
@@ -302,16 +303,14 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const maxPerSlot = staffCount || 1;
         const slotCounts = new Map<string, number>();
 
-        // Bug fix 2026-04-25: align with server's availability.ts. Previously
-        // this used 0-min buffer for non-extended-area cities, while the server
-        // uses 30-min buffer for ALL mobile appointments. Result: Blake's
-        // 10:00 × 75-min appt blocked through 11:15 here but 11:45 on server.
-        // Patient saw 11:30 as available, the last-mile guard rejected at
-        // booking time. Now both layers use identical bidirectional blocking.
-        const BUFFER_MIN_MOBILE = 30;
-        const BUFFER_MIN_OFFICE = 0;
-        const DEFAULT_DURATION_MIN = 30;
-        const NEW_APPT_FOOTPRINT_MIN = 60; // new 30-min slot + 30-min buffer
+        // Buffer math owner-confirmed 2026-04-27 — see src/lib/bookingBuffer.ts
+        // for the exact rules. Default mobile/in-office is 0 buffer; only
+        // specialty-kit / therapeutic / aristotle / extended-area / companion
+        // bookings extend the blocked window beyond `duration_minutes`.
+        // Identical helper is mirrored in supabase/functions/_shared/availability.ts
+        // so client + admin modal + server last-mile guard all agree.
+        const DEFAULT_DURATION_MIN = 60;
+        const NEW_APPT_FOOTPRINT_MIN = 60; // new 60-min slot, no buffer for the new appt itself
 
         data?.forEach((appt: any) => {
           if (!appt.appointment_time) return;
@@ -333,7 +332,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           const apptStartMin = startHour * 60 + startMin;
 
           const duration = (appt.duration_minutes && appt.duration_minutes > 0) ? appt.duration_minutes : DEFAULT_DURATION_MIN;
-          const buffer = appt.service_type === 'in-office' ? BUFFER_MIN_OFFICE : BUFFER_MIN_MOBILE;
+          const buffer = getBufferMinutes({
+            service_type: appt.service_type,
+            address: appt.address,
+            zipcode: appt.zipcode,
+            family_group_id: appt.family_group_id,
+          });
           const apptEndMin = apptStartMin + duration + buffer;
 
           // BACKWARD block — every 15-min slot where apptStart <= slot < apptEnd.
