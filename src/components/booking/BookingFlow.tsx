@@ -25,6 +25,7 @@ import BookingConfirmation from './BookingConfirmation';
 import BookingChatAssistant from './BookingChatAssistant';
 import PriceEstimateBadge from './PriceEstimateBadge';
 import BookingTrustBadges from './BookingTrustBadges';
+import SlotConflictModal from './SlotConflictModal';
 
 interface BookingFlowProps {
   tenantId?: string;
@@ -103,6 +104,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // Sub-step within combined steps
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLabOrder, setShowLabOrder] = useState(false);
+
+  // Slot-conflict modal state. Fires when create-appointment-checkout returns
+  // 409 slot_unavailable. Hormozi: never let a buyer leave empty-handed —
+  // surface 3 closest open times, allow inline retry, fall back to waitlist.
+  const [conflictModal, setConflictModal] = useState<{
+    open: boolean;
+    originalDate: string;
+    originalTime: string;
+    suggestedSlots: { time: string }[];
+    retrying: boolean;
+  }>({ open: false, originalDate: '', originalTime: '', suggestedSlots: [], retrying: false });
 
   // Animation direction
   const prevStepRef = useRef(0);
@@ -239,7 +251,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     setCurrentStep(target);
   };
 
+  // Remember the last checkout args so the SlotConflictModal can replay
+  // them with a different time without losing tip + promo state.
+  const lastCheckoutArgsRef = useRef<{ tipAmount: number; promoCode: string | null }>({ tipAmount: 0, promoCode: null });
+
   const handleCheckout = async (tipAmount: number, promoCode?: string | null) => {
+    lastCheckoutArgsRef.current = { tipAmount, promoCode: promoCode || null };
     try {
       setIsProcessing(true);
       const data = methods.getValues();
@@ -393,6 +410,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       } as any);
 
       if (result.error) {
+        // Slot conflict → surface the smart-suggestion modal instead of toast.
+        if ((result as any).errorCode === 'slot_unavailable') {
+          setConflictModal({
+            open: true,
+            originalDate: (result as any).original_date || appointmentDate,
+            originalTime: (result as any).original_time || data.time,
+            suggestedSlots: (result as any).suggested_slots || [],
+            retrying: false,
+          });
+          return;
+        }
         toast.error(result.error);
         return;
       }
@@ -408,6 +436,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // When the patient picks an alternative time inside the conflict modal,
+  // update the form's `time` field and re-fire handleCheckout. The modal
+  // shows a per-button spinner via the `retrying` flag.
+  const handlePickAlternativeSlot = async (newTime: string, tipAmount: number, promoCode: string | null) => {
+    setConflictModal(prev => ({ ...prev, retrying: true }));
+    methods.setValue('time', newTime);
+    // Give React one tick to commit the form change before retrying
+    await new Promise(res => setTimeout(res, 50));
+    setConflictModal({ open: false, originalDate: '', originalTime: '', suggestedSlots: [], retrying: false });
+    handleCheckout(tipAmount, promoCode);
   };
 
   // Animation variants
@@ -602,6 +642,24 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       {currentStep < BookingStep.Confirmation && (
         <BookingChatAssistant currentStep={currentStep} />
       )}
+
+      {/* Slot-conflict modal — fired by handleCheckout on 409 slot_unavailable */}
+      <SlotConflictModal
+        open={conflictModal.open}
+        originalDate={conflictModal.originalDate}
+        originalTime={conflictModal.originalTime}
+        suggestedSlots={conflictModal.suggestedSlots}
+        retrying={conflictModal.retrying}
+        isMember={memberTier !== 'none'}
+        patientEmail={methods.getValues('patientDetails.email')}
+        patientPhone={methods.getValues('patientDetails.phone')}
+        patientName={`${methods.getValues('patientDetails.firstName') || ''} ${methods.getValues('patientDetails.lastName') || ''}`.trim()}
+        onPickAlternative={(time) => {
+          const args = lastCheckoutArgsRef.current;
+          handlePickAlternativeSlot(time, args.tipAmount, args.promoCode);
+        }}
+        onClose={() => setConflictModal({ open: false, originalDate: '', originalTime: '', suggestedSlots: [], retrying: false })}
+      />
     </div>
   );
 };

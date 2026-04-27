@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { isSlotStillAvailable, getAvailableSlotsForDate } from '../_shared/availability.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -253,17 +254,34 @@ Deno.serve(async (req) => {
     // an active appointment OR held by an active slot_hold from another
     // session. If either is true, reject with a clear error BEFORE Stripe.
     if (appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-      // Check for existing scheduled/confirmed appointment on that slot
-      const { data: existingAppts } = await supabaseClient
-        .from('appointments')
-        .select('id, patient_name, appointment_time')
-        .gte('appointment_date', dateOnly)
-        .lte('appointment_date', `${dateOnly}T23:59:59`)
-        .eq('appointment_time', appointmentTime)
-        .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']);
+      // ─── DURATION-AWARE CONFLICT CHECK ──────────────────────────────
+      // Was previously: .eq('appointment_time', appointmentTime) — only
+      // caught EXACT start matches. Now reuse availability.ts which handles
+      // bidirectional duration + buffer blocking, so a 10:00 × 75-min appt
+      // correctly blocks 11:30 even though no appt starts at 11:30.
+      const stillOpen = await isSlotStillAvailable(supabaseClient, '', dateOnly, appointmentTime, null);
 
-      if (existingAppts && existingAppts.length > 0) {
-        console.warn(`[slot-conflict] ${patientDetails.email} tried to book ${dateOnly} ${appointmentTime} (taken by ${existingAppts[0].patient_name})`);
+      if (!stillOpen) {
+        // ─── SUGGEST 3 CLOSEST OPEN SLOTS (Hormozi: never let buyer leave
+        // empty-handed) ──────────────────────────────────────────────────
+        const allSlots = await getAvailableSlotsForDate(supabaseClient, '', dateOnly, null);
+        const parseMin = (t: string): number => {
+          const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
+          if (!m) return 0;
+          let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
+          if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+          if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+          return h * 60 + mm;
+        };
+        const wantedMin = parseMin(appointmentTime);
+        const suggestedSlots = (allSlots as any[])
+          .filter(s => s.available)
+          .map(s => ({ time: s.time, distance: Math.abs(parseMin(s.time) - wantedMin) }))
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 3)
+          .map(s => ({ time: s.time }));
+
+        console.warn(`[slot-conflict] ${patientDetails?.email} tried to book ${dateOnly} ${appointmentTime} — suggesting ${suggestedSlots.length} alternatives`);
         try {
           await supabaseClient.from('booking_audit_log').insert({
             stage: 'slot_conflict',
@@ -272,14 +290,17 @@ Deno.serve(async (req) => {
             client_appointment_time: appointmentTime,
             server_appointment_date: dateOnly,
             mismatch_detected: true,
-            mismatch_detail: `Slot already booked by existing appointment ${existingAppts[0].id}`,
+            mismatch_detail: `Duration-aware check rejected slot. Suggested: ${suggestedSlots.map(s => s.time).join(', ') || 'none'}`,
             raw_payload: rawPayload,
           });
         } catch { /* non-blocking */ }
         return new Response(
           JSON.stringify({
             error: 'slot_unavailable',
-            message: `That time slot (${dateOnly} at ${appointmentTime}) is no longer available. Please pick a different time.`,
+            message: 'That time slot was claimed in the last minute — pick another open time below.',
+            original_time: appointmentTime,
+            original_date: dateOnly,
+            suggested_slots: suggestedSlots,
           }),
           { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );

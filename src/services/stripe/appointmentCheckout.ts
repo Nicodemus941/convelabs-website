@@ -39,6 +39,13 @@ export interface AppointmentCheckoutResult {
   url?: string;
   sessionId?: string;
   error?: string;
+  // Slot-conflict structured payload (Hormozi: never let a buyer leave
+  // empty-handed). When error === 'slot_unavailable', the UI shows a
+  // suggestion modal with these alternatives + a "use this time" button.
+  errorCode?: string;
+  suggested_slots?: Array<{ time: string }>;
+  original_time?: string;
+  original_date?: string;
 }
 
 export async function createAppointmentCheckoutSession(
@@ -70,8 +77,18 @@ export async function createAppointmentCheckoutSession(
     }
 
     if (data.error) {
-      // Prefer the human-friendly message the edge fn provides (e.g. invalid
-      // promo code, $0-total guard) so toast copy stays actionable
+      // Slot-conflict gets the structured payload through so the UI can
+      // render alternatives. Other errors (invalid promo, $0-total guard)
+      // collapse to the friendly message.
+      if (data.error === 'slot_unavailable') {
+        return {
+          error: (data.message as string) || 'That time slot was just claimed.',
+          errorCode: 'slot_unavailable',
+          suggested_slots: data.suggested_slots || [],
+          original_time: data.original_time,
+          original_date: data.original_date,
+        };
+      }
       return { error: (data.message as string) || (data.error as string) };
     }
 
