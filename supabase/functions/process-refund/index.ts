@@ -193,6 +193,58 @@ Deno.serve(async (req) => {
       // Refund was issued but DB update failed — log but don't fail
     }
 
+    // ─── QB sync — update stripe_qb_sync_log so revenue reports
+    //     reflect the refund. Without this, QB shows the gross revenue
+    //     forever and a 24h Stripe-vs-ledger reconciliation drift.
+    try {
+      const { error: syncErr } = await supabaseClient
+        .from('stripe_qb_sync_log')
+        .update({ amount_refunded_cents: refundAmountCents })
+        .eq('appointment_id', appointmentId);
+      if (syncErr) console.warn('[refund] stripe_qb_sync_log update failed (non-blocking):', syncErr.message);
+    } catch (e) {
+      console.warn('[refund] sync_log update threw (non-blocking):', e);
+    }
+
+    // ─── Resolve admin actor for audit log (best-effort)
+    let actorUserId: string | null = null;
+    let actorEmail: string | null = null;
+    try {
+      const authHeader = req.headers.get('Authorization') || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (token) {
+        const { data: { user } } = await supabaseClient.auth.getUser(token);
+        actorUserId = user?.id || null;
+        actorEmail = user?.email || null;
+      }
+    } catch { /* anon caller — fine */ }
+
+    // ─── Audit log row — answers 'who refunded this and why?' for any
+    //     dispute or compliance review later. Non-blocking.
+    try {
+      await supabaseClient.from('invoice_audit_log' as any).insert({
+        appointment_id: appointmentId,
+        action: 'refunded',
+        actor_user_id: actorUserId,
+        actor_email: actorEmail,
+        stripe_payment_intent_id: appt.stripe_payment_intent_id,
+        amount_cents: refundAmountCents,
+        amount_before_cents: Math.round(totalPaid * 100),
+        amount_after_cents: Math.round((totalPaid - refundAmountDollars) * 100),
+        reason: reason || refundDescription,
+        metadata: {
+          refund_type: refundType,
+          stripe_refund_id: stripeRefund.id,
+          stripe_refund_status: stripeRefund.status,
+          patient_name: appt.patient_name,
+          patient_email: appt.patient_email,
+          is_full_refund: isFullRefund,
+        },
+      });
+    } catch (e) {
+      console.warn('[refund] audit log insert failed (non-blocking):', e);
+    }
+
     console.log(`Refund successful: ${stripeRefund.id} — $${refundAmountDollars} (${refundType})`);
 
     return new Response(JSON.stringify({

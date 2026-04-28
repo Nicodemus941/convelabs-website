@@ -219,6 +219,7 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('invoice_status', 'sent')
       .eq('is_vip', false)
+      .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
       .not('status', 'eq', 'cancelled');
 
     // Hormozi-safe: for recurring series (weekly draws, monthly physicals
@@ -300,6 +301,7 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('invoice_status', 'reminded')
       .eq('is_vip', false)
+      .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
       .not('status', 'eq', 'cancelled');
 
     for (const appt of (remindedAppts || [])) {
@@ -366,6 +368,7 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('invoice_status', 'final_warning')
       .eq('is_vip', false)
+      .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
       .not('status', 'eq', 'cancelled');
 
     for (const appt of (warningAppts || [])) {

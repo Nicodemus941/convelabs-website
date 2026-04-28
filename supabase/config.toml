@@ -145,6 +145,22 @@ verify_jwt = false  # pg_cron
 [functions.smoke-test-public-endpoints]
 verify_jwt = false  # pg_cron
 
+# Cron-only functions — owner-approved 2026-04-28. Same security profile
+# as the other ~15 cron-driven functions above. Pg_cron sends no JWT;
+# without this they 401 every run. No user-controlled input that could
+# be exploited; functions just read state and write to internal tables.
+[functions.detect-double-bookings]
+verify_jwt = false
+
+[functions.activity-monitor]
+verify_jwt = false
+
+[functions.provider-outreach-scheduler]
+verify_jwt = false
+
+[functions.reconcile-invoice-payments]
+verify_jwt = false
+
 [functions.training-search]
 verify_jwt = true
 
