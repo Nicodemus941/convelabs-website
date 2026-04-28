@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
+import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea } from '@/services/pricing/pricingService';
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -432,7 +433,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   if (date && [0, 6].includes(new Date(date + 'T12:00:00').getDay())) previewSurcharges.push({ label: 'Weekend', amount: 75 });
   if (time && (() => { const [t, p] = time.split(' '); const h = parseInt(t); return (p === 'PM' && h !== 12 ? h + 12 : h) >= 17; })()) previewSurcharges.push({ label: 'After-Hours', amount: 50 });
   if (date === new Date().toISOString().split('T')[0]) previewSurcharges.push({ label: 'Same-Day', amount: 100 });
-  const previewBasePrice = SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150;
+  const previewBasePrice = getServicePrice(serviceType, 'none');
   const previewSurchargeTotal = previewSurcharges.reduce((s, x) => s + x.amount, 0);
   // Companion price: tier-aware. Non-member $75, Member $55, VIP $45, Concierge $35.
   const companionPrice = (() => {
@@ -485,24 +486,23 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       const appointmentDate = `${date}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
       // Calculate price with surcharges + discount
+      // PRICING — single source of truth via pricingService (audit 2026-04-28).
+      // Replaces the modal's local SERVICE_TYPES + MEMBER_TIER_PRICING which
+      // didn't cover partner services and was the root cause of the kiturah
+      // doward bug (booked as specialty-kit $185 instead of partner-nd-wellness
+      // $85). pricingService handles all 11 services + 5 partner orgs uniformly.
+      // svc is still used for the human-readable label below; price comes from
+      // pricingService.
       const svc = SERVICE_TYPES.find(s => s.value === serviceType);
-      // AUTO-APPLY member tier pricing — admin doesn't have to remember discounts
-      const MEMBER_TIER_PRICING: Record<string, Record<string, number>> = {
-        'mobile':               { member: 130, vip: 115, concierge: 99 },
-        'in-office':            { member: 49,  vip: 45,  concierge: 39 },
-        'senior':               { member: 85,  vip: 75,  concierge: 65 },
-        'specialty-kit':        { member: 165, vip: 150, concierge: 135 },
-        'specialty-kit-genova': { member: 180, vip: 165, concierge: 150 },
-        'therapeutic':          { member: 180, vip: 165, concierge: 150 },
-      };
-      const listPrice = svc?.price || 150;
-      const tierPrice = detectedTier !== 'none' ? (MEMBER_TIER_PRICING[serviceType]?.[detectedTier] || listPrice) : listPrice;
+      const listPrice = getServicePrice(serviceType, 'none');
+      const tierPrice = detectedTier !== 'none'
+        ? getServicePrice(serviceType, detectedTier as any)
+        : listPrice;
       const basePrice = tierPrice;
       const memberSavings = detectedTier !== 'none' ? (listPrice - tierPrice) : 0;
 
-      // Auto-detect surcharges
-      const EXTENDED_CITIES = ['lake nona','celebration','kissimmee','sanford','eustis','clermont','montverde','deltona','geneva','tavares','mount dora','leesburg','groveland','mascotte','minneola','daytona beach','deland','debary','orange city'];
-      const isExtendedArea = EXTENDED_CITIES.some(c => city.toLowerCase().includes(c));
+      // Auto-detect surcharges — uses canonical extended-area helper.
+      const isInExtendedArea = isExtendedArea(city);
       const appointmentDay = date ? new Date(date + 'T12:00:00').getDay() : 1;
       const isWeekend = appointmentDay === 0 || appointmentDay === 6;
       const isAfterHours = time && (() => {
@@ -515,7 +515,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       let surchargeTotal = 0;
       const surchargeItems: string[] = [];
-      if (isExtendedArea) { surchargeTotal += 75; surchargeItems.push('Extended area +$75'); }
+      if (isInExtendedArea) { surchargeTotal += 75; surchargeItems.push('Extended area +$75'); }
       if (isWeekend) { surchargeTotal += 75; surchargeItems.push('Weekend +$75'); }
       if (isAfterHours) { surchargeTotal += 50; surchargeItems.push('After-hours +$50'); }
       if (isSameDay) { surchargeTotal += 100; surchargeItems.push('Same-day +$100'); }
@@ -1288,7 +1288,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                   {discountValue && (
                     <p className="text-xs text-emerald-600 mt-1 font-medium">
                       Final price: ${(() => {
-                        const base = SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150;
+                        const base = getServicePrice(serviceType, 'none');
                         if (discountType === 'percentage') return Math.round(base * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100;
                         return Math.max(base - (parseFloat(discountValue) || 0), 0);
                       })().toFixed(2)}
@@ -1305,7 +1305,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               )}
               {discountType === 'none' && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  Stripe invoice for <span className="font-semibold">${SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150}</span> → {patientEmail || 'patient email'}
+                  Stripe invoice for <span className="font-semibold">${getServicePrice(serviceType, 'none')}</span> → {patientEmail || 'patient email'}
                 </p>
               )}
             </div>
@@ -1524,7 +1524,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             </div>
 
             {!discountType || discountType === 'none' ? (
-              <p className="text-xs text-muted-foreground text-center">An invoice for ${SERVICE_TYPES.find(s => s.value === serviceType)?.price || 150} will be sent to the patient via Stripe.</p>
+              <p className="text-xs text-muted-foreground text-center">An invoice for ${getServicePrice(serviceType, 'none')} will be sent to the patient via Stripe.</p>
             ) : discountType === 'waive' ? (
               <p className="text-xs text-emerald-600 text-center">Fee waived — no invoice will be sent.</p>
             ) : null}

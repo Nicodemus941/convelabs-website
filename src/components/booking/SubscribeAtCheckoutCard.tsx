@@ -6,6 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import MembershipAgreementDialog from '@/components/membership/MembershipAgreementDialog';
 import FoundingSeatsCounter from '@/components/membership/FoundingSeatsCounter';
+import { getServicePrice } from '@/services/pricing/pricingService';
 
 /**
  * SUBSCRIBE-AT-CHECKOUT CARD — inline Hormozi upsell surface on the booking flow.
@@ -41,15 +42,9 @@ interface Props {
   }) => void;
 }
 
-// Must match the list in src/lib/memberBenefits.ts + server-side TIER_PRICING
-const TIER_PRICING: Record<string, { member: number; vip: number; concierge: number }> = {
-  'mobile':               { member: 13000, vip: 11500, concierge: 9900 },
-  'in-office':            { member: 4900,  vip: 4500,  concierge: 3900 },
-  'senior':               { member: 8500,  vip: 7500,  concierge: 6500 },
-  'specialty-kit':        { member: 16500, vip: 15000, concierge: 13500 },
-  'specialty-kit-genova': { member: 18000, vip: 16500, concierge: 15000 },
-  'therapeutic':          { member: 18000, vip: 16500, concierge: 15000 },
-};
+// Pricing comes from canonical pricingService — see audit 2026-04-28.
+// Local table here only covered 6 services and missed all 5 partner orgs;
+// member upsell wasn't quoting correct savings on partner-routed bookings.
 
 const TIERS = [
   { planName: 'Regular' as const, shortName: 'Regular', key: 'member' as const, annualCents: 9900, color: 'emerald', icon: Sparkles },
@@ -64,16 +59,17 @@ const SubscribeAtCheckoutCard: React.FC<Props> = ({ patientEmail, patientName, s
   const [selectedTier, setSelectedTier] = useState<typeof TIERS[number] | null>(null);
   const [submittingAgreement, setSubmittingAgreement] = useState(false);
 
-  // Calculate savings per tier for this specific visit
+  // Calculate savings per tier for this specific visit. Uses pricingService
+  // as the single source of truth — handles all 11 services + 5 partner orgs
+  // uniformly, so partner-referred patients see correct upsell savings.
   const savings = useMemo(() => {
-    const svcKey = serviceType in TIER_PRICING ? serviceType : 'mobile';
-    const prices = TIER_PRICING[svcKey];
     return TIERS.map((t) => {
-      const thisVisit = prices[t.key];
-      const savedOnThisVisit = Math.max(0, serviceBaseCents - thisVisit);
+      const tierDollars = getServicePrice(serviceType, t.key);
+      const thisVisitCents = Math.round(tierDollars * 100);
+      const savedOnThisVisit = Math.max(0, serviceBaseCents - thisVisitCents);
       return {
         ...t,
-        thisVisitCents: thisVisit,
+        thisVisitCents,
         savingsThisVisit: savedOnThisVisit,
       };
     });
