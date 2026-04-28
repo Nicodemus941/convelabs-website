@@ -70,9 +70,14 @@ function readUserIdFromLocalStorage(): string | null {
   } catch { return null; }
 }
 
+// Build version marker — bump this any time we ship a checkout-flow fix.
+// Lets you confirm in DevTools whether a stale bundle is being served.
+const CHECKOUT_VERSION = '2026-04-28-v3-direct-fetch';
+
 export async function createAppointmentCheckoutSession(
   params: AppointmentCheckoutParams
 ): Promise<AppointmentCheckoutResult> {
+  console.log(`[checkout ${CHECKOUT_VERSION}] starting...`);
   try {
     // H2: pull last-touch attribution (UTMs, referrer, landing page) from
     // sessionStorage so every Stripe checkout + downstream appointment row
