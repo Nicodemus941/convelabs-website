@@ -1,35 +1,20 @@
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.8.0';
-
-export const setupDatabaseFunctions = async (supabaseClient: any) => {
-  // Create function to safely get scheduled campaigns
-  await supabaseClient.sql`
-    CREATE OR REPLACE FUNCTION get_scheduled_campaigns()
-    RETURNS SETOF scheduled_campaigns
-    LANGUAGE sql
-    SECURITY DEFINER
-    AS $$
-      SELECT * FROM scheduled_campaigns ORDER BY scheduled_for ASC;
-    $$;
-  `;
-  
-  // Create function to safely delete a scheduled campaign
-  await supabaseClient.sql`
-    CREATE OR REPLACE FUNCTION delete_scheduled_campaign(campaign_id UUID)
-    RETURNS boolean
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
-    DECLARE
-      deleted_count integer;
-    BEGIN
-      DELETE FROM scheduled_campaigns 
-      WHERE id = campaign_id 
-      AND status = 'scheduled';
-      
-      GET DIAGNOSTICS deleted_count = ROW_COUNT;
-      RETURN deleted_count > 0;
-    END;
-    $$;
-  `;
+/**
+ * setupDatabaseFunctions — DEPRECATED no-op.
+ *
+ * Originally tried to CREATE the get_scheduled_campaigns() and
+ * delete_scheduled_campaign() helpers at runtime via
+ * `supabaseClient.sql\`...\`` — but `.sql()` is not a method on
+ * supabase-js (it exists in some other client libs). Every call
+ * threw `supabaseClient.sql is not a function` and produced a 500,
+ * which silently broke the 15-min process-scheduled-campaigns cron
+ * for who-knows-how-long.
+ *
+ * The two helper functions are now created via the
+ * scheduled_campaigns_helper_functions migration (2026-04-28).
+ * This file remains as a no-op so existing imports don't break.
+ * Safe to remove the imports + this file in a follow-up cleanup.
+ */
+export const setupDatabaseFunctions = async (_supabaseClient: unknown): Promise<void> => {
+  // No-op. See header comment.
+  return;
 };
