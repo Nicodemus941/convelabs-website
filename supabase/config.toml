@@ -161,6 +161,9 @@ verify_jwt = false
 [functions.reconcile-invoice-payments]
 verify_jwt = false
 
+[functions.retry-failed-emails]
+verify_jwt = false  # pg_cron, every 15 min
+
 [functions.training-search]
 verify_jwt = true
 

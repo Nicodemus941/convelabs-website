@@ -30,6 +30,12 @@ export interface LogOrgEmailArgs {
   mailgunResponse?: Response;         // pass the raw Response to capture id + status
   status?: 'sent' | 'failed' | 'bounced' | 'complained' | 'opened' | 'clicked';
   sentBy?: string | null;              // auth.users.id that triggered the send
+  // For retry support — when present and Mailgun returned non-OK, the
+  // retry-failed-emails cron will replay this payload via the named
+  // edge function on a 5/10/20/40/80-min backoff (max 5 attempts).
+  // Leave NULL for one-shot blasts so we don't hammer recipients.
+  retryPayload?: Record<string, unknown> | null;
+  errorMessage?: string | null;        // captured when status='failed'
 }
 
 /**
@@ -72,8 +78,15 @@ export async function logOrgEmail(supabase: any, args: LogOrgEmailArgs): Promise
     // Capture Mailgun message id if response provided
     let mailgunId: string | null = null;
     let status: string = args.status || 'sent';
+    let errorMessage: string | null = args.errorMessage || null;
     if (args.mailgunResponse) {
-      if (!args.mailgunResponse.ok) status = 'failed';
+      if (!args.mailgunResponse.ok) {
+        status = 'failed';
+        try {
+          const errBody = await args.mailgunResponse.clone().text();
+          errorMessage = `HTTP ${args.mailgunResponse.status}: ${errBody.substring(0, 500)}`;
+        } catch { errorMessage = `HTTP ${args.mailgunResponse.status}`; }
+      }
       try {
         const body = await args.mailgunResponse.clone().json();
         mailgunId = String((body as any)?.id || '').replace(/[<>]/g, '') || null;
@@ -98,6 +111,11 @@ export async function logOrgEmail(supabase: any, args: LogOrgEmailArgs): Promise
       mailgun_id: mailgunId,
       sent_by: args.sentBy || null,
       sent_at: new Date().toISOString(),
+      appointment_id: args.appointmentId || null,
+      // Only set retry_payload when send failed AND caller provided one
+      retry_payload: status === 'failed' && args.retryPayload ? args.retryPayload : null,
+      last_attempt_at: new Date().toISOString(),
+      last_error: errorMessage,
     } as any);
   } catch (e) {
     // Never block the caller on logging failure
