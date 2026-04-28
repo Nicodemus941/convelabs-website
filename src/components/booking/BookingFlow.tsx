@@ -424,8 +424,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       } as any);
 
       if (result.error) {
-        // Slot conflict → surface the smart-suggestion modal instead of toast.
-        if ((result as any).errorCode === 'slot_unavailable') {
+        // Hormozi rule: never let a buyer leave empty-handed. Every error
+        // gets a clear plain-English message + a specific recovery action.
+        const code = (result as any).errorCode || '';
+        const goToDateTime = () => {
+          setShowLabOrder(false);
+          setShowDatePicker(true);
+          prevStepRef.current = currentStep;
+          setCurrentStep(BookingStep.ServiceAndDate);
+        };
+
+        if (code === 'slot_unavailable') {
+          // Smart-suggestion modal with 3 alternatives + waitlist fallback
           setConflictModal({
             open: true,
             originalDate: (result as any).original_date || appointmentDate,
@@ -435,18 +445,91 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           });
           return;
         }
-        toast.error(result.error);
+
+        if (code === 'destination_required') {
+          toast.error('Pick where you want your specimen delivered (LabCorp, Quest, AdventHealth, etc.) before checkout.', {
+            duration: 8000,
+            action: { label: 'Pick lab', onClick: goToDateTime },
+          });
+          goToDateTime();
+          return;
+        }
+
+        if (code === 'fasting_not_required') {
+          toast.warning("Your lab order doesn't require fasting — we'll switch you to a routine draw and reopen the slot picker.", {
+            duration: 8000,
+          });
+          goToDateTime();
+          return;
+        }
+
+        if (code === 'date_blocked') {
+          toast.error('That day isn\'t available (holiday or office closure). Please pick a different date.', {
+            duration: 7000,
+            action: { label: 'Pick another date', onClick: goToDateTime },
+          });
+          goToDateTime();
+          return;
+        }
+
+        if (code === 'outside_partner_window' || code === 'outside_booking_window') {
+          // Server-supplied message contains the actual hours
+          toast.error(result.error || 'That time is outside our booking hours. Please pick a different time.', {
+            duration: 9000,
+            action: { label: 'Pick another time', onClick: goToDateTime },
+          });
+          goToDateTime();
+          return;
+        }
+
+        if (code === 'invalid_promo_code') {
+          toast.error(result.error || "We couldn't apply that promo code. Please remove it and try again, or use a different code.", {
+            duration: 8000,
+          });
+          return; // stay on checkout — patient can edit/remove the promo code inline
+        }
+
+        if (code === 'total_too_low') {
+          toast.error("Something's off with the total. Please refresh the page and try again — if it keeps happening, call (941) 527-9169 and we'll book you over the phone.", {
+            duration: 10000,
+          });
+          return;
+        }
+
+        if (code === 'auth_error' || code === 'no_staff_profile') {
+          toast.error(result.error || 'Account issue — please sign out and back in, or call (941) 527-9169.', {
+            duration: 8000,
+          });
+          return;
+        }
+
+        // Unknown server error — friendly fallback. Never show raw
+        // 'Edge Function returned a non-2xx status code' to a patient.
+        const msg = result.error && !result.error.includes('non-2xx')
+          ? result.error
+          : "We hit a hiccup creating your booking. Please try again in a moment, or call (941) 527-9169 to book by phone.";
+        toast.error(msg, {
+          duration: 9000,
+          action: { label: 'Call (941) 527-9169', onClick: () => { window.location.href = 'tel:+19415279169'; } },
+        });
         return;
       }
 
       if (result.url) {
         window.location.href = result.url;
       } else {
-        toast.error('Failed to create checkout session');
+        toast.error("We couldn't reach Stripe. Please try again — or call (941) 527-9169 to book by phone.", {
+          duration: 9000,
+          action: { label: 'Call', onClick: () => { window.location.href = 'tel:+19415279169'; } },
+        });
       }
     } catch (error) {
       console.error('Checkout error:', error);
-      toast.error(`Checkout failed: ${(error as Error).message}`);
+      const msg = (error as Error).message || 'unknown error';
+      toast.error(`Checkout failed: ${msg}. Please try again — or call (941) 527-9169 if it keeps happening.`, {
+        duration: 10000,
+        action: { label: 'Call', onClick: () => { window.location.href = 'tel:+19415279169'; } },
+      });
     } finally {
       setIsProcessing(false);
     }

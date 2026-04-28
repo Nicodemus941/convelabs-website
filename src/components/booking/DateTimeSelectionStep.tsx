@@ -686,6 +686,67 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         return null;
                       })()}
                     </div>
+                  ) : activeWindows.length > 0 && activeWindows.every(w => bookedSlots.has(w.time) || heldSlots.has(w.time)) ? (
+                    /* Empty-state: every slot for this date is booked or held.
+                       Hormozi: never let the buyer leave empty-handed — always
+                       offer the next move (waitlist + try another date). */
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center space-y-3">
+                      <p className="text-sm font-semibold text-amber-900">All slots are taken for {selectedDate ? format(selectedDate, 'EEEE, MMM d') : 'this day'}.</p>
+                      <p className="text-xs text-amber-800">Try the next day, or join the waitlist — we'll text you the moment a slot opens up.</p>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="text-xs border-amber-400 text-amber-900 hover:bg-amber-100"
+                          onClick={() => {
+                            if (selectedDate) {
+                              const next = addDays(selectedDate, 1);
+                              setValue('date', next, { shouldValidate: true });
+                            }
+                          }}
+                        >
+                          Try {selectedDate ? format(addDays(selectedDate, 1), 'EEE MMM d') : 'next day'} →
+                        </Button>
+                        {selectedDate && (
+                          <JoinWaitlistButton
+                            dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+                            desiredTime={selectedTime || ''}
+                            variant="subtle"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ) : activeWindows.length === 0 ? (
+                    /* No slots offered at all — usually means the date is
+                       outside business hours (e.g., Sunday non-AdventHealth)
+                       or the lab destination has a same-day cutoff already passed. */
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center space-y-2">
+                      <p className="text-sm font-semibold text-gray-800">No available times for this day.</p>
+                      <p className="text-xs text-gray-600">
+                        {isAdventHealth
+                          ? 'Try a different date.'
+                          : isWeekend
+                          ? 'We have limited weekend hours — try a weekday or pick AdventHealth as your lab (open 7 days).'
+                          : labDestination && labDestination !== 'pending-doctor-confirmation'
+                          ? `${labDestination === 'quest' || labDestination === 'quest_diagnostics' ? 'Quest' : labDestination === 'labcorp' || labDestination === 'labcorp_extended' ? 'LabCorp' : 'Your lab'} closes early — pick a different date or switch to AdventHealth (24/7).`
+                          : 'Pick a different date.'}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => {
+                          if (selectedDate) {
+                            const next = addDays(selectedDate, 1);
+                            setValue('date', next, { shouldValidate: true });
+                          }
+                        }}
+                      >
+                        Try the next day →
+                      </Button>
+                    </div>
                   ) : (
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 sm:gap-2">
                       {activeWindows.map((window) => {
@@ -760,19 +821,11 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                                 return;
                               }
 
-                              // Release previous hold if exists
-                              if (holdId) {
-                                await supabase.from('slot_holds' as any).update({ released: true }).eq('id', holdId);
-                              }
-
                               field.onChange(window.time);
-
-                              // slot_holds REMOVED 2026-04-28 — was creating
-                              // session-keyed rows that the server check then
-                              // rejected as 'held by another session' when the
-                              // same patient hit Pay (self-blocking). Real
-                              // race-condition protection is in
-                              // isSlotStillAvailable() server-side now.
+                              // slot_holds REMOVED 2026-04-28 — server no
+                              // longer consults them; client no longer creates
+                              // them. Race-condition protection lives in
+                              // isSlotStillAvailable() at create-appointment-checkout.
                             }}
                             disabled={isUnavailable}
                           >
