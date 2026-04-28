@@ -359,22 +359,13 @@ export function usePhlebotomistAppointments() {
     fetchMonthAppointments();
   }, [fetchMonthAppointments]);
 
-  // Refetch when the PWA tab regains focus. Without this, an admin
-  // scheduling a manual appointment never showed up on the phleb's
-  // calendar until they navigated months or closed+reopened.
-  useEffect(() => {
-    const handler = () => {
-      if (document.visibilityState === 'visible') {
-        fetchMonthAppointments();
-      }
-    };
-    document.addEventListener('visibilitychange', handler);
-    window.addEventListener('focus', handler);
-    return () => {
-      document.removeEventListener('visibilitychange', handler);
-      window.removeEventListener('focus', handler);
-    };
-  }, [fetchMonthAppointments]);
+  // NOTE: visibility/focus refetch was previously here but caused a
+  // loading flash on every PWA resume that reset the user's scroll
+  // position + closed any expanded patient card. The realtime
+  // postgres_changes subscription below already keeps the appointment
+  // list fresh, so the explicit refetch was redundant. Patients can
+  // pull-to-refresh or hit the manual refresh button if they suspect
+  // staleness after long offline periods.
 
   // Realtime push: subscribe to INSERT/UPDATE on appointments scoped
   // to this phleb. Any new manual booking by admin pushes to the PWA

@@ -96,41 +96,82 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
     load();
   }, [appointments]);
 
-  // Load messages for a specific patient conversation filtered by phone
+  // Load messages for a specific patient conversation filtered by phone.
+  // Source-of-truth for SMS history is `notification_logs` (387 rows on
+  // 2026-04-28) where every SMS the system sends is logged with
+  // recipient_phone, message, and sent_at. The legacy `sms_notifications`
+  // (only ETA/lab pings) and `sms_messages` (empty conversation table) are
+  // kept as secondary sources for back-compat.
   const loadMessages = useCallback(async (conv: Conversation) => {
     try {
       const allMsgs: Message[] = [];
       const normalizedPhone = conv.patient_phone.replace(/\D/g, '');
-      const phoneVariants = [conv.patient_phone, `+1${normalizedPhone}`, normalizedPhone];
+      const last10 = normalizedPhone.slice(-10);
 
-      // Load from sms_notifications (outbound messages sent to this patient)
-      const { data: notifs } = await supabase
-        .from('sms_notifications' as any)
-        .select('*')
-        .order('created_at', { ascending: true });
+      // Phone match helper: normalize both sides to last 10 digits
+      const phoneMatches = (raw: string | null | undefined): boolean => {
+        if (!raw || !last10) return false;
+        return raw.replace(/\D/g, '').endsWith(last10);
+      };
 
-      if (notifs) {
-        (notifs as any[]).forEach((m: any) => {
-          const msgPhone = (m.phone_number || '').replace(/\D/g, '');
-          if (phoneVariants.some(p => p.replace(/\D/g, '') === msgPhone)) {
-            allMsgs.push({
-              id: m.id,
-              direction: 'outbound',
-              body: m.message_content || '',
-              created_at: m.created_at,
-            });
-          }
+      // PRIMARY — notification_logs (every SMS the system sends)
+      const { data: logs } = await supabase
+        .from('notification_logs' as any)
+        .select('id, notification_type, recipient_phone, message, sent_at, created_at, status')
+        .ilike('notification_type', '%sms%')
+        .order('created_at', { ascending: true })
+        .limit(2000);
+      if (logs) {
+        (logs as any[]).forEach((m: any) => {
+          if (!phoneMatches(m.recipient_phone)) return;
+          allMsgs.push({
+            id: m.id,
+            direction: 'outbound', // notification_logs is system → patient
+            body: m.message || '',
+            created_at: m.sent_at || m.created_at,
+          });
         });
       }
 
-      // Load from sms_messages (conversation-based messages)
+      // SECONDARY — sms_notifications (legacy ETA / lab pings)
+      const { data: notifs } = await supabase
+        .from('sms_notifications' as any)
+        .select('id, phone_number, message_content, sent_at')
+        .order('sent_at', { ascending: true });
+      if (notifs) {
+        (notifs as any[]).forEach((m: any) => {
+          if (!phoneMatches(m.phone_number)) return;
+          allMsgs.push({
+            id: m.id,
+            direction: 'outbound',
+            body: m.message_content || '',
+            created_at: m.sent_at,
+          });
+        });
+      }
+
+      // TERTIARY — sms_messages (conversation table, currently empty but
+      // ready for inbound replies via Twilio webhook)
       const { data: convMsgs } = await supabase
         .from('sms_messages' as any)
-        .select('*')
+        .select('id, conversation_id, direction, body, created_at')
         .order('created_at', { ascending: true });
-
       if (convMsgs) {
+        // Build a phone lookup by conversation_id
+        const convoIds = Array.from(new Set((convMsgs as any[]).map((m: any) => m.conversation_id).filter(Boolean)));
+        let phoneByConvoId = new Map<string, string>();
+        if (convoIds.length > 0) {
+          const { data: convos } = await supabase
+            .from('sms_conversations' as any)
+            .select('id, patient_phone')
+            .in('id', convoIds);
+          if (convos) {
+            (convos as any[]).forEach((c: any) => phoneByConvoId.set(c.id, c.patient_phone || ''));
+          }
+        }
         (convMsgs as any[]).forEach((m: any) => {
+          const convoPhone = phoneByConvoId.get(m.conversation_id) || '';
+          if (!phoneMatches(convoPhone)) return;
           allMsgs.push({
             id: m.id,
             direction: m.direction || 'outbound',
@@ -147,7 +188,8 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         .filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
 
       setMessages(unique);
-    } catch {
+    } catch (err) {
+      console.warn('[messages] load failed:', err);
       setMessages([]);
     }
   }, []);
