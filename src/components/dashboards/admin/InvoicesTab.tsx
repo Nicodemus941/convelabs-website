@@ -154,23 +154,38 @@ const InvoicesTab: React.FC = () => {
   };
 
   const handleVoidInvoice = async (invoice: Invoice) => {
-    if (!confirm('Void this invoice? The appointment will remain but the invoice will be cancelled.')) return;
-    const { error } = await supabase.from('appointments').update({
-      invoice_status: 'cancelled',
-    }).eq('id', invoice.id);
-    if (error) { toast.error('Failed to void'); return; }
+    if (!confirm('Void this invoice? The appointment will remain but the invoice will be cancelled on Stripe + ConveLabs.')) return;
+    const reason = prompt('Reason for voiding (optional, for audit log):') || '';
 
-    // Void on Stripe if exists
-    if (invoice.stripe_invoice_id) {
-      try {
-        await supabase.functions.invoke('send-email', {
-          body: { to: 'system', subject: 'void-stripe-invoice', html: invoice.stripe_invoice_id },
-        });
-      } catch { /* non-blocking */ }
+    try {
+      // Real void: calls Stripe.invoices.voidInvoice() + updates DB +
+      // writes to invoice_audit_log. Replaces the prior fake email-based
+      // void path that left zombie invoices on Stripe with status='sent'.
+      const { data, error } = await supabase.functions.invoke('void-stripe-invoice', {
+        body: { appointmentId: invoice.id, reason },
+      });
+      if (error) {
+        // Try to surface the structured error message from the function
+        const ctx = (error as any).context;
+        let msg = error.message || 'Void failed';
+        if (ctx && typeof ctx.json === 'function') {
+          try { const body = await ctx.json(); msg = body?.message || msg; } catch { /* keep msg */ }
+        }
+        toast.error(msg, { duration: 8000 });
+        return;
+      }
+      const before = (data as any)?.stripe_status_before;
+      const after = (data as any)?.stripe_status_after;
+      toast.success(
+        invoice.stripe_invoice_id
+          ? `Invoice voided · Stripe: ${before || 'unknown'} → ${after || 'void'}`
+          : 'Invoice marked voided in ConveLabs'
+      );
+      fetchInvoices();
+    } catch (e: any) {
+      console.error('[void-invoice]', e);
+      toast.error(`Void failed: ${e?.message || 'unknown'}. Try again or check Stripe directly.`, { duration: 8000 });
     }
-
-    toast.success('Invoice voided');
-    fetchInvoices();
   };
 
   const handleResendInvoice = async (invoice: Invoice) => {
