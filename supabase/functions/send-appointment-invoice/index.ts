@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     // is marked org-billed we route to the org's Stripe customer + email.
     const { data: appt, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, billed_to, organization_id, patient_name, patient_email, patient_phone, patient_name_masked, org_reference_id')
+      .select('id, billed_to, organization_id, patient_name, patient_email, patient_phone, patient_name_masked, org_reference_id, family_group_id, total_amount')
       .eq('id', appointmentId)
       .maybeSingle();
     if (apptErr || !appt) {
@@ -187,7 +187,7 @@ Deno.serve(async (req) => {
       },
     });
 
-    // Add line item
+    // Add primary line item
     await stripe.invoiceItems.create({
       customer: customerId,
       invoice: invoice.id,
@@ -195,6 +195,61 @@ Deno.serve(async (req) => {
       currency: 'usd',
       description: `${serviceName || serviceType || 'Mobile Blood Draw'} — ${patientLabel} — ${appointmentDate || ''}${appointmentTime ? ` at ${appointmentTime}` : ''}`,
     });
+
+    // ─── COMPANION LINE ITEMS — when this appointment has companions
+    // booked under the same family_group_id (same household, same visit
+    // window), add ONE Stripe line item per companion so the invoice
+    // explicitly shows what each charge covers. Without this, the
+    // primary invoice carries one merged amount and patients can't
+    // tell what they paid for; org-billed accounts have no per-patient
+    // attribution. We only add lines for sibling appointments that
+    // are NOT yet invoiced themselves (no stripe_invoice_id) — prevents
+    // double-billing if companions were already invoiced separately.
+    let companionTotalCents = 0;
+    if (appt.family_group_id) {
+      try {
+        const { data: companions } = await supabase
+          .from('appointments')
+          .select('id, patient_name, total_amount, service_type, appointment_date, appointment_time, stripe_invoice_id, invoice_status')
+          .eq('family_group_id', appt.family_group_id)
+          .neq('id', appointmentId)
+          .is('stripe_invoice_id', null)
+          .not('invoice_status', 'eq', 'cancelled')
+          .not('invoice_status', 'eq', 'paid');
+
+        for (const c of (companions || [])) {
+          const cAmt = Math.round(Number((c as any).total_amount || 0) * 100);
+          if (cAmt < 50) continue; // Stripe min line-item amount
+          const cName = (c as any).patient_name || 'Family member';
+          const cDate = (c as any).appointment_date || appointmentDate || '';
+          const cTime = (c as any).appointment_time || '';
+          await stripe.invoiceItems.create({
+            customer: customerId,
+            invoice: invoice.id,
+            amount: cAmt,
+            currency: 'usd',
+            description: `Family member visit — ${cName} — ${cDate}${cTime ? ` at ${cTime}` : ''}`,
+            metadata: { companion_appointment_id: (c as any).id, family_group_id: appt.family_group_id },
+          });
+          companionTotalCents += cAmt;
+
+          // Mark companion appointment as invoiced under the primary's
+          // Stripe invoice so it doesn't get a second invoice from the
+          // dunning cron or a manual resend later.
+          await supabase.from('appointments').update({
+            stripe_invoice_id: invoice.id,
+            invoice_status: 'sent',
+            invoice_sent_at: new Date().toISOString(),
+            notes: `${(c as any).notes || ''}\n[invoice ${invoice.id} — billed via primary ${appointmentId}]`.trim().substring(0, 1000),
+          }).eq('id', (c as any).id);
+        }
+        if (companionTotalCents > 0) {
+          console.log(`[send-invoice] added ${(companions || []).length} companion line items totaling $${(companionTotalCents/100).toFixed(2)} to invoice ${invoice.id}`);
+        }
+      } catch (companionErr) {
+        console.warn('[send-invoice] companion line-items failed (non-blocking):', companionErr);
+      }
+    }
 
     // Finalize + send (Stripe emails the invoice to the customer on file,
     // which is the ORG for org-billed and the PATIENT for patient-billed)
