@@ -375,11 +375,35 @@ const AdminCalendar: React.FC = () => {
   // Filter: always hide cancelled appointments from the calendar
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const [currentView, setCurrentView] = useState(isMobile ? 'timeGridDay' : 'timeGridWeek');
-  const visibleAppointments = appointments.filter(a => a.status !== 'cancelled');
+  const nonCancelled = appointments.filter(a => a.status !== 'cancelled');
+
+  // Family-group dedupe: when a household books multiple patients in the
+  // same visit, the modal creates one primary row + one row per companion
+  // (linked by family_group_id, companion_role set on the children). The
+  // calendar should show ONE block at the visit time with all patient names
+  // — not a separate event per patient.
+  // Convention: primary row has id === family_group_id (or family_group_id NULL).
+  // Companion rows have family_group_id pointing to the primary's id.
+  const companionsByGroup = new Map<string, string[]>();
+  for (const a of nonCancelled) {
+    if (a.family_group_id && a.id !== a.family_group_id && a.companion_role) {
+      const list = companionsByGroup.get(a.family_group_id) || [];
+      list.push(a.patient_name || 'Companion');
+      companionsByGroup.set(a.family_group_id, list);
+    }
+  }
+  const visibleAppointments = nonCancelled.filter(a =>
+    !a.family_group_id || a.id === a.family_group_id || !a.companion_role
+  );
 
   // Convert appointments to FullCalendar events
   const calendarEvents = visibleAppointments.map(appt => {
-    const name = getPatientName(appt);
+    let name = getPatientName(appt);
+    // Append companion names so the household visit reads as a single block
+    const companions = appt.family_group_id ? (companionsByGroup.get(appt.family_group_id) || []) : [];
+    if (companions.length > 0) {
+      name = `${name} + ${companions.join(', ')}`;
+    }
     const dateOnly = appt.appointment_date?.substring(0, 10) || '';
     const { h, m } = parseTime(appt.appointment_time);
     const startStr = dateOnly && appt.appointment_time

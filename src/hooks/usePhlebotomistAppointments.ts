@@ -116,9 +116,26 @@ export function usePhlebotomistAppointments() {
         for (const o of (orgs || [])) orgNameById.set(o.id, o.name);
       }
 
+      // Family-group dedupe: a household with multiple patients per visit
+      // generates one primary row + one row per companion (companion_role
+      // set, family_group_id = primary's id). Phleb only needs ONE card
+      // per household — show the primary, list companions inside the card.
+      // Filter companions out of the main list and build a lookup by group.
+      const companionsByGroup = new Map<string, Array<{ name: string; role: string | null }>>();
+      for (const a of (appts || []) as any[]) {
+        if (a.family_group_id && a.id !== a.family_group_id && a.companion_role) {
+          const list = companionsByGroup.get(a.family_group_id) || [];
+          list.push({ name: a.patient_name || 'Companion', role: a.companion_role || null });
+          companionsByGroup.set(a.family_group_id, list);
+        }
+      }
+      const apptsDeduped = (appts || []).filter((a: any) =>
+        !a.family_group_id || a.id === a.family_group_id || !a.companion_role
+      );
+
       // Build set of dates that have appointments (extract yyyy-MM-dd from timestamp)
       const dates = new Set<string>();
-      (appts || []).forEach((a: any) => {
+      apptsDeduped.forEach((a: any) => {
         if (a.appointment_date) {
           const dateOnly = a.appointment_date.substring(0, 10); // "2026-04-13" from "2026-04-13 12:00:00+00"
           dates.add(dateOnly);
@@ -128,9 +145,15 @@ export function usePhlebotomistAppointments() {
 
       // Enrich with patient data
       const enriched: PhlebAppointment[] = await Promise.all(
-        (appts || []).map(async (appt: any) => {
+        apptsDeduped.map(async (appt: any) => {
           // PRIORITY 1: Use appointment columns directly (most reliable)
           let patientName = appt.patient_name || 'Unknown Patient';
+          // Append companion names so the phleb card reads as a household visit
+          const companions = appt.family_group_id ? (companionsByGroup.get(appt.family_group_id) || []) : [];
+          if (companions.length > 0) {
+            const names = companions.map(c => c.name).join(', ');
+            patientName = `${patientName} + ${names}`;
+          }
           let patientPhone: string | null = appt.patient_phone || null;
           let patientEmail: string | null = appt.patient_email || null;
           let patientDob: string | null = null;
