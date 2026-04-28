@@ -213,9 +213,30 @@ Deno.serve(async (req) => {
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('[connect-onboard] unhandled:', e);
+    // Persist the Stripe error so admin can read it without opening
+    // dev tools — surface in error_logs which the dashboard can render.
+    try {
+      const adminClient = createClient(SUPABASE_URL, SERVICE_KEY);
+      await adminClient.from('error_logs').insert({
+        error_type: 'stripe_connect_onboard',
+        component: 'connect-onboard',
+        action: 'top_level_catch',
+        error_message: String(e?.message || 'unknown'),
+        error_stack: String(e?.stack || ''),
+        payload: {
+          stripe_code: e?.code || null,
+          stripe_type: e?.type || null,
+          stripe_status_code: e?.statusCode || null,
+          stripe_request_id: e?.requestId || null,
+          stripe_doc_url: e?.doc_url || null,
+        },
+      } as any);
+    } catch { /* non-fatal */ }
     return new Response(JSON.stringify({
       error: 'connect_failed',
       message: e?.message || 'Stripe Connect onboarding failed',
+      stripe_code: e?.code || null,
+      stripe_type: e?.type || null,
     }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
