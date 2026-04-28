@@ -1,14 +1,12 @@
 {
   "headers": [
     {
-      "//": "Vite content-hashed bundles — safe to cache forever (filename changes when content changes).",
       "source": "/assets/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "//": "Everything else (HTML, /, all SPA routes that rewrite to index.html, sw.js, /pricing, /book-now, /dashboard, etc.) → never cached. The moment a new deploy lands, every browser fetches the new HTML on next navigation, which references the new asset hashes, which loads the fresh JS. Without this, the SPA rewrite to /index.html was inheriting the rewrite source's headers — meaning /book-now was caching the old HTML for an arbitrary duration depending on Vercel CDN.",
       "source": "/((?!assets/).*)",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" },
