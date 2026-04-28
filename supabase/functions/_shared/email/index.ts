@@ -2,6 +2,16 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.8.0';
 import { EmailData, EmailResult } from './types.ts';
 
+// Re-exports — send-appointment-reminder + other senders import these from
+// this barrel. Without re-exports here the named imports resolved to
+// undefined and the function failed to boot every cron tick (BOOT_ERROR
+// 503 hourly at :00). Caught 2026-04-28 in Layer A audit.
+export { sendEmail, sendWithMailgun } from './providers.ts';
+export { getRenderedTemplate, renderTemplate } from './templates.ts';
+export { logEmailSend } from './logger.ts';
+export { userHasOptedIn } from './preferences.ts';
+export type { EmailData, EmailResult } from './types.ts';
+
 const mailgunApiKey = Deno.env.get('MAILGUN_API_KEY');
 const mailgunDomain = Deno.env.get('MAILGUN_DOMAIN');
 
