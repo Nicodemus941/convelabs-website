@@ -142,23 +142,30 @@ Deno.serve(async (req) => {
           }
           case 'survey': {
             if (MAILGUN_API_KEY && seq.patient_email) {
-              await sendEmail(seq.patient_email, 'How Was Your ConveLabs Experience?', `
+              // Real survey: 1-click 5-star rating links → submit-feedback
+              // edge fn captures into feedback_responses, SMS owner on rating <=2,
+              // and serves a thank-you page (with comment box) inline.
+              const apptId = seq.appointment_id || '';
+              const token = apptId.replace(/-/g, '').slice(-8);
+              const fnBase = `${Deno.env.get('SUPABASE_URL') || 'https://yluyonhrxxtyuiyrdixl.supabase.co'}/functions/v1/submit-feedback`;
+              const starLink = (n: number) =>
+                `${fnBase}?appt=${apptId}&rating=${n}&t=${token}`;
+              const starCell = (n: number) => `
+                <td style="text-align:center;padding:6px;">
+                  <a href="${starLink(n)}" style="display:inline-block;width:48px;height:48px;line-height:48px;background:#fef3c7;border:2px solid #fcd34d;border-radius:10px;color:#b45309;text-decoration:none;font-size:20px;font-weight:800;">${n}★</a>
+                </td>`;
+              await sendEmail(seq.patient_email, 'How was your ConveLabs visit?', `
                 <div style="font-family:Arial;max-width:600px;margin:0 auto;">
                   <div style="background:#B91C1C;color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-                    <h2 style="margin:0;">How Was Your Visit?</h2>
+                    <h2 style="margin:0;">How was your visit?</h2>
                   </div>
                   <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
                     <p>Hi ${patientName},</p>
-                    <p>We hope your ConveLabs experience was exceptional. Your feedback helps us continue providing luxury concierge lab services.</p>
-                    <div style="text-align:center;margin:24px 0;">
-                      <p style="font-size:14px;color:#666;margin-bottom:12px;">Had a great experience?</p>
-                      <a href="https://g.page/r/CQYNAuLgDPeiEAI/review" style="display:inline-block;background:#B91C1C;color:white;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Leave a Google Review ⭐</a>
-                    </div>
-                    <div style="text-align:center;margin-top:16px;">
-                      <p style="font-size:13px;color:#666;">Have feedback or concerns?</p>
-                      <a href="https://convelabs.com/contact" style="color:#B91C1C;font-weight:600;text-decoration:none;">Contact us directly →</a>
-                    </div>
-                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
+                    <p>Quick favor — how would you rate your ConveLabs visit? Tap a number, that's it.</p>
+                    <table cellpadding="0" cellspacing="0" style="margin:18px auto;"><tr>${starCell(1)}${starCell(2)}${starCell(3)}${starCell(4)}${starCell(5)}</tr></table>
+                    <p style="text-align:center;font-size:13px;color:#6b7280;">1 = needs work · 5 = exceptional</p>
+                    <p style="font-size:13px;color:#6b7280;text-align:center;margin-top:24px;">Or call us directly at <strong>(941) 527-9169</strong></p>
+                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
                   </div>
                 </div>
               `);
@@ -192,18 +199,29 @@ Deno.serve(async (req) => {
           }
           case 'results_checkin': {
             if (MAILGUN_API_KEY && seq.patient_email) {
-              await sendEmail(seq.patient_email, 'Checking In — Have Your Results Come In?', `
+              // 1-click yes/no → submit-results-checkin edge fn captures into
+              // lab_results_checkin and SMS-alerts owner on "no" so they can
+              // pull the lab portal directly.
+              const apptId = seq.appointment_id || '';
+              const token = apptId.replace(/-/g, '').slice(-8);
+              const fnBase = `${Deno.env.get('SUPABASE_URL') || 'https://yluyonhrxxtyuiyrdixl.supabase.co'}/functions/v1/submit-results-checkin`;
+              const yesUrl = `${fnBase}?appt=${apptId}&got=yes&t=${token}`;
+              const noUrl = `${fnBase}?appt=${apptId}&got=no&t=${token}`;
+              await sendEmail(seq.patient_email, 'Quick check — got your lab results yet?', `
                 <div style="font-family:Arial;max-width:600px;margin:0 auto;">
                   <div style="background:#B91C1C;color:white;padding:24px;border-radius:12px 12px 0 0;text-align:center;">
-                    <h2 style="margin:0;">Results Check-In</h2>
+                    <h2 style="margin:0;">Got your results?</h2>
                   </div>
                   <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
                     <p>Hi ${patientName},</p>
-                    <p>We wanted to check in and see if your lab results have appeared in your laboratory's patient portal.</p>
-                    <p>Results are available through your lab's portal (LabCorp, Quest, AdventHealth, or Orlando Health). If you haven't received them yet, they may still be processing.</p>
-                    <p>If you need help, the specimen tracking ID we sent you can be provided to your doctor to locate your results.</p>
-                    <p>Questions? Call us at <strong>(941) 527-9169</strong></p>
-                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
+                    <p>It's been about 3 days since your visit. Have your results landed in the lab portal yet?</p>
+                    <table cellpadding="0" cellspacing="0" style="margin:24px auto;"><tr>
+                      <td style="padding:0 8px;"><a href="${yesUrl}" style="display:inline-block;background:#16a34a;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">✓ Yes, got them</a></td>
+                      <td style="padding:0 8px;"><a href="${noUrl}" style="display:inline-block;background:#dc2626;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">✗ Still waiting</a></td>
+                    </tr></table>
+                    <p style="font-size:13px;color:#6b7280;text-align:center;">Tap "still waiting" and we'll chase the lab on your behalf.</p>
+                    <p style="margin-top:24px;font-size:13px;color:#6b7280;">Most labs (LabCorp, Quest, AdventHealth, Orlando Health) post results within 48-72h. Questions? Call <strong>(941) 527-9169</strong>.</p>
+                    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
                   </div>
                 </div>
               `);

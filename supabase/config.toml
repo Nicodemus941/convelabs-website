@@ -167,6 +167,12 @@ verify_jwt = false  # pg_cron, every 15 min
 [functions.appointment-time-drift-smoke]
 verify_jwt = false  # pg_cron, hourly
 
+[functions.submit-feedback]
+verify_jwt = false  # public — clicked from email by patients
+
+[functions.submit-results-checkin]
+verify_jwt = false  # public — clicked from email by patients
+
 [functions.training-search]
 verify_jwt = true
 
