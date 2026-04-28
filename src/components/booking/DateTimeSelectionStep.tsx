@@ -767,22 +767,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
                               field.onChange(window.time);
 
-                              // Create a new slot hold (15 min expiry)
-                              if (selectedDate) {
-                                const year = selectedDate.getFullYear();
-                                const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                                const day = String(selectedDate.getDate()).padStart(2, '0');
-                                const dateStr = `${year}-${month}-${day}`;
-
-                                const { data: hold } = await supabase.from('slot_holds' as any).insert({
-                                  appointment_date: dateStr,
-                                  appointment_time: window.time,
-                                  held_by: `session_${Date.now()}`,
-                                  expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-                                }).select('id').single();
-
-                                if (hold) setHoldId((hold as any).id);
-                              }
+                              // slot_holds REMOVED 2026-04-28 — was creating
+                              // session-keyed rows that the server check then
+                              // rejected as 'held by another session' when the
+                              // same patient hit Pay (self-blocking). Real
+                              // race-condition protection is in
+                              // isSlotStillAvailable() server-side now.
                             }}
                             disabled={isUnavailable}
                           >

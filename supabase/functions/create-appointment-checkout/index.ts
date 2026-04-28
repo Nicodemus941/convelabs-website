@@ -306,51 +306,19 @@ Deno.serve(async (req) => {
         );
       }
 
-      // Check for active slot_hold from a different session
-      const clientSessionId = req.headers.get('x-session-id') || `stripe-session-${Date.now()}`;
-      const { data: activeHolds } = await supabaseClient
-        .from('slot_holds')
-        .select('id, held_by, expires_at')
-        .eq('appointment_date', dateOnly)
-        .eq('appointment_time', appointmentTime)
-        .eq('released', false)
-        .gt('expires_at', new Date().toISOString());
-
-      const conflictingHold = (activeHolds || []).find((h: any) => h.held_by !== clientSessionId);
-      if (conflictingHold) {
-        console.warn(`[slot-held] ${patientDetails.email} tried to book ${dateOnly} ${appointmentTime} (held by another session)`);
-        try {
-          await supabaseClient.from('booking_audit_log').insert({
-            stage: 'slot_conflict',
-            patient_email: patientDetails?.email,
-            client_appointment_date: appointmentDate,
-            client_appointment_time: appointmentTime,
-            mismatch_detected: true,
-            mismatch_detail: `Slot held by another session: ${conflictingHold.held_by}`,
-            raw_payload: rawPayload,
-          });
-        } catch { /* non-blocking */ }
-        return new Response(
-          JSON.stringify({
-            error: 'slot_held_by_other',
-            message: `Another patient is currently booking that time slot. Please pick a different time.`,
-          }),
-          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      // Reserve the slot for 15 min (enough for the Stripe checkout flow)
-      try {
-        await supabaseClient.from('slot_holds').insert({
-          appointment_date: dateOnly,
-          appointment_time: appointmentTime,
-          held_by: clientSessionId,
-          expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-          released: false,
-        });
-      } catch (e) {
-        console.warn('slot_hold insert failed (non-blocking, conflict-allowed):', e);
-      }
+      // ─── slot_holds REMOVED 2026-04-28 ──────────────────────────────
+      // The slot-hold layer was self-blocking the patient: the client
+      // creates a hold with `held_by: session_<timestamp>` when they
+      // PICK a slot, but the patient's session ID was never plumbed
+      // through to checkout. Server fell back to a new session ID, the
+      // session-mismatch check rejected the patient's own hold as
+      // "another session", and the patient saw "slot already claimed"
+      // when re-attempting their own booking.
+      //
+      // The actual race-condition protection is the isSlotStillAvailable()
+      // check earlier in this function (against the appointments table)
+      // and the detect-double-bookings cron. The slot_holds layer added
+      // friction without preventing real conflicts.
     }
 
     // ─── SERVER-SIDE BLOCKED-DATE CHECK ────────────────────────────
