@@ -9,6 +9,7 @@ import {
   User, Phone, Mail, Bell, LogOut, Save, Loader2, CheckCircle2, Shield,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
+import StripeConnectCard from './StripeConnectCard';
 
 const SettingsTab: React.FC = () => {
   const { user, logout } = useAuth();
@@ -146,6 +147,9 @@ const SettingsTab: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Stripe Connect — payouts */}
+      <StripeConnectCard />
 
       {/* Notification Preferences */}
       <Card className="shadow-sm">

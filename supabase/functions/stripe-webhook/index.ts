@@ -1074,6 +1074,36 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // ─── STRIPE CONNECT — log the destination transfer to staff_payouts ──
+    // create-appointment-checkout stamped these on the session metadata when
+    // the assigned phleb has a connected Stripe Express account. The actual
+    // transfer happens automatically inside the same charge (transfer_data
+    // on payment_intent_data); this row is the audit trail.
+    try {
+      if (metadata.connect_transfer_destination && metadata.connect_staff_id) {
+        const baseCents = parseInt(metadata.connect_base_cents || '0', 10) || 0;
+        const companionCents = parseInt(metadata.connect_companion_cents || '0', 10) || 0;
+        const tipCents = parseInt(metadata.connect_tip_cents || '0', 10) || 0;
+        const amountCents = parseInt(metadata.connect_transfer_amount_cents || '0', 10) || 0;
+        await supabaseClient.from('staff_payouts' as any).insert({
+          staff_id: metadata.connect_staff_id,
+          appointment_id: appointment.id,
+          stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
+          stripe_destination_account_id: metadata.connect_transfer_destination,
+          service_type: metadata.service_type || null,
+          base_per_visit_cents: baseCents,
+          companion_addon_cents: companionCents,
+          tip_cents: tipCents,
+          amount_cents: amountCents,
+          status: 'succeeded',
+          transferred_at: new Date().toISOString(),
+        });
+      }
+    } catch (e: any) {
+      // Non-blocking — Stripe already executed the transfer; this is just our log.
+      console.warn('[connect] staff_payouts insert failed (non-blocking):', e?.message || e);
+    }
+
     // ─── OWNER REVENUE SMS (fire FIRST, before anything that could throw) ──
     // Pre-2026-04-20: owner SMS lived inside sendAppointmentConfirmation, so if
     // a HIPAA guard, Mailgun, or patient-SMS step threw, the outer try/catch

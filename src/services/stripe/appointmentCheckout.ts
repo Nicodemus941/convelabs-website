@@ -59,13 +59,23 @@ export async function createAppointmentCheckoutSession(
     // is stamped with the acquisition channel. Drives CAC-per-channel report.
     const attribution = attributionForBooking();
 
-    const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
+    // Hard 30-second timeout so the pay button can never hang indefinitely.
+    // Supabase's functions.invoke has no built-in timeout; on a flaky network
+    // or stuck auth refresh, the await would hang forever and the spinner
+    // would never stop. With this guard, any stall surfaces a clean error
+    // toast within 30s and the patient can retry.
+    const TIMEOUT_MS = 30_000;
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Checkout timed out — please try again. If it keeps happening, refresh the page or contact support.')), TIMEOUT_MS)
+    );
+    const invokePromise = supabase.functions.invoke('create-appointment-checkout', {
       body: {
         ...params,
         userId: user?.id || null,
         attribution,
       },
     });
+    const { data, error } = await Promise.race([invokePromise, timeoutPromise]) as Awaited<typeof invokePromise>;
 
     // CRITICAL: Supabase JS treats ANY non-2xx as `FunctionsHttpError`,
     // sets `data` to null, and surfaces the error before we can inspect

@@ -941,12 +941,73 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── STRIPE CONNECT — destination charge to assigned phleb ────────
+    // When the appointment is assigned to a phleb whose staff_profile has a
+    // Stripe Connect account, route the phleb's portion of every charge
+    // (base + 100% of tip + companion add-on) directly to their account.
+    // Refunds auto-reverse the transfer. Only applies in 'payment' mode.
+    let connectTransfer: { destination: string; amount: number } | null = null;
+    if (sessionMode === 'payment') {
+      try {
+        const { data: connectedStaff } = await supabaseClient
+          .from('staff_profiles')
+          .select('id, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_payouts_enabled')
+          .not('stripe_connect_account_id', 'is', null)
+          .eq('stripe_connect_charges_enabled', true)
+          .eq('stripe_connect_payouts_enabled', true)
+          .limit(2);
+
+        // Only auto-apply when there's exactly one connected phleb (the
+        // single-owner-phleb case). Multi-phleb dispatch will set
+        // assigned_phleb_id at booking time and we'll switch the lookup.
+        if (Array.isArray(connectedStaff) && connectedStaff.length === 1) {
+          const phleb: any = connectedStaff[0];
+          // Companion bookings come through a different flow (separate
+          // appointment row with family_group_id). For the primary visit
+          // we default to false here — the companion's own row gets its
+          // own transfer when its checkout fires.
+          const hasCompanion = false;
+          const { data: takeRes } = await supabaseClient.rpc('compute_phleb_take_cents' as any, {
+            p_staff_id: phleb.id,
+            p_service_type: serviceType || 'mobile',
+            p_tip_cents: tipAmount || 0,
+            p_has_companion: hasCompanion,
+          });
+          const takeCents = Math.max(0, Math.min(Number(takeRes) || 0, amount + (tipAmount || 0)));
+          if (takeCents > 0 && phleb.stripe_connect_account_id) {
+            connectTransfer = { destination: phleb.stripe_connect_account_id, amount: takeCents };
+            const { data: rate } = await supabaseClient
+              .from('phleb_pay_rates')
+              .select('base_per_visit_cents, companion_addon_cents, tip_pct')
+              .eq('staff_id', phleb.id)
+              .eq('service_type', serviceType || 'mobile')
+              .is('effective_to', null)
+              .maybeSingle();
+            metadata.connect_transfer_destination = phleb.stripe_connect_account_id;
+            metadata.connect_transfer_amount_cents = String(takeCents);
+            metadata.connect_staff_id = phleb.id;
+            metadata.connect_base_cents = String((rate as any)?.base_per_visit_cents || 0);
+            metadata.connect_companion_cents = String(hasCompanion ? ((rate as any)?.companion_addon_cents || 0) : 0);
+            metadata.connect_tip_cents = String(Math.round(((tipAmount || 0) * (((rate as any)?.tip_pct ?? 100))) / 100));
+            console.log(`[connect] transfer ${takeCents} cents → ${phleb.stripe_connect_account_id}`);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[connect] transfer setup failed (non-blocking):', err?.message || err);
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: sessionMode,
       customer: customerId,
       line_items: lineItems,
       metadata,
-      ...(sessionMode === 'payment' ? { payment_intent_data: { metadata } } : { subscription_data: { metadata } }),
+      ...(sessionMode === 'payment' ? {
+        payment_intent_data: {
+          metadata,
+          ...(connectTransfer ? { transfer_data: connectTransfer } : {}),
+        },
+      } : { subscription_data: { metadata } }),
       // Hormozi trust ceremony: every paid booking lands on /welcome where
       // the patient sees a clear "you paid ✓ · benefits" page. Prevents the
       // Suzanne-style double-charge pattern on every appointment flow.
