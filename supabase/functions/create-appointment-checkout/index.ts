@@ -408,80 +408,19 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ─── SERVER-SIDE BOOKING WINDOW ENFORCEMENT (tier-based) ────────
-    // Refactored 2026-04-28 to align with the Hormozi simplification
-    // (2026-04-25): business hours are uniform Mon–Sun 6 AM – 6 PM for
-    // EVERYONE. Tier-gating now only applies to:
-    //   • The 1:30–2:30 PM regular-hours premium window (VIP/Concierge)
-    //   • The 5:30–8:00 PM after-hours window (VIP/Concierge)
+    // ─── SERVER-SIDE BOOKING WINDOW ENFORCEMENT — REMOVED 2026-04-28 ──
+    // The slot grid in src/components/booking/DateTimeSelectionStep.tsx +
+    // supabase/functions/_shared/availability.ts (slotsAllowedForDate +
+    // withTierGating) is the authoritative gate for business hours and
+    // tier-based windows. The redundant tier check here kept getting out
+    // of sync with the grid (didn't account for AdventHealth extended
+    // hours, didn't model the 2:30–5:30 PM gap correctly, etc.) and was
+    // 409-ing on slots the grid had legitimately offered.
     //
-    // The slot grid in DateTimeSelectionStep + _shared/availability.ts
-    // already enforces these on the way in. This server check is the
-    // belt-and-suspenders bypass-protection only — it must NOT be more
-    // restrictive than what the grid shows, otherwise patients see slots
-    // that are actually blocked, hit Pay, get 409'd, and abandon.
-    //
-    // ROOT CAUSE: prior version capped non-members at 9 AM – 12 PM only,
-    // but the grid showed 6 AM – 1:30 PM. Patients picking 12:30 PM (etc.)
-    // got rejected. In-office bookings on the doctor's-office service had
-    // ~9 × 409s in the last 30 min before this fix.
-    if (appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-      const earlyTier: MemberTier = await verifyMemberTier(patientDetails?.email);
-      let hh = 0, mm = 0;
-      const t = String(appointmentTime);
-      if (t.includes('AM') || t.includes('PM')) {
-        const [tp, period] = t.split(' ');
-        const [h, m] = tp.split(':').map(Number);
-        hh = period === 'PM' && h !== 12 ? h + 12 : (period === 'AM' && h === 12 ? 0 : h);
-        mm = m || 0;
-      } else {
-        [hh, mm] = t.split(':').map(Number);
-      }
-      const slotMin = hh * 60 + mm;
-      const dow = new Date(dateOnly + 'T12:00:00').getDay(); // 0=Sun..6=Sat
-      const REGULAR_OPEN = 6 * 60;          // 6:00 AM
-      const REGULAR_CLOSE = 13 * 60 + 30;   // 1:30 PM — open to all tiers
-      const VIP_REGULAR_END = 14 * 60 + 30; // 1:30 PM – 2:30 PM = VIP/Concierge only
-      const AFTER_HOURS_START = 17 * 60 + 30; // 5:30 PM
-      const AFTER_HOURS_END = 20 * 60;        // 8:00 PM = VIP/Concierge only
-
-      const isPartner = String(serviceType || '').startsWith('partner-');
-      let allowed = false;
-      let reason = '';
-
-      if (isPartner) {
-        // Partner services use their own org-defined time windows below.
-        allowed = true;
-      } else if (slotMin >= REGULAR_OPEN && slotMin < REGULAR_CLOSE) {
-        // 6 AM – 1:30 PM: open to everyone
-        allowed = true;
-      } else if (slotMin >= REGULAR_CLOSE && slotMin < VIP_REGULAR_END) {
-        // 1:30 PM – 2:30 PM: VIP+ only
-        if (earlyTier === 'vip' || earlyTier === 'concierge') allowed = true;
-        else reason = `Slots between 1:30 PM and 2:30 PM are reserved for VIP and Concierge members.`;
-      } else if (slotMin >= AFTER_HOURS_START && slotMin < AFTER_HOURS_END) {
-        // 5:30 PM – 8 PM: after-hours, VIP+ only
-        if (earlyTier === 'vip' || earlyTier === 'concierge') allowed = true;
-        else reason = `After-hours slots (5:30 PM and later) are reserved for VIP and Concierge members.`;
-      } else if (earlyTier === 'concierge') {
-        // Concierge can book anytime within the grid's allowed window
-        allowed = true;
-      } else {
-        reason = `That time is outside our booking hours. Please pick a time between 6:00 AM and 1:30 PM.`;
-      }
-
-      if (!allowed) {
-        console.warn(`[booking-window] ${patientDetails?.email} (tier=${earlyTier}) tried ${dateOnly} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')} — rejected`);
-        return new Response(
-          JSON.stringify({
-            error: 'outside_booking_window',
-            message: reason,
-            tier: earlyTier,
-          }),
-          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-    }
+    // The downstream isSlotStillAvailable() call (last-mile race-condition
+    // guard) still runs and uses the same grid math, so cross-tier bypass
+    // attempts are still blocked. This deletion only removes the
+    // duplicative restrictive layer.
 
     // ─── PARTNER ORGANIZATION ENFORCEMENT ──────────────────────────
     // If a partner org is specified (patient referred from Aristotle, CAO,
