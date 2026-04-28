@@ -409,23 +409,24 @@ Deno.serve(async (req) => {
     }
 
     // ─── SERVER-SIDE BOOKING WINDOW ENFORCEMENT (tier-based) ────────
-    // Time-of-day scarcity is THE core membership value lever. UI greys out
-    // disallowed slots but a malicious or stale client could try to bypass —
-    // this server-side check is the authoritative gate.
+    // Refactored 2026-04-28 to align with the Hormozi simplification
+    // (2026-04-25): business hours are uniform Mon–Sun 6 AM – 6 PM for
+    // EVERYONE. Tier-gating now only applies to:
+    //   • The 1:30–2:30 PM regular-hours premium window (VIP/Concierge)
+    //   • The 5:30–8:00 PM after-hours window (VIP/Concierge)
     //
-    // Rules (mirrors src/lib/bookingWindows.ts — keep in sync if edited):
-    //   Non-member:  Mon-Fri only. Fasting 6-9am, non-fasting 9am-12pm.
-    //   Regular:     Mon-Fri 6am-12pm. Sat 6-9am.
-    //   VIP:         Mon-Fri 6am-2pm. Sat 6-11am.
-    //   Concierge:   anytime, any day (incl. same-day + Sunday).
+    // The slot grid in DateTimeSelectionStep + _shared/availability.ts
+    // already enforces these on the way in. This server check is the
+    // belt-and-suspenders bypass-protection only — it must NOT be more
+    // restrictive than what the grid shows, otherwise patients see slots
+    // that are actually blocked, hit Pay, get 409'd, and abandon.
+    //
+    // ROOT CAUSE: prior version capped non-members at 9 AM – 12 PM only,
+    // but the grid showed 6 AM – 1:30 PM. Patients picking 12:30 PM (etc.)
+    // got rejected. In-office bookings on the doctor's-office service had
+    // ~9 × 409s in the last 30 min before this fix.
     if (appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-      // We need the tier BEFORE pricing for this check — verify early.
       const earlyTier: MemberTier = await verifyMemberTier(patientDetails?.email);
-      // Heuristic for fasting: if service_type is "fasting-heavy" OR ocr text
-      // has fasting signals, treat as fasting. For MVP we treat all in-office
-      // / mobile / senior / therapeutic as POTENTIALLY fasting — the patient's
-      // booking time still has to fit the tier rules regardless. If the
-      // patient picked a morning fasting slot, we treat as fasting.
       let hh = 0, mm = 0;
       const t = String(appointmentTime);
       if (t.includes('AM') || t.includes('PM')) {
@@ -436,37 +437,49 @@ Deno.serve(async (req) => {
       } else {
         [hh, mm] = t.split(':').map(Number);
       }
-      const hhmm = `${String(hh).padStart(2,'0')}:${String(mm || 0).padStart(2,'0')}`;
+      const slotMin = hh * 60 + mm;
       const dow = new Date(dateOnly + 'T12:00:00').getDay(); // 0=Sun..6=Sat
-      const isFasting = hhmm < '09:00';  // before 9am = fasting window
+      const REGULAR_OPEN = 6 * 60;          // 6:00 AM
+      const REGULAR_CLOSE = 13 * 60 + 30;   // 1:30 PM — open to all tiers
+      const VIP_REGULAR_END = 14 * 60 + 30; // 1:30 PM – 2:30 PM = VIP/Concierge only
+      const AFTER_HOURS_START = 17 * 60 + 30; // 5:30 PM
+      const AFTER_HOURS_END = 20 * 60;        // 8:00 PM = VIP/Concierge only
 
-      // Tier window rules as a simple table
-      const TIER_WINDOWS: Record<MemberTier, Record<number, { fasting: [string,string][]; nonFasting: [string,string][] }>> = {
-        none:    { 1:{fasting:[['06:00','09:00']],nonFasting:[['09:00','12:00']]}, 2:{fasting:[['06:00','09:00']],nonFasting:[['09:00','12:00']]}, 3:{fasting:[['06:00','09:00']],nonFasting:[['09:00','12:00']]}, 4:{fasting:[['06:00','09:00']],nonFasting:[['09:00','12:00']]}, 5:{fasting:[['06:00','09:00']],nonFasting:[['09:00','12:00']]} },
-        member:  { 1:{fasting:[['06:00','09:00']],nonFasting:[['06:00','12:00']]}, 2:{fasting:[['06:00','09:00']],nonFasting:[['06:00','12:00']]}, 3:{fasting:[['06:00','09:00']],nonFasting:[['06:00','12:00']]}, 4:{fasting:[['06:00','09:00']],nonFasting:[['06:00','12:00']]}, 5:{fasting:[['06:00','09:00']],nonFasting:[['06:00','12:00']]}, 6:{fasting:[['06:00','09:00']],nonFasting:[['06:00','09:00']]} },
-        vip:     { 1:{fasting:[['06:00','09:00']],nonFasting:[['06:00','14:00']]}, 2:{fasting:[['06:00','09:00']],nonFasting:[['06:00','14:00']]}, 3:{fasting:[['06:00','09:00']],nonFasting:[['06:00','14:00']]}, 4:{fasting:[['06:00','09:00']],nonFasting:[['06:00','14:00']]}, 5:{fasting:[['06:00','09:00']],nonFasting:[['06:00','14:00']]}, 6:{fasting:[['06:00','09:00']],nonFasting:[['06:00','11:00']]} },
-        concierge: Object.fromEntries([0,1,2,3,4,5,6].map(d => [d, { fasting:[['06:00','20:00']], nonFasting:[['06:00','20:00']] }])) as any,
-      };
+      const isPartner = String(serviceType || '').startsWith('partner-');
+      let allowed = false;
+      let reason = '';
 
-      const dayRule = TIER_WINDOWS[earlyTier]?.[dow];
-      const ranges = dayRule ? (isFasting ? dayRule.fasting : dayRule.nonFasting) : [];
-      const allowed = ranges.some(([s, e]) => hhmm >= s && hhmm < e);
+      if (isPartner) {
+        // Partner services use their own org-defined time windows below.
+        allowed = true;
+      } else if (slotMin >= REGULAR_OPEN && slotMin < REGULAR_CLOSE) {
+        // 6 AM – 1:30 PM: open to everyone
+        allowed = true;
+      } else if (slotMin >= REGULAR_CLOSE && slotMin < VIP_REGULAR_END) {
+        // 1:30 PM – 2:30 PM: VIP+ only
+        if (earlyTier === 'vip' || earlyTier === 'concierge') allowed = true;
+        else reason = `Slots between 1:30 PM and 2:30 PM are reserved for VIP and Concierge members.`;
+      } else if (slotMin >= AFTER_HOURS_START && slotMin < AFTER_HOURS_END) {
+        // 5:30 PM – 8 PM: after-hours, VIP+ only
+        if (earlyTier === 'vip' || earlyTier === 'concierge') allowed = true;
+        else reason = `After-hours slots (5:30 PM and later) are reserved for VIP and Concierge members.`;
+      } else if (earlyTier === 'concierge') {
+        // Concierge can book anytime within the grid's allowed window
+        allowed = true;
+      } else {
+        reason = `That time is outside our booking hours. Please pick a time between 6:00 AM and 1:30 PM.`;
+      }
 
-      if (!dayRule || !allowed) {
-        // Partner services bypass this (corporate/clinic slots have their own schedule)
-        const isPartner = String(serviceType || '').startsWith('partner-');
-        if (!isPartner) {
-          const tierLabel = earlyTier === 'none' ? 'Pay-As-You-Go' : earlyTier.toUpperCase();
-          console.warn(`[booking-window] ${patientDetails?.email} (tier=${earlyTier}) tried ${dateOnly} ${hhmm} — rejected`);
-          return new Response(
-            JSON.stringify({
-              error: 'outside_booking_window',
-              message: `Your ${tierLabel} tier doesn't include ${hhmm} on ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dow]}. Upgrade your membership for extended hours or pick a time within your window.`,
-              tier: earlyTier,
-            }),
-            { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
+      if (!allowed) {
+        console.warn(`[booking-window] ${patientDetails?.email} (tier=${earlyTier}) tried ${dateOnly} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')} — rejected`);
+        return new Response(
+          JSON.stringify({
+            error: 'outside_booking_window',
+            message: reason,
+            tier: earlyTier,
+          }),
+          { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
     }
 
