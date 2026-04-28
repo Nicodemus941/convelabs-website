@@ -129,12 +129,18 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       let serviceSwitched = false;
 
       if (currentService === 'fasting-blood-draw' && fastingDetected === false) {
-        // Fasting picked but order doesn't require fasting → switch to routine
+        // Fasting picked but order doesn't require fasting → switch to routine.
+        // CRITICAL: clear the top-level `time` and `date` so the slot grid
+        // remounts with the new service's window. Prior bug stored the cleared
+        // value at `serviceDetails.timeSlot` which isn't the field the grid
+        // reads — the patient's old fasting-window time persisted, and the
+        // grid kept showing fasting slots even though selectedService had
+        // changed underneath.
         setValue('serviceDetails.selectedService', 'routine-blood-draw');
         setValue('serviceDetails.duration', 60);
         setValue('serviceDetails.sameDay', false);
-        setValue('serviceDetails.date', undefined as any);
-        setValue('serviceDetails.timeSlot', '');
+        setValue('time', '');
+        setValue('date', undefined as any);
         setAutoSwitchModal({
           open: true,
           fromService: 'fasting-blood-draw',
@@ -148,8 +154,8 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
         setValue('serviceDetails.selectedService', 'fasting-blood-draw');
         setValue('serviceDetails.duration', 60);
         setValue('serviceDetails.sameDay', false);
-        setValue('serviceDetails.date', undefined as any);
-        setValue('serviceDetails.timeSlot', '');
+        setValue('time', '');
+        setValue('date', undefined as any);
         setAutoSwitchModal({
           open: true,
           fromService: 'routine-blood-draw',

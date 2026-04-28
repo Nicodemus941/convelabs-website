@@ -1074,6 +1074,87 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // ─── BUNDLED MEMBERSHIP ACTIVATION ───────────────────────────────────
+    // When the patient added an annual membership at checkout (Hormozi
+    // anchor-flip), create-appointment-checkout used Stripe subscription
+    // mode and stamped these metadata fields. Activate the membership row
+    // so the patient gets credit for the next visit at the discounted tier.
+    try {
+      if (metadata.bundled_subscription_plan) {
+        const planName = String(metadata.bundled_subscription_plan).toLowerCase();
+        let tier: 'member' | 'vip' | 'concierge' = 'member';
+        if (planName.includes('concierge')) tier = 'concierge';
+        else if (planName.includes('vip')) tier = 'vip';
+
+        // Find the patient's auth user id (so the membership row anchors to them)
+        let memberUserId: string | null = metadata.user_id || null;
+        if (!memberUserId && metadata.patient_email) {
+          const { data: tp } = await supabaseClient
+            .from('tenant_patients').select('user_id').ilike('email', metadata.patient_email).maybeSingle();
+          if (tp?.user_id) memberUserId = tp.user_id;
+        }
+
+        // Find or create the membership_plans row
+        let { data: plan } = await supabaseClient
+          .from('membership_plans').select('id').ilike('name', `%${tier}%`).maybeSingle();
+        if (!plan) {
+          const annualPriceMap: Record<string, number> = { member: 9900, vip: 19900, concierge: 39900 };
+          const { data: newPlan } = await supabaseClient.from('membership_plans').insert({
+            name: tier.charAt(0).toUpperCase() + tier.slice(1),
+            annual_price: annualPriceMap[tier],
+            monthly_price: Math.round(annualPriceMap[tier] / 12),
+            credits_per_year: 0,
+          }).select('id').single();
+          plan = newPlan;
+        }
+
+        if (memberUserId && plan) {
+          const nextRenewal = new Date();
+          nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
+          // Subscription ID is on session.subscription when sessionMode='subscription'
+          const stripeSubscriptionId = typeof session.subscription === 'string'
+            ? session.subscription
+            : session.subscription?.id || null;
+
+          await supabaseClient.from('user_memberships').upsert({
+            user_id: memberUserId,
+            plan_id: plan.id,
+            status: 'active',
+            stripe_customer_id: session.customer || null,
+            stripe_subscription_id: stripeSubscriptionId,
+            billing_frequency: 'annual',
+            next_renewal: nextRenewal.toISOString(),
+            is_primary_member: true,
+          }, { onConflict: 'user_id' });
+
+          // Stamp the appointment row with the new tier so the welcome flow
+          // shows "your VIP rate is now active" instead of pay-as-you-go.
+          await supabaseClient.from('appointments').update({
+            member_status: tier,
+          }).eq('id', appointment.id);
+
+          console.log(`[bundled-membership] activated ${tier} for user ${memberUserId} via session ${session.id}`);
+
+          // Honor the membership_agreements row (legal record of the click-accept)
+          if (metadata.agreement_id) {
+            try {
+              await supabaseClient.from('membership_agreements' as any).update({
+                accepted_at: new Date().toISOString(),
+                stripe_session_id: session.id,
+                accepted_via: 'bundled_visit_checkout',
+              }).eq('id', metadata.agreement_id);
+            } catch (e) { console.warn('[bundled-membership] agreement stamp failed:', e); }
+          }
+        } else {
+          console.warn(`[bundled-membership] no user_id resolved for ${metadata.patient_email}; membership not activated`);
+        }
+      }
+    } catch (e: any) {
+      // Non-blocking — appointment is already created; admin can manually
+      // activate via Stripe webhook replay if this branch fails.
+      console.error('[bundled-membership] activation failed (non-blocking):', e?.message || e);
+    }
+
     // ─── STRIPE CONNECT — log the destination transfer to staff_payouts ──
     // create-appointment-checkout stamped these on the session metadata when
     // the assigned phleb has a connected Stripe Express account. The actual
