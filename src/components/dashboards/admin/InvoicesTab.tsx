@@ -10,7 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   FileText, Search, RefreshCw, DollarSign, Clock, AlertTriangle,
-  CheckCircle2, XCircle, Send, Download, Filter, Eye, Plus,
+  CheckCircle2, XCircle, Send, Download, Filter, Eye, Plus, Pencil,
 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -65,6 +65,17 @@ const InvoicesTab: React.FC = () => {
   const [patientSearchResults, setPatientSearchResults] = useState<any[]>([]);
   const [orgSearchResults, setOrgSearchResults] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Edit-invoice modal state — voids old Stripe invoice + reissues fresh
+  // (Stripe API forbids editing sent invoices, so void+reissue is the
+  // canonical pattern). Calls reissue-stripe-invoice edge fn.
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [editForm, setEditForm] = useState({
+    newTotal: '', newPatientEmail: '', newPatientName: '',
+    newServiceName: '', newBilledTo: 'patient' as 'patient' | 'org',
+    newOrgEmail: '', reason: '',
+  });
+  const [isReissuing, setIsReissuing] = useState(false);
 
   const SERVICE_PRICES: Record<string, { label: string; price: number }> = {
     mobile: { label: 'Mobile Blood Draw', price: 150 },
@@ -185,6 +196,60 @@ const InvoicesTab: React.FC = () => {
     } catch (e: any) {
       console.error('[void-invoice]', e);
       toast.error(`Void failed: ${e?.message || 'unknown'}. Try again or check Stripe directly.`, { duration: 8000 });
+    }
+  };
+
+  const openEditInvoice = (invoice: Invoice) => {
+    setEditForm({
+      newTotal: String(invoice.total_amount || ''),
+      newPatientEmail: invoice.patient_email || '',
+      newPatientName: invoice.patient_name || '',
+      newServiceName: invoice.service_type || '',
+      newBilledTo: 'patient',
+      newOrgEmail: '',
+      reason: '',
+    });
+    setEditingInvoice(invoice);
+  };
+
+  const handleReissueInvoice = async () => {
+    if (!editingInvoice) return;
+    const body: any = { appointmentId: editingInvoice.id, reason: editForm.reason || 'admin edit' };
+    const newTotalNum = parseFloat(editForm.newTotal);
+    if (!isNaN(newTotalNum) && newTotalNum !== editingInvoice.total_amount) body.newTotal = newTotalNum;
+    if (editForm.newPatientEmail && editForm.newPatientEmail !== editingInvoice.patient_email) body.newPatientEmail = editForm.newPatientEmail;
+    if (editForm.newPatientName && editForm.newPatientName !== editingInvoice.patient_name) body.newPatientName = editForm.newPatientName;
+    if (editForm.newServiceName && editForm.newServiceName !== editingInvoice.service_type) body.newServiceName = editForm.newServiceName;
+    if (editForm.newBilledTo === 'org') {
+      body.newBilledTo = 'org';
+      if (editForm.newOrgEmail) body.newOrgEmail = editForm.newOrgEmail;
+    }
+
+    if (!body.newTotal && !body.newPatientEmail && !body.newPatientName && !body.newServiceName && !body.newBilledTo) {
+      toast.error('No changes to apply. Use Resend to send the same invoice again.');
+      return;
+    }
+
+    setIsReissuing(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('reissue-stripe-invoice', { body });
+      if (error) {
+        const ctx = (error as any).context;
+        let msg = error.message || 'Reissue failed';
+        if (ctx && typeof ctx.json === 'function') {
+          try { const b = await ctx.json(); msg = b?.message || b?.error || msg; } catch { /* keep */ }
+        }
+        toast.error(msg, { duration: 8000 });
+        return;
+      }
+      toast.success('Invoice reissued · old voided, new sent');
+      setEditingInvoice(null);
+      fetchInvoices();
+    } catch (e: any) {
+      console.error('[reissue-invoice]', e);
+      toast.error(`Reissue failed: ${e?.message || 'unknown'}`, { duration: 8000 });
+    } finally {
+      setIsReissuing(false);
     }
   };
 
@@ -401,6 +466,9 @@ const InvoicesTab: React.FC = () => {
                                 <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => handleResendInvoice(inv)}>
                                   <Send className="h-3 w-3 mr-1" /> Resend
                                 </Button>
+                                <Button size="sm" variant="ghost" className="text-xs h-7 text-blue-600" onClick={() => openEditInvoice(inv)}>
+                                  <Pencil className="h-3 w-3 mr-1" /> Edit
+                                </Button>
                                 <Button size="sm" variant="ghost" className="text-xs h-7 text-red-500" onClick={() => handleVoidInvoice(inv)}>
                                   <XCircle className="h-3 w-3 mr-1" /> Void
                                 </Button>
@@ -437,6 +505,83 @@ const InvoicesTab: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit / Reissue Invoice Modal — voids old + sends fresh */}
+      <Dialog open={!!editingInvoice} onOpenChange={(o) => !o && setEditingInvoice(null)}>
+        <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5 text-blue-600" /> Edit & Reissue Invoice</DialogTitle>
+          </DialogHeader>
+          {editingInvoice && (
+            <div className="space-y-4">
+              <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-800">
+                Editing voids the existing Stripe invoice and issues a fresh one with your changes. Paid invoices must be refunded first.
+              </div>
+
+              <div>
+                <Label className="text-xs">Recipient type</Label>
+                <Select value={editForm.newBilledTo} onValueChange={(v: any) => setEditForm(p => ({ ...p, newBilledTo: v }))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="patient">Patient</SelectItem>
+                    <SelectItem value="org">Organization</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Patient name</Label>
+                  <Input className="h-9 text-sm" value={editForm.newPatientName}
+                    onChange={(e) => setEditForm(p => ({ ...p, newPatientName: e.target.value }))} />
+                </div>
+                <div>
+                  <Label className="text-xs">Patient email</Label>
+                  <Input className="h-9 text-sm" type="email" value={editForm.newPatientEmail}
+                    onChange={(e) => setEditForm(p => ({ ...p, newPatientEmail: e.target.value }))} />
+                </div>
+              </div>
+
+              {editForm.newBilledTo === 'org' && (
+                <div>
+                  <Label className="text-xs">Organization billing email</Label>
+                  <Input className="h-9 text-sm" type="email" value={editForm.newOrgEmail}
+                    onChange={(e) => setEditForm(p => ({ ...p, newOrgEmail: e.target.value }))}
+                    placeholder="billing@org.com" />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Amount ($)</Label>
+                  <Input className="h-9 text-sm" type="number" step="0.01" value={editForm.newTotal}
+                    onChange={(e) => setEditForm(p => ({ ...p, newTotal: e.target.value }))} />
+                </div>
+                <div>
+                  <Label className="text-xs">Service / line-item label</Label>
+                  <Input className="h-9 text-sm" value={editForm.newServiceName}
+                    onChange={(e) => setEditForm(p => ({ ...p, newServiceName: e.target.value }))} />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs">Reason (audit log)</Label>
+                <Input className="h-9 text-sm" value={editForm.reason}
+                  onChange={(e) => setEditForm(p => ({ ...p, reason: e.target.value }))}
+                  placeholder="e.g. patient corrected email, price adjustment" />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2 border-t">
+                <Button variant="ghost" onClick={() => setEditingInvoice(null)} disabled={isReissuing}>Cancel</Button>
+                <Button onClick={handleReissueInvoice} disabled={isReissuing} className="bg-blue-600 hover:bg-blue-700">
+                  {isReissuing ? <RefreshCw className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+                  Void old + Reissue
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Generate Invoice Modal */}
       <Dialog open={generateModalOpen} onOpenChange={setGenerateModalOpen}>
