@@ -724,6 +724,57 @@ const PatientProfileTab: React.FC = () => {
                     return;
                   }
                   toast.success('Patient info updated');
+
+                  // ─── EMAIL-CHANGE → AUTO-REISSUE OPEN INVOICES
+                  // appointments.patient_email is set at booking time, NOT
+                  // derived from tenant_patients. So when admin corrects a
+                  // patient's email, any open Stripe invoice + dunning
+                  // cascade still fires to the OLD email — hits a black
+                  // hole, customer never pays, we auto-cancel 24h later.
+                  // Find every open invoice on the OLD email, prompt admin
+                  // to reissue (void old + send fresh) to the new address.
+                  const emailChanged = editForm.email && p.email && editForm.email.trim().toLowerCase() !== p.email.trim().toLowerCase();
+                  if (emailChanged) {
+                    try {
+                      const { data: openInvoices } = await supabase
+                        .from('appointments')
+                        .select('id, total_amount, service_type, appointment_date, invoice_status, stripe_invoice_id')
+                        .ilike('patient_email', p.email)
+                        .in('invoice_status', ['sent', 'reminded', 'final_warning', 'pending_send']);
+                      const list = openInvoices || [];
+                      if (list.length > 0) {
+                        const summary = list.slice(0, 5).map((a: any, i: number) =>
+                          `  ${i + 1}. ${a.appointment_date?.substring(0, 10) || '?'} · $${a.total_amount} · ${a.invoice_status}`
+                        ).join('\n');
+                        const more = list.length > 5 ? `\n  …and ${list.length - 5} more` : '';
+                        const ok = confirm(
+                          `${list.length} open invoice${list.length === 1 ? '' : 's'} ${list.length === 1 ? 'is' : 'are'} still on the old email (${p.email}).\n\n${summary}${more}\n\nVoid and reissue ${list.length === 1 ? 'it' : 'them all'} to ${editForm.email}?\n\n(Click Cancel to leave the existing invoices on the old email.)`
+                        );
+                        if (ok) {
+                          let success = 0, failed = 0;
+                          for (const inv of list) {
+                            try {
+                              const { error: rxErr } = await supabase.functions.invoke('reissue-stripe-invoice', {
+                                body: {
+                                  appointmentId: inv.id,
+                                  newPatientEmail: editForm.email,
+                                  newPatientName: `${editForm.firstName} ${editForm.lastName}`.trim(),
+                                  reason: `Patient email corrected from ${p.email} to ${editForm.email}`,
+                                },
+                              });
+                              if (rxErr) { failed++; console.warn('[reissue-on-email-change] failed for', inv.id, rxErr); }
+                              else success++;
+                            } catch (e) { failed++; console.warn('[reissue-on-email-change] threw for', inv.id, e); }
+                          }
+                          if (success > 0) toast.success(`${success} invoice${success === 1 ? '' : 's'} reissued to ${editForm.email}`);
+                          if (failed > 0) toast.error(`${failed} reissue${failed === 1 ? '' : 's'} failed — check Invoices tab`, { duration: 8000 });
+                        }
+                      }
+                    } catch (reissueLookupErr) {
+                      console.warn('[reissue-on-email-change] lookup failed (non-blocking):', reissueLookupErr);
+                    }
+                  }
+
                   setSelectedPatient({
                     ...p,
                     first_name: editForm.firstName, last_name: editForm.lastName,
