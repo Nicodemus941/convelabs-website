@@ -10,8 +10,14 @@ import {
   Crown, GraduationCap,
 } from 'lucide-react';
 
-type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean };
+// `ownerOnly` gates surfaces that show whole-business financials / valuation
+// data the platform owner sees but their super_admin staff (e.g. Naquala)
+// should not. The platform owner is identified by email (canonical source
+// of truth: business_metrics.platform_owner_email — see public.is_platform_owner()).
+type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean; ownerOnly?: boolean };
 type SidebarSection = { label: string; items: SidebarItem[] };
+
+const PLATFORM_OWNER_EMAIL = 'nicodemmebaptiste@convelabs.com';
 
 function getSidebarSections(basePath: string): SidebarSection[] {
   return [
@@ -19,8 +25,8 @@ function getSidebarSections(basePath: string): SidebarSection[] {
       label: 'MAIN',
       items: [
         { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
-        { name: 'Hormozi Dashboard', icon: TrendingUp, path: `${basePath}/hormozi`, roles: ['super_admin'] },
-        { name: 'Upgrades & ROI', icon: Crown, path: `${basePath}/upgrades`, roles: ['super_admin'] },
+        { name: 'Hormozi Dashboard', icon: TrendingUp, path: `${basePath}/hormozi`, ownerOnly: true },
+        { name: 'Upgrades & ROI', icon: Crown, path: `${basePath}/upgrades`, ownerOnly: true },
         { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
         { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },
         { name: 'Patients', icon: Users, path: `${basePath}/patients` },
@@ -69,6 +75,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const userRole = user?.role || 'patient';
+  const userEmail = (user?.email || '').toLowerCase();
+  const isPlatformOwner = userEmail === PLATFORM_OWNER_EMAIL.toLowerCase();
   const basePath = `/dashboard/${userRole}`;
   const SIDEBAR_SECTIONS = getSidebarSections(basePath);
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -115,7 +123,11 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
       {/* Navigation */}
       <nav className="flex-1 py-4 overflow-y-auto">
         {SIDEBAR_SECTIONS.map((section) => {
-          const visibleItems = section.items.filter(item => !item.roles || item.roles.includes(userRole));
+          const visibleItems = section.items.filter(item => {
+            if (item.ownerOnly && !isPlatformOwner) return false;
+            if (item.roles && !item.roles.includes(userRole)) return false;
+            return true;
+          });
           if (visibleItems.length === 0) return null;
           return (
           <div key={section.label} className="mb-5">

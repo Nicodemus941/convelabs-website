@@ -112,6 +112,15 @@ const Dashboard = () => {
   
   // Check if this is an admin tab route (super_admin OR office_manager)
   if ((userRole === "super_admin" || userRole === "office_manager") && adminTab) {
+    // Owner-only tabs — visible to the platform owner alone, hidden from
+    // operational super_admins (e.g. Naquala). UI sidebar already filters
+    // these out via ownerOnly flag; this is the URL-typing guard.
+    const OWNER_ONLY_TABS = new Set(["hormozi", "upgrades"]);
+    const PLATFORM_OWNER_EMAIL = "nicodemmebaptiste@convelabs.com";
+    const isPlatformOwner = (user.email || "").toLowerCase() === PLATFORM_OWNER_EMAIL.toLowerCase();
+    if (OWNER_ONLY_TABS.has(adminTab) && !isPlatformOwner) {
+      return <Navigate to={`/dashboard/${userRole}`} replace />;
+    }
     return (
       <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "admin"]}>
         <AdminLayout>
