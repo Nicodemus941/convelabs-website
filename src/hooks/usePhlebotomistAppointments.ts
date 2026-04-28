@@ -88,6 +88,12 @@ export function usePhlebotomistAppointments() {
         .gte('appointment_date', monthStart)
         .lte('appointment_date', monthEnd)
         .not('status', 'eq', 'cancelled')
+        // Exclude phantom "Invoice Only" billing rows — these are admin-
+        // created ledger entries (no time, address='Invoice Only') used
+        // to issue a Stripe invoice without a real visit. They were
+        // showing up on the phleb PWA as if they were appointments.
+        .not('appointment_time', 'is', null)
+        .not('address', 'ilike', '%Invoice Only%')
         .order('appointment_date', { ascending: true })
         .order('appointment_time', { ascending: true });
 
