@@ -130,15 +130,15 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
 
       if (currentService === 'fasting-blood-draw' && fastingDetected === false) {
         // Fasting picked but order doesn't require fasting → switch to routine.
-        // CRITICAL: clear the top-level `time` and `date` so the slot grid
-        // remounts with the new service's window. Prior bug stored the cleared
-        // value at `serviceDetails.timeSlot` which isn't the field the grid
-        // reads — the patient's old fasting-window time persisted, and the
-        // grid kept showing fasting slots even though selectedService had
-        // changed underneath.
+        // Clear ALL date/time/surcharge flags so the patient re-picks cleanly.
+        // Prior bug: only cleared 'time' and 'date'; sameDay/weekend stayed
+        // stamped from the previous selection, inflating the checkout price
+        // by $75 (weekend) or $100 (same-day) — patient saw $225 on a $150
+        // mobile draw and 'NaN-NaN-NaN' as the appointment date.
         setValue('serviceDetails.selectedService', 'routine-blood-draw');
         setValue('serviceDetails.duration', 60);
         setValue('serviceDetails.sameDay', false);
+        setValue('serviceDetails.weekend', false);
         setValue('time', '');
         setValue('date', undefined as any);
         setAutoSwitchModal({
@@ -150,10 +150,12 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
         });
         serviceSwitched = true;
       } else if (currentService === 'routine-blood-draw' && fastingDetected === true) {
-        // Routine picked but order requires fasting → switch to fasting
+        // Routine picked but order requires fasting → switch to fasting.
+        // Same full clear as above so the patient re-picks cleanly.
         setValue('serviceDetails.selectedService', 'fasting-blood-draw');
         setValue('serviceDetails.duration', 60);
         setValue('serviceDetails.sameDay', false);
+        setValue('serviceDetails.weekend', false);
         setValue('time', '');
         setValue('date', undefined as any);
         setAutoSwitchModal({

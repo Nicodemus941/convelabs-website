@@ -261,6 +261,24 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       setIsProcessing(true);
       const data = methods.getValues();
 
+      // Hard-fail if date or time is missing/invalid. Caused the "NaN-NaN-NaN"
+      // date that patients saw on the checkout summary after the OCR
+      // fasting→routine auto-switch cleared the date. Better to push them
+      // back to the date picker than send a bogus appointment to Stripe.
+      const rawDate = (data as any).date;
+      const dateObj = rawDate instanceof Date ? rawDate : (rawDate ? new Date(rawDate) : null);
+      const dateValid = dateObj && !isNaN(dateObj.getTime());
+      if (!dateValid || !data.time || String(data.time).trim().length === 0) {
+        setIsProcessing(false);
+        toast.error('Please pick a date and time before continuing.');
+        // Send the patient back to the date/time step
+        setShowDatePicker(true);
+        setShowLabOrder(false);
+        prevStepRef.current = currentStep;
+        setCurrentStep(BookingStep.ServiceAndDate);
+        return;
+      }
+
       const visitType = data.serviceDetails.visitType || 'mobile';
       const service = getServiceById(visitType);
       const additionalPatientCount = (data.additionalPatients || []).length;
