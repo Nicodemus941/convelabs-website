@@ -1,4 +1,4 @@
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, getAuthToken } from '@/integrations/supabase/client';
 import { attributionForBooking } from '@/lib/attribution';
 
 export interface AppointmentCheckoutParams {
@@ -48,87 +48,117 @@ export interface AppointmentCheckoutResult {
   original_date?: string;
 }
 
+// Pull the Supabase function URL + anon key from the existing client config
+// so we can call /functions/v1/create-appointment-checkout via plain fetch.
+// We bypass supabase.functions.invoke() because it triggers an auth refresh
+// on every call — and that refresh hangs on mobile Safari / iOS PWAs when
+// the Service Worker has the page backgrounded, leaving the pay button
+// spinning until our 30s timeout fires. Direct fetch with the existing
+// session token is reliable across every browser we support.
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://yluyonhrxxtyuiyrdixl.supabase.co';
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY || '') as string;
+
+// Read the user_id from the same localStorage entry that the auth client
+// uses, without going through the SDK at all. Avoids any Auth lock
+// contention that hangs on mobile.
+function readUserIdFromLocalStorage(): string | null {
+  try {
+    const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token');
+    if (!stored) return null;
+    const parsed = JSON.parse(stored);
+    return parsed?.user?.id || null;
+  } catch { return null; }
+}
+
 export async function createAppointmentCheckoutSession(
   params: AppointmentCheckoutParams
 ): Promise<AppointmentCheckoutResult> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-
     // H2: pull last-touch attribution (UTMs, referrer, landing page) from
     // sessionStorage so every Stripe checkout + downstream appointment row
     // is stamped with the acquisition channel. Drives CAC-per-channel report.
     const attribution = attributionForBooking();
 
-    // Hard 30-second timeout so the pay button can never hang indefinitely.
-    // Supabase's functions.invoke has no built-in timeout; on a flaky network
-    // or stuck auth refresh, the await would hang forever and the spinner
-    // would never stop. With this guard, any stall surfaces a clean error
-    // toast within 30s and the patient can retry.
-    const TIMEOUT_MS = 30_000;
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Checkout timed out — please try again. If it keeps happening, refresh the page or contact support.')), TIMEOUT_MS)
-    );
-    const invokePromise = supabase.functions.invoke('create-appointment-checkout', {
-      body: {
-        ...params,
-        userId: user?.id || null,
-        attribution,
-      },
-    });
-    const { data, error } = await Promise.race([invokePromise, timeoutPromise]) as Awaited<typeof invokePromise>;
+    // Read auth token DIRECTLY from localStorage — no SDK calls, no auth
+    // refresh, no async lock that can hang on mobile. Guests proceed with
+    // just the anon key, exactly like the rest of the public booking flow.
+    const accessToken = getAuthToken() || '';
+    const userId = readUserIdFromLocalStorage();
 
-    // CRITICAL: Supabase JS treats ANY non-2xx as `FunctionsHttpError`,
-    // sets `data` to null, and surfaces the error before we can inspect
-    // the structured body. That collapses our 409 slot_unavailable payload
-    // (with suggested_slots) into a generic "Edge Function returned a
-    // non-2xx status code" message and the SlotConflictModal never opens.
-    //
-    // Workaround: when the error has a `context` Response (supabase-js
-    // v2.40+), read its body and unwrap. Falls back to plain error.message
-    // if the context is missing or unreadable.
-    if (error) {
-      const ctx: any = (error as any).context;
-      if (ctx && typeof ctx.json === 'function') {
-        try {
-          const body = await ctx.json();
-          if (body?.error === 'slot_unavailable') {
-            return {
-              error: (body.message as string) || 'That time slot was just claimed.',
-              errorCode: 'slot_unavailable',
-              suggested_slots: body.suggested_slots || [],
-              original_time: body.original_time,
-              original_date: body.original_date,
-            };
-          }
-          if (body?.error) {
-            return { error: (body.message as string) || (body.error as string), errorCode: body.error };
-          }
-        } catch (parseErr) {
-          console.warn('[checkout] could not parse error body:', parseErr);
-        }
+    // 30-second hard timeout via AbortController — kills the fetch cleanly
+    // if the network stalls. Spinner cannot get stuck.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+
+    let response: Response;
+    try {
+      response = await fetch(`${SUPABASE_URL}/functions/v1/create-appointment-checkout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
+          'apikey': SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          ...params,
+          userId,
+          attribution,
+        }),
+        signal: controller.signal,
+      });
+    } catch (netErr: any) {
+      clearTimeout(timeoutId);
+      if (netErr?.name === 'AbortError') {
+        return { error: 'Checkout timed out — please check your connection and try again.' };
       }
-      console.error('Error creating appointment checkout:', error);
-      return { error: error.message };
+      console.error('[checkout] fetch failed:', netErr);
+      return { error: `Network error: ${netErr?.message || 'unknown'}. Please try again.` };
+    }
+    clearTimeout(timeoutId);
+
+    // Parse body even on non-2xx so we can surface structured errors
+    // (slot_unavailable suggestions, friendly promo failure messages, etc.)
+    let body: any = null;
+    try {
+      body = await response.json();
+    } catch (parseErr) {
+      console.warn('[checkout] could not parse response body:', parseErr);
     }
 
-    if (!data) {
+    if (!response.ok) {
+      if (body?.error === 'slot_unavailable') {
+        return {
+          error: (body.message as string) || 'That time slot was just claimed.',
+          errorCode: 'slot_unavailable',
+          suggested_slots: body.suggested_slots || [],
+          original_time: body.original_time,
+          original_date: body.original_date,
+        };
+      }
+      if (body?.error) {
+        return { error: (body.message as string) || (body.error as string), errorCode: body.error };
+      }
+      return { error: `Checkout failed (HTTP ${response.status}). Please try again.` };
+    }
+
+    if (!body) {
       return { error: 'No response from checkout service' };
     }
 
-    if (data.error) {
-      if (data.error === 'slot_unavailable') {
+    if (body.error) {
+      if (body.error === 'slot_unavailable') {
         return {
-          error: (data.message as string) || 'That time slot was just claimed.',
+          error: (body.message as string) || 'That time slot was just claimed.',
           errorCode: 'slot_unavailable',
-          suggested_slots: data.suggested_slots || [],
-          original_time: data.original_time,
-          original_date: data.original_date,
+          suggested_slots: body.suggested_slots || [],
+          original_time: body.original_time,
+          original_date: body.original_date,
         };
       }
-      return { error: (data.message as string) || (data.error as string) };
+      return { error: (body.message as string) || (body.error as string) };
     }
 
-    return { url: data.url, sessionId: data.sessionId };
+    return { url: body.url, sessionId: body.sessionId };
   } catch (err) {
     console.error('Error in createAppointmentCheckoutSession:', err);
     return { error: (err as Error).message };
