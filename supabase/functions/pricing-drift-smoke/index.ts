@@ -170,24 +170,38 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Pre-load user_memberships start dates so we can tell if member_status
-    // was active at booking time (vs upgraded after the booking).
-    // This kills the false-positive class where Don/James booked at $150
-    // pay-as-you-go, then upgraded to member later, and member_status now
-    // says 'member' but the booking was correctly charged $150.
+    // Pre-load actual membership truth from user_memberships. The smoke
+    // does NOT trust appointments.member_status — that field is a
+    // denormalized snapshot that can be wrong (stamped at booking time
+    // before the patient actually subscribed, or never cleaned up after
+    // a cancellation). Source-of-truth is user_memberships joined to
+    // tenant_patients via email.
+    //
+    // For each patient email seen in the 24-hour window, look up:
+    //   - their active membership tier (member / vip / concierge / null)
+    //   - their membership start_date
+    // We then use the START_DATE check to decide if the booking happened
+    // when they were a member or not — this kills the 'upgraded-after'
+    // false positives.
     const emails = Array.from(new Set((appts || []).map(a => (a.patient_email || '').toLowerCase()).filter(Boolean)));
-    const membershipStartByEmail = new Map<string, string>();
+    type MembershipFact = { tier: Tier; startedAt: string };
+    const membershipByEmail = new Map<string, MembershipFact>();
     if (emails.length > 0) {
       const { data: mems } = await supabase
         .from('user_memberships')
-        .select('user_id, created_at, status, tenant_patients!inner(email)')
+        .select(`user_id, created_at, status,
+                 membership_plans(name),
+                 tenant_patients!inner(email)`)
         .in('tenant_patients.email', emails as any)
         .eq('status', 'active');
       for (const m of (mems || []) as any[]) {
         const email = (m.tenant_patients?.email || '').toLowerCase();
-        if (email && !membershipStartByEmail.has(email)) {
-          membershipStartByEmail.set(email, m.created_at);
-        }
+        if (!email || membershipByEmail.has(email)) continue;
+        const planName = (m.membership_plans?.name || '').toLowerCase();
+        let tier: Tier = 'member';
+        if (planName.includes('concierge')) tier = 'concierge';
+        else if (planName.includes('vip')) tier = 'vip';
+        membershipByEmail.set(email, { tier, startedAt: m.created_at });
       }
     }
 
@@ -206,16 +220,15 @@ Deno.serve(async (req) => {
 
       scanned++;
 
-      // If patient is currently 'member'/'vip'/'concierge' but their
-      // membership started AFTER this booking, treat them as 'none' for
-      // pricing-expectation purposes (they paid pay-as-you-go correctly).
-      const tier = (['member', 'vip', 'concierge'].includes(a.member_status)
-        ? a.member_status : 'none') as Tier;
-      let effectiveTier: Tier = tier;
-      if (tier !== 'none' && a.patient_email) {
-        const memberSince = membershipStartByEmail.get(String(a.patient_email).toLowerCase());
-        if (memberSince && new Date(memberSince) > new Date(a.created_at)) {
-          effectiveTier = 'none';
+      // Compute the EFFECTIVE tier at the time this appointment was created,
+      // using user_memberships as the authoritative source. Ignores the
+      // appointment's own member_status field entirely — that's the
+      // denormalized snapshot that drifts.
+      let effectiveTier: Tier = 'none';
+      if (a.patient_email) {
+        const fact = membershipByEmail.get(String(a.patient_email).toLowerCase());
+        if (fact && new Date(fact.startedAt) <= new Date(a.created_at)) {
+          effectiveTier = fact.tier;
         }
       }
 
