@@ -33,6 +33,10 @@ export interface AppointmentCheckoutParams {
   };
   /** Optional promo code entered by the patient. Server validates + applies the discount. */
   promoCode?: string | null;
+  /** Optional referral code (typically captured from URL ?ref= or sessionStorage).
+   *  Server re-validates against referral_codes table and applies the discount.
+   *  Front-end value is suggestive only — the server is authoritative. */
+  referralCode?: string | null;
 }
 
 export interface AppointmentCheckoutResult {

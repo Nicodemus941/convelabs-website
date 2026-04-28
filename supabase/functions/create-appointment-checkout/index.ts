@@ -612,6 +612,50 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── REFERRAL CODE — server-side discount application ─────────────
+    // CRITICAL: previously the front-end applied the discount in the UI
+    // and stamped it into notes ("Referral: CODE (-$25)") but NEVER passed
+    // referralCode/referralDiscountCents to the server. Server defaulted
+    // to 0, so Stripe charged FULL price while the patient saw a discount.
+    // Webhook regex still credited the referrer — so referrer happy,
+    // patient overcharged $25. Silent money bug.
+    //
+    // Now: validate the code server-side, subtract from amount before
+    // checkout. Authoritative source of truth is the DB, not the client.
+    let appliedReferralDiscountCents = 0;
+    let appliedReferralCode: string | null = null;
+    if (referralCode && String(referralCode).trim()) {
+      try {
+        const codeUpper = String(referralCode).trim().toUpperCase();
+        const { data: refRow } = await supabaseClient
+          .from('referral_codes')
+          .select('id, user_id, discount_amount, active, max_uses, uses')
+          .eq('code', codeUpper)
+          .eq('active', true)
+          .maybeSingle();
+        if (refRow) {
+          // Self-referral guard: don't let the patient use their own code
+          const isSelfReferral = refRow.user_id && userId && String(refRow.user_id) === String(userId);
+          // Max-uses guard
+          const overCap = refRow.max_uses && (refRow.uses || 0) >= refRow.max_uses;
+          if (!isSelfReferral && !overCap) {
+            const discountCents = Math.round((refRow.discount_amount || 25) * 100);
+            const applyCents = Math.min(discountCents, amount);
+            amount = Math.max(0, amount - applyCents);
+            appliedReferralDiscountCents = applyCents;
+            appliedReferralCode = codeUpper;
+            console.log(`[referral] ${patientDetails?.email} used ${codeUpper}: -$${applyCents/100} (newAmount=$${amount/100})`);
+          } else {
+            console.log(`[referral] rejected ${codeUpper}: self_referral=${isSelfReferral} over_cap=${overCap}`);
+          }
+        } else {
+          console.log(`[referral] code ${codeUpper} not found or inactive`);
+        }
+      } catch (e: any) {
+        console.warn('[referral] validation threw (non-blocking):', e?.message);
+      }
+    }
+
     // ─── STAMP benefit_first_used_at for refund lockout ─────────────
     // The moment a patient uses ANY member benefit (discount or referral),
     // their 30-day refund window auto-closes. Done via a separate update
@@ -719,8 +763,11 @@ Deno.serve(async (req) => {
       member_tier: serverTier,
       member_tier_claimed: clientMemberTier,
       member_correction_cents: String(priceCorrection),
-      referral_code: referralCode || '',
-      referral_discount_cents: String(referralDiscountCents || 0),
+      // Reflect what was ACTUALLY applied server-side, not what client
+      // claimed. Webhook reads this to insert referral_redemptions /
+      // referral_credits rows with the correct amount.
+      referral_code: appliedReferralCode || '',
+      referral_discount_cents: String(appliedReferralDiscountCents || 0),
       // First-class attachment metadata — stripe metadata values must be strings
       lab_order_file_paths: Array.isArray(labOrderFilePaths) ? labOrderFilePaths.slice(0, 10).join(',').substring(0, 500) : '',
       insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',

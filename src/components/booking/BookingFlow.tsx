@@ -373,6 +373,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         amount: Math.round(finalSubtotal * 100),
         tipAmount: Math.round(tipAmount * 100),
         promoCode: promoCode || null,
+        // Referral code from URL ?ref=CODE (set in BookNow.tsx → sessionStorage)
+        // OR manually entered in CheckoutStep. Server re-validates against
+        // referral_codes table and applies the discount before Stripe charge.
+        referralCode: (typeof window !== 'undefined' ? sessionStorage.getItem('convelabs_referral') : null) || null,
         appointmentDate,
         appointmentTime: data.time,
         memberTier, // server re-verifies and re-prices if mismatched
