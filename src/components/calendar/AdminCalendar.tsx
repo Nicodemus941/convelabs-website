@@ -398,12 +398,11 @@ const AdminCalendar: React.FC = () => {
 
   // Convert appointments to FullCalendar events
   const calendarEvents = visibleAppointments.map(appt => {
-    let name = getPatientName(appt);
-    // Append companion names so the household visit reads as a single block
-    const companions = appt.family_group_id ? (companionsByGroup.get(appt.family_group_id) || []) : [];
-    if (companions.length > 0) {
-      name = `${name} + ${companions.join(', ')}`;
-    }
+    const name = getPatientName(appt);
+    // Companion names are intentionally NOT appended — the calendar shows
+    // the primary patient only. Companion rows are filtered out above
+    // (companionsByGroup), and their info is available on the appointment
+    // detail modal for clinical/billing context.
     const dateOnly = appt.appointment_date?.substring(0, 10) || '';
     const { h, m } = parseTime(appt.appointment_time);
     const startStr = dateOnly && appt.appointment_time

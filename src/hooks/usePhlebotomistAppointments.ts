@@ -148,12 +148,10 @@ export function usePhlebotomistAppointments() {
         apptsDeduped.map(async (appt: any) => {
           // PRIORITY 1: Use appointment columns directly (most reliable)
           let patientName = appt.patient_name || 'Unknown Patient';
-          // Append companion names so the phleb card reads as a household visit
-          const companions = appt.family_group_id ? (companionsByGroup.get(appt.family_group_id) || []) : [];
-          if (companions.length > 0) {
-            const names = companions.map(c => c.name).join(', ');
-            patientName = `${patientName} + ${names}`;
-          }
+          // Companion names are intentionally NOT appended — phleb sees the
+          // primary patient only. Companion rows were filtered out via
+          // apptsDeduped above; their info is on the appointment detail
+          // (companion_role, billing) for clinical/billing context.
           let patientPhone: string | null = appt.patient_phone || null;
           let patientEmail: string | null = appt.patient_email || null;
           let patientDob: string | null = null;
