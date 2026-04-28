@@ -269,39 +269,19 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         weekend: data.serviceDetails.weekend,
       }, tipAmount, additionalPatientCount, memberTier);
 
-      // Lab orders: prefer paths already uploaded by LabOrderUploadStep
-      // (upload-on-drop). Fall back to uploading now if anything slipped through
-      // (e.g., if the early upload failed and only a File is in state).
-      const alreadyUploadedPaths: string[] = ((data as any)?.labOrder?.uploadedPaths || []) as string[];
-      const labOrderPaths: string[] = [...alreadyUploadedPaths];
-      const uploadedNames = new Set(alreadyUploadedPaths.map(p => p.split('/').pop()?.replace(/^laborder_\d+_/, '')));
-      for (const file of labOrderFiles) {
-        // Skip files that were already uploaded during the upload step
-        if (uploadedNames.has(file.name)) continue;
-        const fileName = `laborder_${Date.now()}_${file.name}`;
-        const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, file);
-        if (uploadErr) console.error('Lab order upload error:', uploadErr);
-        else labOrderPaths.push(fileName);
-      }
-
-      // Upload insurance file and track path + save to patient profile
-      let insurancePath: string | null = null;
-      if (insuranceFile) {
-        const fileName = `insurance_${Date.now()}_${insuranceFile.name}`;
-        const { error: uploadErr } = await supabase.storage.from('lab-orders').upload(fileName, insuranceFile);
-        if (uploadErr) console.error('Insurance upload error:', uploadErr);
-        else {
-          insurancePath = fileName;
-          // Save insurance card path to patient's profile for future bookings
-          const patientEmail = data.patientDetails.email;
-          if (patientEmail) {
-            supabase.from('tenant_patients')
-              .update({ insurance_card_path: fileName })
-              .ilike('email', patientEmail)
-              .then(({ error }) => { if (error) console.error('Insurance path save error:', error); });
-          }
-        }
-      }
+      // Lab orders + insurance — trust the upload-on-drop in
+      // LabOrderUploadStep / InsuranceUploadStep entirely. Re-uploading
+      // here used the Supabase Storage SDK, which acquires the same auth
+      // lock that hangs on mobile Safari / iOS PWAs — leaving the pay
+      // button spinning before our direct-fetch checkout call ever runs.
+      // If a file genuinely slipped through, the patient sees a "no lab
+      // order on file" hint; the appointment still books and the phleb
+      // can collect it on-site. Better than a stuck pay button.
+      const labOrderPaths: string[] = [
+        ...(((data as any)?.labOrder?.uploadedPaths || []) as string[]),
+      ];
+      const insurancePath: string | null =
+        ((data as any)?.insurance?.uploadedPath as string | null) || null;
 
       // CRITICAL: store the LOCAL calendar date, not a UTC ISO string.
       //
