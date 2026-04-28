@@ -238,6 +238,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     setShowLabOrder(false);
   };
 
+  // Service types that don't need a patient-uploaded lab order. The
+  // doctor's office service is already in-clinic. Partner-org services
+  // route the order through the partnered practice, not the patient.
+  const NO_LAB_ORDER_SERVICES = [
+    'in-office',
+    'partner-nd-wellness',
+    'partner-naturamed',
+    'partner-aristotle-education',
+  ];
+  const skipsLabOrder = (visitType: string | undefined) =>
+    NO_LAB_ORDER_SERVICES.includes(visitType || '');
+
   const handleBack = () => {
     prevStepRef.current = currentStep;
     const target = currentStep - 1;
@@ -247,7 +259,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     // hitting Back from PatientInfo dumps them on Service, not Date & Time,
     // which feels like the back button is broken.
     if (target === BookingStep.ServiceAndDate) setShowDatePicker(true);
-    if (target === BookingStep.LocationAndLabOrder) setShowLabOrder(true);
+    if (target === BookingStep.LocationAndLabOrder) {
+      // Don't restore showLabOrder if the service type doesn't need one
+      const vt = methods.getValues('serviceDetails.visitType') || '';
+      setShowLabOrder(!skipsLabOrder(vt));
+    }
     setCurrentStep(target);
   };
 
@@ -584,10 +600,20 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                 <PatientInfoStep onNext={handleNext} onBack={handleBack} />
               )}
 
-              {/* Step 4: Location & Lab Order (combined) */}
+              {/* Step 4: Location & Lab Order (combined) — skip the lab
+                  order half entirely for service types that don't need one
+                  (in-office is in-clinic; partner-org services route the
+                  order through the partner practice, not the patient). */}
               {currentStep === BookingStep.LocationAndLabOrder && !showLabOrder && (
                 <LocationSelectionStep
-                  onNext={() => setShowLabOrder(true)}
+                  onNext={() => {
+                    const vt = methods.getValues('serviceDetails.visitType') || '';
+                    if (skipsLabOrder(vt)) {
+                      handleNext();   // Jump straight to checkout
+                    } else {
+                      setShowLabOrder(true);
+                    }
+                  }}
                   onBack={handleBack}
                 />
               )}
