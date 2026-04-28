@@ -203,7 +203,7 @@ Deno.serve(async (req) => {
     const end = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
     const { data: appts, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, phlebotomist_id, appointment_date, appointment_time, status, patient_name, patient_email, patient_phone, created_at, service_type, booking_source')
+      .select('id, phlebotomist_id, appointment_date, appointment_time, status, patient_name, patient_email, patient_phone, created_at, service_type, booking_source, address, zipcode, family_group_id')
       .gte('appointment_date', today.toISOString().slice(0, 10))
       .lte('appointment_date', end.toISOString().slice(0, 10))
       .in('status', ['scheduled', 'confirmed'])
@@ -267,25 +267,62 @@ Deno.serve(async (req) => {
 
           results.conflicts_found++;
 
-          // Owner-confirmed 2026-04-27: when EITHER side of the conflict was
-          // manually scheduled by an admin, treat the conflict as INTENDED
-          // (admin knows what they're doing — companion visits, double-up
-          // appointments, family-group draws). Skip patient apology SMS/email
-          // and the $25 credit. Owner still gets a heads-up so they can
-          // verify on the calendar.
-          const isAdminOverride = (
+          // Owner-confirmed rule 2026-04-28:
+          //   • Manual + same household (family_group_id match) → silent
+          //     (it's a household visit, not a conflict)
+          //   • Manual + same zipcode → silent squeeze-in (admin chose to
+          //     fit a second patient nearby; intentional)
+          //   • Manual + DIFFERENT zipcode → owner WARNING (looks like a
+          //     scheduling mistake — two patients across town at the same
+          //     time can't both be served). Still NO patient notification —
+          //     owner decides what to do.
+          //   • Both online → existing apology automation (patient SMS +
+          //     email + $25 credit + reschedule token). This is the
+          //     genuine race-condition double-sell case.
+          const eitherManual = (
             String(later.booking_source || '').toLowerCase().startsWith('manual')
             || String(earlier.booking_source || '').toLowerCase().startsWith('manual')
           );
-          if (isAdminOverride) {
+          const sameFamily = (
+            later.family_group_id && earlier.family_group_id &&
+            later.family_group_id === earlier.family_group_id
+          );
+          const normalizeZip = (z: string | null | undefined) =>
+            String(z || '').trim().slice(0, 5);
+          const sameZip = (
+            normalizeZip(later.zipcode) &&
+            normalizeZip(later.zipcode) === normalizeZip(earlier.zipcode)
+          );
+
+          if (eitherManual) {
+            const dateShort = (later.appointment_date || '').slice(0, 10);
+            if (sameFamily) {
+              // Household visit pair — actually expected. Skip silently.
+              continue;
+            }
+            if (sameZip) {
+              // Intentional squeeze-in. Owner heads-up only.
+              if (smsReady) {
+                await sendSMS(
+                  Deno.env.get('OWNER_PHONE') || '9415279169',
+                  `[Auto] Same-area squeeze ${dateShort} ${later.appointment_time}: ` +
+                  `${later.patient_name} (id ${later.id.slice(0, 8)}) + ` +
+                  `${earlier.patient_name} (id ${earlier.id.slice(0, 8)}) ` +
+                  `— same zip ${normalizeZip(later.zipcode) || 'unknown'}. No patient notification fired.`,
+                  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM,
+                );
+              }
+              continue;
+            }
+            // Manual + different zip → likely a scheduling mistake.
             if (smsReady) {
-              const dateShort = (later.appointment_date || '').slice(0, 10);
               await sendSMS(
                 Deno.env.get('OWNER_PHONE') || '9415279169',
-                `[Auto] Manual-override double-booking ${dateShort} ${later.appointment_time}: ` +
-                `${later.patient_name} (id ${later.id.slice(0, 8)}) overlaps ` +
-                `${earlier.patient_name} (id ${earlier.id.slice(0, 8)}). ` +
-                `No patient notification fired (admin override). Verify on calendar.`,
+                `⚠️ [Manual conflict] ${dateShort} ${later.appointment_time}: ` +
+                `${later.patient_name} (zip ${normalizeZip(later.zipcode) || '?'}) ` +
+                `vs ${earlier.patient_name} (zip ${normalizeZip(earlier.zipcode) || '?'}). ` +
+                `DIFFERENT areas — verify which patient to keep / move. ` +
+                `No patient notification fired.`,
                 TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM,
               );
             }
