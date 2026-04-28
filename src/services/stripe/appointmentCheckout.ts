@@ -72,12 +72,12 @@ function readUserIdFromLocalStorage(): string | null {
 
 // Build version marker — bump this any time we ship a checkout-flow fix.
 // Lets you confirm in DevTools whether a stale bundle is being served.
-const CHECKOUT_VERSION = '2026-04-28-v3-direct-fetch';
+const CHECKOUT_VERSION = '2026-04-28-v4-aggressive-bypass';
 
 export async function createAppointmentCheckoutSession(
   params: AppointmentCheckoutParams
 ): Promise<AppointmentCheckoutResult> {
-  console.log(`[checkout ${CHECKOUT_VERSION}] starting...`);
+  console.log(`[checkout ${CHECKOUT_VERSION}] starting at ${new Date().toISOString()}`);
   try {
     // H2: pull last-touch attribution (UTMs, referrer, landing page) from
     // sessionStorage so every Stripe checkout + downstream appointment row
@@ -87,22 +87,53 @@ export async function createAppointmentCheckoutSession(
     // Read auth token DIRECTLY from localStorage — no SDK calls, no auth
     // refresh, no async lock that can hang on mobile. Guests proceed with
     // just the anon key, exactly like the rest of the public booking flow.
-    const accessToken = getAuthToken() || '';
-    const userId = readUserIdFromLocalStorage();
+    let accessToken = '';
+    let userId: string | null = null;
+    try {
+      accessToken = getAuthToken() || '';
+      userId = readUserIdFromLocalStorage();
+    } catch (lsErr) {
+      // Some private-browsing modes (Chrome incognito, Brave strict mode)
+      // throw on localStorage access. Proceed as guest — the booking is
+      // still anonymous-allowed.
+      console.warn('[checkout] localStorage unavailable, proceeding as guest:', lsErr);
+    }
+
+    // Sanity-check the anon key. If env var missing, Bearer header would be
+    // empty → server returns 401 → spinner stops with confusing message.
+    // Fail fast with a clear message instead.
+    if (!SUPABASE_ANON_KEY) {
+      console.error('[checkout] VITE_SUPABASE_PUBLISHABLE_KEY missing from env');
+      return { error: 'Configuration error — please refresh and try again, or contact support.' };
+    }
 
     // 30-second hard timeout via AbortController — kills the fetch cleanly
     // if the network stalls. Spinner cannot get stuck.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30_000);
+    const timeoutId = setTimeout(() => {
+      console.warn('[checkout] 30s timeout fired — aborting fetch');
+      controller.abort();
+    }, 30_000);
+
+    const fetchUrl = `${SUPABASE_URL}/functions/v1/create-appointment-checkout`;
+    console.log(`[checkout] POST → ${fetchUrl}`);
+    const fetchStart = Date.now();
 
     let response: Response;
     try {
-      response = await fetch(`${SUPABASE_URL}/functions/v1/create-appointment-checkout`, {
+      response = await fetch(fetchUrl, {
         method: 'POST',
+        // CRITICAL: 'omit' so PWA/Service-Worker can't attach stale cookies
+        // that some auth proxies reject; we send Authorization explicitly.
+        credentials: 'omit',
+        // 'no-store' so any aggressive HTTP cache (Chrome PWA cache layer)
+        // can never serve a stale POST response.
+        cache: 'no-store',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${accessToken || SUPABASE_ANON_KEY}`,
           'apikey': SUPABASE_ANON_KEY,
+          'X-Client-Info': 'convelabs-checkout-direct-fetch',
         },
         body: JSON.stringify({
           ...params,
@@ -111,12 +142,15 @@ export async function createAppointmentCheckoutSession(
         }),
         signal: controller.signal,
       });
+      console.log(`[checkout] response status=${response.status} after ${Date.now() - fetchStart}ms`);
     } catch (netErr: any) {
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - fetchStart;
       if (netErr?.name === 'AbortError') {
+        console.error(`[checkout] aborted after ${elapsed}ms`);
         return { error: 'Checkout timed out — please check your connection and try again.' };
       }
-      console.error('[checkout] fetch failed:', netErr);
+      console.error(`[checkout] fetch failed after ${elapsed}ms:`, netErr);
       return { error: `Network error: ${netErr?.message || 'unknown'}. Please try again.` };
     }
     clearTimeout(timeoutId);
