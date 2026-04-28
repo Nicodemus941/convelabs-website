@@ -8,12 +8,77 @@
       ]
     },
     {
-      "//": "Everything else (HTML, /, all SPA routes that rewrite to index.html, sw.js, /pricing, /book-now, /dashboard, etc.) → never cached. The moment a new deploy lands, every browser fetches the new HTML on next navigation, which references the new asset hashes, which loads the fresh JS. Without this, the SPA rewrite to /index.html was inheriting the rewrite source's headers — meaning /book-now was caching the old HTML for an arbitrary duration depending on Vercel CDN.",
-      "source": "/((?!assets/).*)",
+      "//": "SPA shell + service worker + manifest — never cache. Vercel's path-to-regexp does NOT support negative lookahead (commit fa40cca), so we enumerate explicit no-cache paths instead of /((?!assets/).*).",
+      "source": "/",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" },
         { "key": "Pragma", "value": "no-cache" },
         { "key": "Expires", "value": "0" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" },
+        { "key": "Pragma", "value": "no-cache" },
+        { "key": "Expires", "value": "0" }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" },
+        { "key": "Pragma", "value": "no-cache" },
+        { "key": "Expires", "value": "0" }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "//": "All SPA routes that rewrite to /index.html. Headers apply to the original requested path (pre-rewrite), so we must list them. Vercel CDN treats unlisted paths with default caching, but since the rewrite TARGET (/index.html) above is no-cache, the served HTML body will not be CDN-cached.",
+      "source": "/book-now/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "source": "/dashboard/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "source": "/admin/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "source": "/staff/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "source": "/login",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "source": "/pricing",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
+      ]
+    },
+    {
+      "source": "/lab-request/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate, s-maxage=0" }
       ]
     }
   ],
