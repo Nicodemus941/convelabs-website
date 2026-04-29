@@ -34,6 +34,21 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
     setSignedUrl(null);
     (async () => {
       try {
+        // lab-orders bucket is public=true, so getPublicUrl returns a
+        // stable render.supabase.co URL that bypasses RLS entirely. This
+        // matches the URL used by email attachments. We previously used
+        // createSignedUrl which goes through storage.objects RLS — that
+        // worked when policies were lax but broke after the security
+        // lockdown when the SDK auth-context didn't always carry the
+        // phleb's JWT through to the signing call.
+        const { data: pub } = supabase.storage
+          .from('lab-orders')
+          .getPublicUrl(filePath);
+        if (pub?.publicUrl) {
+          setSignedUrl(pub.publicUrl);
+          return;
+        }
+        // Fallback to signed URL path for backwards compat / private buckets
         const { data, error: err } = await supabase.storage
           .from('lab-orders')
           .createSignedUrl(filePath, 3600);
