@@ -13,7 +13,12 @@
  * site can use the result unconditionally.
  */
 export async function resizeImageForUpload(file: File, opts?: { maxBytes?: number; maxLongEdge?: number; quality?: number }): Promise<File> {
-  const maxBytes = opts?.maxBytes ?? 4_500_000; // 4.5 MB to leave headroom for base64 + JSON wrapper
+  // 3.5 MB binary threshold = ~4.66 MB base64 (33% encoding overhead),
+  // safely under Anthropic Vision's 5 MB base64 cap. The 4.5 MB threshold
+  // we tried first wasn't enough — IMG_1927.jpeg landed at 4.41 MB binary
+  // / 5.88 MB base64 and was rejected. Phone photos at 12 MP routinely
+  // hit this range so the threshold has to be conservative.
+  const maxBytes = opts?.maxBytes ?? 3_500_000;
   const maxLongEdge = opts?.maxLongEdge ?? 1600;
   const quality = opts?.quality ?? 0.85;
 
