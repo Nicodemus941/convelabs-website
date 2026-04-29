@@ -113,48 +113,44 @@ serve(async (req: Request) => {
 
 // Helper function to process a single appointment reminder
 async function processSingleAppointment(appointmentId: string, supabaseClient: any) {
-  // Get appointment details
+  // Get appointment details. The previous JOIN syntax
+  // `patient:patient_id (id, email)` doesn't resolve — there's no FK
+  // relation registered under that alias, so PostgREST returned
+  // "Could not find a relationship between 'appointments' and 'patient_id'
+  // in the schema cache" and every reminder silently failed. Fix: use the
+  // appointment's own patient_email column and look up the rest via
+  // tenant_patients separately.
   const { data: appointment, error } = await supabaseClient
     .from('appointments')
-    .select(`
-      *,
-      patient:patient_id (
-        id,
-        email
-      ),
-      phlebotomist:phlebotomist_id (
-        user_metadata->firstName,
-        user_metadata->lastName
-      )
-    `)
+    .select('*')
     .eq('id', appointmentId)
     .single();
-  
+
   if (error || !appointment) {
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error?.message || 'Appointment not found' 
+      JSON.stringify({
+        success: false,
+        error: error?.message || 'Appointment not found'
       }),
-      { 
+      {
         headers: { 'Content-Type': 'application/json' },
         status: 404,
       }
     );
   }
-  
-  // Get patient's email
-  const patientEmail = appointment.patient?.email;
+
+  // Resolve patient email — appointment row carries it directly; fall
+  // back to tenant_patients lookup if blank.
+  let patientEmail: string | null = appointment.patient_email || null;
+  if (!patientEmail && appointment.patient_id) {
+    const { data: tp } = await supabaseClient
+      .from('tenant_patients').select('email').eq('id', appointment.patient_id).maybeSingle();
+    patientEmail = tp?.email || null;
+  }
   if (!patientEmail) {
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: 'Patient email not found' 
-      }),
-      { 
-        headers: { 'Content-Type': 'application/json' },
-        status: 400,
-      }
+      JSON.stringify({ success: false, error: 'Patient email not found' }),
+      { headers: { 'Content-Type': 'application/json' }, status: 400 }
     );
   }
   
@@ -204,13 +200,63 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
   
   // Render the reminder email template
   const renderedTemplate = await getRenderedTemplate('appointment_reminder', templateData);
-  
+
+  // ─── INVOICE NUDGE — soft pay-link reminder when invoice is open ───
+  // VIPs are normally exempt from dunning, but if the visit is tomorrow
+  // and they haven't paid, a friendly nudge with the appointment
+  // confirmation IS service, not dunning. Same goes for any patient
+  // whose invoice is sent/reminded/final_warning when the visit lands.
+  let nudgeHtml = '';
+  let nudgeText = '';
+  try {
+    const isUnpaid =
+      appointment.payment_status === 'pending' &&
+      ['sent','reminded','final_warning','pending_send'].includes(appointment.invoice_status || '');
+    if (isUnpaid) {
+      const payUrl: string | null = appointment.stripe_invoice_url || null;
+      const amount = `$${Number(appointment.total_amount || 0).toFixed(2)}`;
+      if (payUrl) {
+        nudgeHtml = `
+          <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:14px 16px;margin:18px 0;font-family:Arial,sans-serif;">
+            <p style="margin:0 0 6px;font-weight:700;color:#92400e;font-size:14px;">Quick reminder: invoice still open</p>
+            <p style="margin:0 0 10px;font-size:13px;color:#78350f;line-height:1.5;">
+              Your ${amount} invoice for tomorrow's visit hasn't been paid yet. Pay now so we can confirm:
+            </p>
+            <div style="text-align:center;">
+              <a href="${payUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:12px 26px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">Pay ${amount} →</a>
+            </div>
+          </div>`;
+        nudgeText = `\n\nQuick reminder: your ${amount} invoice is still open. Pay: ${payUrl}\n`;
+      } else {
+        // No hosted Stripe URL on file — surface a callable line instead
+        nudgeHtml = `
+          <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:14px 16px;margin:18px 0;font-family:Arial,sans-serif;">
+            <p style="margin:0;font-size:13px;color:#78350f;line-height:1.5;">
+              Your ${amount} invoice is still open. Call <strong>(941) 527-9169</strong> to settle before your visit.
+            </p>
+          </div>`;
+        nudgeText = `\n\nYour ${amount} invoice is still open. Call (941) 527-9169 to settle.\n`;
+      }
+    }
+  } catch (e) {
+    console.warn('[appt-reminder] nudge build failed (non-blocking):', e);
+  }
+
+  // Inject the nudge near the top of the rendered HTML body — between
+  // <body> and the actual content. Falls back to prepending if no <body>.
+  const finalHtml = nudgeHtml
+    ? (renderedTemplate.html.includes('<body')
+        ? renderedTemplate.html.replace(/(<body[^>]*>)/i, `$1${nudgeHtml}`)
+        : nudgeHtml + renderedTemplate.html)
+    : renderedTemplate.html;
+  const finalText = (renderedTemplate.text || '') + nudgeText;
+
   // Send the reminder email
   const result = await sendEmail({
     to: patientEmail,
     subject: renderedTemplate.subject,
-    html: renderedTemplate.html,
-    text: renderedTemplate.text
+    html: finalHtml,
+    text: finalText
   });
   
   // Log the email

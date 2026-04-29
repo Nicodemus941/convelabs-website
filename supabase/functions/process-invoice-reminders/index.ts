@@ -214,13 +214,24 @@ Deno.serve(async (req) => {
     //   soon   (2-7 days):      6h after invoice
     //   relaxed (7+ days):      24h after invoice
     // ════════════════════════════════════════════════════════════════
-    const { data: sentAppts } = await supabase
+    // VIPs are normally exempt from dunning (handled with white-glove care
+    // out-of-band). EXCEPTION: when the visit is <24h away and the invoice
+    // is still unpaid, send ONE friendly "we're coming tomorrow — here's
+    // your pay link" reminder. That's service, not dunning.
+    const VIP_REMINDER_WINDOW_HOURS = 24;
+    const { data: sentApptsRaw } = await supabase
       .from('appointments')
       .select('*')
       .eq('invoice_status', 'sent')
-      .eq('is_vip', false)
       .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
       .not('status', 'eq', 'cancelled');
+    const sentAppts = (sentApptsRaw || []).filter((a: any) => {
+      if (!a.is_vip) return true;  // non-VIPs always in scope
+      // VIPs only when visit is within 24h
+      const apptMs = getApptTimeMs(a);
+      const hoursUntil = (apptMs - now) / (1000 * 60 * 60);
+      return hoursUntil > 0 && hoursUntil <= VIP_REMINDER_WINDOW_HOURS;
+    });
 
     // Hormozi-safe: for recurring series (weekly draws, monthly physicals
     // etc.), treat the whole group as ONE billable unit for dunning. Send
@@ -296,13 +307,19 @@ Deno.serve(async (req) => {
     // PHASE 2: Final Warning
     // Trigger: invoice_status = 'reminded' AND ≥12h since reminder sent
     // ════════════════════════════════════════════════════════════════
-    const { data: remindedAppts } = await supabase
+    // VIP relaxation: same rule as Phase 1 — inside the 24h pre-visit
+    // window, treat them like non-VIPs so they get the warning nudge.
+    const { data: remindedApptsRaw } = await supabase
       .from('appointments')
       .select('*')
       .eq('invoice_status', 'reminded')
-      .eq('is_vip', false)
       .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
       .not('status', 'eq', 'cancelled');
+    const remindedAppts = (remindedApptsRaw || []).filter((a: any) => {
+      if (!a.is_vip) return true;
+      const hoursUntil = (getApptTimeMs(a) - now) / (1000 * 60 * 60);
+      return hoursUntil > 0 && hoursUntil <= VIP_REMINDER_WINDOW_HOURS;
+    });
 
     for (const appt of (remindedAppts || [])) {
       // Use time since the REMINDER was sent, not since original invoice.
@@ -363,6 +380,11 @@ Deno.serve(async (req) => {
     // Trigger: invoice_status = 'final_warning' AND ≥24h since warning
     //          AND appointment is within 7 days (no urgency otherwise)
     // ════════════════════════════════════════════════════════════════
+    // VIP HARD GUARDRAIL: NEVER auto-cancel a VIP's appointment for unpaid
+    // invoice. Owner explicitly wants VIPs (e.g. Meir Waizman) to be
+    // chased gently and resolved out-of-band — admin handles balance,
+    // not the cron. is_vip=false filter is REQUIRED here even though
+    // Phase 1 + 2 relax it inside the 24h pre-visit window.
     const { data: warningAppts } = await supabase
       .from('appointments')
       .select('*')
