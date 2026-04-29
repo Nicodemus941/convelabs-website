@@ -210,6 +210,32 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
   const [blockedDates, setBlockedDates] = useState<{ start: string; end: string }[]>([]);
   const [showAfterHours, setShowAfterHours] = useState(false);
+  // Phleb on-duty state — when ANY phleb has duty_through > now, after-hours
+  // slots open up AND the same-day 3pm cutoff is relaxed. The PWA OnDutyToggle
+  // writes phleb_duty_status; this component reads it.
+  const [phlebOnDuty, setPhlebOnDuty] = useState(false);
+  const [phlebDutyThrough, setPhlebDutyThrough] = useState<Date | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        // Public-readable RPC returns ONLY (boolean, duty_through) — no PII,
+        // no phleb identity. RLS on phleb_duty_status table itself blocks
+        // anon/patient access; this RPC is granted to anon + authenticated.
+        const { data } = await supabase.rpc('get_any_phleb_on_duty_now' as any);
+        if (cancelled) return;
+        const row = Array.isArray(data) ? data[0] : data;
+        if (row?.on_duty && row?.duty_through) {
+          setPhlebOnDuty(true);
+          setPhlebDutyThrough(new Date(row.duty_through));
+        } else {
+          setPhlebOnDuty(false);
+          setPhlebDutyThrough(null);
+        }
+      } catch (e) { /* silent — default to false */ }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDate]);
   const [holdId, setHoldId] = useState<string | null>(null);
   // Tier-unlock dialog state. Clicking a tier-locked slot opens this with
   // the required tier + upgrade CTA, instead of silently greying the slot out.
@@ -410,8 +436,14 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   // SAME-DAY LEAD TIME: 90 minutes minimum before appointment
   const SAME_DAY_LEAD_MINUTES = 90;
   // SAME-DAY CUTOFF: No same-day bookings after 3 PM (15:00)
-  const SAME_DAY_CUTOFF_HOUR = 15; // 3 PM
-  const isSameDayCutoff = isSameDay && today.getHours() >= SAME_DAY_CUTOFF_HOUR;
+  const SAME_DAY_CUTOFF_HOUR = 15; // 3 PM (default)
+  // When a phleb is on-duty, relax the 3 PM cutoff out to whenever their
+  // duty ends. This lets them mark online at 4 PM and have today's slots
+  // STILL be bookable up to their duty_through window.
+  const cutoffHour = phlebOnDuty && phlebDutyThrough
+    ? Math.max(SAME_DAY_CUTOFF_HOUR, phlebDutyThrough.getHours())
+    : SAME_DAY_CUTOFF_HOUR;
+  const isSameDayCutoff = isSameDay && today.getHours() >= cutoffHour;
 
   // Convert a time string like "2:30 PM" to minutes since midnight
   const timeToMinutes = (t: string): number => {
@@ -492,8 +524,19 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     });
   }
 
-  const activeWindows = (!isWeekend && showAfterHours)
-    ? [...baseWindows, ...afterHoursWindows]
+  // Auto-include after-hours slots when a phleb is on-duty and this is
+  // a same-day booking. The deprecated showAfterHours toggle is preserved
+  // for any future manual-override path. Filter after-hours slots down to
+  // the on-duty window so we don't show slots past duty_through.
+  const phlebDutyMinutes = phlebDutyThrough
+    ? phlebDutyThrough.getHours() * 60 + phlebDutyThrough.getMinutes()
+    : 0;
+  const dutyConstrainedAfterHours = phlebOnDuty
+    ? afterHoursWindows.filter(w => timeToMinutes(w.time) <= phlebDutyMinutes)
+    : [];
+  const includeAfterHours = !isWeekend && (showAfterHours || (isSameDay && phlebOnDuty));
+  const activeWindows = includeAfterHours
+    ? [...baseWindows, ...(phlebOnDuty ? dutyConstrainedAfterHours : afterHoursWindows)]
     : baseWindows;
   
   // Check if both date and time are selected (STAT auto-selects "Next Available")
@@ -608,7 +651,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                           const isTodayPastCutoff = date.getFullYear() === today.getFullYear()
                             && date.getMonth() === today.getMonth()
                             && date.getDate() === today.getDate()
-                            && today.getHours() >= SAME_DAY_CUTOFF_HOUR;
+                            && today.getHours() >= cutoffHour;
                           return isPast || isTooFar || isHoliday(date) || isBlockedByAdmin(date, blockedDates) || isTodayPastCutoff;
                         }}
                         initialFocus
@@ -663,12 +706,29 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     </div>
                   )}
 
+                  {/* Phleb on-duty indicator — surfaces extended availability
+                      so patients understand why later/after-hours slots
+                      are showing on a same-day booking. */}
+                  {isSameDay && phlebOnDuty && phlebDutyThrough && (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-2 flex items-start gap-2">
+                      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse mt-1.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-emerald-900">A phlebotomist is on duty</p>
+                        <p className="text-xs text-emerald-700 mt-0.5">
+                          Extended availability through {phlebDutyThrough.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} — including after-hours slots.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {isSameDayCutoff ? (
                     <div className="py-4 space-y-2">
                       <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
                         <p className="font-medium text-red-900">Same-Day Booking Cutoff Reached</p>
                         <p className="text-sm text-red-700 mt-1">
-                          Same-day appointments cannot be booked after 3:00 PM. Please select tomorrow or a future date.
+                          {phlebOnDuty
+                            ? `Today's slots have closed past ${cutoffHour > 12 ? `${cutoffHour - 12}:00 PM` : `${cutoffHour}:00 AM`}. Please select tomorrow or a future date.`
+                            : 'Same-day appointments cannot be booked after 3:00 PM. Please select tomorrow or a future date.'}
                         </p>
                       </div>
                     </div>
