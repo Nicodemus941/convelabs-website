@@ -351,8 +351,31 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // Cheryl Hanin case) had this number in the UI total but not in the
       // Stripe session → primary invoice missing the companion fee.
       const familyMemberExtra = parseFloat(String((data as any).familyMemberExtra || 0)) || 0;
+
+      // DOUBLE-COUNT GUARD: the booking flow has TWO entry points for adding
+      // companions to a visit:
+      //   1. additionalPatients[] — legacy multi-patient form (PatientInfoStep)
+      //   2. familyMembers[] — saved-family-member shortcut (CheckoutStep modal)
+      // Both add $75 per companion via different paths. If a patient enters
+      // the SAME companion through both UIs (or the form copies between them),
+      // they get double-charged. Pricing-drift smoke caught Mary Rienzi at
+      // $250 (vs $175 expected) — refunded $75 via pyr_1TRaRvAPnMg8iHarG6WoO5pt.
+      //
+      // Fix: companion fee already lives inside breakdown.subtotal via the
+      // additionalPatientCount param to calculateTotal. familyMemberExtra is
+      // a SEPARATE add-on. To prevent double-counting, only add
+      // familyMemberExtra IF additionalPatientCount === 0. Otherwise treat
+      // them as the same population (admin can audit notes for which UI fed in).
+      const safeFamilyMemberExtra = additionalPatientCount > 0 ? 0 : familyMemberExtra;
+      if (additionalPatientCount > 0 && familyMemberExtra > 0) {
+        console.warn(
+          `[booking] companion double-count detected: additionalPatients=${additionalPatientCount} + familyMemberExtra=$${familyMemberExtra}. ` +
+          `Charging only the additionalPatients tier (already in breakdown.subtotal). ` +
+          `If patient legitimately wanted multiple companions through both UIs, this is a known limitation — admin can add via manual scheduling.`
+        );
+      }
       const finalSubtotal = Math.max(
-        breakdown.subtotal - referralDiscount + bundleExtra + familyMemberExtra,
+        breakdown.subtotal - referralDiscount + bundleExtra + safeFamilyMemberExtra,
         0
       );
 
