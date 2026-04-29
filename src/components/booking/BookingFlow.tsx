@@ -9,7 +9,7 @@ import { bookingFormSchema, BookingFormValues } from '@/types/appointmentTypes';
 import { useAvailableServices } from '@/hooks/useAvailableServices';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateTotal, getServiceById } from '@/services/pricing/pricingService';
+import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
 import { createAppointmentCheckoutSession } from '@/services/stripe/appointmentCheckout';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -298,9 +298,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const visitType = data.serviceDetails.visitType || 'mobile';
       const service = getServiceById(visitType);
       const additionalPatientCount = (data.additionalPatients || []).length;
+      // CRITICAL: extendedArea was missing here — CheckoutStep displayed
+      // the surcharge in the patient-visible breakdown but BookingFlow's
+      // checkout-time recalc didn't include it, so the amount we sent to
+      // Stripe was internally inconsistent with what the patient saw.
+      // Pricing-drift smoke caught Mary Rienzi (Clermont, $250 charged
+      // vs $175 expected, refunded $75 via pyr_1TRaRvAPnMg8iHarG6WoO5pt).
+      const locationCity = data.locationDetails?.city || '';
       const breakdown = calculateTotal(visitType, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
+        extendedArea: isExtendedArea(locationCity),
       }, tipAmount, additionalPatientCount, memberTier);
 
       // Lab orders + insurance — trust the upload-on-drop in
