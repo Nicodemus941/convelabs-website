@@ -29,7 +29,9 @@ interface DeliveryRow {
   patient_name: string | null;
   lab_destination: string | null;
   specimen_lab_name: string | null;
-  delivery_location: string | null;
+  // Stored as JSONB { lat, lng, accuracy } by SpecimenDeliveryModal.
+  // Legacy rows may contain a plain string address. Handle both.
+  delivery_location: string | { lat: number; lng: number; accuracy?: number } | null;
   specimen_tracking_id: string | null;
   delivered_at: string | null;
   specimens_delivered_at: string | null;
@@ -191,7 +193,11 @@ const DeliveriesTab: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <p className="font-medium">{labLabel}</p>
                       {r.delivery_location && (
-                        <p className="text-gray-500 text-[11px] mt-0.5 truncate">{r.delivery_location}</p>
+                        <p className="text-gray-500 text-[11px] mt-0.5 truncate">
+                          {typeof r.delivery_location === 'string'
+                            ? r.delivery_location
+                            : `${r.delivery_location.lat.toFixed(5)}, ${r.delivery_location.lng.toFixed(5)}${r.delivery_location.accuracy ? ` · ±${Math.round(r.delivery_location.accuracy)}m` : ''}`}
+                        </p>
                       )}
                       {r.specimen_tracking_id && (
                         <p className="text-[11px] text-gray-500 mt-0.5">
