@@ -261,7 +261,47 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   };
 
   if (loading) return null;
-  if (patients.length === 0) return null; // no linked patients yet → don't clutter UI
+
+  // Empty state — newly-registered orgs need a clear path to add their
+  // first patient. (Previously this entire section was hidden when
+  // patients.length === 0, which left brand-new orgs with no roster
+  // entrypoint.)
+  if (patients.length === 0) {
+    return (
+      <>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Users className="h-4 w-4 text-[#B91C1C]" /> Your patients
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Build your roster so you can request labs in one click — no re-typing names every time.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="py-8 text-center">
+            <Users className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+            <p className="text-sm text-gray-700 font-medium">No patients on your roster yet</p>
+            <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+              Add patients now and you'll be able to bulk-request labs, track visits, and enroll them in your subscription.
+            </p>
+            <Button
+              size="sm"
+              className="mt-4 bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5"
+              onClick={() => setAddOpen(true)}
+            >
+              <UserPlus className="h-3.5 w-3.5" /> Add your first patient
+            </Button>
+          </CardContent>
+        </Card>
+        <AddPatientModal
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          organizationId={orgId}
+          onCreated={() => { setAddOpen(false); load(); }}
+        />
+      </>
+    );
+  }
 
   return (
     <>
