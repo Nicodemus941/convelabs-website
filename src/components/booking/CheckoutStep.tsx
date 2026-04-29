@@ -89,7 +89,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   } | null>(null);
   const [memberLabel, setMemberLabel] = useState('');
   const [bundleEnabled, setBundleEnabled] = useState(false);
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  // Family members live INSIDE the additionalPatients form array (single
+  // source of truth for companions on this booking). Tagged with
+  // _source='family_member' so we can filter for display + remove. Older
+  // architecture had a separate familyMembers local state + familyMemberExtra
+  // form field which double-counted with PatientInfoStep's additionalPatients
+  // — caught Mary Rienzi at $250 vs $175. Consolidation removes the dual path.
+  const additionalPatientsAll = (watch('additionalPatients') || []) as any[];
+  const familyMembers = additionalPatientsAll.filter((p: any) => p?._source === 'family_member') as FamilyMember[];
   const [showFamilyForm, setShowFamilyForm] = useState(false);
   const [familyForm, setFamilyForm] = useState({ name: '', dob: '', relationship: 'Spouse' });
   const BUNDLE_COUNT = 4;
@@ -196,14 +203,40 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const handleAddFamilyMember = () => {
     if (!familyForm.name.trim()) { toast.error('Please enter the family member\'s name'); return; }
     if (!familyForm.dob) { toast.error('Please enter their date of birth'); return; }
-    setFamilyMembers(prev => [...prev, { ...familyForm, name: familyForm.name.trim() }]);
+    // Push into additionalPatients (canonical source). _source tag lets us
+    // filter family-member entries out for display + removal.
+    const trimmedName = familyForm.name.trim();
+    const [first, ...rest] = trimmedName.split(/\s+/);
+    const current = (getValues('additionalPatients') || []) as any[];
+    methods.setValue('additionalPatients', [
+      ...current,
+      {
+        firstName: first || trimmedName,
+        lastName: rest.join(' ') || '',
+        email: '',
+        phone: '',
+        dob: familyForm.dob,
+        relationship: familyForm.relationship,
+        _source: 'family_member',
+      },
+    ] as any);
     setFamilyForm({ name: '', dob: '', relationship: 'Spouse' });
     setShowFamilyForm(false);
     toast.success(`Family member added (+$${familyMemberPrice})`);
   };
 
   const handleRemoveFamilyMember = (index: number) => {
-    setFamilyMembers(prev => prev.filter((_, i) => i !== index));
+    // Remove the Nth family-member-tagged entry from additionalPatients.
+    const current = (getValues('additionalPatients') || []) as any[];
+    let fmSeen = -1;
+    const next = current.filter((p: any) => {
+      if (p?._source === 'family_member') {
+        fmSeen++;
+        return fmSeen !== index;
+      }
+      return true;
+    });
+    methods.setValue('additionalPatients', next as any);
     toast.info('Family member removed');
   };
 
@@ -252,7 +285,11 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     }
     if (familyMembers.length > 0) {
       methods.setValue('familyMembers' as any, familyMembers);
-      methods.setValue('familyMemberExtra' as any, familyMemberTotal);
+      // CONSOLIDATED: family members are already inside additionalPatients,
+      // so their fee is already counted by calculateTotal via the
+      // additionalPatientCount path. Setting familyMemberExtra=0 keeps
+      // older callers safe in case any read it.
+      methods.setValue('familyMemberExtra' as any, 0);
     }
 
     // HIPAA safeguard: detect when logged-in user's email matches patient email
@@ -674,12 +711,10 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
-        {familyMemberTotal > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">{familyMembers.length} family member{familyMembers.length > 1 ? 's' : ''} × ${familyMemberPrice}</span>
-            <span>+${familyMemberTotal.toFixed(2)}</span>
-          </div>
-        )}
+        {/* Family-member line removed — family members now live inside
+            additionalPatients form array, so their fee is already counted
+            in breakdown.surcharges (see "Additional patients (N × $75)"
+            line above). Showing a separate line would double-display. */}
 
         {effectiveReferralDiscount > 0 && (
           <div className="flex justify-between text-sm text-emerald-700">
@@ -693,7 +728,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         {/* Total */}
         <div className="flex justify-between text-lg font-bold">
           <span>Total</span>
-          <span>${Math.max(0, breakdown.total + addOnTotal + familyMemberTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}</span>
+          <span>${Math.max(0, breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}</span>
         </div>
 
         {/* Referral Code */}
@@ -790,7 +825,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             ) : (
               <>
                 <CreditCard className="mr-2 h-4 w-4" />
-                Proceed to Payment — ${Math.max(0, breakdown.total + addOnTotal + familyMemberTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}
+                Proceed to Payment — ${Math.max(0, breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}
               </>
             )}
           </Button>
