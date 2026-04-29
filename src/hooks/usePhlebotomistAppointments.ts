@@ -76,10 +76,13 @@ export function usePhlebotomistAppointments() {
 
     // When targetMonth is passed (user navigated to a specific month),
     // fetch ONLY that month — efficient calendar paging.
-    // When no targetMonth (default load), fetch a rolling 60-day window
-    // from today: current month + next month. Without this, an admin
-    // manually scheduling a visit for May 5 wouldn't show on a phleb's
-    // PWA opened on April 29 — they'd have to manually scroll forward.
+    // When no targetMonth (default load), fetch a rolling 4-month window:
+    // current month through end of (today + 3 months). Without this,
+    // upcoming bookings (recurring series, advance schedules) didn't
+    // show on default PWA load and phleb had to manually scroll forward
+    // to discover them — a real bug we hit with Meriruth Gregg's May 5
+    // booking on April 29, and Lawrence Carpenter's recurring series
+    // through July.
     let monthStart: string;
     let monthEnd: string;
     if (targetMonth) {
@@ -88,8 +91,9 @@ export function usePhlebotomistAppointments() {
     } else {
       const now = new Date();
       monthStart = format(startOfMonth(now), 'yyyy-MM-dd');
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-      monthEnd = format(endOfMonth(nextMonth), 'yyyy-MM-dd');
+      // End of (today + 3 months). 4-month rolling window total.
+      const farMonth = new Date(now.getFullYear(), now.getMonth() + 3, 1);
+      monthEnd = format(endOfMonth(farMonth), 'yyyy-MM-dd');
     }
 
     try {
