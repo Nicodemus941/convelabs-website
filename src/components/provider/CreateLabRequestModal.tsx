@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Loader2, UploadCloud, FileText, X, MessageSquare, ChevronDown, ChevronUp, CheckCircle2, DollarSign, Building2, User } from 'lucide-react';
+import { Loader2, UploadCloud, FileText, X, MessageSquare, ChevronDown, ChevronUp, CheckCircle2, DollarSign, Building2, User, Users, Search } from 'lucide-react';
 
 /**
  * Provider-facing modal: "Request labs for a patient"
@@ -64,6 +64,50 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
 
   // NEW: expand full OCR panel list (click "+N more" to see the rest)
   const [showAllPanels, setShowAllPanels] = useState(false);
+
+  // Roster picker — saved tenant_patients for this org, one-click auto-fill.
+  // (User's "easy selections" ask: stop re-typing names every lab request.)
+  const [rosterOpen, setRosterOpen] = useState(false);
+  const [rosterQ, setRosterQ] = useState('');
+  const [roster, setRoster] = useState<Array<{ name: string; email: string | null; phone: string | null; visits: number }>>([]);
+  const [rosterLoaded, setRosterLoaded] = useState(false);
+
+  const loadRoster = async () => {
+    if (rosterLoaded) return;
+    try {
+      const { data, error } = await supabase.rpc('get_org_linked_patients' as any);
+      if (error) throw error;
+      const rows = (data as any[] | null) || [];
+      setRoster(rows.map(r => ({
+        name: r.patient_name,
+        email: r.patient_email,
+        phone: r.patient_phone,
+        visits: Number(r.visit_count) || 0,
+      })));
+      setRosterLoaded(true);
+    } catch (e) {
+      console.warn('[create-lab-request] roster load failed:', e);
+      setRosterLoaded(true);
+    }
+  };
+
+  const pickFromRoster = (p: { name: string; email: string | null; phone: string | null }) => {
+    setPatientName(p.name);
+    setPatientEmail(p.email || '');
+    setPatientPhone(p.phone ? formatPhoneDisplay(p.phone) : '');
+    setRosterOpen(false);
+    setRosterQ('');
+  };
+
+  const filteredRoster = useMemo(() => {
+    const q = rosterQ.trim().toLowerCase();
+    if (!q) return roster;
+    return roster.filter(r =>
+      r.name.toLowerCase().includes(q) ||
+      (r.email || '').toLowerCase().includes(q) ||
+      (r.phone || '').replace(/\D/g, '').includes(q.replace(/\D/g, ''))
+    );
+  }, [roster, rosterQ]);
 
   const reset = () => {
     setPatientName(''); setPatientEmail(''); setPatientPhone('');
@@ -229,7 +273,58 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
         <div className="space-y-4 pt-2">
           {/* PATIENT */}
           <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">Patient</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">Patient</p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px] gap-1.5"
+                onClick={() => { setRosterOpen(v => !v); if (!rosterLoaded) loadRoster(); }}
+              >
+                <Users className="h-3 w-3" /> Pick from roster
+              </Button>
+            </div>
+            {rosterOpen && (
+              <div className="rounded-lg border bg-gray-50 p-2 space-y-2">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400 pointer-events-none" />
+                  <Input
+                    value={rosterQ}
+                    onChange={e => setRosterQ(e.target.value)}
+                    placeholder="Search your roster…"
+                    className="pl-8 h-8 text-xs bg-white"
+                    autoFocus
+                  />
+                </div>
+                <div className="max-h-48 overflow-y-auto divide-y bg-white rounded border">
+                  {!rosterLoaded ? (
+                    <div className="p-3 text-center text-xs text-gray-500"><Loader2 className="h-3 w-3 animate-spin inline mr-1" /> Loading roster…</div>
+                  ) : filteredRoster.length === 0 ? (
+                    <div className="p-3 text-center text-xs text-gray-500">
+                      {roster.length === 0 ? 'No patients on your roster yet. Add some from the dashboard.' : 'No matches.'}
+                    </div>
+                  ) : (
+                    filteredRoster.slice(0, 50).map(p => (
+                      <button
+                        key={p.name}
+                        type="button"
+                        onClick={() => pickFromRoster(p)}
+                        className="w-full text-left p-2 hover:bg-red-50 transition flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-xs font-medium truncate">{p.name}</div>
+                          <div className="text-[10px] text-gray-500 truncate">
+                            {p.email || '—'}{p.email && p.phone && ' · '}{p.phone || ''}
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-gray-400 flex-shrink-0">{p.visits} visit{p.visits === 1 ? '' : 's'}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
             <div>
               <Label>Full name *</Label>
               <Input value={patientName} onChange={e => setPatientName(e.target.value)} placeholder="Jane Smith" autoFocus />
