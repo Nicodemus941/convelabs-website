@@ -400,6 +400,52 @@ Deno.serve(async (req) => {
         ocr_fasting_required: fastingDetected,
         ocr_completed_at: new Date().toISOString(),
       }).eq('id', labOrderRowId);
+
+      // ─── MIRROR TO PARENT APPOINTMENT ─────────────────────────────
+      // The labOrderId path used to skip updating the parent appointments
+      // row, so downstream code (booking-flow fasting banner, admin
+      // reports, phleb visit prep) never saw the OCR'd panels. Now we
+      // pull every COMPLETE lab order on this appointment, merge their
+      // panels, and write the union back to appointments.lab_order_panels
+      // + lab_order_ocr_text + ocr_processed_at. Also OR-folds fasting
+      // detection across every order — if ANY one says fasting, the
+      // whole visit needs fasting.
+      if (targetId) {
+        try {
+          const { data: allOrders } = await supabase
+            .from('appointment_lab_orders')
+            .select('ocr_detected_panels, ocr_full_text, ocr_fasting_required')
+            .eq('appointment_id', targetId)
+            .eq('ocr_status', 'complete');
+          const merged = new Set<string>();
+          let mergedText = '';
+          let mergedFasting = false;
+          for (const o of (allOrders || []) as any[]) {
+            for (const p of (o.ocr_detected_panels || [])) merged.add(String(p));
+            if (o.ocr_full_text) mergedText += (mergedText ? '\n\n---\n\n' : '') + o.ocr_full_text;
+            if (o.ocr_fasting_required) mergedFasting = true;
+          }
+          // Include this row's results even if it isn't yet flushed into the
+          // SELECT above (race window).
+          for (const p of (result.panels || [])) merged.add(String(p));
+          if (result.text && !mergedText.includes(result.text)) {
+            mergedText += (mergedText ? '\n\n---\n\n' : '') + result.text;
+          }
+          mergedFasting = mergedFasting || fastingDetected;
+
+          await supabase.from('appointments').update({
+            lab_order_panels: Array.from(merged),
+            lab_order_ocr_text: mergedText.substring(0, 50000),
+            ocr_processed_at: new Date().toISOString(),
+            // If fasting was detected and the appointment is currently
+            // tagged routine/non-fasting, surface the override via notes
+            // — but DON'T silently change service_type. Admin reviews.
+            ...(mergedFasting ? { fasting_required: true } : {}),
+          }).eq('id', targetId);
+        } catch (mirrorErr) {
+          console.warn('[ocr->appointment-mirror] failed (non-blocking):', mirrorErr);
+        }
+      }
     } else if (targetId) {
       await supabase.from('appointments').update({
         lab_order_ocr_text: result.text,
