@@ -12,7 +12,7 @@
  *   - Future bookings made while on-duty stay valid even after toggling off.
  */
 import React, { useEffect, useState } from 'react';
-import { Loader2, Moon, Power } from 'lucide-react';
+import { Loader2, Moon, Power, Sun } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -71,8 +71,20 @@ const OnDutyToggle: React.FC<{ variant?: 'desktop' | 'mobile' }> = ({ variant = 
   }
 
   function until4Hr() {
+    // Preserve current minute — previously zeroed minutes which made
+    // "4 hours" at 5:45 AM resolve to 9:00 AM (4h - 45min). Now stays
+    // a true 4 hours.
     const t = new Date();
-    t.setHours(t.getHours() + 4, 0, 0, 0);
+    t.setHours(t.getHours() + 4);
+    setDuty(t);
+  }
+  function untilEndOfDay() {
+    // 8 PM local — covers a typical phleb workday from any morning start.
+    // Most-tapped option; placed first.
+    const t = new Date();
+    t.setHours(20, 0, 0, 0);
+    // If it's already past 8 PM, fall back to midnight.
+    if (t < new Date()) t.setHours(23, 59, 59, 999);
     setDuty(t);
   }
   function untilMidnight() {
@@ -122,6 +134,17 @@ const OnDutyToggle: React.FC<{ variant?: 'desktop' | 'mobile' }> = ({ variant = 
             <div className="p-2 space-y-1">
               {!isOnDuty ? (
                 <>
+                  <button
+                    onClick={untilEndOfDay}
+                    disabled={updating}
+                    className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-emerald-50 border border-emerald-200 bg-emerald-50/40 transition flex items-center gap-2.5"
+                  >
+                    <Sun className="h-4 w-4 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-900">On duty for the workday</p>
+                      <p className="text-[11px] text-emerald-700">Auto-ends at 8:00 PM · most-tapped</p>
+                    </div>
+                  </button>
                   <button
                     onClick={until4Hr}
                     disabled={updating}
