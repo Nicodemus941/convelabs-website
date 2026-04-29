@@ -86,6 +86,11 @@ const Login = () => {
             <CardDescription>Sign in to access your account</CardDescription>
           </CardHeader>
           <CardContent>
+            {searchParams.get('reset') === 'success' && (
+              <div className="mb-4 p-3 text-sm bg-green-50 text-green-800 rounded-lg border border-green-200">
+                Password updated. Sign in with your new password to continue.
+              </div>
+            )}
             <LoginForm handleSuperAdminLogin={handleSuperAdminLogin} redirectPath={redirectPath} />
 
             <div className="mt-6 space-y-3 text-center text-sm">

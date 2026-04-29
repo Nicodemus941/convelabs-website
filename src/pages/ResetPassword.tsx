@@ -191,14 +191,26 @@ const ResetPassword = () => {
       setIsSuccess(true);
       toast.success("Password updated — signing you in…");
 
-      // Their session is still valid after the password change. Skip the
-      // unnecessary sign-out + /login bounce. Route straight to the
-      // role-appropriate dashboard so they never see a login form twice.
-      setTimeout(async () => {
-        try {
-          const { data: refreshed } = await supabase.auth.refreshSession();
-          const role = refreshed?.session?.user?.user_metadata?.role
-            || refreshed?.user?.user_metadata?.role;
+      // The recovery session is unreliable after an admin password update —
+      // refreshSession() can return a stale/null token, which sends the user
+      // to /dashboard logged-out and bounces them to /login. Do a clean
+      // signInWithPassword with the email we already verified + the new
+      // password so we get a guaranteed fresh session.
+      const targetEmail = email || data?.email;
+      try {
+        if (targetEmail) {
+          await supabase.auth.signOut().catch(() => {}); // clear any half-baked recovery session
+          const { data: signed, error: signErr } = await supabase.auth.signInWithPassword({
+            email: targetEmail,
+            password,
+          });
+          if (signErr) {
+            console.warn('[reset-password] auto-sign-in failed, sending to /login:', signErr.message);
+            window.location.href = '/login?reset=success';
+            return;
+          }
+          const role = signed?.session?.user?.user_metadata?.role
+            || signed?.user?.user_metadata?.role;
           if (role === 'provider') {
             window.location.href = '/dashboard/provider';
             return;
@@ -207,12 +219,15 @@ const ResetPassword = () => {
             window.location.href = `/dashboard/${role}`;
             return;
           }
-          // No role in metadata — let Dashboard.tsx derive it from org membership
           window.location.href = '/dashboard';
-        } catch {
-          window.location.href = '/dashboard';
+          return;
         }
-      }, 1200);
+        // No email captured — safest fallback is /login with success flag
+        window.location.href = '/login?reset=success';
+      } catch (redirectErr) {
+        console.error('[reset-password] post-success redirect failed:', redirectErr);
+        window.location.href = '/login?reset=success';
+      }
     } catch (err: any) {
       console.error('[reset-password] submit failed:', err);
       setFormError(err.message || "An unexpected error occurred. Please try again.");

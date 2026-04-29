@@ -45,8 +45,24 @@ Deno.serve(async (req) => {
 
     if (updateErr) {
       console.error('Password update failed:', updateErr);
-      return new Response(JSON.stringify({ error: updateErr.message || 'Failed to update password' }), {
-        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      // Map Supabase auth errors to friendly, actionable messages.
+      // Return 200 (not 5xx) so the client's `data.error` path receives them
+      // rather than them getting swallowed by FunctionsHttpError.
+      const raw = (updateErr.message || '').toLowerCase();
+      let friendly = updateErr.message || 'Failed to update password';
+      let code = 'unknown';
+      if (raw.includes('different from the old') || raw.includes('same as') || raw.includes('same_password') || raw.includes('new password should')) {
+        friendly = "That password matches one you've used before. For your security, please choose a new password you haven't used on this account.";
+        code = 'same_password';
+      } else if (raw.includes('weak') || raw.includes('pwned') || raw.includes('compromised') || raw.includes('breach')) {
+        friendly = 'That password has shown up in a known data breach. Please choose a different one.';
+        code = 'weak_password';
+      } else if (raw.includes('at least') || raw.includes('length') || raw.includes('characters')) {
+        friendly = updateErr.message || 'Password does not meet the minimum length requirement.';
+        code = 'too_short';
+      }
+      return new Response(JSON.stringify({ error: friendly, code }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
