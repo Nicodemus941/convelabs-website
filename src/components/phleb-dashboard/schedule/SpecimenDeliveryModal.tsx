@@ -131,6 +131,11 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         status: 'specimen_delivered',
         delivered_at: nowIso,
         specimens_delivered_at: nowIso,
+        // Mirror the lab-generated tracking ID to the appointment row so the
+        // Deliveries tab + admin reports can show it. Previously only stored
+        // in specimen_deliveries.specimen_id which the dashboard didn't read.
+        specimen_tracking_id: specimenId.trim(),
+        specimen_lab_name: labLabel,
         ...(geoStamp ? { delivery_location: geoStamp } : {}),
         ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
       }).eq('id', appointmentId);
