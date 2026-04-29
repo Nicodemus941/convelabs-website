@@ -320,6 +320,11 @@ const ProviderDashboard: React.FC = () => {
                 <Calendar className="h-4 w-4" /> Schedule a visit
               </Link>
             </Button>
+            <Button asChild variant="outline" className="h-12 px-5 gap-2 text-[15px]">
+              <Link to="/for-providers" target="_blank">
+                <FileText className="h-4 w-4" /> Services & pricing
+              </Link>
+            </Button>
           </div>
         </div>
 

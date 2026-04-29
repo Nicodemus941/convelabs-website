@@ -110,6 +110,14 @@ function renderEmail(r: Recipient, customIntro?: string): string {
     </div>
     <p style="text-align:center;font-size:12px;color:#6b7280;margin:0 0 16px;">Takes 2 minutes. 24-hour founder response.</p>
 
+    <p style="margin:22px 0 8px;font-size:14px;">
+      Want the answers right now without a call?
+      <a href="${PUBLIC_SITE}/for-providers" style="color:#B91C1C;font-weight:600;">View services, pricing, hours &amp; how it works →</a>
+    </p>
+    <p style="margin:8px 0 0;font-size:12px;color:#6b7280;">
+      Includes draw fees, lab destinations (Quest, LabCorp, AdventHealth, Orlando Health), service area, and the patient booking flow.
+    </p>
+
     <p style="margin:22px 0 8px;font-size:14px;">Prefer a phone call? <a href="tel:+19415279169" style="color:#B91C1C;font-weight:600;">(941) 527-9169</a> — I answer my own phone on weekdays.</p>
 
     <p style="margin:16px 0 0;">With gratitude,<br>
