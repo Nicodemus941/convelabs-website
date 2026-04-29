@@ -74,9 +74,23 @@ export function usePhlebotomistAppointments() {
     if (!user) return;
     setIsLoading(true);
 
-    const month = targetMonth || new Date();
-    const monthStart = format(startOfMonth(month), 'yyyy-MM-dd');
-    const monthEnd = format(endOfMonth(month), 'yyyy-MM-dd');
+    // When targetMonth is passed (user navigated to a specific month),
+    // fetch ONLY that month — efficient calendar paging.
+    // When no targetMonth (default load), fetch a rolling 60-day window
+    // from today: current month + next month. Without this, an admin
+    // manually scheduling a visit for May 5 wouldn't show on a phleb's
+    // PWA opened on April 29 — they'd have to manually scroll forward.
+    let monthStart: string;
+    let monthEnd: string;
+    if (targetMonth) {
+      monthStart = format(startOfMonth(targetMonth), 'yyyy-MM-dd');
+      monthEnd = format(endOfMonth(targetMonth), 'yyyy-MM-dd');
+    } else {
+      const now = new Date();
+      monthStart = format(startOfMonth(now), 'yyyy-MM-dd');
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      monthEnd = format(endOfMonth(nextMonth), 'yyyy-MM-dd');
+    }
 
     try {
       // phlebotomist_id stores the auth user ID (not staff_profiles.id)
