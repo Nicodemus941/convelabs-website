@@ -80,10 +80,14 @@ const SMSMessagingTab: React.FC = () => {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [{ data: pts }, { data: notifs }, { data: convMsgs }] = await Promise.all([
+      const [{ data: pts }, { data: notifs }, { data: threadMsgs }, { data: convs }] = await Promise.all([
         supabase.from('tenant_patients').select('id, first_name, last_name, phone, email, address, city, state').not('phone', 'is', null).order('first_name'),
         supabase.from('sms_notifications' as any).select('phone_number, message_content, created_at').order('created_at', { ascending: false }),
-        supabase.from('sms_messages' as any).select('conversation_id, direction, body, created_at').order('created_at', { ascending: false }),
+        // Thread messages joined to their conversation so we know which patient phone they belong to
+        supabase.from('sms_messages' as any)
+          .select('id, conversation_id, direction, body, created_at, sms_conversations!inner(patient_phone, patient_id)')
+          .order('created_at', { ascending: false }).limit(500),
+        supabase.from('sms_conversations' as any).select('id, patient_phone, patient_id, last_message_at'),
       ]);
 
       const contactList: PatientContact[] = (pts || []).filter((p: any) => p.phone).map((p: any) => ({
@@ -97,37 +101,57 @@ const SMSMessagingTab: React.FC = () => {
       }));
       setPatients(contactList);
 
-      // Build conversation previews from message history
+      // Build conversation previews keyed by last-10-digits-of-phone
+      const norm = (p: string | null | undefined) => (p || '').replace(/\D/g, '').slice(-10);
       const phoneToLastMsg = new Map<string, { body: string; at: string; dir: 'inbound' | 'outbound' }>();
 
-      // From sms_notifications (outbound)
-      for (const n of (notifs as any[]) || []) {
-        const phone = (n.phone_number || '').replace(/^\+1/, '').replace(/\D/g, '');
+      // From sms_messages (canonical — covers both inbound + outbound)
+      for (const m of (threadMsgs as any[]) || []) {
+        const conv = (m.sms_conversations || {}) as any;
+        const phone = norm(conv.patient_phone);
+        if (!phone) continue;
         if (!phoneToLastMsg.has(phone)) {
-          phoneToLastMsg.set(phone, { body: n.message_content || '', at: n.created_at, dir: 'outbound' });
+          phoneToLastMsg.set(phone, {
+            body: m.body || '',
+            at: m.created_at,
+            dir: (m.direction === 'inbound' ? 'inbound' : 'outbound'),
+          });
         }
       }
 
-      // From sms_messages (could be inbound)
-      for (const m of (convMsgs as any[]) || []) {
-        // We don't have phone directly on sms_messages, skip for now — notifications cover outbound
+      // Legacy sms_notifications fill in any phones we haven't seen via threading yet
+      for (const n of (notifs as any[]) || []) {
+        const phone = norm(n.phone_number);
+        if (!phone || phoneToLastMsg.has(phone)) continue;
+        phoneToLastMsg.set(phone, { body: n.message_content || '', at: n.created_at, dir: 'outbound' });
       }
+
+      // Pull last-viewed timestamps to compute unread state
+      const lastViewed = (() => {
+        try { return JSON.parse(localStorage.getItem('convelabs_sms_last_viewed') || '{}'); }
+        catch { return {}; }
+      })();
 
       const convos: ConversationPreview[] = [];
       for (const patient of contactList) {
-        const cleanPhone = patient.phone.replace(/\D/g, '');
-        const last = phoneToLastMsg.get(cleanPhone);
+        const phone = norm(patient.phone);
+        const last = phoneToLastMsg.get(phone);
         if (last) {
+          const lastViewedAt = lastViewed[patient.id];
+          // Unread = there's an inbound message newer than last view, OR
+          // last message is inbound and we've never opened this thread
+          const unread = last.dir === 'inbound' && (
+            !lastViewedAt || new Date(last.at) > new Date(lastViewedAt)
+          );
           convos.push({
             patient,
             lastMessage: last.body,
             lastMessageAt: last.at,
             lastDirection: last.dir,
-            unread: last.dir === 'inbound',
+            unread,
           });
         }
       }
-      // Sort by most recent message
       convos.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
       setConversations(convos);
     } catch (err) {
@@ -139,40 +163,78 @@ const SMSMessagingTab: React.FC = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Load messages for active patient
+  // Load messages for active patient — properly scoped to this patient's
+  // conversation. Uses sms_conversations as the threading anchor (one
+  // conversation per patient phone), pulls all sms_messages tied to it,
+  // plus legacy sms_notifications matched by phone (pre-threading rows).
   const loadMessages = useCallback(async (patient: PatientContact) => {
-    const cleanPhone = patient.phone.replace(/\D/g, '');
+    const cleanPhone = patient.phone.replace(/\D/g, '').slice(-10);
     const phoneVariants = [cleanPhone, `+1${cleanPhone}`, patient.phone];
 
-    const [{ data: notifMsgs }, { data: appts }] = await Promise.all([
+    // 1. Find this patient's conversation row (matches by last-10-digit
+    //    normalized phone, same way the DB upsert RPC normalizes).
+    const { data: convs } = await supabase
+      .from('sms_conversations' as any)
+      .select('id, patient_phone, patient_id')
+      .or(`patient_id.eq.${patient.id},patient_phone.ilike.%${cleanPhone}%`)
+      .limit(5);
+    const convIds = (convs || []).map((c: any) => c.id);
+
+    // 2. Pull threaded messages for those conversations
+    const [{ data: threadMsgs }, { data: notifMsgs }, { data: appts }] = await Promise.all([
+      convIds.length > 0
+        ? supabase.from('sms_messages' as any).select('*')
+            .in('conversation_id', convIds)
+            .order('created_at', { ascending: true })
+        : Promise.resolve({ data: [] }),
       supabase.from('sms_notifications' as any).select('*').order('created_at', { ascending: true }),
       supabase.from('appointments').select('*').eq('patient_id', patient.id).order('appointment_date', { ascending: false }),
     ]);
 
     const allMsgs: Message[] = [];
-    if (notifMsgs) {
-      for (const m of notifMsgs as any[]) {
-        const msgPhone = (m.phone_number || '').replace(/^\+1/, '').replace(/\D/g, '');
-        if (phoneVariants.includes(msgPhone) || phoneVariants.includes(m.phone_number)) {
-          allMsgs.push({ id: m.id, direction: 'outbound', body: m.message_content || '', created_at: m.created_at });
-        }
-      }
+    // Threaded messages (canonical going forward)
+    for (const m of (threadMsgs as any[]) || []) {
+      allMsgs.push({
+        id: m.id,
+        direction: m.direction || 'outbound',
+        body: m.body || '',
+        created_at: m.created_at,
+        status: m.status,
+      });
     }
-
-    // Also check sms_messages table
-    const { data: convMsgs } = await supabase.from('sms_messages' as any).select('*').order('created_at', { ascending: true });
-    if (convMsgs) {
-      for (const m of convMsgs as any[]) {
-        // Include all for now — we can filter by conversation_id later when we have proper linking
-        allMsgs.push({ id: m.id, direction: m.direction || 'outbound', body: m.body || '', created_at: m.created_at, status: m.status });
+    // Legacy sms_notifications — match by phone, dedupe by twilio_message_sid
+    // when we have it (otherwise by body+timestamp). Outbound only, since
+    // sms_notifications was never used for inbound.
+    const seenSids = new Set<string>();
+    for (const m of (threadMsgs as any[]) || []) {
+      if (m.twilio_message_sid) seenSids.add(m.twilio_message_sid);
+    }
+    for (const m of (notifMsgs as any[]) || []) {
+      const msgPhone = (m.phone_number || '').replace(/^\+1/, '').replace(/\D/g, '').slice(-10);
+      if (msgPhone === cleanPhone || phoneVariants.includes(m.phone_number)) {
+        // Skip if already represented in threaded messages
+        if (m.twilio_message_sid && seenSids.has(m.twilio_message_sid)) continue;
+        allMsgs.push({
+          id: m.id,
+          direction: 'outbound',
+          body: m.message_content || '',
+          created_at: m.created_at,
+        });
       }
     }
 
     allMsgs.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    // Dedupe by id
     const seen = new Set<string>();
     const deduped = allMsgs.filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; });
     setMessages(deduped);
+
+    // Mark this thread as read (clears the unread badge for this patient)
+    try {
+      const lastViewedKey = 'convelabs_sms_last_viewed';
+      const stored = JSON.parse(localStorage.getItem(lastViewedKey) || '{}');
+      stored[patient.id] = new Date().toISOString();
+      localStorage.setItem(lastViewedKey, JSON.stringify(stored));
+    } catch { /* localStorage may be unavailable */ }
 
     // Set appointment data for context panel
     const appointments = (appts || []) as PatientAppointment[];

@@ -121,6 +121,44 @@ serve(async (req) => {
       throw new Error(`Twilio error: ${twilioResponse.message}`)
     }
 
+    // ─── TWO-WAY SMS THREADING ─────────────────────────────────────
+    // Mirror outbound message into sms_messages so the admin Messages
+    // tab shows the full thread. Best-effort — never fail the send on
+    // logging issues. Inbound replies get logged by twilio-inbound-sms.
+    try {
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.38.4');
+      const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
+      const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+      const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+      // Try to resolve patient_id for prettier conversation linkage
+      const phoneDigits = normalizedPhone.replace(/\D/g, '').slice(-10);
+      let patientId: string | null = null;
+      try {
+        const { data: tp } = await admin
+          .from('tenant_patients')
+          .select('id')
+          .filter('phone', 'ilike', `%${phoneDigits}%`)
+          .limit(1)
+          .maybeSingle();
+        patientId = (tp as any)?.id || null;
+      } catch { /* keep null */ }
+      const { data: convId } = await admin.rpc('get_or_create_sms_conversation' as any, {
+        p_patient_phone: normalizedPhone,
+        p_patient_id: patientId,
+      });
+      if (convId) {
+        await admin.from('sms_messages').insert({
+          conversation_id: convId,
+          direction: 'outbound',
+          body: String(message).substring(0, 1500),
+          twilio_message_sid: twilioResponse.sid || null,
+          status: 'sent',
+        } as any);
+      }
+    } catch (logErr) {
+      console.warn('[send-sms] thread log failed (non-blocking):', logErr);
+    }
+
     return new Response(
       JSON.stringify({
         success: true,

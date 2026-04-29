@@ -45,6 +45,38 @@ Deno.serve(async (req) => {
     if (!fromDigits || !body) return twiml('Message received.');
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+    const messageSid = String(formData.get('MessageSid') || '') || null;
+
+    // ─── TWO-WAY SMS THREADING ─────────────────────────────────────
+    // Every inbound message lands in sms_messages tied to a per-phone
+    // sms_conversations row. This is what the admin Messages tab reads
+    // + what the AdminSidebar bell subscription wakes on. Best-effort —
+    // never block patient response on logging failure.
+    try {
+      // Try to resolve the patient_id from tenant_patients (helps the
+      // Messages tab join the conversation to a known patient).
+      const { data: tp } = await admin
+        .from('tenant_patients')
+        .select('id')
+        .filter('phone', 'ilike', `%${fromDigits.slice(-10)}%`)
+        .limit(1)
+        .maybeSingle();
+      const { data: convId } = await admin.rpc('get_or_create_sms_conversation' as any, {
+        p_patient_phone: from,
+        p_patient_id: tp?.id || null,
+      });
+      if (convId) {
+        await admin.from('sms_messages').insert({
+          conversation_id: convId,
+          direction: 'inbound',
+          body: body.substring(0, 1500),
+          twilio_message_sid: messageSid,
+          status: 'received',
+        } as any);
+      }
+    } catch (logErr) {
+      console.warn('[inbound-sms] thread log failed (non-blocking):', logErr);
+    }
 
     // Find the most recent pending lab request for this phone
     const { data: reqs } = await admin

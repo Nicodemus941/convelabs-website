@@ -81,25 +81,50 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const SIDEBAR_SECTIONS = getSidebarSections(basePath);
   const [hasNewMessages, setHasNewMessages] = useState(false);
 
-  // Subscribe to new SMS messages for notification indicator
+  // Subscribe to NEW INBOUND SMS messages for the notification bell.
+  // Outbound messages also land in sms_messages now (two-way threading)
+  // so the filter to direction='inbound' is critical — otherwise the
+  // bell would ring on every outbound send the admin themselves did.
   useEffect(() => {
-    const channel = supabase
-      .channel('admin-sms-indicator')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sms_messages' }, () => {
-        // Don't show indicator if already on SMS page
-        if (!location.pathname.includes('/sms')) {
+    // Initial bell state: any inbound in the last 24h that's newer than
+    // the admin's last visit to /sms (tracked in localStorage).
+    (async () => {
+      try {
+        const lastSeen = localStorage.getItem('convelabs_sms_tab_last_seen');
+        const since = lastSeen ? new Date(lastSeen).toISOString() : new Date(Date.now() - 86400_000).toISOString();
+        const { count } = await supabase
+          .from('sms_messages' as any)
+          .select('id', { count: 'exact', head: true })
+          .eq('direction', 'inbound')
+          .gt('created_at', since);
+        if ((count || 0) > 0 && !location.pathname.includes('/sms')) {
           setHasNewMessages(true);
         }
-      })
+      } catch { /* silent */ }
+    })();
+
+    const channel = supabase
+      .channel('admin-sms-indicator')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sms_messages', filter: 'direction=eq.inbound' },
+        () => {
+          if (!location.pathname.includes('/sms')) {
+            setHasNewMessages(true);
+          }
+        }
+      )
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [location.pathname]);
 
-  // Clear indicator when navigating to SMS page
+  // Clear indicator when navigating to SMS page + stamp last-seen
   useEffect(() => {
     if (location.pathname.includes('/sms')) {
       setHasNewMessages(false);
+      try { localStorage.setItem('convelabs_sms_tab_last_seen', new Date().toISOString()); }
+      catch { /* localStorage may be unavailable */ }
     }
   }, [location.pathname]);
 
