@@ -33,6 +33,7 @@ const CorporateInviteAccept = lazy(() => import('@/pages/CorporateInviteAccept')
 const AcceptStaffInvite = lazy(() => import('@/pages/AcceptStaffInvite'));
 const StaffOnboarding = lazy(() => import('@/pages/StaffOnboarding'));
 const ForProviders = lazy(() => import('@/pages/ForProviders'));
+const ProviderRegister = lazy(() => import('@/pages/ProviderRegister'));
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -65,6 +66,7 @@ function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/about" element={<About />} />
                         <Route path="/for-providers" element={<ForProviders />} />
+                        <Route path="/providers/register" element={<ProviderRegister />} />
                         <Route path="/blood-work-guide" element={<BloodWorkGuide />} />
                         <Route path="/reschedule/confirmed" element={<RescheduleConfirmed />} />
                         <Route path="/reschedule/declined" element={<RescheduleDeclined />} />

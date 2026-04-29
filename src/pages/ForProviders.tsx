@@ -239,13 +239,13 @@ const ForProviders: React.FC = () => (
             </p>
             <div className="flex flex-wrap gap-2 pt-2">
               <Button asChild className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
+                <Link to="/providers/register">Register your practice (90 sec)</Link>
+              </Button>
+              <Button asChild variant="outline">
                 <Link to="/book-now">Patient booking link</Link>
               </Button>
               <Button asChild variant="outline">
                 <Link to="/login">Provider portal login</Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link to="/partner-with-us">Become a partner practice</Link>
               </Button>
             </div>
           </CardContent>

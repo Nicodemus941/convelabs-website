@@ -19,6 +19,7 @@ import ProviderOnboardingModal from '@/components/provider/ProviderOnboardingMod
 import CreateLabRequestModal from '@/components/provider/CreateLabRequestModal';
 import LabRequestTimeline from '@/components/provider/LabRequestTimeline';
 import LinkedPatientsSection from '@/components/provider/LinkedPatientsSection';
+import PracticeProfilePanel from '@/components/provider/PracticeProfilePanel';
 import SubscribeYourPracticeCard from '@/components/provider/SubscribeYourPracticeCard';
 import ManageSubscriptionCard from '@/components/provider/ManageSubscriptionCard';
 import BAASigningModal from '@/components/provider/BAASigningModal';
@@ -366,6 +367,9 @@ const ProviderDashboard: React.FC = () => {
         ) : (
           <SubscribeYourPracticeCard orgName={org.name} />
         )}
+
+        {/* PRACTICE PROFILE — completion-driven onboarding nudge */}
+        <PracticeProfilePanel orgId={org.id} />
 
         {/* LINKED PATIENTS + BULK RE-REQUEST */}
         <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} />
