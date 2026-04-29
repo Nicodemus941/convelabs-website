@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Upload, FileText, Loader2, CheckCircle2, AlertTriangle, Trash2, ExternalLink, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
+import { resizeImageForUpload } from '@/lib/imageResize';
 
 // Wire up the pdfjs worker (needed for thumbnails)
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
@@ -96,16 +97,20 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
     let dupeCount = 0;
     let failedCount = 0;
 
-    for (const file of files) {
-      // Guardrails
-      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        toast.error(`${file.name} exceeds ${MAX_FILE_SIZE_MB}MB`);
+    for (const rawFile of files) {
+      // Guardrails (against ABSOLUTE size cap before downsize attempt)
+      if (rawFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        toast.error(`${rawFile.name} exceeds ${MAX_FILE_SIZE_MB}MB`);
         failedCount++; continue;
       }
-      if (!ACCEPTED.includes(file.type) && !/\.(pdf|jpe?g|png|webp|heic)$/i.test(file.name)) {
-        toast.error(`${file.name} is not a supported file type`);
+      if (!ACCEPTED.includes(rawFile.type) && !/\.(pdf|jpe?g|png|webp|heic)$/i.test(rawFile.name)) {
+        toast.error(`${rawFile.name} is not a supported file type`);
         failedCount++; continue;
       }
+
+      // Resize image for OCR — Anthropic Vision rejects images >5MB.
+      // PDFs + small files pass through unchanged.
+      const file = await resizeImageForUpload(rawFile);
 
       try {
         const sha = await sha256Hex(file);

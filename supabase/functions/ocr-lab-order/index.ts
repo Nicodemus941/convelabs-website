@@ -196,7 +196,11 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 
   const body = {
-    model: 'claude-sonnet-4-5',
+    // Use a stable, known-good model ID. The previous 'claude-sonnet-4-5'
+    // wasn't a valid Anthropic model name — Cloudflare in front of
+    // api.anthropic.com bounced the request with a JS challenge page,
+    // which we logged as "Anthropic API 403: <!DOCTYPE html>...".
+    model: 'claude-3-5-sonnet-20241022',
     max_tokens: 1500,
     messages: [{
       role: 'user',
@@ -228,6 +232,11 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
         'Content-Type': 'application/json',
         'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
+        // PDF document support requires the beta flag; harmless for images
+        'anthropic-beta': 'pdfs-2024-09-25',
+        // Explicit User-Agent — Cloudflare in front of api.anthropic.com
+        // sometimes challenges default Deno fetch UAs with a JS page.
+        'User-Agent': 'ConveLabs-OCR/1.0 (Supabase Edge Function)',
       },
       body: JSON.stringify(body),
     });
@@ -359,6 +368,24 @@ Deno.serve(async (req) => {
         ok: false, skipped: 'heic_unsupported',
         hint: 'HEIC format cannot be OCR-processed. Ask patient to re-upload as JPG or PDF.',
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // 5 MB hard cap on Anthropic Vision API. Client-side resize handles most
+    // cases (src/lib/imageResize.ts) but if a stale-bundle browser or a HEIC
+    // file with strange size slipped through, surface a clear actionable
+    // error rather than the cryptic 400 from upstream.
+    if (downloaded.data.byteLength > 5 * 1024 * 1024) {
+      const friendly = `Image is ${(downloaded.data.byteLength / 1024 / 1024).toFixed(1)} MB — Anthropic OCR caps at 5 MB. Re-upload as a smaller photo or a PDF.`;
+      if (labOrderRowId) {
+        await supabase.from('appointment_lab_orders').update({
+          ocr_status: 'failed',
+          ocr_error: friendly,
+          ocr_completed_at: new Date().toISOString(),
+        }).eq('id', labOrderRowId);
+      }
+      return new Response(JSON.stringify({ error: 'image_too_large', hint: friendly }), {
+        status: 413, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     const base64 = bytesToBase64(downloaded.data);

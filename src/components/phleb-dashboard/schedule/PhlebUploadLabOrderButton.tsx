@@ -18,6 +18,7 @@
  */
 
 import React, { useRef, useState } from 'react';
+import { resizeImageForUpload } from '@/lib/imageResize';
 import { FileUp, Loader2, CheckCircle2, AlertCircle, Building2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
@@ -34,11 +35,15 @@ const PhlebUploadLabOrderButton: React.FC<Props> = ({ appointmentId, onUploaded,
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
-  async function handleFile(file: File) {
+  async function handleFile(rawFile: File) {
     if (busy) return;
     setBusy(true);
     const startedAt = Date.now();
     try {
+      // 0. Resize image down to fit Anthropic Vision's 5 MB limit. Phone
+      //    photos at 12 MP are routinely 6-12 MB which the OCR side rejects.
+      //    Non-images (PDFs) and small files pass through unchanged.
+      const file = await resizeImageForUpload(rawFile);
       // 1. Upload the file to storage
       const ext = (file.name.split('.').pop() || 'pdf').toLowerCase();
       const safeName = `phleb_${appointmentId.substring(0, 8)}_${Date.now()}.${ext}`;
