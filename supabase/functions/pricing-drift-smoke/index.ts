@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
       .select(`id, patient_name, patient_email, service_type, service_price, total_amount, tip_amount,
                surcharge_amount, member_status, weekend_service, extended_hours, address,
                billed_to, family_group_id, booking_source, notes, organization_id,
-               created_at, payment_status`)
+               created_at, payment_status, pricing_breakdown`)
       .gte('created_at', since)
       .eq('payment_status', 'completed')
       .order('created_at', { ascending: false });
@@ -219,6 +219,34 @@ Deno.serve(async (req) => {
       }
 
       scanned++;
+
+      // ─── BREAKDOWN-AS-TRUTH SHORT CIRCUIT ───────────────────────────
+      // If the appointment was captured with an itemized cart breakdown
+      // (online_booking_v1+), trust it. Drift is now just "did Stripe
+      // charge what the cart said?" Companion fees, surcharges, discounts
+      // all live IN the breakdown so we don't have to re-derive them.
+      const breakdown = (a as any).pricing_breakdown as any;
+      if (breakdown && typeof breakdown === 'object' && typeof breakdown.total === 'number') {
+        const cartTotal = Number(breakdown.total) || 0;
+        const visitTotal = Number(a.total_amount || 0) - Number(a.tip_amount || 0);
+        const delta = Math.abs(visitTotal - cartTotal);
+        if (delta > 1) {
+          drifts.push({
+            id: a.id,
+            patient_name: a.patient_name || '(unknown)',
+            service_type: a.service_type,
+            member_status: (breakdown.tier as string) || 'none',
+            total_amount: Number(a.total_amount),
+            expected: cartTotal,
+            delta,
+            reason: visitTotal > cartTotal ? 'overcharge_vs_cart' : 'undercharge_vs_cart',
+          });
+        }
+        // Either way, the breakdown is authoritative — skip the legacy
+        // canonical-recompute path which was the source of false positives
+        // (Mary Rienzi 3-person case).
+        continue;
+      }
 
       // Compute the EFFECTIVE tier at the time this appointment was created,
       // using user_memberships as the authoritative source. Ignores the

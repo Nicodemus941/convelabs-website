@@ -379,6 +379,54 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         0
       );
 
+      // ─── ITEMIZED CART CAPTURE ──────────────────────────────────────
+      // Persist exactly what was in the cart at checkout. Server stamps
+      // this onto the appointment row via the webhook so any future
+      // pricing-drift alert can be triaged in one query — vs reverse-
+      // engineering after the fact (Mary Rienzi 3-person case 2026-04-29).
+      const allCompanions = (data.additionalPatients || []) as any[];
+      const surchargesForBreakdown = [
+        ...breakdown.surcharges.map(s => ({ label: s.label, amount: s.amount })),
+      ];
+      if (referralDiscount > 0) {
+        surchargesForBreakdown.push({ label: `Referral discount${referralCode ? ` (${referralCode})` : ''}`, amount: -referralDiscount });
+      }
+      if (bundleExtra > 0) {
+        surchargesForBreakdown.push({ label: `Bundle prepay (${bundleCount} visits @ ${Math.round((1 - 0.85) * 100)}% off)`, amount: bundleExtra });
+      }
+      const pricingBreakdown = {
+        service: {
+          type: visitType,
+          label: service?.name || visitType,
+          price: breakdown.servicePrice,
+        },
+        surcharges: surchargesForBreakdown,
+        tier: memberTier,
+        tier_label: memberLabel || memberTier,
+        additional_patients: allCompanions.map((p: any) => ({
+          firstName: p?.firstName || null,
+          lastName: p?.lastName || null,
+          email: p?.email || null,
+          phone: p?.phone || null,
+          dob: p?.dob || null,
+          relationship: p?.relationship || null,
+          source: p?._source || 'additional',
+        })),
+        additional_patient_count: additionalPatientCount,
+        tip: tipAmount,
+        referral_code: referralCode || null,
+        referral_discount: referralDiscount,
+        bundle_extra: bundleExtra,
+        bundle_count: bundleCount,
+        subtotal: breakdown.subtotal,
+        final_subtotal: finalSubtotal,
+        total: parseFloat((finalSubtotal + tipAmount).toFixed(2)),
+        location_city: locationCity,
+        location_extended_area: isExtendedArea(locationCity),
+        captured_at: new Date().toISOString(),
+        captured_by: 'online_booking_v1',
+      };
+
       // Lab destination — where the specimen gets delivered after draw.
       // Collected by LabDestinationSelector into form data.labOrder.labDestination
       // but previously NEVER forwarded to the backend. Fixing that data leak now.
@@ -408,6 +456,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // OR manually entered in CheckoutStep. Server re-validates against
         // referral_codes table and applies the discount before Stripe charge.
         referralCode: (typeof window !== 'undefined' ? sessionStorage.getItem('convelabs_referral') : null) || null,
+        pricingBreakdown,
         appointmentDate,
         appointmentTime: data.time,
         memberTier, // server re-verifies and re-prices if mismatched

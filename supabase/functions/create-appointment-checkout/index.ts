@@ -88,6 +88,7 @@ Deno.serve(async (req) => {
       userId,
       referralCode = null,
       referralDiscountCents = 0,
+      pricingBreakdown = null,
       // New first-class attachment fields (replaces notes-stuffing pattern)
       labOrderFilePaths = [],
       insuranceCardPath = null,
@@ -970,6 +971,31 @@ Deno.serve(async (req) => {
         ? `${origin}/pricing?status=cancel`
         : `${origin}/book-now?status=cancel`,
     });
+
+    // ─── ITEMIZED CART CAPTURE ─────────────────────────────────────
+    // Stash the cart breakdown keyed by Stripe session id. Webhook reads
+    // it back when the session completes and writes onto the appointment
+    // row's pricing_breakdown column. Lets future drift alerts be triaged
+    // in one query (vs reverse-engineering Mary Rienzi 3-person case).
+    if (pricingBreakdown && typeof pricingBreakdown === 'object') {
+      try {
+        const enriched = {
+          ...pricingBreakdown,
+          stripe_session_id: session.id,
+          server_amount_charged_cents: amount + tipAmount,
+          server_apology_credit_cents_applied: apologyCreditApplied,
+          server_promo_code_applied_cents: promoCodeApplied?.applied_cents || 0,
+          server_referral_discount_cents: appliedReferralDiscountCents,
+          server_tier_correction_cents: priceCorrection,
+          server_member_tier: serverTier,
+          server_captured_at: new Date().toISOString(),
+        };
+        await supabaseClient.from('pending_pricing_breakdowns')
+          .insert({ stripe_session_id: session.id, breakdown: enriched } as any);
+      } catch (e: any) {
+        console.warn('[pricing-breakdown] stash failed (non-blocking):', e?.message);
+      }
+    }
 
     // Mark applied apology credits as redeemed (tied to this session).
     // If checkout is abandoned, they stay redeemed — but next attempt

@@ -37,6 +37,11 @@ export interface AppointmentCheckoutParams {
    *  Server re-validates against referral_codes table and applies the discount.
    *  Front-end value is suggestive only — the server is authoritative. */
   referralCode?: string | null;
+  /** Itemized cart at checkout — service + surcharges + companions + discounts.
+   *  Server stashes in pending_pricing_breakdowns keyed by Stripe session id;
+   *  the webhook copies it to appointments.pricing_breakdown so any future
+   *  pricing-drift alert can be triaged in one query. */
+  pricingBreakdown?: Record<string, unknown> | null;
 }
 
 export interface AppointmentCheckoutResult {

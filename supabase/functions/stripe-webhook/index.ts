@@ -1074,6 +1074,33 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // ─── COPY PRICING BREAKDOWN onto appointment row ─────────────────
+    // create-appointment-checkout stashed the itemized cart in
+    // pending_pricing_breakdowns keyed by stripe_session_id. Pull it
+    // here, write to appointments.pricing_breakdown, then delete the
+    // pending row. Lets every future pricing-drift alert be reconciled
+    // in one query — the actual cart is on the row.
+    try {
+      const sessionId = (session as any)?.id;
+      if (sessionId) {
+        const { data: pending } = await supabaseClient
+          .from('pending_pricing_breakdowns')
+          .select('breakdown')
+          .eq('stripe_session_id', sessionId)
+          .maybeSingle();
+        if (pending && (pending as any).breakdown) {
+          await supabaseClient.from('appointments').update({
+            pricing_breakdown: (pending as any).breakdown,
+          }).eq('id', appointment.id);
+          await supabaseClient.from('pending_pricing_breakdowns')
+            .delete().eq('stripe_session_id', sessionId);
+          console.log(`[pricing-breakdown] mirrored to appointment ${appointment.id}`);
+        }
+      }
+    } catch (e: any) {
+      console.warn('[pricing-breakdown] mirror failed (non-blocking):', e?.message);
+    }
+
     // ─── BUNDLED MEMBERSHIP ACTIVATION ───────────────────────────────────
     // When the patient added an annual membership at checkout (Hormozi
     // anchor-flip), create-appointment-checkout used Stripe subscription
