@@ -45,28 +45,68 @@ const LabOrderUpload: React.FC<LabOrderUploadProps> = ({
     try {
       setUploading(true);
 
-      // Generate unique filename (flat path in lab-orders bucket)
-      const fileName = `laborder_${appointmentId}_${Date.now()}_${selectedFile.name}`;
+      // Use a path scoped to the appointment so storage objects line up
+      // with the new normalized appointment_lab_orders model + RLS policies.
+      const ext = selectedFile.name.split('.').pop() || 'bin';
+      const filePath = `appointments/${appointmentId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
       // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('lab-orders')
-        .upload(fileName, selectedFile);
+        .upload(filePath, selectedFile, {
+          contentType: selectedFile.type || 'application/octet-stream',
+          upsert: false,
+        });
 
       if (uploadError) throw uploadError;
 
-      // Update appointment record with file path
-      const { data: appt } = await supabase.from('appointments').select('lab_order_file_path').eq('id', appointmentId).single();
-      const existingPath = appt?.lab_order_file_path || '';
-      const newPath = existingPath ? `${existingPath}, ${fileName}` : fileName;
+      // Insert into appointment_lab_orders so OCR + org-match + every UI
+      // surface sees it (the legacy appointments.lab_order_file_path
+      // column auto-syncs from this table via the
+      // sync_appointment_lab_order_file_path trigger).
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-      const { error: updateError } = await supabase.from('appointments')
-        .update({ lab_order_file_path: newPath })
-        .eq('id', appointmentId);
+      // Compute a content sha so the unique-on-(appointment_id, sha) dedup works
+      const buf = await selectedFile.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      const sha = Array.from(new Uint8Array(hashBuf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
 
-      if (updateError) throw updateError;
+      const { data: inserted, error: insErr } = await supabase
+        .from('appointment_lab_orders')
+        .insert({
+          appointment_id: appointmentId,
+          file_path: filePath,
+          original_filename: selectedFile.name,
+          content_sha256: sha,
+          file_size_bytes: selectedFile.size,
+          mime_type: selectedFile.type || 'application/octet-stream',
+          page_count: selectedFile.type === 'application/pdf' ? null : 1,
+          ocr_status: 'pending',
+          uploaded_by: currentUser?.id || null,
+        })
+        .select('id')
+        .single();
 
-      toast.success('Lab order uploaded successfully! Your phlebotomist will be able to view it.');
+      if (insErr) {
+        // Duplicate (same file already attached) — treat as a soft success.
+        if ((insErr as any).code === '23505') {
+          toast.info('This lab order is already attached.');
+          setSelectedFile(null);
+          onUploadComplete();
+          return;
+        }
+        throw insErr;
+      }
+
+      // Fire OCR (non-blocking — caller doesn't wait on the result)
+      if (inserted?.id) {
+        supabase.functions.invoke('ocr-lab-order', { body: { labOrderId: inserted.id } })
+          .then(() => {}, () => {});
+      }
+
+      toast.success('Lab order uploaded! Your phlebotomist will be able to view it.');
       setSelectedFile(null);
       onUploadComplete();
 

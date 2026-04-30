@@ -196,11 +196,14 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 
   const body = {
-    // Use a stable, known-good model ID. The previous 'claude-sonnet-4-5'
-    // wasn't a valid Anthropic model name — Cloudflare in front of
-    // api.anthropic.com bounced the request with a JS challenge page,
-    // which we logged as "Anthropic API 403: <!DOCTYPE html>...".
-    model: 'claude-3-5-sonnet-20241022',
+    // Model history:
+    //   • 'claude-sonnet-4-5'           — bare alias, bounced by Cloudflare (403)
+    //   • 'claude-3-5-sonnet-20241022'  — Anthropic deprecated → 404 not_found_error
+    //   • 'claude-3-7-sonnet-20250219'  — also 404 on this API key tier
+    //   • 'claude-sonnet-4-20250514'    — current. Same model already used by
+    //     extract-insurance-ocr in this project, so the API key is verified
+    //     to have access. Vision-capable, active-support.
+    model: 'claude-sonnet-4-20250514',
     max_tokens: 1500,
     messages: [{
       role: 'user',
