@@ -50,6 +50,36 @@ async function sha256Hex(file: File): Promise<string> {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Fire an owner SMS when a lab-order upload silently fails so ghost-uploads
+ * (file picked → toast missed → file never landed) get caught in real time
+ * instead of surfacing as "the phleb has no lab order" the day of the visit.
+ * Non-blocking — never throws back into the upload caller.
+ */
+async function reportUploadFailure(opts: {
+  appointmentId: string;
+  patientName?: string;
+  filename: string;
+  stage: 'storage_upload' | 'db_insert' | 'exception' | 'oversize' | 'unsupported_type';
+  detail: string;
+}) {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    const who = user?.email || user?.id?.slice(0, 8) || 'unknown';
+    const apptShort = opts.appointmentId.slice(0, 8);
+    const patient = opts.patientName ? ` · ${opts.patientName}` : '';
+    const msg =
+      `⚠️ Lab-order upload FAILED [${opts.stage}]${patient}` +
+      ` · appt ${apptShort} · file ${opts.filename.slice(0, 60)}` +
+      ` · by ${who} · ${opts.detail.slice(0, 200)}`;
+    await supabase.functions.invoke('send-sms-notification', {
+      body: { to: '9415279169', message: msg, category: 'admin_alert' },
+    });
+  } catch {
+    /* swallow — telemetry must never block the upload UX */
+  }
+}
+
 async function pdfPageCount(file: File): Promise<number | null> {
   if (file.type !== 'application/pdf') return 1;
   try {
@@ -101,10 +131,12 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
       // Guardrails (against ABSOLUTE size cap before downsize attempt)
       if (rawFile.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
         toast.error(`${rawFile.name} exceeds ${MAX_FILE_SIZE_MB}MB`);
+        reportUploadFailure({ appointmentId, patientName, filename: rawFile.name, stage: 'oversize', detail: `${(rawFile.size / 1024 / 1024).toFixed(1)}MB` });
         failedCount++; continue;
       }
       if (!ACCEPTED.includes(rawFile.type) && !/\.(pdf|jpe?g|png|webp|heic)$/i.test(rawFile.name)) {
         toast.error(`${rawFile.name} is not a supported file type`);
+        reportUploadFailure({ appointmentId, patientName, filename: rawFile.name, stage: 'unsupported_type', detail: rawFile.type || 'unknown mime' });
         failedCount++; continue;
       }
 
@@ -124,6 +156,7 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
         });
         if (upErr) {
           toast.error(`Upload failed for ${file.name}: ${upErr.message}`);
+          reportUploadFailure({ appointmentId, patientName, filename: file.name, stage: 'storage_upload', detail: upErr.message || String(upErr) });
           failedCount++; continue;
         }
 
@@ -158,6 +191,7 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
           // made "upload not accepting it" appear as a UI bug
           console.error('[lab-order insert] failed:', insErr);
           toast.error(`Failed to attach ${file.name}: ${insErr.message}`, { duration: 8000 });
+          reportUploadFailure({ appointmentId, patientName, filename: file.name, stage: 'db_insert', detail: `${(insErr as any).code || ''} ${insErr.message || String(insErr)}` });
           failedCount++; continue;
         }
 
@@ -169,6 +203,7 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
         uploadedCount++;
       } catch (e: any) {
         toast.error(`${file.name} — ${e?.message || 'error'}`);
+        reportUploadFailure({ appointmentId, patientName, filename: file.name, stage: 'exception', detail: e?.message || String(e) });
         failedCount++;
       }
     }
