@@ -167,20 +167,42 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
     );
   }
   
-  // Format date and time from appointment date
+  // ── TIME-BUG FIX (2026-04-30) ────────────────────────────────────
+  // appointment_date is a UTC timestamptz; the visit's CLOCK-time the
+  // patient cares about lives in the separate `appointment_time` column
+  // (e.g. '09:00:00'). Lawrence Carpenter's appointment_date was stored
+  // as 2026-05-01 13:00:00+00 (= 9 AM ET during DST) but the old code
+  // formatted that with the server's UTC locale → "1 PM" reminder for a
+  // 9 AM visit. Fix:
+  //   • Format the DATE in America/New_York so we never roll into the
+  //     prior day for late-evening UTC stamps.
+  //   • Use appointment_time directly for the TIME string.
+  const TZ = 'America/New_York';
   const appointmentDate = new Date(appointment.appointment_date);
   const formattedDate = appointmentDate.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
-    year: 'numeric'
+    year: 'numeric',
+    timeZone: TZ,
   });
-  
-  const formattedTime = appointmentDate.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  });
+
+  const fmtTimeFromHHMMSS = (s: string | null | undefined): string => {
+    if (!s) {
+      // Fallback: use the date column's hour-of-day in ET
+      return appointmentDate.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ,
+      });
+    }
+    const m = s.match(/^(\d{1,2}):(\d{2})/);
+    if (!m) return s;
+    let h = parseInt(m[1], 10);
+    const min = m[2];
+    const period = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${h}:${min} ${period}`;
+  };
+  const formattedTime = fmtTimeFromHHMMSS(appointment.appointment_time);
   
   // Create data for the template
   const templateData = {
