@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Check, X, Crown, Sparkles, Shield, Clock, Calendar as CalIcon, Users, Gift, Loader2, ArrowRight, AlertTriangle, Heart, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -151,15 +151,44 @@ const FAQ = [
   { q: 'Do non-members ever lose access?', a: 'No. Non-members can always book Mon–Fri mornings. Memberships just expand your window and remove fees — you\'re never locked out.' },
 ];
 
+// sessionStorage key for the "user signed agreement, then went to log in /
+// register" resume flow. Holding tier name + agreement meta lets us pick up
+// EXACTLY where they left off — no second agreement screen, no "agree again"
+// loop. Cleared on successful checkout redirect or explicit cancel.
+const PENDING_KEY = 'cl.pendingMembership.v1';
+interface PendingMembership {
+  tierKey: Tier['key'];
+  agreementVersion: string;
+  agreementSha: string;
+  savedAt: number; // ms
+}
+
 const Pricing: React.FC = () => {
   const { user } = useAuth();
   const [selectedTier, setSelectedTier] = useState<Tier | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const resumeFiredRef = useRef(false);
 
   const handleSubscribe = async (tier: Tier, agreementMeta: { agreementVersion: string; agreementSha: string }) => {
     if (!user) {
-      toast.info('Log in to subscribe.');
-      window.location.href = `/login?redirect=${encodeURIComponent('/pricing')}`;
+      // Persist the signed agreement + the chosen tier so we can resume
+      // checkout immediately after auth — no re-prompt for agreement.
+      try {
+        const pending: PendingMembership = {
+          tierKey: tier.key,
+          agreementVersion: agreementMeta.agreementVersion,
+          agreementSha: agreementMeta.agreementSha,
+          savedAt: Date.now(),
+        };
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+      } catch { /* storage disabled — user will just re-agree */ }
+      // Patient registration first (Hormozi: don't make them solve the
+      // login puzzle if they don't have an account yet). Signup page
+      // links to login for returning users.
+      toast.info('Create your account to finish — your agreement is saved.');
+      window.location.href =
+        `/signup?fromMembership=1&plan=${encodeURIComponent(tier.planName)}` +
+        `&redirect=${encodeURIComponent('/pricing')}`;
       return;
     }
     if (!tier.planName || !tier.annualPrice) {
@@ -217,6 +246,40 @@ const Pricing: React.FC = () => {
       setSubmitting(false);
     }
   };
+
+  // Resume pending checkout after login/signup: if a signed agreement was
+  // stashed in sessionStorage AND the user is now authed, fire the
+  // subscribe call directly — skip the agreement dialog entirely.
+  useEffect(() => {
+    if (!user) return;
+    if (resumeFiredRef.current) return;
+    let raw: string | null = null;
+    try { raw = sessionStorage.getItem(PENDING_KEY); } catch { /* noop */ }
+    if (!raw) return;
+    let pending: PendingMembership | null = null;
+    try { pending = JSON.parse(raw); } catch { pending = null; }
+    if (!pending) {
+      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* noop */ }
+      return;
+    }
+    // Stale guard — older than 1 hour, drop it (signed agreement gets re-shown)
+    if (Date.now() - (pending.savedAt || 0) > 60 * 60 * 1000) {
+      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* noop */ }
+      return;
+    }
+    const tier = TIERS.find((t) => t.key === pending!.tierKey);
+    if (!tier || !tier.planName) {
+      try { sessionStorage.removeItem(PENDING_KEY); } catch { /* noop */ }
+      return;
+    }
+    resumeFiredRef.current = true;
+    try { sessionStorage.removeItem(PENDING_KEY); } catch { /* noop */ }
+    toast.success(`Welcome back — finishing your ${tier.name} signup…`);
+    handleSubscribe(tier, {
+      agreementVersion: pending.agreementVersion,
+      agreementSha: pending.agreementSha,
+    });
+  }, [user]);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">

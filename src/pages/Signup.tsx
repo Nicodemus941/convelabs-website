@@ -16,12 +16,15 @@ const Signup = () => {
   const [verificationPending, setVerificationPending] = useState(false);
   const [verificationEmail, setVerificationEmail] = useState('');
 
-  // Redirect logged in users
+  // Redirect logged in users — honor ?redirect= for the membership-resume
+  // flow so a signed-in patient who lands here from /pricing bounces
+  // straight back without seeing the signup form.
   useEffect(() => {
     if (user) {
-      navigate('/dashboard');
+      const target = searchParams.get('redirect') || '/dashboard';
+      navigate(target);
     }
-  }, [user, navigate]);
+  }, [user, navigate, searchParams]);
 
   // Listen for auth state changes (email verification)
   useEffect(() => {
@@ -30,7 +33,7 @@ const Signup = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session) {
         // User verified and signed in — redirect to dashboard
-        navigate('/dashboard', { replace: true });
+        navigate(searchParams.get('redirect') || '/dashboard', { replace: true });
       }
     });
 
@@ -38,7 +41,7 @@ const Signup = () => {
     const interval = setInterval(async () => {
       const { data } = await supabase.auth.getSession();
       if (data?.session) {
-        navigate('/dashboard', { replace: true });
+        navigate(searchParams.get('redirect') || '/dashboard', { replace: true });
       }
     }, 5000);
 

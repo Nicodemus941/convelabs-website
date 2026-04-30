@@ -492,6 +492,39 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
 
     console.log(`Created membership for user ${userId} with plan ${planId}`);
 
+    // ── MIRROR TIER TO tenant_patients ────────────────────────────
+    // Activates perks + booking-flow tier auto-detect immediately on
+    // payment. Without this, user_memberships had the row but the
+    // tenant_patients.membership_tier column stayed 'none' and surfaces
+    // (member savings banner, in-checkout discount, dashboard badge)
+    // showed the patient as a non-member until manual admin sync.
+    try {
+      const planNameLower = String(planData?.name || '').toLowerCase();
+      let tier: 'member' | 'vip' | 'concierge' = 'member';
+      if (planNameLower.includes('concierge')) tier = 'concierge';
+      else if (planNameLower.includes('vip')) tier = 'vip';
+      else if (planNameLower.includes('individual') || planNameLower.includes('regular') || planNameLower.includes('family') || planNameLower.includes('essential')) tier = 'member';
+
+      const { error: tpErr } = await supabaseClient
+        .from('tenant_patients')
+        .update({
+          membership_tier: tier,
+          membership_status: 'active',
+          membership_plan_id: planId,
+          membership_start_date: new Date().toISOString(),
+          membership_end_date: nextRenewal.toISOString(),
+          membership_activated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId);
+      if (tpErr) {
+        console.warn(`[tier-mirror] non-blocking failure for user ${userId}:`, tpErr.message);
+      } else {
+        console.log(`[tier-mirror] tenant_patients.membership_tier='${tier}' for user ${userId}`);
+      }
+    } catch (e: any) {
+      console.warn('[tier-mirror] exception (non-blocking):', e?.message || e);
+    }
+
     // ── FOUNDING 50 SEAT CLAIM ─────────────────────────────────────
     // If (a) the checkout flagged this as founding intent AND (b) the
     // plan is VIP, atomically claim the next founding seat number.
