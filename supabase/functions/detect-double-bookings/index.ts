@@ -203,7 +203,7 @@ Deno.serve(async (req) => {
     const end = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
     const { data: appts, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, phlebotomist_id, appointment_date, appointment_time, status, patient_name, patient_email, patient_phone, created_at, service_type, booking_source, address, zipcode, family_group_id')
+      .select('id, phlebotomist_id, appointment_date, appointment_time, status, patient_name, patient_email, patient_phone, created_at, service_type, booking_source, address, zipcode, family_group_id, conflict_override_at')
       .gte('appointment_date', today.toISOString().slice(0, 10))
       .lte('appointment_date', end.toISOString().slice(0, 10))
       .in('status', ['scheduled', 'confirmed'])
@@ -266,6 +266,14 @@ Deno.serve(async (req) => {
           if (Math.abs(ti - tj) >= 45) continue; // not a conflict
 
           results.conflicts_found++;
+
+          // Owner-stamped manual override: if either side has
+          // conflict_override_at set, the owner already eyeballed this pair
+          // and chose to keep both (e.g. close-by addresses, family wedge).
+          // Skip silently — no SMS, no token, no nag.
+          if ((later as any).conflict_override_at || (earlier as any).conflict_override_at) {
+            continue;
+          }
 
           // Owner-confirmed rule 2026-04-28:
           //   • Manual + same household (family_group_id match) → silent
