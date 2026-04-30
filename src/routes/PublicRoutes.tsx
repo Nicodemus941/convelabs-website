@@ -29,6 +29,7 @@ const BookNow = lazy(() => import('../pages/BookNow'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 const PatientLabRequestPage = lazy(() => import('../pages/PatientLabRequestPage'));
 const ProviderClaimPage = lazy(() => import('../pages/ProviderClaimPage'));
+const JoinTier = lazy(() => import('../pages/JoinTier'));
 const CheckoutSuccessPage = lazy(() => import('../pages/CheckoutSuccessPage'));
 
 const Corporate = lazy(() => import('../pages/Corporate'));
@@ -74,6 +75,10 @@ export const routes = [
   <Route key="login" path="/login" element={<Login />} />,
   <Route key="provider" path="/provider" element={<ProviderLogin />} />,
   <Route key="lab-request" path="/lab-request/:token" element={<PatientLabRequestPage />} />,
+  // /join (no token) handles the email-upsell direct-checkout: ?tier=vip&email=…
+  // Must come BEFORE /join/:token so the typed query path takes precedence
+  // when there's no token segment in the URL.
+  <Route key="join-tier" path="/join" element={<JoinTier />} />,
   <Route key="provider-claim" path="/join/:token" element={<ProviderClaimPage />} />,
   <Route key="welcome" path="/welcome" element={<CheckoutSuccessPage />} />,
   <Route key="payment-success" path="/payment-success" element={<CheckoutSuccessPage />} />,
