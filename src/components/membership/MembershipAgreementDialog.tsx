@@ -34,7 +34,7 @@ interface Props {
 // Current agreement version — bump this string whenever the terms change.
 // The membership_agreements table stores the version per signature so we
 // always know exactly what the patient accepted.
-const AGREEMENT_VERSION = '2026-04-30-v2';
+const AGREEMENT_VERSION = '2026-04-30-v3';
 
 const buildAgreementText = (tier: Props['tier']): string => `
 ConveLabs Membership Agreement
@@ -273,14 +273,158 @@ or "our"), and the individual identified at checkout ("Member," "you," or
     Email: hello@convelabs.com
     Phone: (941) 527-9169
 
-20. ACCEPTANCE
+20. TELEHEALTH LIMITATIONS; PRIMARY CARE RELATIONSHIP
+    20.1 ConveLabs is not a telehealth provider, urgent-care service,
+         emergency-care provider, or substitute for a licensed primary
+         care physician. Membership does not include and will never
+         include diagnosis, treatment, prescription, dosing guidance,
+         or interpretation of lab results.
+    20.2 You acknowledge and warrant that you maintain (or will
+         maintain) an ongoing relationship with a licensed primary
+         care physician or other treating clinician who is responsible
+         for ordering your tests, reviewing results, and directing your
+         medical care.
+    20.3 If you experience symptoms requiring urgent or emergency
+         attention, dial 911 or go to the nearest emergency room. Do
+         not contact ConveLabs in lieu of emergency medical services.
+
+21. CHAIN OF CUSTODY; LAB AS RESULT-OWNER
+    21.1 ConveLabs collects, packages, and transports specimens from
+         the point of collection to a clinical laboratory designated
+         on the requisition (the "Performing Lab"). At the moment a
+         specimen is accepted by the Performing Lab, custody and
+         control of the specimen and all associated test results
+         transfer to that Performing Lab.
+    21.2 The Performing Lab is the data controller and result-of-record
+         issuer under CLIA and applicable state law. ConveLabs does
+         not generate, certify, alter, withhold, or amend any test
+         result. Disputes regarding test accuracy, billing by the
+         Performing Lab, or insurance reimbursement for tests
+         performed by the Performing Lab must be addressed directly
+         with the Performing Lab.
+    21.3 Specimen-integrity events occurring during ConveLabs custody
+         (e.g., temperature excursion, mislabel) will be remediated by
+         a complimentary recollection at our next available slot per
+         our published Recollection Guarantee.
+
+22. CONFIDENTIALITY (CONCIERGE TIER); MUTUAL NDA OPTION
+    22.1 Concierge-tier members may request a Mutual Non-Disclosure
+         Addendum executed by ConveLabs that prohibits disclosure of
+         (a) Member's identity as a ConveLabs patient, (b) the contents
+         of any visit, and (c) any non-public personal or business
+         information observed in the course of in-home service.
+    22.2 The Mutual NDA Addendum, if executed, supplements but does
+         not supersede ConveLabs' HIPAA obligations. ConveLabs may
+         still disclose PHI as required by law, court order, valid
+         subpoena, or to the Performing Lab to fulfill the test order.
+    22.3 ConveLabs maintains baseline discretion for ALL members:
+         we do not publicly identify any member, post photos taken
+         inside any member's home, or list members on any
+         testimonial / case-study page without that member's prior
+         written consent (Section 26).
+
+23. RECORDS RETENTION
+    23.1 ConveLabs retains lab requisitions, appointment records,
+         payment records, signed agreements, and audit trails for a
+         minimum of six (6) years from the later of (a) the date the
+         record was created or (b) the date of the last activity on
+         your account, consistent with 45 CFR § 164.530(j)(2) (HIPAA)
+         and applicable Florida medical-records statutes.
+    23.2 Upon written request to hello@convelabs.com, ConveLabs will
+         provide a copy of records pertaining to you within thirty
+         (30) days, subject to identity verification. Reasonable
+         per-page or per-record fees may apply for high-volume
+         requests as permitted by law.
+    23.3 Following the retention period, ConveLabs may permanently
+         destroy records using HIPAA-compliant disposal methods.
+
+24. NO INSURANCE COVERAGE BY MEMBERSHIP
+    24.1 Membership is a SERVICE PLAN, not an insurance product. The
+         Annual Fee is consideration for access to ConveLabs' specimen-
+         collection services and member benefits described on the
+         pricing page. Membership does NOT cover, reimburse, or insure
+         against (a) the cost of laboratory testing performed by the
+         Performing Lab, (b) clinician visits, (c) prescriptions, (d)
+         hospital or urgent-care charges, or (e) any medical
+         complication, injury, or illness.
+    24.2 You are solely responsible for maintaining health insurance
+         and for any charges billed by the Performing Lab or other
+         medical providers.
+
+25. REFERRAL CREDITS AND REWARDS
+    25.1 ConveLabs may from time to time issue referral credits,
+         account credits, or promotional discounts ("Credits") to
+         members who refer new paying patients.
+    25.2 Credits (a) are not redeemable for cash, (b) have no monetary
+         value outside of ConveLabs services, (c) are not transferable
+         except to immediate household members named on your
+         membership, (d) expire twelve (12) months from issuance unless
+         otherwise stated, and (e) may not be combined with one another
+         or stacked with any other discount unless ConveLabs expressly
+         permits stacking in writing.
+    25.3 ConveLabs may suspend, modify, or terminate any referral
+         program with thirty (30) days' notice; previously earned
+         Credits remain redeemable through their original expiration
+         date.
+    25.4 Fraudulent referral activity (self-referrals, fabricated
+         referrals, organized credit-farming) results in forfeiture
+         of all unused Credits and may result in membership
+         termination without refund.
+
+26. PUBLICITY, REVIEWS, AND TESTIMONIALS
+    26.1 You may freely post or share reviews of ConveLabs services on
+         any third-party platform. Member status, specific lab
+         results, and any other PHI must be redacted by you before
+         publication.
+    26.2 If you publicly publish a review, photograph, or testimonial
+         that names ConveLabs, you grant ConveLabs a worldwide,
+         non-exclusive, royalty-free, perpetual license to repost,
+         excerpt (without distortion), and reference that review or
+         testimonial in ConveLabs marketing materials, on its
+         websites, and in social media. You may revoke this license
+         prospectively by emailing hello@convelabs.com; revocation
+         does not require ConveLabs to remove materials already
+         disseminated in print or paid-media campaigns scheduled
+         before revocation.
+    26.3 ConveLabs will NOT identify you in marketing materials by
+         name, photograph, or other identifying detail without your
+         separate, specific, prior written consent (a separate
+         Publicity Release).
+
+27. INTELLECTUAL PROPERTY; ACCEPTABLE USE; DMCA
+    27.1 The ConveLabs name, logos, websites, software, branded
+         patient portal, and content posted by ConveLabs are owned by
+         ConveLabs or its licensors. Membership does not grant you
+         any license to ConveLabs intellectual property other than
+         the limited right to access and use the patient portal in
+         the ordinary course of receiving services.
+    27.2 You will not (a) copy, modify, reverse-engineer, or scrape
+         the ConveLabs websites or portal; (b) upload malicious code,
+         spam, or content that infringes any third party's rights;
+         (c) use the portal to harass any ConveLabs personnel or
+         other patient.
+    27.3 DMCA notices alleging infringement should be sent to:
+         Designated Agent — DMCA, ConveLabs LLC,
+         Email: dmca@convelabs.com.
+         Notices must include the elements required by 17 U.S.C.
+         § 512(c)(3). Counter-notices may be submitted under
+         17 U.S.C. § 512(g).
+
+28. ACCEPTANCE
     By ticking the "I agree" boxes below and proceeding to payment,
     you acknowledge that you have read, understood, and agree to be
-    bound by every term of this Agreement, including the limited
-    refund policy in Section 3, the binding arbitration and class-
-    action waiver in Section 13, and the auto-renewal provision in
-    Section 1. Your IP address, browser user-agent, and acceptance
-    timestamp are recorded as evidence of your electronic signature.
+    bound by every term of this Agreement, including:
+      • the limited refund policy in Section 3 (and Section 3.2's
+        no-refund-if-services-used clause)
+      • the binding arbitration and class-action waiver in Section 13
+      • the auto-renewal provision in Section 1
+      • the limitation of liability and indemnification in Sections 11–12
+      • the safety-disclosure duty in Section 10
+      • the chain-of-custody handoff in Section 21
+      • the no-insurance-coverage acknowledgement in Section 24
+      • the publicity license terms in Section 26
+    Your IP address, browser user-agent, and acceptance timestamp are
+    recorded as evidence of your electronic signature.
 
 DO NOT ACCEPT IF YOU DO NOT FULLY UNDERSTAND ANY TERM ABOVE. Call
 (941) 527-9169 or email hello@convelabs.com with questions before

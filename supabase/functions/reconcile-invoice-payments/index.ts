@@ -36,11 +36,21 @@ Deno.serve(async (req) => {
     const errors: string[] = [];
 
     // ── STEP 1: Find appointments with Stripe invoice IDs that aren't marked paid ──
+    //
+    // BUG FIX (2026-04-30): the previous filter only excluded 'completed' so
+    // rows already marked 'voided' / 'void' / 'refunded' got pulled every
+    // 30 min, hit Stripe again (paid API call), no-op'd the UPDATE, and
+    // logged a fresh error_logs row each cycle — producing the
+    // "Cron health check error log" notification spam (Savitri Gopie +
+    // Bob Peters at $0 every 30 min). Now we also exclude all terminal-
+    // state payment_statuses so those rows leave the polling set after
+    // their first reconciliation pass.
     const { data: unsyncedAppts, error: queryError } = await supabase
       .from('appointments')
       .select('id, patient_name, stripe_invoice_id, payment_status, invoice_status, total_amount, total_price, status')
       .not('stripe_invoice_id', 'is', null)
-      .neq('payment_status', 'completed')
+      .not('payment_status', 'in', '("completed","voided","void","refunded","uncollectible")')
+      .not('invoice_status', 'in', '("paid","voided","void","uncollectible")')
       .not('status', 'in', '("cancelled")')
       .limit(50);
 
@@ -131,17 +141,23 @@ Deno.serve(async (req) => {
     }
 
     // ── STEP 3: Log results ──
-    if (synced.length > 0) {
-      console.log(`Reconciliation complete: ${synced.length} payment(s) synced`);
-
-      // Log to error_logs for audit trail (as info, not error)
+    // Only log entries that were actually moved to a NEW state (paid).
+    // Routine "marked_void / marked_uncollectible" syncs and idempotent
+    // re-runs no longer get a row in error_logs — those were tripping
+    // the activity-monitor's "new errors this cycle" alert every 30 min
+    // even though nothing was wrong.
+    const billable = synced.filter(s => s.action === 'marked_paid');
+    if (billable.length > 0) {
+      console.log(`Reconciliation complete: ${billable.length} payment(s) freshly marked paid`);
       await supabase.from('error_logs').insert({
         error_type: 'reconciliation',
         component: 'reconcile-invoice-payments',
         action: 'auto_sync',
-        error_message: `Synced ${synced.length} payment(s): ${synced.map(s => `${s.patientName} ($${s.amount})`).join(', ')}`,
+        error_message: `Synced ${billable.length} payment(s): ${billable.map(s => `${s.patientName} ($${s.amount})`).join(', ')}`,
         resolved: true,
       }).then(() => {}, () => {});
+    } else if (synced.length > 0) {
+      console.log(`Reconciliation: ${synced.length} non-billable state-sync(s) — not logged.`);
     }
 
     return new Response(JSON.stringify({
