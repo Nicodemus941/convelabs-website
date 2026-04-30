@@ -27,6 +27,13 @@ export const useSignup = () => {
     console.log("Signup attempt:", { email, firstName, lastName, role });
     
     try {
+      // Honor any ?redirect= already on the URL (the membership-resume flow
+      // sends ?redirect=/pricing through the signup screen). Without this,
+      // the email-confirmation link always landed on the dashboard and the
+      // pending agreement in sessionStorage never resumed.
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      const desiredRedirect = params?.get('redirect') || `/dashboard/${role}`;
+
       // Register the new user
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -38,7 +45,7 @@ export const useSignup = () => {
             full_name: `${firstName} ${lastName}`.trim(),
             role
           },
-          emailRedirectTo: `${window.location.origin}/login?redirect=/dashboard/${role}`,
+          emailRedirectTo: `${window.location.origin}/login?redirect=${encodeURIComponent(desiredRedirect)}`,
         }
       });
       
@@ -103,10 +110,15 @@ export const useSignup = () => {
           authResult.data.user = mapUserData(data.user, role);
         }
         
-        // Auto login is handled by onAuthStateChange
-        console.log("Navigating to dashboard:", role);
+        // Auto login is handled by onAuthStateChange. Honor ?redirect= so
+        // the membership-resume flow lands back on /pricing instead of the
+        // dashboard.
+        const target = (typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('redirect')
+          : null) || `/dashboard/${role}`;
+        console.log("Navigating after signup:", target);
         setTimeout(() => {
-          navigate(`/dashboard/${role}`);
+          navigate(target);
         }, 100);
       }
       

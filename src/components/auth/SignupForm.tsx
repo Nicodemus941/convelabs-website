@@ -106,14 +106,36 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
     setIsSubmitting(true);
 
     try {
-      // Check if email already exists in tenant_patients (migrated patient)
-      const { data: existingPatient } = await supabase
-        .from('tenant_patients')
-        .select('id, first_name')
-        .ilike('email', email.trim())
-        .maybeSingle();
+      // Hard timeout so the spinner can't hang forever — patients reported
+      // "Creating Account…" spinning indefinitely. If the network call
+      // doesn't resolve in 30s, surface an error instead of locking the form.
+      const timeoutPromise = new Promise<{ success: false; error: { message: string } }>((resolve) => {
+        setTimeout(() => resolve({
+          success: false,
+          error: { message: 'Network seems slow — please check your connection and try again.' },
+        }), 30000);
+      });
 
-      const result = await signup(email, password, firstName, lastName, role);
+      // Pre-flight tenant_patients lookup REMOVED — it added 1-3s and could
+      // hang under anon-RLS edge cases. The "already registered" path is
+      // still handled (defensively) in the error branch below + in catch().
+      const result = await Promise.race([
+        signup(email, password, firstName, lastName, role),
+        timeoutPromise,
+      ]);
+      // Lazy-load existingPatient only if we actually need it (the
+      // "already registered" branch). Saves a roundtrip on every signup.
+      let existingPatient: any = null;
+      const lookupExisting = async () => {
+        if (existingPatient !== null) return existingPatient;
+        const { data } = await supabase
+          .from('tenant_patients')
+          .select('id, first_name')
+          .ilike('email', email.trim())
+          .maybeSingle();
+        existingPatient = data || false;
+        return existingPatient;
+      };
 
       if (result.success) {
         if (onSignupComplete) {
@@ -125,14 +147,15 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
         const errorMsg = result.error?.message || "";
         // Check if account already exists
         if (errorMsg.includes('already registered') || errorMsg.includes('already been registered') || errorMsg.includes('User already registered')) {
-          if (existingPatient) {
+          const ep = await lookupExisting();
+          if (ep) {
             // Migrated patient — send password reset via Mailgun (avoid lock)
             await supabase.functions.invoke('send-password-reset', {
               body: { email: email.trim() },
             });
             setShowMigratedMessage(true);
             toast("We found your account!", {
-              description: `Welcome back, ${existingPatient.first_name || 'patient'}! Check your email to set your password.`,
+              description: `Welcome back, ${ep.first_name || 'patient'}! Check your email to set your password.`,
             });
           } else {
             toast.error("An account with this email already exists. Please log in instead.");
