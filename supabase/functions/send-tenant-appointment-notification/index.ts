@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.36.0";
 import { verifyRecipientEmail } from "../_shared/verify-recipient.ts";
+import { formatApptForPatient } from "../_shared/appointment-format.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,18 +66,13 @@ serve(async (req) => {
     
     console.log(`Sending ${notificationType} email to ${patientEmail}`);
     
-    // Format appointment date
-    const appointmentDate = new Date(appointment.appointment_date);
-    const formattedDate = appointmentDate.toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-    const formattedTime = appointmentDate.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    // Format appointment date + time using the canonical ET-aware helper.
+    // The previous direct toLocaleTimeString on appointment_date rendered
+    // a UTC stamp as if it were local clock time (Lawrence Carpenter case:
+    // 13:00 UTC = 9 AM ET, was being shown as "1 PM").
+    const fmt = formatApptForPatient(appointment.appointment_date, (appointment as any).appointment_time);
+    const formattedDate = fmt.date;
+    const formattedTime = fmt.time;
     
     // Generate subject and content based on notification type
     let subject = '';
