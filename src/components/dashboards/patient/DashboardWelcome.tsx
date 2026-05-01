@@ -7,6 +7,7 @@ import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 import FoundingMemberBadge from "@/components/membership/FoundingMemberBadge";
 import FoundingSeatsCounter from "@/components/membership/FoundingSeatsCounter";
 import PendingInsuranceModal from "@/components/patient/PendingInsuranceModal";
+import CompleteProfileCard from "@/components/patient/CompleteProfileCard";
 
 
 interface DashboardWelcomeProps {
@@ -53,6 +54,14 @@ const DashboardWelcome = ({ user, handleBookAppointment }: DashboardWelcomeProps
           as a call to join. Component renders null when seats are closed. */}
       <div className="mt-3">
         <FoundingSeatsCounter variant="banner" />
+      </div>
+
+      {/* Soft profile-completion nudge — non-blocking, value-trade per
+          field, hides itself when 100% complete. Captures phone/DOB/
+          address/insurance one bucket at a time so SignupForm stays
+          friction-free (Hormozi: don't grow the conversion form). */}
+      <div className="mt-4">
+        <CompleteProfileCard />
       </div>
 
       {/* OCR-detected insurance mismatch confirm modal. Self-fetches via
