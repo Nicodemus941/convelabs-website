@@ -14,7 +14,15 @@ import {
 // data the platform owner sees but their super_admin staff (e.g. Naquala)
 // should not. The platform owner is identified by email (canonical source
 // of truth: business_metrics.platform_owner_email — see public.is_platform_owner()).
-type SidebarItem = { name: string; icon: any; path: string; roles?: string[]; badge?: boolean; ownerOnly?: boolean };
+type SidebarItem = {
+  name: string;
+  icon: any;
+  path: string;
+  roles?: string[];
+  badge?: boolean;       // green pulse for inbound SMS
+  taskBadge?: boolean;   // numeric red badge driven by my_open_task_count
+  ownerOnly?: boolean;
+};
 type SidebarSection = { label: string; items: SidebarItem[] };
 
 const PLATFORM_OWNER_EMAIL = 'nicodemmebaptiste@convelabs.com';
@@ -41,7 +49,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Invoices', icon: Receipt, path: `${basePath}/invoices` },
         { name: 'Organizations', icon: Building2, path: `${basePath}/organizations` },
         { name: 'Specimens', icon: FlaskConical, path: `${basePath}/specimens` },
-        { name: 'Notes', icon: ClipboardList, path: `${basePath}/notes` },
+        { name: 'Notes & Tasks', icon: ClipboardList, path: `${basePath}/notes`, taskBadge: true },
         { name: 'Operations', icon: Wrench, path: `${basePath}/operations` },
         { name: 'AI Assistant', icon: Sparkles, path: `${basePath}/ai-assistant` },
         { name: 'Training', icon: GraduationCap, path: `${basePath}/training` },
@@ -80,6 +88,42 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const basePath = `/dashboard/${userRole}`;
   const SIDEBAR_SECTIONS = getSidebarSections(basePath);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [myOpenTaskCount, setMyOpenTaskCount] = useState<number>(0);
+
+  // ── OPEN TASKS BADGE ──────────────────────────────────────────────
+  // Drives the numeric "Notes & Tasks (N)" pill in the sidebar so
+  // admin sees pending work even when she's on a different tab.
+  // Initial fetch via the get_my_open_task_count() RPC + a realtime
+  // subscription on activity_log so the number stays live without polling.
+  useEffect(() => {
+    if (!user?.id) return;
+    let mounted = true;
+
+    const refreshCount = async () => {
+      try {
+        const { data, error } = await supabase.rpc('get_my_open_task_count' as any);
+        if (!error && mounted) {
+          setMyOpenTaskCount(typeof data === 'number' ? data : Number(data) || 0);
+        }
+      } catch { /* silent */ }
+    };
+
+    refreshCount();
+
+    // ANY change to activity_log can affect the count for this user
+    // (assignment to me, status flip away from open/in_progress, etc.).
+    // Cheaper to re-run the RPC than to compute the delta client-side.
+    const channel = supabase
+      .channel('admin-task-badge')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'activity_log' },
+        () => { refreshCount(); }
+      )
+      .subscribe();
+
+    return () => { mounted = false; supabase.removeChannel(channel); };
+  }, [user?.id]);
 
   // Subscribe to NEW INBOUND SMS messages for the notification bell.
   // Outbound messages also land in sms_messages now (two-way threading)
@@ -179,10 +223,22 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                       {item.badge && hasNewMessages && !active && (
                         <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse shadow-[0_0_6px_2px_rgba(74,222,128,0.6)]" />
                       )}
+                      {item.taskBadge && myOpenTaskCount > 0 && !active && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                      )}
                     </div>
                     {item.name}
                     {item.badge && hasNewMessages && !active && (
                       <span className="ml-auto w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_4px_1px_rgba(74,222,128,0.5)]" />
+                    )}
+                    {item.taskBadge && myOpenTaskCount > 0 && (
+                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
+                        active
+                          ? 'bg-white text-conve-red'
+                          : 'bg-red-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(239,68,68,0.45)]'
+                      }`}>
+                        {myOpenTaskCount > 99 ? '99+' : myOpenTaskCount}
+                      </span>
                     )}
                   </Link>
                 );
