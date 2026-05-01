@@ -497,6 +497,13 @@ const PatientProfile = () => {
                       const _raw = a.lab_order_file_path as string;
                       const paths = (_raw.includes('\n') ? _raw.split('\n') : _raw.split(',')).map((p: string) => p.trim()).filter(Boolean);
                       for (const path of paths) {
+                        // download() → blob → objectURL avoids 404s on
+                        // filenames containing commas / spaces.
+                        const { data: blob, error: dlErr } = await supabase.storage.from('lab-orders').download(path);
+                        if (!dlErr && blob) {
+                          window.open(URL.createObjectURL(blob), '_blank');
+                          continue;
+                        }
                         const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
                         if (data?.signedUrl) window.open(data.signedUrl, '_blank');
                       }

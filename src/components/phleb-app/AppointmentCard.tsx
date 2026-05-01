@@ -121,6 +121,16 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
       .map((p) => p.trim())
       .filter(Boolean);
     for (const path of paths) {
+      // download() → blob → objectURL avoids the URL-encoding 404 that hits
+      // files whose names contain commas/spaces (Mary Rienzi 5/1: 3 files
+      // with commas all 404'd through createSignedUrl until this fix).
+      const { data: blob, error: dlErr } = await supabase.storage
+        .from('lab-orders')
+        .download(path);
+      if (!dlErr && blob) {
+        window.open(URL.createObjectURL(blob), '_blank');
+        continue;
+      }
       const { data } = await supabase.storage
         .from('lab-orders')
         .createSignedUrl(path, 3600);

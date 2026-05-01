@@ -34,13 +34,28 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
     setSignedUrl(null);
     (async () => {
       try {
-        // lab-orders bucket is public=true, so getPublicUrl returns a
-        // stable render.supabase.co URL that bypasses RLS entirely. This
-        // matches the URL used by email attachments. We previously used
-        // createSignedUrl which goes through storage.objects RLS — that
-        // worked when policies were lax but broke after the security
-        // lockdown when the SDK auth-context didn't always carry the
-        // phleb's JWT through to the signing call.
+        // Strategy: download the blob through the SDK (path is escaped
+        // server-side by Supabase) and render via URL.createObjectURL.
+        // This sidesteps URL-encoding bugs that 404'd files whose names
+        // contained commas or spaces (Mary Rienzi 5/1/2026:
+        // "Rienzi, Mary Ellen.pdf" / "Rienzi,P.pdf" both 404'd via
+        // getPublicUrl because the public CDN couldn't match the
+        // un-encoded characters in the URL path).
+        const { data: blob, error: dlErr } = await supabase.storage
+          .from('lab-orders')
+          .download(filePath);
+        if (!dlErr && blob) {
+          setSignedUrl(URL.createObjectURL(blob));
+          return;
+        }
+        // Fallback chain: signed URL → public URL
+        const { data: signed } = await supabase.storage
+          .from('lab-orders')
+          .createSignedUrl(filePath, 3600);
+        if (signed?.signedUrl) {
+          setSignedUrl(signed.signedUrl);
+          return;
+        }
         const { data: pub } = supabase.storage
           .from('lab-orders')
           .getPublicUrl(filePath);
@@ -48,13 +63,7 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
           setSignedUrl(pub.publicUrl);
           return;
         }
-        // Fallback to signed URL path for backwards compat / private buckets
-        const { data, error: err } = await supabase.storage
-          .from('lab-orders')
-          .createSignedUrl(filePath, 3600);
-        if (err) throw err;
-        if (!data?.signedUrl) throw new Error('No signed URL returned');
-        setSignedUrl(data.signedUrl);
+        throw dlErr || new Error('Could not load file');
       } catch (e: any) {
         setError(e.message || 'Failed to load file');
       } finally {
@@ -62,6 +71,13 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
       }
     })();
   }, [open, filePath]);
+
+  // Revoke object URL on close to free memory
+  useEffect(() => {
+    return () => {
+      if (signedUrl && signedUrl.startsWith('blob:')) URL.revokeObjectURL(signedUrl);
+    };
+  }, [signedUrl]);
 
   const isImage = filePath ? /\.(jpe?g|png|gif|webp)$/i.test(filePath) : false;
   const isHeic = filePath ? /\.heic$/i.test(filePath) : false;
