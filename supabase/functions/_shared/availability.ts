@@ -100,6 +100,45 @@ function formatTime(h: number, m: number): string {
   return `${hr}:${String(m).padStart(2, '0')} ${period}`;
 }
 
+/**
+ * Normalize ANY time string to the canonical "H:MM AM/PM" format used by
+ * the slot grid. Accepts:
+ *   - "6:00 AM"        — already canonical (slot picker)
+ *   - "06:00 AM"       — zero-padded hour
+ *   - "11:30:00"       — 24-hour with seconds (HTML form value)
+ *   - "11:30"          — 24-hour HH:MM (HTML5 time input default)
+ *   - "11:30:00.123"   — 24-hour with fractional seconds (Postgres time)
+ * Returns the canonical form, or null if the input can't be parsed.
+ *
+ * This is the fix for the bug surfaced by the 2026-04-30 E2E test: every
+ * call to create-appointment-checkout that sent 24-hour time was rejected
+ * with "slot_unavailable" because the slot grid stores 12-hour AM/PM.
+ */
+export function normalizeSlotTime(t: string | null | undefined): string | null {
+  if (!t) return null;
+  const trimmed = String(t).trim();
+
+  // Already canonical "H:MM AM/PM" (with optional zero-padded hour)
+  const ampm = /^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)$/.exec(trimmed);
+  if (ampm) {
+    const h = parseInt(ampm[1], 10);
+    const m = ampm[2];
+    return `${h}:${m} ${ampm[3].toUpperCase()}`;
+  }
+
+  // 24-hour HH:MM or HH:MM:SS (with optional fractional)
+  const h24 = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(trimmed);
+  if (h24) {
+    const h = parseInt(h24[1], 10);
+    const m = parseInt(h24[2], 10);
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      return formatTime(h, m);
+    }
+  }
+
+  return null;
+}
+
 function baseGrid(endHour: number = DEFAULT_GRID_END): string[] {
   // 15-min increments per owner request 2026-04-25 — patients can now book
   // :15 and :45 of the hour in addition to :00 and :30. The bidirectional
@@ -423,7 +462,12 @@ export async function isSlotStillAvailable(
   time: string,
   timeWindowRules: any,
 ): Promise<boolean> {
+  // Normalize whatever the caller sent ("11:30:00" / "11:30" / "11:30 AM")
+  // to the canonical "H:MM AM/PM" the slot grid uses. Without this, every
+  // 24-hour-formatted time was silently rejected as "slot_unavailable".
+  const canonical = normalizeSlotTime(time);
+  if (!canonical) return false;
   const slots = await getAvailableSlotsForDate(supabase, orgId, dateIso, timeWindowRules);
-  const match = slots.find(s => s.time === time);
+  const match = slots.find(s => s.time === canonical);
   return !!match?.available;
 }

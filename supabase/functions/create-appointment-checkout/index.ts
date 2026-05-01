@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { isSlotStillAvailable, getAvailableSlotsForDate } from '../_shared/availability.ts';
+import { isSlotStillAvailable, getAvailableSlotsForDate, normalizeSlotTime } from '../_shared/availability.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -260,7 +260,11 @@ Deno.serve(async (req) => {
       // caught EXACT start matches. Now reuse availability.ts which handles
       // bidirectional duration + buffer blocking, so a 10:00 × 75-min appt
       // correctly blocks 11:30 even though no appt starts at 11:30.
-      const stillOpen = await isSlotStillAvailable(supabaseClient, '', dateOnly, appointmentTime, null);
+      // Time-format normalization (2026-04-30 E2E fix): accept "11:30 AM",
+      // "11:30:00", or "11:30" uniformly — every consumer of appointmentTime
+      // beyond this line uses the canonical "H:MM AM/PM" form.
+      const canonicalTime = normalizeSlotTime(appointmentTime) || appointmentTime;
+      const stillOpen = await isSlotStillAvailable(supabaseClient, '', dateOnly, canonicalTime, null);
 
       if (!stillOpen) {
         // ─── SUGGEST 3 CLOSEST OPEN SLOTS (Hormozi: never let buyer leave
@@ -274,7 +278,7 @@ Deno.serve(async (req) => {
           if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
           return h * 60 + mm;
         };
-        const wantedMin = parseMin(appointmentTime);
+        const wantedMin = parseMin(canonicalTime);
         const suggestedSlots = (allSlots as any[])
           .filter(s => s.available)
           .map(s => ({ time: s.time, distance: Math.abs(parseMin(s.time) - wantedMin) }))
