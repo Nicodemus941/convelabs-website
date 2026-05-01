@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Sparkles, Check, X, ChevronDown, ChevronUp, Crown, Star, Shield } from 'lucide-react';
+import { Sparkles, Check, X, ChevronDown, ChevronUp, Crown, Star, Shield, Calculator, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import MembershipAgreementDialog from '@/components/membership/MembershipAgreementDialog';
@@ -133,6 +133,12 @@ const SubscribeAtCheckoutCard: React.FC<Props> = ({ patientEmail, patientName, s
                 <p className="text-xs text-gray-600 mt-0.5">
                   Add an annual membership at checkout → this visit is discounted + 12 months of priority.
                 </p>
+                {/* Plain "today you pay" anchor so the patient knows the bundled
+                    upfront total before they even expand the panel. */}
+                <p className="text-[11px] text-emerald-700 font-medium mt-1">
+                  Example with VIP: today you pay {dollars(savings[1].thisVisitCents + savings[1].annualCents)} once
+                  ({dollars(savings[1].thisVisitCents)} visit + {dollars(savings[1].annualCents)} membership · saves {dollars(savings[1].savingsThisVisit)} now + every future visit)
+                </p>
               </div>
             </div>
             {expanded ? <ChevronUp className="h-4 w-4 text-gray-400" /> : <ChevronDown className="h-4 w-4 text-gray-400" />}
@@ -145,6 +151,17 @@ const SubscribeAtCheckoutCard: React.FC<Props> = ({ patientEmail, patientName, s
                 const TierIcon = t.icon;
                 const colorClass = t.color === 'emerald' ? 'border-emerald-300 hover:bg-emerald-50' : t.color === 'red' ? 'border-[#B91C1C]/30 hover:bg-red-50' : 'border-amber-300 hover:bg-amber-50';
                 const textColor = t.color === 'emerald' ? 'text-emerald-700' : t.color === 'red' ? 'text-[#B91C1C]' : 'text-amber-700';
+                // Plain-English math the patient can verify: today's total
+                // (visit + annual), what auto-renews, and break-even
+                const todayTotalCents = t.thisVisitCents + t.annualCents;
+                const breakEvenVisits = t.savingsThisVisit > 0
+                  ? Math.ceil((t.annualCents - t.savingsThisVisit) / t.savingsThisVisit) + 1
+                  : null;
+                const renewDate = (() => {
+                  const d = new Date();
+                  d.setFullYear(d.getFullYear() + 1);
+                  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                })();
                 return (
                   <button
                     key={t.planName}
@@ -167,11 +184,35 @@ const SubscribeAtCheckoutCard: React.FC<Props> = ({ patientEmail, patientName, s
                               <FoundingSeatsCounter variant="pill" />
                             </div>
                           )}
-                          <p className="text-xs text-gray-600 mt-0.5">
-                            This visit: <span className="line-through text-gray-400">{dollars(serviceBaseCents)}</span>{' '}
-                            <strong className="text-gray-900">{dollars(t.thisVisitCents)}</strong>
-                            <span className="text-emerald-700 font-semibold"> (save {dollars(t.savingsThisVisit)})</span>
-                          </p>
+
+                          {/* "Here's exactly what you'll pay" — the Hormozi clarity panel */}
+                          <div className="mt-2.5 rounded-md bg-white/70 border border-gray-200 p-2.5 space-y-1.5">
+                            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+                              <Calculator className="h-3 w-3" /> What you'll pay today
+                            </div>
+                            <div className="text-xs text-gray-700 space-y-0.5">
+                              <div className="flex justify-between">
+                                <span>Today's visit ({t.planName} rate)</span>
+                                <span><span className="line-through text-gray-400 mr-1">{dollars(serviceBaseCents)}</span><strong className="text-gray-900">{dollars(t.thisVisitCents)}</strong></span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>{t.planName} membership · 12 months</span>
+                                <strong className="text-gray-900">{dollars(t.annualCents)}</strong>
+                              </div>
+                              <div className="flex justify-between border-t pt-1 mt-1">
+                                <strong className="text-gray-900">Total today (one charge)</strong>
+                                <strong className="text-gray-900 text-sm">{dollars(todayTotalCents)}</strong>
+                              </div>
+                            </div>
+                            <div className="flex items-start gap-1.5 text-[11px] text-emerald-700 font-medium">
+                              <CheckCircle2 className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                              <span>You save {dollars(t.savingsThisVisit)} on this visit{breakEvenVisits ? ` · pays for itself in ${breakEvenVisits} visits` : ''}</span>
+                            </div>
+                            <div className="flex items-start gap-1.5 text-[10px] text-gray-500">
+                              <RefreshCw className="h-3 w-3 mt-0.5 flex-shrink-0" />
+                              <span>Renews {renewDate} at {dollars(t.annualCents)}/yr · cancel anytime · 30-day refund (if no benefits used)</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

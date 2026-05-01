@@ -340,8 +340,30 @@ const Pricing: React.FC = () => {
                           <span className="text-xs text-muted-foreground">/year</span>
                         </div>
                         <p className="text-[10px] text-muted-foreground mt-0.5">
-                          That's ~${Math.round(tier.annualPrice / 12)}/mo · billed annually
+                          That's ~${Math.round(tier.annualPrice / 12)}/mo · billed annually · one charge
                         </p>
+                        {/* Plain-English math anchor — what they pay today + what
+                            future visits cost — Hormozi "trade visible" rule */}
+                        {(() => {
+                          const visitNonMember = 150;
+                          const visitMemberPrice = tier.key === 'concierge' ? 99 : tier.key === 'vip' ? 115 : 130;
+                          const savePerVisit = visitNonMember - visitMemberPrice;
+                          const breakEven = savePerVisit > 0 ? Math.ceil(tier.annualPrice / savePerVisit) : null;
+                          return (
+                            <div className="mt-2 rounded-md bg-emerald-50/60 border border-emerald-200 p-2 text-[10.5px] leading-relaxed">
+                              <p className="font-semibold text-emerald-900 mb-0.5">Today: just ${tier.annualPrice} (one charge)</p>
+                              <p className="text-gray-700">
+                                Future mobile draws: <span className="line-through text-gray-400">$150</span>{' '}
+                                <strong>${visitMemberPrice}</strong> each (save ${savePerVisit}/visit)
+                              </p>
+                              {breakEven && (
+                                <p className="text-gray-600 mt-0.5">
+                                  Pays for itself in <strong>{breakEven} visit{breakEven === 1 ? '' : 's'}</strong>
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </>
                     ) : (
                       <div className="text-3xl font-bold">Free</div>
