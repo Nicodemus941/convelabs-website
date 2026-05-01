@@ -183,7 +183,17 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ text: string; panels: string[] } | { error: string }> {
+interface OcrExtraction {
+  text: string;
+  panels: string[];
+  insurance: {
+    provider?: string | null;
+    memberId?: string | null;
+    groupNumber?: string | null;
+  } | null;
+}
+
+async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<OcrExtraction | { error: string }> {
   if (!ANTHROPIC_API_KEY) {
     console.error('[ocr] ANTHROPIC_API_KEY not set');
     return { error: 'ANTHROPIC_API_KEY not configured on edge function' };
@@ -214,14 +224,16 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
           text: [
             'This is a medical lab order / test requisition.',
             '',
-            'Extract:',
+            'Extract THREE things:',
             '1. A plain-text transcription of ALL ordered tests, panels, CPT codes, and special instructions (especially fasting requirements).',
             '2. A structured list of the panels/tests ordered. Normalize names to their common abbreviation when obvious (e.g. "Comprehensive Metabolic Panel" → "CMP").',
+            '3. The patient\'s insurance information IF present on the form. Look for boxes/sections labeled "Insurance", "Carrier", "Member ID", "Group #", "Subscriber ID", "Policy #". Return the carrier name (e.g. "Aetna", "BCBS Florida", "United Healthcare", "Medicare", "Self-Pay"), the member/subscriber ID, and the group number. If the form says "Self-Pay" or "Cash", return provider="Self-Pay" with empty IDs. If no insurance section is present, return null.',
             '',
             'Reply ONLY with valid JSON in this exact shape, no prose:',
-            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel", ...]}',
+            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}}',
             '',
-            'If the image is unreadable, reply: {"text": "", "panels": []}',
+            'If no insurance is on the form, set "insurance": null.',
+            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null}',
           ].join('\n'),
         },
       ],
@@ -259,9 +271,19 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<{ 
       const parsed = JSON.parse(match[0]);
       const text = String(parsed.text || '').substring(0, 8000);
       const panels = Array.isArray(parsed.panels) ? parsed.panels.slice(0, 40).map((p: any) => String(p).substring(0, 80)) : [];
-      return { text, panels };
+      // Insurance is optional — only return a non-null block if Claude found a real carrier
+      let insurance: OcrExtraction['insurance'] = null;
+      if (parsed.insurance && typeof parsed.insurance === 'object') {
+        const provider = parsed.insurance.provider ? String(parsed.insurance.provider).trim().substring(0, 80) : null;
+        const memberId = parsed.insurance.memberId ? String(parsed.insurance.memberId).trim().substring(0, 80) : null;
+        const groupNumber = parsed.insurance.groupNumber ? String(parsed.insurance.groupNumber).trim().substring(0, 80) : null;
+        // Treat empty / "null" / "n/a" strings as no-insurance-detected
+        const looksReal = provider && !/^(none|n\/a|null|n a|—|-)$/i.test(provider);
+        if (looksReal) insurance = { provider, memberId, groupNumber };
+      }
+      return { text, panels, insurance };
     } catch {
-      return { text: content.substring(0, 8000), panels: [] };
+      return { text: content.substring(0, 8000), panels: [], insurance: null };
     }
   } catch (e: any) {
     console.error('[ocr] request exception', e);
@@ -422,6 +444,14 @@ Deno.serve(async (req) => {
 
     // Persist the OCR result. Row-scoped if we came via labOrderId; otherwise
     // the legacy appointment-level columns.
+    const insuranceUpdate = result.insurance
+      ? {
+          ocr_insurance_provider: result.insurance.provider || null,
+          ocr_insurance_member_id: result.insurance.memberId || null,
+          ocr_insurance_group_number: result.insurance.groupNumber || null,
+        }
+      : { ocr_insurance_provider: null, ocr_insurance_member_id: null, ocr_insurance_group_number: null };
+
     if (labOrderRowId) {
       await supabase.from('appointment_lab_orders').update({
         ocr_status: 'complete',
@@ -429,6 +459,7 @@ Deno.serve(async (req) => {
         ocr_full_text: result.text,
         ocr_fasting_required: fastingDetected,
         ocr_completed_at: new Date().toISOString(),
+        ...insuranceUpdate,
       }).eq('id', labOrderRowId);
 
       // ─── MIRROR TO PARENT APPOINTMENT ─────────────────────────────
@@ -482,6 +513,81 @@ Deno.serve(async (req) => {
         lab_order_panels: result.panels,
         ocr_processed_at: new Date().toISOString(),
       }).eq('id', targetId);
+    }
+
+    // ─── INSURANCE COMPARE + QUEUE ────────────────────────────────
+    // If OCR detected an insurance block, compare to what's stored on
+    // tenant_patients. Stamp the alo with insurance_match_status and (when
+    // it differs) queue a pending_insurance_changes row so the patient can
+    // confirm via dashboard modal. If they had nothing on file, auto-add.
+    if (labOrderRowId && targetId) {
+      try {
+        const matchKey = (s: string | null | undefined) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const ocrIns = result.insurance;
+
+        // Look up the appointment's patient row
+        const { data: appt2 } = await supabase
+          .from('appointments').select('patient_id, patient_email').eq('id', targetId).maybeSingle();
+        let patient: any = null;
+        if (appt2?.patient_id) {
+          const { data: tp } = await supabase
+            .from('tenant_patients')
+            .select('id, insurance_provider, insurance_member_id, insurance_group_number')
+            .eq('id', appt2.patient_id).maybeSingle();
+          if (tp) patient = tp;
+        } else if (appt2?.patient_email) {
+          const { data: tp } = await supabase
+            .from('tenant_patients')
+            .select('id, insurance_provider, insurance_member_id, insurance_group_number')
+            .ilike('email', appt2.patient_email)
+            .order('created_at', { ascending: false })
+            .limit(1).maybeSingle();
+          if (tp) patient = tp;
+        }
+
+        let matchStatus: 'match' | 'differs' | 'extracted_new' | 'none' = 'none';
+        if (ocrIns) {
+          if (!patient || (!patient.insurance_provider && !patient.insurance_member_id)) {
+            matchStatus = 'extracted_new';
+            // Auto-add — no friction. Patient never had insurance on file.
+            if (patient?.id) {
+              await supabase.from('tenant_patients').update({
+                insurance_provider: ocrIns.provider || null,
+                insurance_member_id: ocrIns.memberId || null,
+                insurance_group_number: ocrIns.groupNumber || null,
+                updated_at: new Date().toISOString(),
+              }).eq('id', patient.id);
+            }
+          } else {
+            const same =
+              matchKey(patient.insurance_provider) === matchKey(ocrIns.provider) &&
+              matchKey(patient.insurance_member_id) === matchKey(ocrIns.memberId);
+            matchStatus = same ? 'match' : 'differs';
+            if (matchStatus === 'differs' && patient?.id) {
+              // Queue a pending change for the patient to confirm
+              await supabase.from('pending_insurance_changes' as any).insert({
+                appointment_lab_order_id: labOrderRowId,
+                appointment_id: targetId,
+                tenant_patient_id: patient.id,
+                current_provider: patient.insurance_provider,
+                current_member_id: patient.insurance_member_id,
+                current_group_number: patient.insurance_group_number,
+                proposed_provider: ocrIns.provider || null,
+                proposed_member_id: ocrIns.memberId || null,
+                proposed_group_number: ocrIns.groupNumber || null,
+              }).then(() => {}, (e) => {
+                // unique-violation = a pending change for this alo already exists; ignore
+                if (!String(e?.code) === '23505') console.warn('[insurance-queue] insert err:', e);
+              });
+            }
+          }
+        }
+        await supabase.from('appointment_lab_orders').update({
+          insurance_match_status: matchStatus,
+        }).eq('id', labOrderRowId);
+      } catch (e) {
+        console.warn('[insurance-pipeline] non-blocking exception:', e);
+      }
     }
 
     // ─── PARTNERSHIP FLYWHEEL ────────────────────────────────────────
@@ -568,6 +674,33 @@ Deno.serve(async (req) => {
               org_match_reason: reason,
               org_match_organization_id: orgId,
             }).eq('id', labOrderRowId);
+
+            // FIRST-DETECTION OWNER ALERT
+            // When OCR auto-creates a brand-new org, page the owner once so
+            // they can fill in manager_email + contact_email proactively
+            // (the org row is missing them — that's how patient onboarding
+            // emails get routed to the right inbox). Without this, new orgs
+            // sat without comms metadata until 3+ referrals tripped the
+            // existing 3-referral SMS — too late for the first patient.
+            if (status === 'auto_created') {
+              try {
+                const TWILIO_SID  = Deno.env.get('TWILIO_ACCOUNT_SID');
+                const TWILIO_AUTH = Deno.env.get('TWILIO_AUTH_TOKEN');
+                const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
+                const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+                if (TWILIO_SID && TWILIO_AUTH) {
+                  await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+                    method: 'POST',
+                    headers: { Authorization: `Basic ${btoa(`${TWILIO_SID}:${TWILIO_AUTH}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                      To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
+                      Body: `🆕 New practice auto-registered from lab order: ${extracted.practiceName}${extracted.orderingPhysician ? ' (Dr ' + extracted.orderingPhysician + ')' : ''}${extracted.npi ? ' · NPI ' + extracted.npi : ''}. Add manager_email in Admin → Organizations to enable system notifications.`,
+                      From: TWILIO_FROM,
+                    }).toString(),
+                  });
+                }
+              } catch (firstErr) { console.warn('[ocr->org] first-detection alert failed (non-blocking):', firstErr); }
+            }
           } else if (labOrderRowId && (!linkRes || !(linkRes as any).org_id)) {
             await supabase.from('appointment_lab_orders').update({
               org_match_status: 'unmatched',

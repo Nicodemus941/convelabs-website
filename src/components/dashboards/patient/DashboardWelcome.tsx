@@ -6,6 +6,7 @@ import { User } from "@/types/auth";
 import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 import FoundingMemberBadge from "@/components/membership/FoundingMemberBadge";
 import FoundingSeatsCounter from "@/components/membership/FoundingSeatsCounter";
+import PendingInsuranceModal from "@/components/patient/PendingInsuranceModal";
 
 
 interface DashboardWelcomeProps {
@@ -53,6 +54,12 @@ const DashboardWelcome = ({ user, handleBookAppointment }: DashboardWelcomeProps
       <div className="mt-3">
         <FoundingSeatsCounter variant="banner" />
       </div>
+
+      {/* OCR-detected insurance mismatch confirm modal. Self-fetches via
+          get_my_pending_insurance_change RPC; renders nothing when there's
+          no pending change. Shows once per OCR'd lab order; resolution
+          (accept_new / keep_existing) closes the queue row. */}
+      <PendingInsuranceModal />
     </>
   );
 };
