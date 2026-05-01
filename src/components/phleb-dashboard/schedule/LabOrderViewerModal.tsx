@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2, ExternalLink, Download, FileText, AlertTriangle } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 
 /**
@@ -34,13 +34,22 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
     setSignedUrl(null);
     (async () => {
       try {
-        // Strategy: download the blob through the SDK (path is escaped
-        // server-side by Supabase) and render via URL.createObjectURL.
-        // This sidesteps URL-encoding bugs that 404'd files whose names
-        // contained commas or spaces (Mary Rienzi 5/1/2026:
-        // "Rienzi, Mary Ellen.pdf" / "Rienzi,P.pdf" both 404'd via
-        // getPublicUrl because the public CDN couldn't match the
-        // un-encoded characters in the URL path).
+        // Strategy 1: build the public URL ourselves with per-segment
+        // encodeURIComponent. Supabase JS's getPublicUrl/download don't
+        // encode commas, so "Rienzi, Mary Ellen.pdf" and "Rienzi,P.pdf"
+        // 404'd at the CDN. Manual encoding fixes the entire class of
+        // filename bugs in one go.
+        const url = publicStorageUrl('lab-orders', filePath);
+        // Verify it actually resolves before locking the UI to that URL
+        try {
+          const head = await fetch(url, { method: 'HEAD' });
+          if (head.ok) {
+            setSignedUrl(url);
+            return;
+          }
+        } catch { /* fall through to alternate paths */ }
+
+        // Strategy 2 (fallback): SDK download() → blob URL
         const { data: blob, error: dlErr } = await supabase.storage
           .from('lab-orders')
           .download(filePath);
@@ -48,19 +57,13 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
           setSignedUrl(URL.createObjectURL(blob));
           return;
         }
-        // Fallback chain: signed URL → public URL
+
+        // Strategy 3 (last resort): signed URL
         const { data: signed } = await supabase.storage
           .from('lab-orders')
           .createSignedUrl(filePath, 3600);
         if (signed?.signedUrl) {
           setSignedUrl(signed.signedUrl);
-          return;
-        }
-        const { data: pub } = supabase.storage
-          .from('lab-orders')
-          .getPublicUrl(filePath);
-        if (pub?.publicUrl) {
-          setSignedUrl(pub.publicUrl);
           return;
         }
         throw dlErr || new Error('Could not load file');

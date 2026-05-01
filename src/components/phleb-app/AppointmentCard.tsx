@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { User, Phone, Mail, MapPin, FileText, Clock, Truck, CheckCircle, Play, Package } from 'lucide-react';
 import NavigateButton from './NavigateButton';
 import { useAppointmentStatus } from '@/hooks/useAppointmentStatus';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface Appointment {
@@ -121,22 +121,11 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
       .map((p) => p.trim())
       .filter(Boolean);
     for (const path of paths) {
-      // download() → blob → objectURL avoids the URL-encoding 404 that hits
-      // files whose names contain commas/spaces (Mary Rienzi 5/1: 3 files
-      // with commas all 404'd through createSignedUrl until this fix).
-      const { data: blob, error: dlErr } = await supabase.storage
-        .from('lab-orders')
-        .download(path);
-      if (!dlErr && blob) {
-        window.open(URL.createObjectURL(blob), '_blank');
-        continue;
-      }
-      const { data } = await supabase.storage
-        .from('lab-orders')
-        .createSignedUrl(path, 3600);
-      if (data?.signedUrl) {
-        window.open(data.signedUrl, '_blank');
-      }
+      // Manually-encoded public URL (per-segment encodeURIComponent) —
+      // fixes the comma/space 404 that Supabase's getPublicUrl misses.
+      // Verified live: %2C %20 encoded variants return 200 + real PDF
+      // bytes for Mary Rienzi's 5/1 appointment.
+      window.open(publicStorageUrl('lab-orders', path), '_blank');
     }
   };
 

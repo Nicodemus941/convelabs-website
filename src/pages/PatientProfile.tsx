@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -497,15 +497,9 @@ const PatientProfile = () => {
                       const _raw = a.lab_order_file_path as string;
                       const paths = (_raw.includes('\n') ? _raw.split('\n') : _raw.split(',')).map((p: string) => p.trim()).filter(Boolean);
                       for (const path of paths) {
-                        // download() → blob → objectURL avoids 404s on
-                        // filenames containing commas / spaces.
-                        const { data: blob, error: dlErr } = await supabase.storage.from('lab-orders').download(path);
-                        if (!dlErr && blob) {
-                          window.open(URL.createObjectURL(blob), '_blank');
-                          continue;
-                        }
-                        const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
-                        if (data?.signedUrl) window.open(data.signedUrl, '_blank');
+                        // publicStorageUrl encodes each path segment with
+                        // encodeURIComponent so commas/spaces resolve.
+                        window.open(publicStorageUrl('lab-orders', path), '_blank');
                       }
                     }}>
                       <FileText className="h-3.5 w-3.5" /> View

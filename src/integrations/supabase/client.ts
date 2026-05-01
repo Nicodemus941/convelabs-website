@@ -45,6 +45,23 @@ export const getAuthToken = () => {
   }
 };
 
+/**
+ * Build a public storage URL with PROPER percent-encoding of every
+ * path segment. The Supabase JS getPublicUrl() / download() helpers
+ * don't encode commas — files with names like "Rienzi, Mary Ellen.pdf"
+ * or "Rienzi,P.pdf" 404 because the storage CDN can't match the
+ * literal comma in the URL. encodeURIComponent on each segment fixes
+ * commas, spaces, parens, and every other ambiguous character.
+ *
+ * Use this instead of supabase.storage.from(b).getPublicUrl() whenever
+ * the bucket is `public=true` and the filename might contain anything
+ * other than [A-Za-z0-9._-].
+ */
+export function publicStorageUrl(bucket: string, path: string): string {
+  const safe = path.split('/').map(encodeURIComponent).join('/');
+  return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${safe}`;
+}
+
 export const signOut = async () => {
   try {
     console.log("Executing signOut helper function");
