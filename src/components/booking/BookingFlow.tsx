@@ -600,12 +600,28 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       }
 
       if (result.url) {
+        // Telemetry: stamp before we navigate away so we know the patient
+        // got the URL. If they NEVER arrive at Stripe (DNS, blocker, etc.)
+        // the booking_audit_log row is the only signal we have.
+        try { sessionStorage.setItem('cl.lastCheckoutRedirectAt', String(Date.now())); } catch { /* noop */ }
         window.location.href = result.url;
       } else {
+        // Page-went-blank guard: if Stripe URL is missing AND for any
+        // reason the toast doesn't render (rare, but iOS content blockers
+        // can hide them), notify the owner so we hear about it in real time.
         toast.error("We couldn't reach Stripe. Please try again — or call (941) 527-9169 to book by phone.", {
           duration: 9000,
           action: { label: 'Call', onClick: () => { window.location.href = 'tel:+19415279169'; } },
         });
+        // Background owner alert — non-blocking
+        supabase.functions.invoke('send-sms-notification', {
+          body: {
+            to: '9415279169',
+            patientName: 'System',
+            message: `🚨 Patient hit Pay → no Stripe URL. Email: ${data.patientDetails?.email || 'unknown'} · check edge fn logs for create-appointment-checkout`,
+            category: 'admin_alert',
+          },
+        }).catch(() => { /* swallow — telemetry must never block */ });
       }
     } catch (error) {
       console.error('Checkout error:', error);
@@ -614,6 +630,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         duration: 10000,
         action: { label: 'Call', onClick: () => { window.location.href = 'tel:+19415279169'; } },
       });
+      // Background owner alert with patient context
+      supabase.functions.invoke('send-sms-notification', {
+        body: {
+          to: '9415279169',
+          patientName: 'System',
+          message: `🚨 Booking checkout EXCEPTION · ${data.patientDetails?.email || 'unknown'} · ${msg.slice(0, 200)}`,
+          category: 'admin_alert',
+        },
+      }).catch(() => { /* swallow */ });
     } finally {
       setIsProcessing(false);
     }
