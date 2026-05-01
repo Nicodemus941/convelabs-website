@@ -492,7 +492,10 @@ const PatientProfile = () => {
                       <p className="text-xs text-muted-foreground">{a.service_name || a.service_type}</p>
                     </div>
                     <Button variant="outline" size="sm" className="text-xs gap-1" onClick={async () => {
-                      const paths = a.lab_order_file_path.split(',').map((p: string) => p.trim());
+                      // Newline-first split (current trigger), comma fallback for legacy rows.
+                      // Filenames with commas ("Rienzi, Mary Ellen.pdf") used to break this.
+                      const _raw = a.lab_order_file_path as string;
+                      const paths = (_raw.includes('\n') ? _raw.split('\n') : _raw.split(',')).map((p: string) => p.trim()).filter(Boolean);
                       for (const path of paths) {
                         const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
                         if (data?.signedUrl) window.open(data.signedUrl, '_blank');

@@ -429,14 +429,21 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               )}
 
               {/* Lab Order files (uploaded requisitions) */}
-              {appointment.lab_order_file_path ? (
+              {appointment.lab_order_file_path ? (() => {
+                // Newline-first split (current trigger output); fall back to
+                // comma-split for legacy rows. Lab-order filenames CAN contain
+                // commas ("Rienzi, Mary Ellen.pdf") which broke the old
+                // comma-only split — Mary Rienzi 5/1/2026 was the trigger.
+                const _raw = appointment.lab_order_file_path;
+                const _parts = _raw.includes('\n') ? _raw.split('\n') : _raw.split(',');
+                return (
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
                     <FileText className="h-3.5 w-3.5 text-gray-500" />
-                    Lab Orders ({appointment.lab_order_file_path.split(',').length})
+                    Lab Orders ({_parts.length})
                   </p>
                   <div className="flex flex-col gap-1.5">
-                    {appointment.lab_order_file_path.split(',').map((p: string, i: number) => {
+                    {_parts.map((p: string, i: number) => {
                       const path = p.trim();
                       const fileName = path.split('/').pop() || `Lab Order ${i + 1}`;
                       return (
@@ -496,7 +503,8 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     </div>
                   )}
                 </div>
-              ) : (
+                );
+              })() : (
                 // Show a "no lab order" hint for services that typically need one
                 !['in-office', 'partner-nd-wellness', 'partner-restoration-place', 'partner-elite-medical-concierge', 'partner-naturamed', 'partner-aristotle-education'].includes(appointment.service_type) && (
                   <div className="px-4 py-3 border-b">

@@ -111,11 +111,22 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
 
   const handleLabOrderDownload = async () => {
     if (!appointment.lab_order_file_path) return;
-    const { data } = await supabase.storage
-      .from('lab-orders')
-      .createSignedUrl(appointment.lab_order_file_path, 3600);
-    if (data?.signedUrl) {
-      window.open(data.signedUrl, '_blank');
+    // Multi-file: the trigger-maintained list is newline-joined (legacy rows
+    // may be comma-joined). Open EVERY file in its own tab — previously this
+    // code used the whole string as a single path and 404'd whenever the
+    // appointment had >1 lab order. Mary Rienzi 5/1/2026 had 3 files; only
+    // the first opened until this fix.
+    const raw = appointment.lab_order_file_path;
+    const paths = (raw.includes('\n') ? raw.split('\n') : raw.split(','))
+      .map((p) => p.trim())
+      .filter(Boolean);
+    for (const path of paths) {
+      const { data } = await supabase.storage
+        .from('lab-orders')
+        .createSignedUrl(path, 3600);
+      if (data?.signedUrl) {
+        window.open(data.signedUrl, '_blank');
+      }
     }
   };
 
