@@ -57,6 +57,14 @@ interface SpecimenDeliveryModalProps {
 interface RowState {
   // From DB
   appointmentId: string;
+  /**
+   * If set, this row represents a single appointment_lab_orders row on the
+   * anchor appointment (the "one appointment, multiple lab orders for
+   * different patients" case — e.g. delivering specimens for 3 family
+   * members under a single booking). Persistence writes to
+   * appointment_lab_orders, not the appointments table.
+   */
+  labOrderId: string | null;
   patientId: string | null;
   patientName: string;
   patientPhone: string | null;
@@ -75,6 +83,22 @@ interface RowState {
   // Local UX flags
   saving: boolean;
   confirming: boolean;
+}
+
+/**
+ * Derive a human patient name from a lab-order filename. Sanitize-edge-fn
+ * renames originals to `laborder_<unixms>_<safe_original_basename>.pdf`.
+ * Strip prefix + extension + replace underscores → spaces and Title Case.
+ * Handles legacy unrenamed files too (just strips extension).
+ */
+function patientNameFromFilename(name: string | null | undefined): string {
+  if (!name) return 'Patient';
+  let s = name.replace(/\.[^.]+$/, '');
+  s = s.replace(/^laborder_\d+_/, '');
+  s = s.replace(/[_]+/g, ' ').replace(/,\s*/g, ', ').trim();
+  if (!s) return 'Patient';
+  // Title-case each word
+  return s.split(/\s+/).map(w => w.length > 1 ? w[0].toUpperCase() + w.slice(1) : w.toUpperCase()).join(' ');
 }
 
 const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
@@ -134,29 +158,84 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         for (const o of (orgs || [])) orgNameMap.set((o as any).id, (o as any).name);
       }
 
-      const next: RowState[] = siblings.map((a: any) => {
-        // Try to map any saved specimen_lab_name back to a lab `value`
-        const matchLab = LABS.find(l => l.label.toLowerCase() === String(a.specimen_lab_name || '').toLowerCase());
-        return {
-          appointmentId: a.id,
-          patientId: a.patient_id,
-          patientName: a.patient_name || 'Patient',
-          patientPhone: a.patient_phone,
-          patientEmail: a.patient_email,
-          serviceType: a.service_type || '',
-          organizationId: a.organization_id || null,
-          organizationName: a.organization_id ? (orgNameMap.get(a.organization_id) || null) : null,
-          companionRole: a.companion_role || null,
-          alreadyDelivered: !!(a.specimens_delivered_at || a.delivered_at),
-          specimenId: a.specimen_tracking_id || '',
-          labName: matchLab ? matchLab.value : (a.specimen_lab_name ? 'other' : ''),
-          tubeCount: '1',
-          tubeTypes: '',
-          deliveryNotes: '',
-          saving: false,
-          confirming: false,
-        };
-      });
+      // Per-lab-order branch — single appointment with multiple lab orders
+      // for different patients (e.g. one head-of-household books and uploads
+      // 3 family members' lab orders). Use lab-order rows as the unit instead
+      // of sibling appointment rows.
+      let labOrders: any[] = [];
+      if (siblings.length === 1 && !(anchor as any).family_group_id) {
+        const { data: lo } = await supabase
+          .from('appointment_lab_orders')
+          .select('id, original_filename, ocr_patient_name, org_match_organization_id, delivery_specimen_id, delivery_lab_name, delivery_tube_count, delivery_tube_types, delivered_at')
+          .eq('appointment_id', appointmentId)
+          .is('deleted_at', null)
+          .order('uploaded_at', { ascending: true });
+        if (lo && lo.length >= 2) {
+          labOrders = lo;
+          // Pull org names for any per-lab-order org assignments not in the
+          // sibling-derived map already
+          const extraOrgIds = Array.from(new Set(lo.map((l: any) => l.org_match_organization_id).filter(Boolean))) as string[];
+          const missing = extraOrgIds.filter(id => !orgNameMap.has(id));
+          if (missing.length > 0) {
+            const { data: orgs2 } = await supabase.from('organizations').select('id, name').in('id', missing);
+            for (const o of (orgs2 || [])) orgNameMap.set((o as any).id, (o as any).name);
+          }
+        }
+      }
+
+      let next: RowState[];
+      if (labOrders.length >= 2) {
+        // Per-lab-order rows, one per patient on the booking
+        next = labOrders.map((lo: any) => {
+          const matchLab = LABS.find(l => l.label.toLowerCase() === String(lo.delivery_lab_name || '').toLowerCase());
+          const orgId = lo.org_match_organization_id || (anchor as any).organization_id || null;
+          return {
+            appointmentId: (anchor as any).id,
+            labOrderId: lo.id as string,
+            patientId: (anchor as any).patient_id,
+            patientName: lo.ocr_patient_name || patientNameFromFilename(lo.original_filename),
+            patientPhone: (anchor as any).patient_phone,
+            patientEmail: (anchor as any).patient_email,
+            serviceType: (anchor as any).service_type || '',
+            organizationId: orgId,
+            organizationName: orgId ? (orgNameMap.get(orgId) || null) : null,
+            companionRole: null,
+            alreadyDelivered: !!lo.delivered_at,
+            specimenId: lo.delivery_specimen_id || '',
+            labName: matchLab ? matchLab.value : (lo.delivery_lab_name ? 'other' : ''),
+            tubeCount: lo.delivery_tube_count ? String(lo.delivery_tube_count) : '1',
+            tubeTypes: lo.delivery_tube_types || '',
+            deliveryNotes: '',
+            saving: false,
+            confirming: false,
+          };
+        });
+      } else {
+        next = siblings.map((a: any) => {
+          // Try to map any saved specimen_lab_name back to a lab `value`
+          const matchLab = LABS.find(l => l.label.toLowerCase() === String(a.specimen_lab_name || '').toLowerCase());
+          return {
+            appointmentId: a.id,
+            labOrderId: null,
+            patientId: a.patient_id,
+            patientName: a.patient_name || 'Patient',
+            patientPhone: a.patient_phone,
+            patientEmail: a.patient_email,
+            serviceType: a.service_type || '',
+            organizationId: a.organization_id || null,
+            organizationName: a.organization_id ? (orgNameMap.get(a.organization_id) || null) : null,
+            companionRole: a.companion_role || null,
+            alreadyDelivered: !!(a.specimens_delivered_at || a.delivered_at),
+            specimenId: a.specimen_tracking_id || '',
+            labName: matchLab ? matchLab.value : (a.specimen_lab_name ? 'other' : ''),
+            tubeCount: '1',
+            tubeTypes: '',
+            deliveryNotes: '',
+            saving: false,
+            confirming: false,
+          };
+        });
+      }
       setRows(next);
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load companion patients');
@@ -175,28 +254,41 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
     }
   }, [open]);
 
+  /** Stable per-row key — labOrderId in per-lab-order mode, else appointmentId */
+  const rowKey = (r: RowState) => r.labOrderId || r.appointmentId;
+
   /** Mutate the row + schedule a debounced auto-save */
   const updateRow = (id: string, patch: Partial<RowState>) => {
-    setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, ...patch } : r));
+    setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, ...patch } : r));
     if (saveTimers.current[id]) clearTimeout(saveTimers.current[id]);
     saveTimers.current[id] = setTimeout(() => persistRow(id), 600);
   };
 
-  /** Write the editable fields for a single row to its appointment */
+  /** Write the editable fields for a single row to its backing record */
   const persistRow = async (id: string) => {
-    setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, saving: true } : r));
-    const row = rowsRef.current.find(r => r.appointmentId === id);
+    setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, saving: true } : r));
+    const row = rowsRef.current.find(r => rowKey(r) === id);
     if (!row) return;
     try {
-      await supabase.from('appointments').update({
-        specimen_tracking_id: row.specimenId.trim() || null,
-        specimen_lab_name: row.labName ? labLabel(row.labName) : null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', id);
+      if (row.labOrderId) {
+        // Per-lab-order autosave (multiple patients on one appointment)
+        await supabase.from('appointment_lab_orders' as any).update({
+          delivery_specimen_id: row.specimenId.trim() || null,
+          delivery_lab_name: row.labName ? labLabel(row.labName) : null,
+          delivery_tube_count: parseInt(row.tubeCount) || null,
+          delivery_tube_types: row.tubeTypes || null,
+        }).eq('id', row.labOrderId);
+      } else {
+        await supabase.from('appointments').update({
+          specimen_tracking_id: row.specimenId.trim() || null,
+          specimen_lab_name: row.labName ? labLabel(row.labName) : null,
+          updated_at: new Date().toISOString(),
+        }).eq('id', row.appointmentId);
+      }
     } catch (e) {
       console.warn('[specimen] auto-save failed:', e);
     } finally {
-      setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, saving: false } : r));
+      setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, saving: false } : r));
     }
   };
 
@@ -238,18 +330,29 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
    *      a companion routed to a different org never sees the primary's data)
    */
   const confirmRow = async (id: string): Promise<boolean> => {
-    const row = rowsRef.current.find(r => r.appointmentId === id);
+    const row = rowsRef.current.find(r => rowKey(r) === id);
     if (!row) return false;
     if (!row.specimenId.trim() || !row.labName) {
       toast.error(`${row.patientName}: specimen ID + lab are required`);
       return false;
     }
-    setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, confirming: true } : r));
+    setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, confirming: true } : r));
     try {
       const lab = labLabel(row.labName);
       const nowIso = new Date().toISOString();
+      const deliveredBy = (() => {
+        try {
+          const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token');
+          if (stored) {
+            const p = JSON.parse(stored);
+            return p?.user?.user_metadata?.full_name || p?.user?.email || 'Phlebotomist';
+          }
+        } catch { /* noop */ }
+        return 'Phlebotomist';
+      })();
 
-      // Audit row in specimen_deliveries
+      // Audit row in specimen_deliveries — fired for both branches so the
+      // ledger has one row per delivered patient regardless of mode.
       try {
         await supabase.from('specimen_deliveries' as any).insert({
           appointment_id: row.appointmentId,
@@ -260,19 +363,10 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           tube_count: parseInt(row.tubeCount) || 1,
           tube_types: row.tubeTypes || null,
           service_type: row.serviceType,
-          delivery_notes: row.deliveryNotes || null,
+          delivery_notes: row.deliveryNotes || (row.labOrderId ? `lab_order:${row.labOrderId}` : null),
           collection_time: nowIso,
           delivered_at: nowIso,
-          delivered_by: (() => {
-            try {
-              const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token');
-              if (stored) {
-                const p = JSON.parse(stored);
-                return p?.user?.user_metadata?.full_name || p?.user?.email || 'Phlebotomist';
-              }
-            } catch { /* noop */ }
-            return 'Phlebotomist';
-          })(),
+          delivered_by: deliveredBy,
           status: 'delivered',
         });
       } catch (e) { console.warn('specimen_deliveries insert failed:', e); }
@@ -293,24 +387,60 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         }
       } catch (e) { console.warn('signature upload exception:', e); }
 
-      // Stamp the appointment row
-      await supabase.from('appointments').update({
-        status: 'specimen_delivered',
-        delivered_at: nowIso,
-        specimens_delivered_at: nowIso,
-        specimen_tracking_id: row.specimenId.trim(),
-        specimen_lab_name: lab,
-        ...(geoStamp ? { delivery_location: geoStamp } : {}),
-        ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
-      }).eq('id', row.appointmentId);
+      if (row.labOrderId) {
+        // Per-lab-order branch — stamp the lab_order row, then promote the
+        // parent appointment ONLY once every lab order is delivered.
+        await supabase.from('appointment_lab_orders' as any).update({
+          delivery_specimen_id: row.specimenId.trim(),
+          delivery_lab_name: lab,
+          delivery_tube_count: parseInt(row.tubeCount) || 1,
+          delivery_tube_types: row.tubeTypes || null,
+          delivered_at: nowIso,
+          delivered_by: deliveredBy,
+        }).eq('id', row.labOrderId);
 
-      // Fire the unified notification for THIS appointment only.
-      // The edge fn validates and routes to ONLY that appointment.organization_id
-      // (cross-companion HIPAA leak prevented at server boundary).
+        // Calculate post-update "all delivered?" against the live ref +
+        // this row that's about to flip
+        const postState = rowsRef.current.map(r => rowKey(r) === id ? { ...r, alreadyDelivered: true } : r);
+        const allNowDelivered = postState.every(r => r.alreadyDelivered);
+        if (allNowDelivered) {
+          // Aggregate every specimen ID + lab into the parent appointment
+          // for backwards-compatible reads (calendar, reports).
+          const aggIds = postState.map(r => r.specimenId.trim()).filter(Boolean).join(' / ');
+          const labels = Array.from(new Set(postState.map(r => labLabel(r.labName)).filter(Boolean)));
+          await supabase.from('appointments').update({
+            status: 'specimen_delivered',
+            delivered_at: nowIso,
+            specimens_delivered_at: nowIso,
+            specimen_tracking_id: aggIds,
+            specimen_lab_name: labels.join(' / '),
+            ...(geoStamp ? { delivery_location: geoStamp } : {}),
+            ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
+          }).eq('id', row.appointmentId);
+        }
+      } else {
+        // Family-group / single-appointment branch — stamp appointment row
+        await supabase.from('appointments').update({
+          status: 'specimen_delivered',
+          delivered_at: nowIso,
+          specimens_delivered_at: nowIso,
+          specimen_tracking_id: row.specimenId.trim(),
+          specimen_lab_name: lab,
+          ...(geoStamp ? { delivery_location: geoStamp } : {}),
+          ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
+        }).eq('id', row.appointmentId);
+      }
+
+      // Fire the unified notification — scoped to this appointment + the
+      // specific patient + lab order. The edge fn routes by org_id to avoid
+      // cross-patient HIPAA leak.
       try {
         await supabase.functions.invoke('send-specimen-delivery-notification', {
           body: {
             appointmentId: row.appointmentId,
+            labOrderId: row.labOrderId,
+            patientName: row.patientName,
+            organizationId: row.organizationId,
             specimenId: row.specimenId.trim(),
             labName: lab,
             tubeCount: parseInt(row.tubeCount) || 1,
@@ -319,12 +449,12 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         });
       } catch (e) { console.warn('[specimen] notify failed (non-blocking):', e); }
 
-      setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, alreadyDelivered: true, confirming: false } : r));
+      setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, alreadyDelivered: true, confirming: false } : r));
       toast.success(`${row.patientName} delivered to ${lab}`);
       return true;
     } catch (e: any) {
       toast.error(e?.message || `Failed to confirm ${row.patientName}`);
-      setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, confirming: false } : r));
+      setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, confirming: false } : r));
       return false;
     }
   };
@@ -335,7 +465,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
     let anyConfirmed = false;
     for (const r of rowsRef.current) {
       if (!r.alreadyDelivered) {
-        const ok = await confirmRow(r.appointmentId);
+        const ok = await confirmRow(rowKey(r));
         if (ok) anyConfirmed = true;
       }
     }
@@ -419,7 +549,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
               )}
 
               {rows.map((row, idx) => (
-                <div key={row.appointmentId}
+                <div key={rowKey(row)}
                   className={`rounded-lg border p-3 ${
                     row.alreadyDelivered
                       ? 'border-emerald-300 bg-emerald-50/40'
@@ -433,8 +563,13 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                         {row.companionRole}
                       </span>
                     )}
-                    {idx === 0 && totalRows > 1 && !row.companionRole && (
+                    {idx === 0 && totalRows > 1 && !row.companionRole && !row.labOrderId && (
                       <span className="text-[10px] bg-gray-100 text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">primary</span>
+                    )}
+                    {row.labOrderId && (
+                      <span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-2 py-0.5">
+                        from lab order
+                      </span>
                     )}
                     {orgChip(row, primaryOrgId)}
                     <span className="ml-auto inline-flex items-center gap-1 text-[10px]">
@@ -459,7 +594,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                       <Input
                         className="h-9 text-sm"
                         value={row.specimenId}
-                        onChange={(e) => updateRow(row.appointmentId, { specimenId: e.target.value })}
+                        onChange={(e) => updateRow(rowKey(row), { specimenId: e.target.value })}
                         placeholder="e.g. LC-2026-04131"
                         disabled={row.alreadyDelivered}
                       />
@@ -468,7 +603,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                       <Label className="text-[11px]">Lab Destination *</Label>
                       <Select
                         value={row.labName}
-                        onValueChange={(v) => updateRow(row.appointmentId, { labName: v })}
+                        onValueChange={(v) => updateRow(rowKey(row), { labName: v })}
                         disabled={row.alreadyDelivered}
                       >
                         <SelectTrigger className="h-9 text-sm">
@@ -485,7 +620,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                         type="number" min="1" max="50"
                         className="h-9 text-sm"
                         value={row.tubeCount}
-                        onChange={(e) => updateRow(row.appointmentId, { tubeCount: e.target.value })}
+                        onChange={(e) => updateRow(rowKey(row), { tubeCount: e.target.value })}
                         disabled={row.alreadyDelivered}
                       />
                     </div>
@@ -494,7 +629,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                       <Input
                         className="h-9 text-sm"
                         value={row.tubeTypes}
-                        onChange={(e) => updateRow(row.appointmentId, { tubeTypes: e.target.value })}
+                        onChange={(e) => updateRow(rowKey(row), { tubeTypes: e.target.value })}
                         placeholder="SST, EDTA…"
                         disabled={row.alreadyDelivered}
                       />
@@ -506,7 +641,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                     <div className="mt-2.5 flex justify-end">
                       <Button
                         size="sm"
-                        onClick={() => confirmRow(row.appointmentId)}
+                        onClick={() => confirmRow(rowKey(row))}
                         disabled={row.confirming || !row.specimenId.trim() || !row.labName}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 h-8 text-xs"
                       >

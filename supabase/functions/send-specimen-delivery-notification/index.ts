@@ -39,6 +39,10 @@ interface Body {
   labName?: string;
   tubeCount?: number;
   deliveredAt?: string;
+  // Per-lab-order branch (one appointment, multiple patients via lab orders)
+  labOrderId?: string;
+  patientName?: string;
+  organizationId?: string;
 }
 
 Deno.serve(async (req) => {
@@ -77,6 +81,98 @@ Deno.serve(async (req) => {
       await supabase.from('appointments')
         .update({ specimens_delivered_at: deliveredAtIso })
         .eq('id', apptId);
+    }
+
+    // ─── PER-LAB-ORDER BRANCH ──────────────────────────────────────
+    // When the PWA confirms one lab-order's specimen on an appointment that
+    // has multiple patients' lab orders attached, send a scoped org email
+    // (only that lab order's referring practice) with that patient's name +
+    // tracking ID, and dedupe via appointment_lab_orders.org_notified_at.
+    // Patient SMS/email is suppressed here — the booker/account holder gets
+    // one consolidated patient notification once the parent appointment is
+    // fully delivered (handled by the non-lab-order branch below when
+    // confirm-all completes).
+    if (body.labOrderId) {
+      const targetOrgId = body.organizationId || appt.organization_id || null;
+      const labelPatient = body.patientName || appt.patient_name || 'patient';
+      let orgSent = 0;
+      try {
+        // Dedup check
+        const { data: lo } = await supabase
+          .from('appointment_lab_orders')
+          .select('org_notified_at')
+          .eq('id', body.labOrderId)
+          .maybeSingle();
+        if (lo?.org_notified_at) {
+          return new Response(JSON.stringify({ ok: true, lab_order_dedup: true }), {
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        if (targetOrgId && MAILGUN_API_KEY) {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('id, name, contact_name, contact_email, billing_email')
+            .eq('id', targetOrgId)
+            .maybeSingle();
+          const recipient = org?.contact_email || org?.billing_email;
+          if (recipient) {
+            const apptDate = appt.appointment_date
+              ? new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+              : 'recently';
+            const svc = appt.service_name || appt.service_type || 'lab draw';
+            const labLine = body.labName ? `<p style="margin:6px 0 0;"><strong>Delivered to:</strong> ${body.labName}</p>` : '';
+            const trackingLine = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${body.specimenId}</p>` : '';
+            const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#059669;color:white;padding:20px;border-radius:10px 10px 0 0;text-align:center;">
+    <h2 style="margin:0;font-size:20px;">Specimen Delivered ✓</h2>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;padding:22px;border-radius:0 0 10px 10px;line-height:1.5;">
+    <p>Hi ${org?.contact_name || 'team'},</p>
+    <p>We've completed the specimen handoff for <strong>${labelPatient}</strong>.</p>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;margin:14px 0;font-size:14px;">
+      <p style="margin:0;"><strong>Visit:</strong> ${svc} on ${apptDate}</p>
+      ${labLine}
+      ${trackingLine}
+    </div>
+    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;border-top:1px solid #f3f4f6;padding-top:12px;">
+      ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810 · (941) 527-9169
+    </p>
+  </div>
+</div>`;
+            const fd = new FormData();
+            fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+            fd.append('to', recipient);
+            fd.append('subject', `Specimen delivered for ${labelPatient}${body.labName ? ` · ${body.labName}` : ''}`);
+            fd.append('html', html);
+            fd.append('o:tracking-clicks', 'no');
+            fd.append('o:tag', 'specimen-delivery-laborder-org-notify');
+            const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+              method: 'POST',
+              headers: { Authorization: `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+              body: fd,
+            });
+            await logOrgEmail(supabase, {
+              appointmentId: apptId,
+              organizationId: org!.id,
+              toEmail: recipient,
+              emailType: 'specimen_delivered_org_lab_order',
+              subject: `Specimen delivered for ${labelPatient}${body.labName ? ` · ${body.labName}` : ''}`,
+              mailgunResponse: mgRes,
+            });
+            if (mgRes.ok) orgSent++;
+          }
+        }
+        // Stamp dedup regardless (avoid retry-loop on missing-recipient)
+        await supabase.from('appointment_lab_orders')
+          .update({ org_notified_at: new Date().toISOString() })
+          .eq('id', body.labOrderId);
+      } catch (e: any) {
+        console.error('[specimen-notify] lab-order branch failed:', e?.message);
+      }
+      return new Response(JSON.stringify({ ok: true, lab_order_branch: true, org_sent: orgSent }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // ─── PATIENT SMS + EMAIL ───────────────────────────────────────
