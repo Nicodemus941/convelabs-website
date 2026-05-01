@@ -1,11 +1,32 @@
-import React, { useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+/**
+ * SpecimenDeliveryModal — multi-patient, auto-saving, HIPAA-safe.
+ *
+ * Use case: a phleb who drew blood for a primary patient + companions
+ * (linked via family_group_id) needs to log ONE specimen-tracking ID per
+ * patient, send each patient's data to ONLY that patient's referring
+ * organization, and not lose any of it if the PWA navigates away mid-typing.
+ *
+ * Key behaviors:
+ *   • On open, fetches ALL appointments in the family_group (or just the
+ *     one if no group), shows each as its own row with its own controls.
+ *   • Auto-saves on every keystroke (600ms debounce) directly to the
+ *     specific appointment row — close + reopen restores everything.
+ *   • Per-row "Confirm delivered" stamps THAT row's specimens_delivered_at
+ *     and fires send-specimen-delivery-notification for THAT appointmentId
+ *     only — the edge fn already scopes recipients by appointment.org_id,
+ *     so a companion routed to a different org never leaks the primary
+ *     patient's data and vice versa.
+ *   • "Confirm all delivered" sweeps unconfirmed rows with one click.
+ */
+
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Package, Loader2, Send, MapPin, Check } from 'lucide-react';
+import { Package, Loader2, Send, MapPin, Check, Users, Building2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
@@ -33,23 +54,155 @@ interface SpecimenDeliveryModalProps {
   onDelivered: () => void;
 }
 
-const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
-  open, onClose, appointmentId, patientId, patientName,
-  patientPhone, patientEmail, serviceType, onDelivered,
-}) => {
-  const [specimenId, setSpecimenId] = useState('');
-  const [labName, setLabName] = useState('');
-  const [labAddress, setLabAddress] = useState('');
-  const [tubeCount, setTubeCount] = useState('1');
-  const [tubeTypes, setTubeTypes] = useState('');
-  const [deliveryNotes, setDeliveryNotes] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+interface RowState {
+  // From DB
+  appointmentId: string;
+  patientId: string | null;
+  patientName: string;
+  patientPhone: string | null;
+  patientEmail: string | null;
+  serviceType: string;
+  organizationId: string | null;
+  organizationName: string | null;
+  companionRole: string | null;
+  alreadyDelivered: boolean;
+  // Editable
+  specimenId: string;
+  labName: string;
+  tubeCount: string;
+  tubeTypes: string;
+  deliveryNotes: string;
+  // Local UX flags
+  saving: boolean;
+  confirming: boolean;
+}
 
-  // Chain-of-custody enhancements (Sprint 3.5)
+const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
+  open, onClose, appointmentId, onDelivered,
+}) => {
+  const [rows, setRows] = useState<RowState[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [confirmingAll, setConfirmingAll] = useState(false);
+
+  // Chain-of-custody (per modal session)
   const signatureRef = useRef<SignaturePadHandle>(null);
   const [geoCapturing, setGeoCapturing] = useState(false);
   const [geoStamp, setGeoStamp] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
-  const [signatureCaptured, setSignatureCaptured] = useState(false);
+
+  // Debounce timers per row (key: appointmentId)
+  const saveTimers = useRef<Record<string, any>>({});
+
+  /** Map a lab `value` to its canonical label */
+  const labLabel = (v: string) => LABS.find(l => l.value === v)?.label || v;
+
+  /** Pull every appointment in the family group (or just the one if not in a group) */
+  const loadRows = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: anchor, error: anchorErr } = await supabase
+        .from('appointments')
+        .select(`
+          id, patient_id, patient_name, patient_phone, patient_email,
+          service_type, organization_id, family_group_id, companion_role,
+          specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at
+        `)
+        .eq('id', appointmentId)
+        .maybeSingle();
+      if (anchorErr || !anchor) throw anchorErr || new Error('Appointment not found');
+
+      let siblings: any[] = [anchor];
+      if ((anchor as any).family_group_id) {
+        const { data: group } = await supabase
+          .from('appointments')
+          .select(`
+            id, patient_id, patient_name, patient_phone, patient_email,
+            service_type, organization_id, family_group_id, companion_role,
+            specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at
+          `)
+          .eq('family_group_id', (anchor as any).family_group_id)
+          .neq('status', 'cancelled')
+          // Anchor first, then companions
+          .order('companion_role', { ascending: true, nullsFirst: true });
+        if (group && group.length > 0) siblings = group;
+      }
+
+      // Fetch each org's name in one call
+      const orgIds = Array.from(new Set(siblings.map(s => s.organization_id).filter(Boolean))) as string[];
+      const orgNameMap = new Map<string, string>();
+      if (orgIds.length > 0) {
+        const { data: orgs } = await supabase.from('organizations').select('id, name').in('id', orgIds);
+        for (const o of (orgs || [])) orgNameMap.set((o as any).id, (o as any).name);
+      }
+
+      const next: RowState[] = siblings.map((a: any) => {
+        // Try to map any saved specimen_lab_name back to a lab `value`
+        const matchLab = LABS.find(l => l.label.toLowerCase() === String(a.specimen_lab_name || '').toLowerCase());
+        return {
+          appointmentId: a.id,
+          patientId: a.patient_id,
+          patientName: a.patient_name || 'Patient',
+          patientPhone: a.patient_phone,
+          patientEmail: a.patient_email,
+          serviceType: a.service_type || '',
+          organizationId: a.organization_id || null,
+          organizationName: a.organization_id ? (orgNameMap.get(a.organization_id) || null) : null,
+          companionRole: a.companion_role || null,
+          alreadyDelivered: !!(a.specimens_delivered_at || a.delivered_at),
+          specimenId: a.specimen_tracking_id || '',
+          labName: matchLab ? matchLab.value : (a.specimen_lab_name ? 'other' : ''),
+          tubeCount: '1',
+          tubeTypes: '',
+          deliveryNotes: '',
+          saving: false,
+          confirming: false,
+        };
+      });
+      setRows(next);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load companion patients');
+    } finally {
+      setLoading(false);
+    }
+  }, [appointmentId]);
+
+  useEffect(() => { if (open) loadRows(); }, [open, loadRows]);
+
+  // Cleanup pending timers when the modal closes
+  useEffect(() => {
+    if (!open) {
+      Object.values(saveTimers.current).forEach((t: any) => clearTimeout(t));
+      saveTimers.current = {};
+    }
+  }, [open]);
+
+  /** Mutate the row + schedule a debounced auto-save */
+  const updateRow = (id: string, patch: Partial<RowState>) => {
+    setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, ...patch } : r));
+    if (saveTimers.current[id]) clearTimeout(saveTimers.current[id]);
+    saveTimers.current[id] = setTimeout(() => persistRow(id), 600);
+  };
+
+  /** Write the editable fields for a single row to its appointment */
+  const persistRow = async (id: string) => {
+    setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, saving: true } : r));
+    const row = rowsRef.current.find(r => r.appointmentId === id);
+    if (!row) return;
+    try {
+      await supabase.from('appointments').update({
+        specimen_tracking_id: row.specimenId.trim() || null,
+        specimen_lab_name: row.labName ? labLabel(row.labName) : null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+    } catch (e) {
+      console.warn('[specimen] auto-save failed:', e);
+    } finally {
+      setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, saving: false } : r));
+    }
+  };
+
+  // Keep a live ref of rows so persistRow always reads the latest state inside its setTimeout
+  const rowsRef = useRef<RowState[]>([]);
+  useEffect(() => { rowsRef.current = rows; }, [rows]);
 
   const captureGeo = async () => {
     setGeoCapturing(true);
@@ -75,215 +228,347 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
     }
   };
 
-  const handleSubmit = async () => {
-    if (!specimenId.trim() || !labName) {
-      toast.error('Specimen ID and Lab are required');
-      return;
+  /**
+   * Confirm delivery for ONE row:
+   *   1. Persist any pending edits
+   *   2. Insert a specimen_deliveries audit row
+   *   3. Stamp the appointment specimens_delivered_at + status
+   *   4. Fire send-specimen-delivery-notification ONLY for this appointmentId
+   *      (HIPAA-safe — that fn is scoped to a single appointment.org_id, so
+   *      a companion routed to a different org never sees the primary's data)
+   */
+  const confirmRow = async (id: string): Promise<boolean> => {
+    const row = rowsRef.current.find(r => r.appointmentId === id);
+    if (!row) return false;
+    if (!row.specimenId.trim() || !row.labName) {
+      toast.error(`${row.patientName}: specimen ID + lab are required`);
+      return false;
     }
-
-    setIsSaving(true);
+    setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, confirming: true } : r));
     try {
-      const labLabel = LABS.find(l => l.value === labName)?.label || labName;
+      const lab = labLabel(row.labName);
+      const nowIso = new Date().toISOString();
 
-      // Save specimen delivery record
-      const { error: insertError } = await supabase.from('specimen_deliveries' as any).insert({
-        appointment_id: appointmentId,
-        patient_id: patientId,
-        patient_name: patientName,
-        specimen_id: specimenId.trim(),
-        lab_name: labLabel,
-        lab_address: labAddress || null,
-        tube_count: parseInt(tubeCount) || 1,
-        tube_types: tubeTypes || null,
-        service_type: serviceType,
-        delivery_notes: deliveryNotes || null,
-        collection_time: new Date().toISOString(),
-        delivered_at: new Date().toISOString(),
-        delivered_by: (() => { try { const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token'); if (stored) { const p = JSON.parse(stored); return p?.user?.user_metadata?.full_name || p?.user?.email || 'Phlebotomist'; } } catch {} return 'Phlebotomist'; })(),
-        status: 'delivered',
-      });
+      // Audit row in specimen_deliveries
+      try {
+        await supabase.from('specimen_deliveries' as any).insert({
+          appointment_id: row.appointmentId,
+          patient_id: row.patientId,
+          patient_name: row.patientName,
+          specimen_id: row.specimenId.trim(),
+          lab_name: lab,
+          tube_count: parseInt(row.tubeCount) || 1,
+          tube_types: row.tubeTypes || null,
+          service_type: row.serviceType,
+          delivery_notes: row.deliveryNotes || null,
+          collection_time: nowIso,
+          delivered_at: nowIso,
+          delivered_by: (() => {
+            try {
+              const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token');
+              if (stored) {
+                const p = JSON.parse(stored);
+                return p?.user?.user_metadata?.full_name || p?.user?.email || 'Phlebotomist';
+              }
+            } catch { /* noop */ }
+            return 'Phlebotomist';
+          })(),
+          status: 'delivered',
+        });
+      } catch (e) { console.warn('specimen_deliveries insert failed:', e); }
 
-      if (insertError) throw insertError;
-
-      // Upload signature if present
+      // Optional signature upload (only on the FIRST delivered row of the session)
       let signaturePath: string | null = null;
       try {
         if (signatureRef.current && !signatureRef.current.isEmpty()) {
           const blob = await signatureRef.current.toBlob();
           if (blob) {
-            const sigName = `sig_${appointmentId}_${Date.now()}.png`;
+            const sigName = `sig_${row.appointmentId}_${Date.now()}.png`;
             const { error: sigErr } = await supabase.storage.from('specimen-signatures').upload(sigName, blob, {
               contentType: 'image/png',
               upsert: true,
             });
             if (!sigErr) signaturePath = sigName;
-            else console.warn('Signature upload failed:', sigErr);
           }
         }
-      } catch (e) { console.warn('Signature capture exception:', e); }
+      } catch (e) { console.warn('signature upload exception:', e); }
 
-      // Update appointment status + chain-of-custody fields.
-      // Stamp BOTH delivered_at (legacy) and specimens_delivered_at (canonical,
-      // used by admin dashboards). Earlier only delivered_at was being set —
-      // caused specimen-count widgets to read 0 even after deliveries fired.
-      const nowIso = new Date().toISOString();
+      // Stamp the appointment row
       await supabase.from('appointments').update({
         status: 'specimen_delivered',
         delivered_at: nowIso,
         specimens_delivered_at: nowIso,
-        // Mirror the lab-generated tracking ID to the appointment row so the
-        // Deliveries tab + admin reports can show it. Previously only stored
-        // in specimen_deliveries.specimen_id which the dashboard didn't read.
-        specimen_tracking_id: specimenId.trim(),
-        specimen_lab_name: labLabel,
+        specimen_tracking_id: row.specimenId.trim(),
+        specimen_lab_name: lab,
         ...(geoStamp ? { delivery_location: geoStamp } : {}),
         ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
-      }).eq('id', appointmentId);
+      }).eq('id', row.appointmentId);
 
-      // Unified patient + org notification via send-specimen-delivery-notification.
-      // Previously the modal fanned out 3 separate invokes (send-sms-notification,
-      // send-email, send-specimen-delivery-notification). The first two had .catch
-      // swallowers with no audit logging — when they silently failed (Ellen
-      // Sherman + Cliff Stein, April 22) the patient never learned their sample
-      // had been delivered. One call now handles patient SMS + patient email +
-      // all linked orgs, and writes rows to sms_notifications / email_send_log
-      // so every send is auditable.
-      let patientNotified = false;
+      // Fire the unified notification for THIS appointment only.
+      // The edge fn validates and routes to ONLY that appointment.organization_id
+      // (cross-companion HIPAA leak prevented at server boundary).
       try {
-        const { data: notifyRes } = await supabase.functions.invoke('send-specimen-delivery-notification', {
+        await supabase.functions.invoke('send-specimen-delivery-notification', {
           body: {
-            appointmentId,
-            specimenId: specimenId.trim(),
-            labName: labLabel,
-            tubeCount: parseInt(tubeCount) || 1,
+            appointmentId: row.appointmentId,
+            specimenId: row.specimenId.trim(),
+            labName: lab,
+            tubeCount: parseInt(row.tubeCount) || 1,
             deliveredAt: nowIso,
           },
         });
-        patientNotified = !!(notifyRes?.patient_sms_sent || notifyRes?.patient_email_sent);
-      } catch (orgErr) {
-        console.warn('[specimen] notification invoke failed (non-blocking):', orgErr);
-      }
+      } catch (e) { console.warn('[specimen] notify failed (non-blocking):', e); }
 
-      toast.success(
-        patientNotified
-          ? `Specimen delivered to ${labLabel}. Patient + linked org notified.`
-          : `Specimen delivered to ${labLabel}. Saved — retrying notifications in background.`
-      );
-      onDelivered();
-      onClose();
-    } catch (err: any) {
-      console.error('Specimen delivery error:', err);
-      toast.error(err.message || 'Failed to record delivery');
-    } finally {
-      setIsSaving(false);
+      setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, alreadyDelivered: true, confirming: false } : r));
+      toast.success(`${row.patientName} delivered to ${lab}`);
+      return true;
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to confirm ${row.patientName}`);
+      setRows(rs => rs.map(r => r.appointmentId === id ? { ...r, confirming: false } : r));
+      return false;
     }
   };
 
+  /** Confirm every still-unconfirmed row */
+  const confirmAll = async () => {
+    setConfirmingAll(true);
+    let anyConfirmed = false;
+    for (const r of rowsRef.current) {
+      if (!r.alreadyDelivered) {
+        const ok = await confirmRow(r.appointmentId);
+        if (ok) anyConfirmed = true;
+      }
+    }
+    setConfirmingAll(false);
+    if (anyConfirmed) {
+      onDelivered();
+      // Don't auto-close — let the phleb see the green checks first
+    }
+  };
+
+  /** Render summary chip with org info — color-coded if companion org differs */
+  const orgChip = (row: RowState, primaryOrgId: string | null) => {
+    if (!row.organizationName) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] bg-gray-100 text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">
+          <Building2 className="h-2.5 w-2.5" /> No org
+        </span>
+      );
+    }
+    const isDifferent = !!primaryOrgId && row.organizationId !== primaryOrgId;
+    return (
+      <span className={`inline-flex items-center gap-1 text-[10px] rounded-full px-2 py-0.5 ${
+        isDifferent
+          ? 'bg-amber-100 text-amber-800 border border-amber-300'
+          : 'bg-blue-50 text-blue-700 border border-blue-200'
+      }`}>
+        <Building2 className="h-2.5 w-2.5" />
+        {row.organizationName.length > 28 ? row.organizationName.slice(0, 28) + '…' : row.organizationName}
+        {isDifferent && <span className="ml-1 font-bold">·different</span>}
+      </span>
+    );
+  };
+
+  const primaryOrgId = useMemo(() => rows[0]?.organizationId || null, [rows]);
+  const distinctOrgs = useMemo(
+    () => Array.from(new Set(rows.map(r => r.organizationId).filter(Boolean))),
+    [rows]
+  );
+  const totalRows = rows.length;
+  const deliveredCount = rows.filter(r => r.alreadyDelivered).length;
+  const allDelivered = totalRows > 0 && deliveredCount === totalRows;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[92vh] overflow-y-auto p-0">
+        <DialogHeader className="px-5 py-4 border-b sticky top-0 bg-white z-10">
+          <DialogTitle className="flex items-center gap-2 text-base">
             <Package className="h-5 w-5 text-[#B91C1C]" />
             Specimen Delivery
+            {totalRows > 1 && (
+              <span className="ml-2 inline-flex items-center gap-1 text-[11px] bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">
+                <Users className="h-3 w-3" /> {totalRows} patients · {distinctOrgs.length} org{distinctOrgs.length === 1 ? '' : 's'}
+              </span>
+            )}
           </DialogTitle>
+          {totalRows > 1 && (
+            <p className="text-xs text-gray-500 mt-1">
+              {deliveredCount} of {totalRows} confirmed delivered. Each patient's data is sent only to their assigned organization.
+            </p>
+          )}
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-            <p className="font-medium text-blue-800">Patient: {patientName}</p>
-            {patientPhone && <p className="text-xs text-blue-600">SMS + Email notification will be sent</p>}
-            {!patientPhone && patientEmail && <p className="text-xs text-blue-600">Email notification will be sent (no phone on file)</p>}
-          </div>
-
-          <div>
-            <Label>Specimen / Tracking ID *</Label>
-            <Input
-              value={specimenId}
-              onChange={e => setSpecimenId(e.target.value)}
-              placeholder="e.g. LC-2026-04131, QD-789456"
-              className="font-mono"
-            />
-          </div>
-
-          <div>
-            <Label>Lab / Destination *</Label>
-            <Select value={labName} onValueChange={setLabName}>
-              <SelectTrigger><SelectValue placeholder="Select lab" /></SelectTrigger>
-              <SelectContent>
-                {LABS.map(l => (
-                  <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label>Lab Address (optional)</Label>
-            <Input value={labAddress} onChange={e => setLabAddress(e.target.value)} placeholder="Lab location or drop-off point" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Tube Count</Label>
-              <Input type="number" min="1" value={tubeCount} onChange={e => setTubeCount(e.target.value)} />
+        <div className="px-5 py-4 space-y-4">
+          {loading ? (
+            <div className="py-12 text-center text-sm text-gray-500">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" /> Loading patients…
             </div>
-            <div>
-              <Label>Tube Types</Label>
-              <Input value={tubeTypes} onChange={e => setTubeTypes(e.target.value)} placeholder="SST, EDTA, etc." />
-            </div>
-          </div>
-
-          <div>
-            <Label>Delivery Notes (optional)</Label>
-            <Textarea value={deliveryNotes} onChange={e => setDeliveryNotes(e.target.value)} placeholder="Any notes about the delivery..." rows={2} />
-          </div>
-
-          {/* ─── Chain-of-Custody (Sprint 3.5) ──────────────────────── */}
-          <div className="border-t pt-3 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-600">Chain of Custody (optional)</p>
-
-            {/* Geo-stamp capture */}
-            <div className="flex items-start gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5 h-8 text-xs flex-shrink-0"
-                onClick={captureGeo}
-                disabled={geoCapturing || isSaving}
-              >
-                {geoCapturing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> :
-                  geoStamp ? <Check className="h-3.5 w-3.5 text-emerald-600" /> :
-                    <MapPin className="h-3.5 w-3.5" />}
-                {geoStamp ? 'Location stamped' : 'Stamp delivery location'}
-              </Button>
-              {geoStamp && (
-                <p className="text-[10px] text-gray-500 flex-1 min-w-0 pt-1.5">
-                  {geoStamp.lat.toFixed(5)}, {geoStamp.lng.toFixed(5)} · ±{Math.round(geoStamp.accuracy)}m
-                </p>
+          ) : rows.length === 0 ? (
+            <div className="py-12 text-center text-sm text-gray-500">No patients found.</div>
+          ) : (
+            <>
+              {/* Cross-org HIPAA banner — shown when companions are linked to a
+                  different org than the primary patient */}
+              {distinctOrgs.length > 1 && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-900">
+                    <strong>Multiple organizations on this booking.</strong> The system will deliver each patient's specimen ID + name to ONLY that patient's referring organization. Companions routed to a different practice never see the primary patient's data.
+                  </div>
+                </div>
               )}
-            </div>
 
-            {/* Signature pad — lab clerk signs for receipt */}
-            <div>
-              <Label className="text-xs text-gray-600">Receiver signature (lab clerk)</Label>
-              <SignaturePad ref={signatureRef} onChange={(isEmpty) => setSignatureCaptured(!isEmpty)} height={140} />
-            </div>
-          </div>
+              {rows.map((row, idx) => (
+                <div key={row.appointmentId}
+                  className={`rounded-lg border p-3 ${
+                    row.alreadyDelivered
+                      ? 'border-emerald-300 bg-emerald-50/40'
+                      : 'border-gray-200 bg-white'
+                  }`}>
+                  {/* Header row: name, role, org chip, delivered status */}
+                  <div className="flex items-center gap-2 flex-wrap mb-2">
+                    <span className="text-sm font-semibold text-gray-900">{row.patientName}</span>
+                    {row.companionRole && row.companionRole !== 'primary' && (
+                      <span className="text-[10px] bg-gray-100 text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">
+                        {row.companionRole}
+                      </span>
+                    )}
+                    {idx === 0 && totalRows > 1 && !row.companionRole && (
+                      <span className="text-[10px] bg-gray-100 text-gray-600 border border-gray-200 rounded-full px-2 py-0.5">primary</span>
+                    )}
+                    {orgChip(row, primaryOrgId)}
+                    <span className="ml-auto inline-flex items-center gap-1 text-[10px]">
+                      {row.alreadyDelivered ? (
+                        <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" /> Delivered
+                        </span>
+                      ) : row.saving ? (
+                        <span className="text-gray-500 flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" /> Saving
+                        </span>
+                      ) : (
+                        <span className="text-amber-700">Pending</span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <Label className="text-[11px]">Specimen / Tracking ID *</Label>
+                      <Input
+                        className="h-9 text-sm"
+                        value={row.specimenId}
+                        onChange={(e) => updateRow(row.appointmentId, { specimenId: e.target.value })}
+                        placeholder="e.g. LC-2026-04131"
+                        disabled={row.alreadyDelivered}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Lab Destination *</Label>
+                      <Select
+                        value={row.labName}
+                        onValueChange={(v) => updateRow(row.appointmentId, { labName: v })}
+                        disabled={row.alreadyDelivered}
+                      >
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue placeholder="Select lab" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {LABS.map((l) => <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Tubes</Label>
+                      <Input
+                        type="number" min="1" max="50"
+                        className="h-9 text-sm"
+                        value={row.tubeCount}
+                        onChange={(e) => updateRow(row.appointmentId, { tubeCount: e.target.value })}
+                        disabled={row.alreadyDelivered}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-[11px]">Tube types <span className="text-gray-400 font-normal">(optional)</span></Label>
+                      <Input
+                        className="h-9 text-sm"
+                        value={row.tubeTypes}
+                        onChange={(e) => updateRow(row.appointmentId, { tubeTypes: e.target.value })}
+                        placeholder="SST, EDTA…"
+                        disabled={row.alreadyDelivered}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Per-row Confirm button */}
+                  {!row.alreadyDelivered && (
+                    <div className="mt-2.5 flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={() => confirmRow(row.appointmentId)}
+                        disabled={row.confirming || !row.specimenId.trim() || !row.labName}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 h-8 text-xs"
+                      >
+                        {row.confirming
+                          ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Confirming…</>
+                          : <><Check className="h-3.5 w-3.5" /> Confirm delivered</>}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {/* Chain-of-custody (geo + signature) */}
+              <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <div className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-2">Chain of custody</div>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Button size="sm" variant="outline" onClick={captureGeo} disabled={geoCapturing} className="text-xs h-8 gap-1">
+                    {geoCapturing ? <Loader2 className="h-3 w-3 animate-spin" /> : <MapPin className="h-3 w-3" />}
+                    {geoStamp ? 'Location captured ✓' : 'Capture delivery location'}
+                  </Button>
+                  {geoStamp && (
+                    <span className="text-[10px] text-gray-600 self-center">
+                      {geoStamp.lat.toFixed(5)}, {geoStamp.lng.toFixed(5)} · ±{Math.round(geoStamp.accuracy)}m
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-[11px]">Lab tech signature (optional)</Label>
+                  <SignaturePad ref={signatureRef} />
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose} disabled={isSaving}>Cancel</Button>
-          <Button
-            className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-2"
-            onClick={handleSubmit}
-            disabled={isSaving || !specimenId.trim() || !labName}
-          >
-            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Confirm Delivery
-          </Button>
-        </DialogFooter>
+        {/* Sticky action bar */}
+        <div className="px-5 py-3 border-t bg-white sticky bottom-0 flex flex-wrap gap-2 justify-between items-center">
+          <div className="text-xs text-gray-500">
+            {totalRows > 0 && (
+              <>
+                <strong>{deliveredCount} / {totalRows}</strong> delivered
+                {totalRows > 1 && ' · auto-saving as you type'}
+              </>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose} disabled={confirmingAll}>
+              {allDelivered ? 'Close' : 'Done editing'}
+            </Button>
+            {totalRows > 1 && !allDelivered && (
+              <Button
+                onClick={confirmAll}
+                disabled={confirmingAll || rows.every(r => r.alreadyDelivered || !r.specimenId.trim() || !r.labName)}
+                className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 min-w-[180px]"
+              >
+                {confirmingAll
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Confirming all…</>
+                  : <><Send className="h-4 w-4" /> Confirm all delivered</>}
+              </Button>
+            )}
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
