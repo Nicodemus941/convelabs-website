@@ -27,6 +27,7 @@ import SMSMessagingTab from "@/components/dashboards/admin/SMSMessagingTab";
 import InvoicesTab from "@/components/dashboards/admin/InvoicesTab";
 import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingTab";
 import NotesTab from "@/components/dashboards/admin/NotesTab";
+import InboxTab from "@/components/dashboards/admin/InboxTab";
 import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
@@ -138,6 +139,7 @@ const Dashboard = () => {
           {adminTab === "invoices" && <InvoicesTab />}
           {adminTab === "specimens" && <SpecimenTrackingTab />}
           {adminTab === "notes" && <NotesTab />}
+          {adminTab === "inbox" && <InboxTab />}
           {adminTab === "patients" && <PatientProfileTab />}
           {adminTab === "organizations" && <OrganizationsTab />}
           {adminTab === "operations" && <OperationsPanel />}
@@ -148,7 +150,7 @@ const Dashboard = () => {
           {adminTab === "chatbot" && <ChatbotTab />}
           {adminTab === "provider-acquisition" && <ProviderAcquisitionTab />}
           {adminTab === "scripts" && <ScriptsTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "patients", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>
