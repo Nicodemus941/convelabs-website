@@ -23,6 +23,7 @@ interface Appointment {
   status: string;
   notes?: string;
   lab_order_file_path?: string;
+  organization_id?: string | null;
 }
 
 interface AppointmentCardProps {
@@ -217,6 +218,14 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
               Service: <span className="font-medium text-foreground">{appointment.service_name}</span>
             </p>
           )}
+
+          {/* Organization — view / assign / edit on the spot */}
+          <AssignOrgButton
+            appointmentId={appointment.id}
+            currentOrgId={appointment.organization_id}
+            variant="primary"
+            onAssigned={() => onStatusChange()}
+          />
 
           {/* Lab order download */}
           {appointment.lab_order_file_path && (

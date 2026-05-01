@@ -22,6 +22,7 @@ import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
 import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
+import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
 
@@ -427,6 +428,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   })()}
                 </div>
               )}
+
+              {/* Organization — view linked practice, reassign, edit details */}
+              <div className="px-4 py-3 border-b">
+                <AssignOrgButton
+                  appointmentId={appointment.id}
+                  currentOrgId={(appointment as any).organization_id}
+                  variant="primary"
+                />
+              </div>
 
               {/* Lab Order files (uploaded requisitions) */}
               {appointment.lab_order_file_path ? (() => {
