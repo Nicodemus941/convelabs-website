@@ -7,13 +7,23 @@ interface VisitTypeSelectorProps {
   onNext: () => void;
 }
 
-const PROVIDER_PARTNERS = [
-  { id: 'restoration-place', name: 'Restoration Place', price: 125 },
-  { id: 'elite-medical-concierge', name: 'Elite Medical Concierge', price: 72.25 },
-  { id: 'naturamed', name: 'NaturaMed', price: 85 },
-  { id: 'nd-wellness', name: 'ND Wellness', price: 85 },
-  { id: 'aristotle-education', name: 'Aristotle Education', price: 185 },
+// Provider partners shown to patients on the public booking flow.
+// Each entry can opt out of the public list via `hidden: true` — used
+// for orgs that ONLY book through their own portal or via admin manual
+// scheduling (e.g. Aristotle Education books all their patients through
+// their own dashboard). Sorted alphabetically by name so the list stays
+// scannable as we add partners.
+const PROVIDER_PARTNERS_ALL = [
+  { id: 'restoration-place',         name: 'Restoration Place',         price: 125 },
+  { id: 'elite-medical-concierge',   name: 'Elite Medical Concierge',   price: 72.25 },
+  { id: 'naturamed',                 name: 'NaturaMed',                 price: 85 },
+  { id: 'nd-wellness',               name: 'ND Wellness',               price: 85 },
+  { id: 'aristotle-education',       name: 'Aristotle Education',       price: 185, hidden: true },
 ];
+
+const PROVIDER_PARTNERS = PROVIDER_PARTNERS_ALL
+  .filter(p => !p.hidden)
+  .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
 
 const VISIT_TYPES = [
   {
@@ -50,7 +60,7 @@ const VISIT_TYPES = [
     name: 'Is your doctor one of these?',
     subtitle: 'Discounted rate — partnered practices',
     price: null,
-    description: 'Restoration Place, Elite Medical Concierge, NaturaMed, ND Wellness, Aristotle Education. Tap to pick yours.',
+    description: 'Elite Medical Concierge, NaturaMed, ND Wellness, Restoration Place. Tap to pick yours.',
     icon: Handshake,
     gradient: 'from-emerald-500/10 to-emerald-600/5',
     borderColor: 'border-emerald-200 hover:border-emerald-400',
