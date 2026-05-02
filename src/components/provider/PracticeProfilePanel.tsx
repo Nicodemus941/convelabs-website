@@ -13,7 +13,7 @@
  * the provider feels the trade, not the demand.
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Loader2, Plus, Trash2, CheckCircle2, Lock, Sparkles } from 'lucide-react';
+import AddressAutocomplete from '@/components/ui/address-autocomplete';
 
 interface OrgProvider {
   id: string;
@@ -215,7 +216,17 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
           <Field label="Organization name" value={org.name || ''} onSave={(v) => saveField('name', v)} saving={saving === 'name'} />
           <Field label="Main contact email" value={org.contact_email || ''} onSave={(v) => saveField('contact_email', v)} saving={saving === 'contact_email'} type="email" />
           <Field label="Main phone" value={org.contact_phone || ''} onSave={(v) => saveField('contact_phone', v)} saving={saving === 'contact_phone'} />
-          <Field label="Practice address" value={org.address || ''} onSave={(v) => saveField('address', v)} saving={saving === 'address'} />
+          {/* Practice address — Google Places autocomplete so we capture a
+              clean, validated formatted address (street + city + state + zip
+              all in one), matching the patient booking flow. Save policy
+              mirrors other Fields: persists on place-selected (instant) OR
+              on a 1.2s typing pause (debounced) so we don't hit DB per
+              keystroke. */}
+          <AddressField
+            value={org.address || ''}
+            saving={saving === 'address'}
+            onSave={(v) => saveField('address', v)}
+          />
           <Field label="Fax (for results routing)" value={org.fax || ''} onSave={(v) => saveField('fax', v)} saving={saving === 'fax'} />
         </Section>
 
@@ -276,8 +287,21 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
           </div>
         </Section>
 
-        {/* LAB ACCOUNTS */}
-        <Section title="Laboratory accounts" hint="Tells us which labs your patients' results should route to. We send specimens to the lab the patient picks at booking — but knowing your accounts means we can default to the right one.">
+        {/* LAB ACCOUNTS — multi-select. Practices commonly have accounts
+            with 2-3 labs (Quest + LabCorp is the most common combo). The
+            previous styling was too subtle to read as "selected vs not"
+            so users thought it was single-select. Solid emerald fill on
+            active + checkmark + a running count up top makes it obvious. */}
+        <Section title="Laboratory accounts" hint="Tells us which labs your patients' results should route to. We send specimens to the lab the patient picks at booking — but knowing your accounts means we can default to the right one. Most practices select 2-3.">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-700">
+              <strong>Select all that apply</strong>
+              {labAccounts.length > 0 && <span className="text-emerald-700"> · {labAccounts.length} selected</span>}
+            </p>
+            {labAccounts.length === 0 && (
+              <span className="text-[10px] text-gray-400">Tap each lab you have an account with</span>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
             {LAB_OPTIONS.map(lab => {
               const active = labAccounts.some((l: any) => l.lab === lab);
@@ -286,15 +310,28 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
                   key={lab}
                   type="button"
                   onClick={() => toggleLab(lab)}
-                  className={`text-xs px-3 py-1.5 rounded-full border transition ${active ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white border-gray-300 text-gray-700 hover:border-[#B91C1C]'}`}
+                  aria-pressed={active}
+                  className={`text-xs px-3 py-1.5 rounded-full border-2 transition font-medium ${
+                    active
+                      ? 'bg-emerald-600 border-emerald-700 text-white shadow-sm'
+                      : 'bg-white border-gray-300 text-gray-700 hover:border-emerald-400 hover:bg-emerald-50'
+                  }`}
                 >
-                  {active && <CheckCircle2 className="h-3 w-3 inline mr-1" />}
+                  {active
+                    ? <CheckCircle2 className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
+                    : <Plus className="h-3 w-3 inline mr-1 -mt-0.5 text-gray-400" />}
                   {lab}
                 </button>
               );
             })}
           </div>
-          <p className="text-[11px] text-gray-500 mt-2">Tap to toggle. We'll only set up account-specific routing once you tell us which labs you have accounts with.</p>
+          <p className="text-[11px] text-gray-500 mt-2">
+            {labAccounts.length === 0
+              ? 'No accounts selected yet. Tap each lab — we\'ll only set up account-specific routing once you tell us which ones you have.'
+              : labAccounts.length === 1
+                ? 'Got 1. If you have accounts with more labs, add them too — we\'ll route results to the right one for each patient.'
+                : `Great — ${labAccounts.length} accounts on file. We'll route every patient's results to the lab their order specifies.`}
+          </p>
         </Section>
 
         {/* MISSING PROMPTS */}
@@ -332,6 +369,58 @@ const Section: React.FC<React.PropsWithChildren<{ title: string; hint?: string }
     {children}
   </div>
 );
+
+/**
+ * AddressField — Google Places-backed practice address with debounced
+ * save (1.2s after last keystroke) + instant save on place-pick. Avoids
+ * the per-keystroke DB write that would happen if we saved on every
+ * onChange.
+ */
+const AddressField: React.FC<{
+  value: string;
+  saving?: boolean;
+  onSave: (v: string) => Promise<void> | void;
+}> = ({ value, saving, onSave }) => {
+  const [local, setLocal] = useState(value);
+  const dirtyRef = useRef(false);
+  const timerRef = useRef<any>(null);
+
+  useEffect(() => { setLocal(value); }, [value]);
+
+  // Debounced save on plain typing
+  useEffect(() => {
+    if (!dirtyRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (local !== value) onSave(local);
+      dirtyRef.current = false;
+    }, 1200);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [local, value, onSave]);
+
+  return (
+    <div className="space-y-1 mb-2">
+      <Label className="text-xs">
+        Practice address {saving && <Loader2 className="h-3 w-3 animate-spin inline ml-1 text-gray-400" />}
+      </Label>
+      <AddressAutocomplete
+        value={local}
+        onChange={(v) => { dirtyRef.current = true; setLocal(v); }}
+        onPlaceSelected={(place) => {
+          // Pick a suggestion → save the canonical formatted address
+          // immediately (skip debounce). Cancel any pending timer.
+          if (timerRef.current) clearTimeout(timerRef.current);
+          dirtyRef.current = false;
+          const formatted = place.address || place.street;
+          setLocal(formatted);
+          onSave(formatted);
+        }}
+        placeholder="Start typing your practice address…"
+      />
+      <p className="text-[10px] text-gray-500">Used on every confirmation, invoice, and Maps directions for the phleb</p>
+    </div>
+  );
+};
 
 const Field: React.FC<{
   label: string;
