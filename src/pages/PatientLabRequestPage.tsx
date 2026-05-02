@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Loader2, CheckCircle2, Home, ArrowRight, ExternalLink, Clock, AlertTriangle } from 'lucide-react';
+import { Loader2, CheckCircle2, Home, ArrowRight, ExternalLink, Clock, AlertTriangle, Users, X } from 'lucide-react';
 import { format } from 'date-fns';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import DOBVerifyGate from '@/components/patient/DOBVerifyGate';
@@ -123,6 +123,17 @@ const PatientLabRequestPage: React.FC = () => {
   const [emailOverride, setEmailOverride] = useState('');
   const [phoneOverride, setPhoneOverride] = useState('');
 
+  // Couples / households at one address. The booker (e.g. Amy) pastes the
+  // ConveLabs lab-request links of additional patients (e.g. Robert) whose
+  // orders came from the SAME organization. The server validates org match
+  // and spawns sibling appointment rows under one family_group_id, so each
+  // patient gets their own fasting-aware reminder + their own specimen
+  // delivery slot at the visit. Org-covered (e.g. Elite Medical Concierge)
+  // = no charge to either patient.
+  const [companionInput, setCompanionInput] = useState('');
+  const [companionTokens, setCompanionTokens] = useState<{ token: string; name: string; orgName?: string }[]>([]);
+  const [companionAdding, setCompanionAdding] = useState(false);
+
   // Live availability state
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -217,6 +228,62 @@ const PatientLabRequestPage: React.FC = () => {
 
   const canSubmit = !!(date && time && address.trim().length >= 10);
 
+  /**
+   * Add a companion lab-request to the booking. Patient pastes either the
+   * full URL or just the token. We hit get-lab-request to validate the
+   * token belongs to a real, still-pending request before adding it to
+   * the list. Server re-validates org match at submit time.
+   */
+  const addCompanion = async () => {
+    const raw = companionInput.trim();
+    if (!raw) return;
+    // Extract token from a URL like /lab-request/<token>?... or accept a bare token
+    const urlMatch = raw.match(/\/lab-request\/([A-Za-z0-9_-]+)/);
+    const cToken = (urlMatch ? urlMatch[1] : raw).split('?')[0].trim();
+    if (!cToken || cToken === token) {
+      toast.error('Paste a different patient\'s ConveLabs link.');
+      return;
+    }
+    if (companionTokens.some(c => c.token === cToken)) {
+      toast.info('Already added.');
+      return;
+    }
+    setCompanionAdding(true);
+    try {
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/get-lab-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: cToken }),
+      });
+      const j = await resp.json();
+      if (!resp.ok || !j?.request) {
+        toast.error(j?.error || 'That link isn\'t valid or has already been used.');
+        return;
+      }
+      const cOrgId = j.request.organization_id || j.request.org_id;
+      const myOrgId = data?.request?.organization_id || (data as any)?.request?.org_id;
+      if (cOrgId && myOrgId && cOrgId !== myOrgId) {
+        toast.error('That patient was sent by a different practice — we can only bundle visits ordered by the same office.');
+        return;
+      }
+      if (j.request.already_scheduled) {
+        toast.error('That patient already has a draw scheduled.');
+        return;
+      }
+      setCompanionTokens(curr => [...curr, {
+        token: cToken,
+        name: j.request.patient_name || 'Additional patient',
+        orgName: j.org?.name,
+      }]);
+      setCompanionInput('');
+      toast.success(`${j.request.patient_name || 'Patient'} added — same trip, same time.`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not validate that link');
+    } finally {
+      setCompanionAdding(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!canSubmit || !token) return;
     setSubmitting(true);
@@ -231,6 +298,7 @@ const PatientLabRequestPage: React.FC = () => {
           address,
           patient_email_override: emailOverride.trim() || undefined,
           patient_phone_override: phoneOverride.trim() || undefined,
+          companion_access_tokens: companionTokens.map(c => c.token),
         }),
       });
       const j = await resp.json();
@@ -668,6 +736,70 @@ const PatientLabRequestPage: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Couples / households at one address — paste another patient's
+            ConveLabs link from the same office. Both visits run on one trip,
+            both org-covered (when applicable), both get fasting-aware
+            reminders independently. */}
+        {date && time && address.trim().length >= 10 && org?.default_billed_to === 'org' && (
+          <Card className="shadow-sm mb-4 border-emerald-200 bg-emerald-50/40">
+            <CardContent className="p-5 space-y-3">
+              <div>
+                <h3 className="font-semibold text-sm flex items-center gap-2 text-emerald-900">
+                  <Users className="h-4 w-4" /> Anyone else at this address from {org?.name || 'your provider'}?
+                </h3>
+                <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                  If your partner, spouse, or family member also got a lab order from {org?.name || 'the same office'}, paste their ConveLabs link below — same trip, same time, no extra cost (they cover everyone). Each person gets their own fasting reminder if needed.
+                </p>
+              </div>
+
+              {companionTokens.length > 0 && (
+                <div className="space-y-1.5">
+                  {companionTokens.map((c, idx) => (
+                    <div key={c.token} className="flex items-center justify-between gap-2 bg-white border border-emerald-200 rounded-lg px-3 py-2">
+                      <div className="text-sm">
+                        <span className="font-medium text-gray-900">{c.name}</span>
+                        <span className="text-xs text-gray-500 ml-1.5">· same trip</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => setCompanionTokens(arr => arr.filter((_, i) => i !== idx))}
+                        aria-label="Remove patient"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Input
+                  value={companionInput}
+                  onChange={(e) => setCompanionInput(e.target.value)}
+                  placeholder="Paste their convelabs.com/lab-request/… link"
+                  className="flex-1 bg-white"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCompanion(); } }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="bg-white border-emerald-300 text-emerald-800 hover:bg-emerald-100"
+                  onClick={addCompanion}
+                  disabled={companionAdding || !companionInput.trim()}
+                >
+                  {companionAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add'}
+                </Button>
+              </div>
+              <p className="text-[11px] text-gray-500">
+                Tip: their link looks like <span className="font-mono">convelabs.com/lab-request/abc123…</span>. Same office only — we don't bundle visits across different doctors' offices.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Optional contact overrides */}
         {(!request.patient_email || !request.patient_phone) && (

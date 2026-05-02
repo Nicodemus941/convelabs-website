@@ -42,6 +42,14 @@ Deno.serve(async (req) => {
     const {
       access_token, appointment_date, appointment_time,
       address, patient_email_override, patient_phone_override, insurance_card_path,
+      // Couples / households at one address. The booker (e.g. Amy) pastes
+      // the access-token links of additional patients (e.g. Robert) whose
+      // lab requests came from the SAME organization. We validate org match
+      // server-side, then spawn companion appointment rows under the primary
+      // via family_group_id. Each companion keeps its own fasting_required
+      // from its own lab_request row, so the night-before reminder fires
+      // correctly per person (Amy/Robert case: one fasts, one doesn't).
+      companion_access_tokens,
     } = body || {};
     // service_type is always 'mobile' — we removed the in-office option
     const service_type = 'mobile';
@@ -149,6 +157,105 @@ Deno.serve(async (req) => {
       appointment_id: appt.id,
       patient_scheduled_at: needsPayment ? null : new Date().toISOString(),
     }).eq('id', request.id);
+
+    // ─── COMPANION LAB REQUESTS (couples / households at same address) ───
+    // The booker pasted additional access-tokens (e.g. Amy booking Robert
+    // too at the same address, both ordered by Elite Medical Concierge).
+    // For each token: look up the lab_request, verify it belongs to THE
+    // SAME organization (cross-org leakage guard), still pending_schedule,
+    // and not expired. Then spawn a companion appointment under the
+    // primary's family_group_id with that companion's own fasting flag.
+    const companionsCreated: any[] = [];
+    if (Array.isArray(companion_access_tokens) && companion_access_tokens.length > 0 && !needsPayment) {
+      // Stamp the primary as the family group anchor
+      await admin.from('appointments')
+        .update({ family_group_id: appt.id, companion_role: 'primary' })
+        .eq('id', appt.id);
+
+      for (const rawTok of companion_access_tokens) {
+        const tok = String(rawTok || '').trim();
+        if (!tok || tok === access_token) continue;
+
+        try {
+          const { data: cReq } = await admin
+            .from('patient_lab_requests')
+            .select('*')
+            .eq('access_token', tok)
+            .maybeSingle();
+          if (!cReq) {
+            console.warn('[companion-lab-request] token not found, skipping');
+            continue;
+          }
+          // SECURITY: companion must be from the same org as the primary —
+          // otherwise the booker could leak an unrelated org's lab order
+          // into this booking.
+          if (cReq.organization_id !== request.organization_id) {
+            console.warn(`[companion-lab-request] org mismatch (primary ${request.organization_id} vs companion ${cReq.organization_id}) — refusing`);
+            continue;
+          }
+          if (cReq.status !== 'pending_schedule') {
+            console.warn(`[companion-lab-request] already scheduled: ${cReq.id}`);
+            continue;
+          }
+          if (new Date(cReq.access_token_expires_at) < new Date()) {
+            console.warn(`[companion-lab-request] expired: ${cReq.id}`);
+            continue;
+          }
+
+          const cEmail = (cReq.patient_email || '').toLowerCase() || null;
+          const { data: cAppt, error: cErr } = await admin.from('appointments').insert({
+            patient_name: cReq.patient_name,
+            patient_email: cEmail,
+            patient_phone: cReq.patient_phone || null,
+            address: address.trim(),
+            service_type: 'mobile',
+            service_name: 'Mobile Blood Draw',
+            appointment_date: apptDateIso,
+            appointment_time,
+            // Companion ride-along: org-covered → $0; if patient-billed
+            // path, future iteration will charge per companion. For now,
+            // companion booking is gated to org_covers=true (we early-return
+            // when needsPayment, and orgCovers is org-wide).
+            total_amount: 0,
+            status: 'scheduled',
+            payment_status: orgCovers ? 'org_billed' : 'not_required',
+            organization_id: request.organization_id,
+            billed_to: billedTo,
+            patient_name_masked: org.show_patient_name_on_appointment === false,
+            // Each companion's own lab order + fasting flag (the Amy/Robert case)
+            lab_order_file_path: cReq.lab_order_file_path,
+            lab_order_panels: cReq.lab_order_panels,
+            lab_order_full_text: cReq.lab_order_full_text,
+            fasting_required: cReq.fasting_required,
+            urine_required: cReq.urine_required,
+            gtt_required: cReq.gtt_required,
+            zipcode: parsedZip,
+            lab_request_id: cReq.id,
+            family_group_id: appt.id,
+            companion_role: 'companion',
+            notes: `[Lab request by ${org.name}] companion of ${request.patient_name} (primary appt ${appt.id})`,
+          }).select('id, patient_name, patient_email, patient_phone, fasting_required').single();
+
+          if (cErr || !cAppt) {
+            console.error('[companion-lab-request] insert failed:', cErr?.message);
+            continue;
+          }
+
+          await admin.from('patient_lab_requests').update({
+            status: 'scheduled',
+            appointment_id: cAppt.id,
+            patient_scheduled_at: new Date().toISOString(),
+          }).eq('id', cReq.id);
+
+          companionsCreated.push(cAppt);
+        } catch (e: any) {
+          console.error('[companion-lab-request] error:', e?.message || e);
+        }
+      }
+      if (companionsCreated.length > 0) {
+        console.log(`[companion-lab-request] created ${companionsCreated.length} companion(s) under group ${appt.id}`);
+      }
+    }
 
     // ── If patient owes money, create Stripe Checkout session ─────────────
     let stripeUrl: string | null = null;
@@ -319,11 +426,46 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn('patient confirmation SMS failed:', e); }
     }
 
+    // ── COMPANION CONFIRMATION EMAILS / SMS (org-covered only for now) ─────
+    // Fire one short confirmation per companion whose row was just created.
+    // Reuses the same fmt/copy as the primary so the experience is uniform.
+    for (const c of companionsCreated) {
+      try {
+        if (c.patient_email && MAILGUN_API_KEY) {
+          const fastingNote = c.fasting_required
+            ? `<p style="margin:10px 0 0;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px;font-size:13px;color:#78350f;"><strong>🍽️ Fasting required</strong> — stop eating/drinking (water OK) 8 hrs before your draw.</p>`
+            : '';
+          const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
+  <div style="background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:22px;border-radius:12px 12px 0 0;text-align:center;"><h1 style="margin:0;font-size:20px;">✓ Your ConveLabs draw is booked</h1></div>
+  <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111827;">
+    <p>Hi ${String(c.patient_name).split(' ')[0]},</p>
+    <p>You're booked alongside ${request.patient_name} at the same address — one trip for both of you.</p>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px;">
+      <p style="margin:0;"><strong>When:</strong> ${fmtDate(appointment_date)} at ${appointment_time}</p>
+      <p style="margin:6px 0 0;"><strong>Where:</strong> ${String(address).trim()}</p>
+      <p style="margin:6px 0 0;"><strong>Ordered by:</strong> ${org.name}</p>
+    </div>
+    ${fastingNote}
+    <p style="font-size:13px;color:#6b7280;margin-top:18px;">Need to reschedule? Email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or call (941) 527-9169.</p>
+  </div>
+</div>`;
+          const fd = new FormData();
+          fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+          fd.append('to', c.patient_email);
+          fd.append('subject', `✓ Booked with ${request.patient_name}: ${fmtDate(appointment_date)} at ${appointment_time}`);
+          fd.append('html', html);
+          fd.append('o:tracking-clicks', 'no');
+          await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+        }
+      } catch (e) { console.warn('companion confirmation email failed:', e); }
+    }
+
     return new Response(JSON.stringify({
       success: true,
       appointment_id: appt.id,
       stripe_url: stripeUrl,
       org_covers: orgCovers,
+      companions_created: companionsCreated.length,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('schedule-lab-request error:', error);

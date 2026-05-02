@@ -392,7 +392,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
               <p className="text-sm font-semibold text-blue-900">📠 Don't have your lab order in hand?</p>
               <p className="text-xs text-blue-700 mt-0.5 mb-2">
                 We require the order before drawing so we collect the right tubes and tests.
-                The fastest path: ask your doctor's office to <strong>fax it to (941) 527-9169</strong> —
+                The fastest path: ask your doctor's office to <strong>fax it to (941) 251-8467</strong> —
                 or pick this option and we'll contact your doctor's office directly to request it.
               </p>
               <Button
