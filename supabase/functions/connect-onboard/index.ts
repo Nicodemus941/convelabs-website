@@ -108,6 +108,66 @@ Deno.serve(async (req) => {
 
     const { action = 'onboard' } = await req.json().catch(() => ({}));
     const adminClient = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // ─── action: diagnose — admin-only sanity check ────────────────
+    // Returns enough info to diagnose Connect setup without exposing
+    // the full secret key. Tells you:
+    //   - Which Stripe account the configured key belongs to
+    //   - Live vs test mode
+    //   - Whether Connect is activated on that account
+    // Useful when "Stripe says I enabled Connect" but the API still
+    // rejects accounts.create — usually the env-var key is for a
+    // DIFFERENT Stripe account than the one the admin configured.
+    if (action === 'diagnose') {
+      const sk = Deno.env.get('STRIPE_SECRET_KEY') || '';
+      const keyPrefix = sk.slice(0, 8); // "sk_live_X" or "sk_test_X"
+      const mode = sk.startsWith('sk_live_') ? 'live' : sk.startsWith('sk_test_') ? 'test' : 'unknown';
+
+      let accountId: string | null = null;
+      let businessName: string | null = null;
+      let connectEnabled = false;
+      let connectError: string | null = null;
+
+      try {
+        // 1. Identify which Stripe account this key controls
+        const account = await stripe.accounts.retrieve();
+        accountId = account.id;
+        businessName = (account as any).business_profile?.name || account.email || null;
+
+        // 2. Probe whether Connect is enabled by attempting to LIST
+        //    connected accounts (read-only, doesn't create anything).
+        //    If Connect isn't activated, this call fails with the same
+        //    "signed up for Connect" error.
+        try {
+          await stripe.accounts.list({ limit: 1 });
+          connectEnabled = true;
+        } catch (e: any) {
+          connectEnabled = false;
+          connectError = String(e?.message || 'unknown');
+        }
+      } catch (e: any) {
+        connectError = `Could not retrieve Stripe account: ${e?.message || 'unknown'}`;
+      }
+
+      return new Response(JSON.stringify({
+        ok: true,
+        env_var_set: !!sk,
+        key_prefix: keyPrefix,
+        mode,
+        stripe_account_id: accountId,
+        business_name: businessName,
+        connect_enabled: connectEnabled,
+        connect_error: connectError,
+        next_step: !sk
+          ? 'STRIPE_SECRET_KEY env var not set on Supabase'
+          : !accountId
+          ? 'Configured key is invalid or revoked — generate a new one at dashboard.stripe.com/apikeys'
+          : !connectEnabled
+          ? `Connect not yet activated on Stripe account ${accountId} (${businessName || 'unknown'}). Finish "Continue setup" at dashboard.stripe.com/connect — submit the form, don't just open it.`
+          : 'All green — phleb Connect button should work.',
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const { staff, email, firstName, lastName, phone } = await getStaffForAuthUser(token);
 
     if (!staff) {
