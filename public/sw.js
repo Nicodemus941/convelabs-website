@@ -21,5 +21,6 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Don't intercept any requests — pass everything through to network
-self.addEventListener('fetch', () => {});
+// Intentionally NO 'fetch' handler — Chrome warns that a no-op fetch
+// handler still adds navigation overhead. Since we self-unregister on
+// activate, requests pass directly to the network without us in the loop.
