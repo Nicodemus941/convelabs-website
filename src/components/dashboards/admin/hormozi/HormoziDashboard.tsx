@@ -12,6 +12,7 @@ import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
 import AcquisitionByChannel from './AcquisitionByChannel';
 import RevenueTypeSplit from './RevenueTypeSplit';
 import Level0Tracker from './Level0Tracker';
+import BreakEvenTracker from './BreakEvenTracker';
 import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
 import TrendSparkline from './TrendSparkline';
@@ -153,6 +154,12 @@ const HormoziDashboard: React.FC = () => {
       <section>
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Operational Pulse</h2>
         <OpsHealthCard />
+      </section>
+
+      {/* ─── BREAK-EVEN TRACKER (owner-pay $5K/mo target) ─────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">This month at a glance</h2>
+        <BreakEvenTracker />
       </section>
 
       {/* ─── LEVEL 0 GATE TRACKER (master plan Part B) ───────────── */}

@@ -179,6 +179,43 @@ Deno.serve(async (req) => {
     lines.push('TODAY');
     lines.push(`${tAll.length} scheduled${tomorrowCount ? ` | ${tomorrowCount} tomorrow` : ''}`);
 
+    // ── BREAK-EVEN TRACKER ──────────────────────────────────────────────
+    // One-line "where am I this month?" against the $5K/mo phleb-pay goal
+    // and the ~14-visit fixed-cost break-even. Mirrors the dashboard tile.
+    try {
+      const monthStartIso = `${today.substring(0, 7)}-01T00:00:00`;
+      const nextMonthIso = (() => {
+        const [y, m] = today.split('-').map(Number);
+        const next = new Date(Date.UTC(y, m, 1));
+        return next.toISOString().substring(0, 10) + 'T00:00:00';
+      })();
+      const { count: visitsMtd } = await supabase
+        .from('appointments')
+        .select('*', { count: 'exact', head: true })
+        .gte('appointment_date', monthStartIso)
+        .lt('appointment_date', nextMonthIso)
+        .in('status', ['scheduled', 'confirmed', 'specimen_delivered', 'completed'])
+        .in('payment_status', ['completed', 'paid', 'org_billed', 'not_required']);
+
+      const v = visitsMtd || 0;
+      const phlebPay = v * 63;
+      const dayOfMonth = parseInt(today.substring(8, 10), 10);
+      const totalDays = new Date(parseInt(today.substring(0, 4), 10), parseInt(today.substring(5, 7), 10), 0).getDate();
+      const projected = Math.round((v / Math.max(dayOfMonth, 1)) * totalDays);
+
+      lines.push('');
+      lines.push('MTD');
+      if (v >= 80) {
+        lines.push(`✓ ${v} visits | $${phlebPay} earned | $5K goal HIT (pace ${projected})`);
+      } else if (v >= 14) {
+        lines.push(`✓ ${v} visits | $${phlebPay} earned | ${80 - v} more for $5K (pace ${projected})`);
+      } else {
+        lines.push(`⚠ ${v} visits | $${phlebPay} earned | ${14 - v} to break even (pace ${projected})`);
+      }
+    } catch (e) {
+      console.warn('[brief] break-even line skipped:', e);
+    }
+
     // Attention
     if (attention.length > 0) {
       lines.push('');
