@@ -23,6 +23,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Loader2, Plus, Trash2, CheckCircle2, Lock, Sparkles } from 'lucide-react';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
+import AddProviderModal from '@/components/provider/AddProviderModal';
 
 interface OrgProvider {
   id: string;
@@ -74,6 +75,7 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
   const [missing, setMissing] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     const [{ data: orgRow }, { data: provs }, { data: pctRow }] = await Promise.all([
@@ -105,25 +107,19 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
     }
   };
 
-  const addProvider = async () => {
-    const name = prompt('Provider full name (e.g., Dr. Jane Doe, MD)');
-    if (!name?.trim()) return;
-    const npi = prompt("Provider's 10-digit NPI (optional but recommended)") || null;
-    const email = prompt("Provider's email (optional)") || null;
+  const submitNewProvider = async (input: { name: string; npi: string | null; email: string | null }) => {
     setSaving('add_provider');
     try {
       const { error } = await supabase.from('org_providers' as any).insert({
         organization_id: orgId,
-        full_name: name.trim(),
-        npi: npi?.trim() || null,
-        email: email?.trim() || null,
+        full_name: input.name,
+        npi: input.npi || null,
+        email: input.email || null,
         is_primary: providers.length === 0,
       } as any);
       if (error) throw error;
       toast.success('Provider added');
       await refresh();
-    } catch (e: any) {
-      toast.error(`Add failed: ${e?.message || 'unknown'}`);
     } finally { setSaving(null); }
   };
 
@@ -192,18 +188,30 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
             <div className="absolute top-0 left-[50%] h-full w-px bg-white/60" />
             <div className="absolute top-0 left-[80%] h-full w-px bg-white/60" />
           </div>
-          <div className="grid grid-cols-3 gap-2 mt-2 text-[11px]">
-            <div className={`flex items-center gap-1 ${unlocked(50) ? 'text-emerald-700' : 'text-gray-400'}`}>
-              {unlocked(50) ? <CheckCircle2 className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-              50% — patient booking links live
+          {/* Dollar-denominated unlocks. Hormozi: stop selling features —
+              sell what they SAVE. Each tier shows a quantified win the
+              practice gets back when they cross the threshold. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-[11px]">
+            <div className={`flex items-start gap-1.5 ${unlocked(50) ? 'text-emerald-700' : 'text-gray-500'}`}>
+              {unlocked(50) ? <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" /> : <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />}
+              <div>
+                <p className="font-semibold">50% · Patients book themselves</p>
+                <p className="text-[10px] opacity-80">Saves your front desk ~3 hrs/week</p>
+              </div>
             </div>
-            <div className={`flex items-center gap-1 ${unlocked(80) ? 'text-emerald-700' : 'text-gray-400'}`}>
-              {unlocked(80) ? <CheckCircle2 className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-              80% — patient roster
+            <div className={`flex items-start gap-1.5 ${unlocked(80) ? 'text-emerald-700' : 'text-gray-500'}`}>
+              {unlocked(80) ? <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" /> : <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />}
+              <div>
+                <p className="font-semibold">80% · 1-click bulk lab requests</p>
+                <p className="text-[10px] opacity-80">90 sec/request → 5 sec each</p>
+              </div>
             </div>
-            <div className={`flex items-center gap-1 ${unlocked(100) ? 'text-emerald-700' : 'text-gray-400'}`}>
-              {unlocked(100) ? <CheckCircle2 className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-              100% — org-billed monthly invoicing
+            <div className={`flex items-start gap-1.5 ${unlocked(100) ? 'text-emerald-700' : 'text-gray-500'}`}>
+              {unlocked(100) ? <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" /> : <Lock className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />}
+              <div>
+                <p className="font-semibold">100% · Net-30 monthly invoicing</p>
+                <p className="text-[10px] opacity-80">Skip per-visit Stripe checkout for patients</p>
+              </div>
             </div>
           </div>
         </div>
@@ -254,7 +262,7 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
                 </Button>
               </div>
             ))}
-            <Button variant="outline" size="sm" onClick={addProvider} disabled={saving === 'add_provider'} className="gap-1.5">
+            <Button variant="outline" size="sm" onClick={() => setAddProviderOpen(true)} disabled={saving === 'add_provider'} className="gap-1.5">
               {saving === 'add_provider' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               Add a provider
             </Button>
@@ -358,6 +366,12 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
         )}
 
       </CardContent>
+
+      <AddProviderModal
+        open={addProviderOpen}
+        onClose={() => setAddProviderOpen(false)}
+        onSubmit={submitNewProvider}
+      />
     </Card>
   );
 };
