@@ -408,8 +408,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           lastName: p?.lastName || null,
           email: p?.email || null,
           phone: p?.phone || null,
-          dob: p?.dob || null,
+          // dob can come in via DateOfBirthInput's `dob` field OR the new
+          // native date input's `dateOfBirth` field — accept both
+          dob: p?.dob || p?.dateOfBirth || null,
           relationship: p?.relationship || null,
+          // Per-patient fasting flag — drives a separate fasting-aware
+          // reminder for this patient at the 24-hr cron. The Amy/Robert
+          // case (couple, one fasts, one doesn't) uses this.
+          fastingRequired: !!p?.fastingRequired,
           source: p?._source || 'additional',
         })),
         additional_patient_count: additionalPatientCount,

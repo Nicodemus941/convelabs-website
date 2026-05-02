@@ -1113,6 +1113,7 @@ async function handleAppointmentPayment(session: any) {
     // here, write to appointments.pricing_breakdown, then delete the
     // pending row. Lets every future pricing-drift alert be reconciled
     // in one query — the actual cart is on the row.
+    let pendingBreakdown: any = null;
     try {
       const sessionId = (session as any)?.id;
       if (sessionId) {
@@ -1122,8 +1123,9 @@ async function handleAppointmentPayment(session: any) {
           .eq('stripe_session_id', sessionId)
           .maybeSingle();
         if (pending && (pending as any).breakdown) {
+          pendingBreakdown = (pending as any).breakdown;
           await supabaseClient.from('appointments').update({
-            pricing_breakdown: (pending as any).breakdown,
+            pricing_breakdown: pendingBreakdown,
           }).eq('id', appointment.id);
           await supabaseClient.from('pending_pricing_breakdowns')
             .delete().eq('stripe_session_id', sessionId);
@@ -1132,6 +1134,86 @@ async function handleAppointmentPayment(session: any) {
       }
     } catch (e: any) {
       console.warn('[pricing-breakdown] mirror failed (non-blocking):', e?.message);
+    }
+
+    // ─── COMPANION APPOINTMENT ROWS (couples / households) ───────────
+    // When the patient added "additional patients at same address" during
+    // booking (PatientInfoStep), spawn one appointment row per companion
+    // linked to the primary via family_group_id. Each gets its own
+    // fasting_required flag so the night-before reminder can fire correctly
+    // per-person (Amy/Robert case: one fasts, one doesn't). Companions
+    // share the same date+time+address+phleb but get their own row so:
+    //   - they show as separate cards on the phleb's PWA
+    //   - the SpecimenDeliveryModal renders one row per patient
+    //   - per-patient confirmation/reminder/specimen emails route correctly
+    //   - org reports count visit-units accurately (3 patients = 3 lines)
+    try {
+      const companions = Array.isArray(pendingBreakdown?.additional_patients)
+        ? pendingBreakdown.additional_patients
+        : [];
+      if (companions.length > 0 && appointment?.id) {
+        const familyGroupId = appointment.id;
+        await supabaseClient.from('appointments')
+          .update({ family_group_id: familyGroupId, companion_role: 'primary' })
+          .eq('id', appointment.id);
+
+        for (let i = 0; i < companions.length; i++) {
+          const c = companions[i] || {};
+          const cName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || `Patient ${i + 2}`;
+          // Try to find/match a tenant_patients row by email for the companion
+          let cPatientId: string | null = null;
+          if (c.email) {
+            try {
+              const { data: tp } = await supabaseClient
+                .from('tenant_patients')
+                .select('id')
+                .ilike('email', String(c.email).trim())
+                .maybeSingle();
+              if (tp) cPatientId = (tp as any).id;
+            } catch { /* non-blocking */ }
+          }
+          const { error: cErr } = await supabaseClient.from('appointments').insert([{
+            appointment_date: appointmentDate,
+            appointment_time: appointmentTime,
+            status: 'scheduled',
+            payment_status: 'completed',
+            patient_id: cPatientId,
+            patient_name: cName,
+            patient_email: c.email || null,
+            patient_phone: c.phone || null,
+            address: fullAddress,
+            zipcode: metadata.zip_code || '',
+            service_type: metadata.service_type || 'mobile',
+            service_name: metadata.service_name || 'Blood Draw',
+            // Per-patient fasting flag (the Amy/Robert case)
+            fasting_required: !!c.fastingRequired,
+            // Family/group linkage so the phleb PWA + SpecimenDeliveryModal
+            // render this as a sibling of the primary
+            family_group_id: familyGroupId,
+            companion_role: c.relationship || 'companion',
+            // Org / billing fields inherit from primary
+            organization_id: metadata.organization_id || null,
+            billed_to: metadata.billed_to || 'patient',
+            patient_name_masked: metadata.patient_name_masked === 'true',
+            // Companions ride on the primary's checkout — no separate stripe row
+            stripe_checkout_session_id: checkoutSessionId,
+            // Total stays $0 on companion rows; fee is on primary's pricing_breakdown
+            total_amount: 0,
+            service_price: 0,
+            tip_amount: 0,
+            duration_minutes: metadata.duration_minutes ? parseInt(metadata.duration_minutes, 10) : undefined,
+            booking_source: 'online',
+            notes: `Companion of ${patientName} (primary appt ${appointment.id})`,
+          }]);
+          if (cErr) {
+            console.warn(`[companion-row] insert failed for ${cName}:`, cErr.message);
+          } else {
+            console.log(`[companion-row] created for ${cName} (fasting=${!!c.fastingRequired}) under group ${familyGroupId}`);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error('[companion-row] non-blocking error:', e?.message || e);
     }
 
     // ─── BUNDLED MEMBERSHIP ACTIVATION ───────────────────────────────────

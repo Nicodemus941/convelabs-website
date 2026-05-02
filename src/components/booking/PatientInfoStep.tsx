@@ -394,33 +394,47 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
             />
           </div>
           
-          {/* Additional Patients */}
+          {/* Additional Patients — couples / households at same address.
+              Hormozi: surface savings + fasting-per-person FIRST so the
+              Amy/Robert "couple, one fasts, one doesn't" case has a path
+              instead of an org email-side-channel. Each additional patient
+              creates its own appointment row (family_group_id) at the
+              webhook, so each gets their own fasting-aware reminder + own
+              specimen-delivery row. */}
           <div className="border-t pt-5 mt-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-medium text-sm">Additional Patients at Same Location</h3>
-                <p className="text-xs text-muted-foreground">$75 per additional patient</p>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3.5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <h3 className="font-semibold text-sm flex items-center gap-2 text-emerald-900">
+                    <Users className="h-4 w-4" /> More than one person at this address?
+                  </h3>
+                  <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
+                    Add a partner, parent, or kid getting labs the same visit. <strong>$75 each — saves $75-$150 vs. booking separately</strong>, and we only roll up once. Each person can have their own fasting status.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="bg-white border-emerald-300 text-emerald-800 hover:bg-emerald-100 flex-shrink-0"
+                  onClick={() => append({ firstName: '', lastName: '', email: '', phone: '', dateOfBirth: '', fastingRequired: false } as any)}
+                >
+                  <UserPlus className="h-4 w-4 mr-1" /> Add Patient
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => append({ firstName: '', lastName: '', email: '', phone: '', dateOfBirth: '' })}
-              >
-                <UserPlus className="h-4 w-4 mr-1" /> Add Patient
-              </Button>
             </div>
 
             {fields.map((field, index) => (
-              <Card key={field.id} className="p-4 bg-muted/30">
+              <Card key={field.id} className="p-4 bg-muted/30 border-2 border-dashed">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-medium">Patient {index + 2}</span>
+                  <span className="text-sm font-semibold">Patient {index + 2} <span className="text-muted-foreground font-normal">· same address, same trip</span></span>
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => remove(index)}
+                    aria-label="Remove patient"
                   >
                     <X className="h-4 w-4" />
                   </Button>
@@ -432,7 +446,7 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                     render={({ field: f }) => (
                       <FormItem>
                         <FormControl>
-                          <Input {...f} placeholder="First Name" />
+                          <Input {...f} placeholder="First Name *" />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -444,9 +458,25 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                     render={({ field: f }) => (
                       <FormItem>
                         <FormControl>
-                          <Input {...f} placeholder="Last Name" />
+                          <Input {...f} placeholder="Last Name *" />
                         </FormControl>
                         <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={control}
+                    name={`additionalPatients.${index}.dateOfBirth` as any}
+                    render={({ field: f }) => (
+                      <FormItem>
+                        <FormControl>
+                          <Input
+                            {...f}
+                            type="date"
+                            placeholder="Date of birth"
+                            value={f.value || ''}
+                          />
+                        </FormControl>
                       </FormItem>
                     )}
                   />
@@ -456,7 +486,7 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                     render={({ field: f }) => (
                       <FormItem>
                         <FormControl>
-                          <Input {...f} placeholder="Email (optional)" type="email" />
+                          <Input {...f} placeholder="Email — for their own confirmation (optional)" type="email" />
                         </FormControl>
                       </FormItem>
                     )}
@@ -469,6 +499,36 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                         <FormControl>
                           <Input {...f} placeholder="Phone (optional)" type="tel" />
                         </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                {/* Per-patient fasting toggle — the Amy/Robert case.
+                    One can fast while the other doesn't; reminders fire
+                    per-row off appointments.fasting_required at the
+                    24-hour reminder cron. */}
+                <div className="mt-3 pt-3 border-t border-dashed">
+                  <FormField
+                    control={control}
+                    name={`additionalPatients.${index}.fastingRequired` as any}
+                    render={({ field: f }) => (
+                      <FormItem>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-muted-foreground leading-relaxed">
+                            <strong className="text-foreground">Fasting required for this patient?</strong><br/>
+                            We send them their own night-before reminder if their lab order requires it.
+                          </div>
+                          <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={!!f.value}
+                              onChange={(e) => f.onChange(e.target.checked)}
+                              className="h-4 w-4 accent-conve-red"
+                            />
+                            <span className="text-xs font-medium">{f.value ? 'Yes — fasting' : 'No — eats normally'}</span>
+                          </label>
+                        </div>
                       </FormItem>
                     )}
                   />
