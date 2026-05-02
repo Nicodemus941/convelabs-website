@@ -213,15 +213,26 @@ Deno.serve(async (req) => {
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('[connect-onboard] unhandled:', e);
+
+    // Detect the "platform not registered for Connect" error specifically.
+    // Stripe returns the literal text "signed up for Connect" in the
+    // message and our test surface confirmed there's no dedicated error
+    // code for it — match on the substring. When this fires, the OWNER
+    // of the Stripe account needs to enable Connect at
+    // https://dashboard.stripe.com/connect — no code change can fix it.
+    const msg = String(e?.message || '');
+    const isPlatformNotEnabled = /signed up for Connect/i.test(msg)
+      || /not.*Connect.*platform/i.test(msg);
+
     // Persist the Stripe error so admin can read it without opening
     // dev tools — surface in error_logs which the dashboard can render.
     try {
       const adminClient = createClient(SUPABASE_URL, SERVICE_KEY);
       await adminClient.from('error_logs').insert({
-        error_type: 'stripe_connect_onboard',
+        error_type: isPlatformNotEnabled ? 'stripe_connect_platform_not_enabled' : 'stripe_connect_onboard',
         component: 'connect-onboard',
         action: 'top_level_catch',
-        error_message: String(e?.message || 'unknown'),
+        error_message: msg || 'unknown',
         error_stack: String(e?.stack || ''),
         payload: {
           stripe_code: e?.code || null,
@@ -229,9 +240,24 @@ Deno.serve(async (req) => {
           stripe_status_code: e?.statusCode || null,
           stripe_request_id: e?.requestId || null,
           stripe_doc_url: e?.doc_url || null,
+          admin_action_required: isPlatformNotEnabled
+            ? 'Enable Stripe Connect at https://dashboard.stripe.com/connect — pick Platform or marketplace, Express onboarding type. One-time setup, instant approval for US accounts.'
+            : null,
         },
       } as any);
     } catch { /* non-fatal */ }
+
+    if (isPlatformNotEnabled) {
+      // 503 Service Unavailable — semantically "we'll work after admin
+      // does the one-time setup," not an internal code bug.
+      return new Response(JSON.stringify({
+        error: 'platform_not_enabled',
+        message: 'Stripe Connect isn\'t enabled on the ConveLabs Stripe account yet. Our admin has been notified — you\'ll be able to connect your bank account as soon as setup is complete (usually same-day).',
+        admin_message: 'Enable Connect at https://dashboard.stripe.com/connect (Platform or marketplace → Express). One-time, instant approval for US.',
+        admin_action_required: true,
+      }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     return new Response(JSON.stringify({
       error: 'connect_failed',
       message: e?.message || 'Stripe Connect onboarding failed',

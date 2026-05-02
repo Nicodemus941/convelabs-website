@@ -124,6 +124,20 @@ const StripeConnectCard: React.FC = () => {
       toast.error('Could not start Stripe onboarding — please try again.');
     } catch (err: any) {
       console.error('[connect] error:', err);
+
+      // Specific case: ConveLabs admin hasn't enabled the Stripe Connect
+      // platform yet (a one-time Stripe-dashboard step, not a code bug).
+      // Show a friendly "we're working on it" message instead of a scary
+      // generic error so the phleb knows it's a setup issue on our end.
+      if (err?.payload?.error === 'platform_not_enabled' || /platform_not_enabled|signed up for Connect|isn't enabled on the ConveLabs/i.test(String(err?.message || ''))) {
+        toast.info('Stripe Connect setup is pending on our end.', {
+          description: 'Our admin has been notified — you\'ll be able to connect your bank account as soon as setup is complete (usually same-day). Nothing for you to do right now.',
+          duration: 12000,
+        });
+        setIsLoading(false);
+        return;
+      }
+
       const msg = err?.name === 'AbortError'
         ? 'Stripe connect timed out — check your connection and try again.'
         : `Stripe connect failed: ${err?.message || 'Unknown error'}`;
