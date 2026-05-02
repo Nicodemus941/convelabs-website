@@ -91,11 +91,15 @@ const InboxTab: React.FC = () => {
       }));
       setInsuranceQ(ins);
 
-      // Discovered orgs missing comms metadata
+      // Discovered orgs missing comms metadata. Filter out inactive orgs
+      // so manually-merged duplicates (e.g. when an OCR-discovered "new
+      // practice" turns out to be a known org under a different legal
+      // name) drop out of the inbox the moment is_active=false is set.
       const { data: orgs } = await supabase
         .from('organizations')
         .select('id, name, contact_email, contact_phone, manager_email, npi, outreach_status, referral_count, first_discovered_at, last_referral_at')
         .eq('discovered_from_lab_order', true as any)
+        .eq('is_active', true)
         .or('manager_email.is.null,contact_email.is.null')
         .order('referral_count', { ascending: false })
         .order('first_discovered_at', { ascending: false })
