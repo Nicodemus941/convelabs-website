@@ -273,9 +273,28 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   const handleCheckout = async (tipAmount: number, promoCode?: string | null) => {
     lastCheckoutArgsRef.current = { tipAmount, promoCode: promoCode || null };
+    // CRITICAL: declare `data` OUTSIDE the try block so the catch handler
+    // can still read patient context for the owner-alert SMS. Prior bug:
+    // `const data = methods.getValues()` lived inside try, so when ANY
+    // exception fired the catch handler hit `ReferenceError: data is not
+    // defined` — patient saw nothing on screen, owner got no alert.
+    let data: any = null;
     try {
       setIsProcessing(true);
-      const data = methods.getValues();
+      data = methods.getValues();
+      // Resolve labels referenced inside pricingBreakdown / surcharges.
+      // These were referenced but never declared in scope (memberLabel,
+      // referralCode) — caused a hard ReferenceError on Pay-button click,
+      // which the broken catch block above swallowed silently. Patients
+      // saw a stuck spinner with no recovery path.
+      const memberLabel = memberTier === 'none' ? 'Pay-as-you-go'
+        : memberTier === 'member' ? 'Member'
+        : memberTier === 'vip' ? 'VIP'
+        : memberTier === 'concierge' ? 'Concierge'
+        : memberTier;
+      const referralCode = (typeof window !== 'undefined'
+        ? sessionStorage.getItem('convelabs_referral')
+        : null) || null;
 
       // Hard-fail if date or time is missing/invalid. Caused the "NaN-NaN-NaN"
       // date that patients saw on the checkout summary after the OCR
