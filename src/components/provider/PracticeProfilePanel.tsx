@@ -221,9 +221,12 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
 
         {/* CORE CONTACT */}
         <Section title="Core contact" hint="Used on every confirmation, invoice, and result routing">
-          <Field label="Organization name" value={org.name || ''} onSave={(v) => saveField('name', v)} saving={saving === 'name'} />
-          <Field label="Main contact email" value={org.contact_email || ''} onSave={(v) => saveField('contact_email', v)} saving={saving === 'contact_email'} type="email" />
-          <Field label="Main phone" value={org.contact_phone || ''} onSave={(v) => saveField('contact_phone', v)} saving={saving === 'contact_phone'} />
+          <Field label="Organization name" value={org.name || ''} onSave={(v) => saveField('name', v)} saving={saving === 'name'}
+            blankWarning="Patient confirmation emails sign 'from your practice' — without this they'll just see 'your provider'." />
+          <Field label="Main contact email" value={org.contact_email || ''} onSave={(v) => saveField('contact_email', v)} saving={saving === 'contact_email'} type="email"
+            blankWarning="Without this, specimen-delivery and visit notifications can't reach you." />
+          <Field label="Main phone" value={org.contact_phone || ''} onSave={(v) => saveField('contact_phone', v)} saving={saving === 'contact_phone'} format="phone"
+            blankWarning="Patients can't call you if a draw needs rescheduling — they'll call us instead." />
           {/* Practice address — Google Places autocomplete so we capture a
               clean, validated formatted address (street + city + state + zip
               all in one), matching the patient booking flow. Save policy
@@ -235,37 +238,63 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
             saving={saving === 'address'}
             onSave={(v) => saveField('address', v)}
           />
-          <Field label="Fax (for results routing)" value={org.fax || ''} onSave={(v) => saveField('fax', v)} saving={saving === 'fax'} />
+          <Field label="Fax (for results routing)" value={org.fax || ''} onSave={(v) => saveField('fax', v)} saving={saving === 'fax'} format="phone"
+            blankWarning="Quest/LabCorp default to faxing results — without this we have to manually route every report." />
         </Section>
 
         {/* TEAM EMAILS */}
         <Section title="Team emails" hint="So the right person gets the right notifications — confirmations to front desk, escalations to manager, billing to billing">
-          <Field label="Office manager email" value={org.manager_email || ''} onSave={(v) => saveField('manager_email', v)} saving={saving === 'manager_email'} type="email" />
-          <Field label="Front-desk email" value={org.front_desk_email || ''} onSave={(v) => saveField('front_desk_email', v)} saving={saving === 'front_desk_email'} type="email" />
-          <Field label="Billing email" value={org.billing_email || ''} onSave={(v) => saveField('billing_email', v)} saving={saving === 'billing_email'} type="email" hint="Used for org-billed monthly invoices" />
+          <Field label="Office manager email" value={org.manager_email || ''} onSave={(v) => saveField('manager_email', v)} saving={saving === 'manager_email'} type="email"
+            blankWarning="Escalations (slot conflicts, missed visits) fall back to your main contact email." />
+          <Field label="Front-desk email" value={org.front_desk_email || ''} onSave={(v) => saveField('front_desk_email', v)} saving={saving === 'front_desk_email'} type="email"
+            blankWarning="Patient confirmations cc'd to your team go to main contact instead — louder inbox." />
+          <Field label="Billing email" value={org.billing_email || ''} onSave={(v) => saveField('billing_email', v)} saving={saving === 'billing_email'} type="email" hint="Used for org-billed monthly invoices"
+            blankWarning="Monthly invoices fall back to main contact — risks getting buried in clinical mail." />
         </Section>
 
-        {/* PROVIDERS */}
+        {/* PROVIDERS — empty state is intentionally loud. Without at least
+            one provider the 100% completion gate (Net-30 invoicing) is
+            unreachable, so we make the "Add" path impossible to miss. */}
         <Section title="Providers" hint="Each provider's NPI lets us sign lab orders correctly + auto-route results">
           <div className="space-y-2">
-            {providers.map(p => (
-              <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-md p-2 text-sm">
-                <div className="flex-1">
-                  <p className="font-medium">{p.full_name} {p.is_primary && <Badge variant="outline" className="ml-1 text-[10px]">primary</Badge>}</p>
-                  <p className="text-xs text-gray-500">
-                    {p.npi ? `NPI ${p.npi}` : <span className="text-amber-700">No NPI on file</span>}
-                    {p.email && <> · {p.email}</>}
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => removeProvider(p.id)}>
-                  <Trash2 className="h-3.5 w-3.5 text-red-500" />
+            {providers.length === 0 ? (
+              <div className="rounded-lg border-2 border-dashed border-amber-300 bg-amber-50/60 p-4 text-center">
+                <p className="text-sm font-semibold text-amber-900 mb-1">
+                  ⚠ No providers added yet — Net-30 invoicing locked
+                </p>
+                <p className="text-xs text-amber-800 mb-3 max-w-md mx-auto">
+                  Add a provider with their NPI so we can sign lab orders correctly. Most practices add their primary in under 30 seconds — we look up the NPI for you.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => setAddProviderOpen(true)}
+                  className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add your first provider
                 </Button>
               </div>
-            ))}
-            <Button variant="outline" size="sm" onClick={() => setAddProviderOpen(true)} disabled={saving === 'add_provider'} className="gap-1.5">
-              {saving === 'add_provider' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-              Add a provider
-            </Button>
+            ) : (
+              <>
+                {providers.map(p => (
+                  <div key={p.id} className="flex items-center justify-between bg-gray-50 rounded-md p-2 text-sm">
+                    <div className="flex-1">
+                      <p className="font-medium">{p.full_name} {p.is_primary && <Badge variant="outline" className="ml-1 text-[10px]">primary</Badge>}</p>
+                      <p className="text-xs text-gray-500">
+                        {p.npi ? `NPI ${p.npi}` : <span className="text-amber-700">No NPI on file</span>}
+                        {p.email && <> · {p.email}</>}
+                      </p>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => removeProvider(p.id)}>
+                      <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                    </Button>
+                  </div>
+                ))}
+                <Button variant="outline" size="sm" onClick={() => setAddProviderOpen(true)} disabled={saving === 'add_provider'} className="gap-1.5">
+                  {saving === 'add_provider' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  Add another provider
+                </Button>
+              </>
+            )}
           </div>
         </Section>
 
@@ -365,6 +394,20 @@ export const PracticeProfilePanel: React.FC<{ orgId: string }> = ({ orgId }) => 
           </div>
         )}
 
+        {/* Social proof footer — Hormozi: every form should answer "am I
+            in good company doing this?" Replaces the empty space below
+            the last section with a low-key reassurance bar. */}
+        <div className="mt-6 pt-4 border-t border-gray-100 flex items-center justify-center gap-4 text-[11px] text-gray-500">
+          <span className="flex items-center gap-1">
+            <span className="text-emerald-600">●</span>
+            Trusted by partner practices across Central Florida
+          </span>
+          <span className="text-gray-300">·</span>
+          <span>Most complete this in <strong className="text-gray-700">under 5 minutes</strong></span>
+          <span className="text-gray-300">·</span>
+          <span>HIPAA-aligned & encrypted</span>
+        </div>
+
       </CardContent>
 
       <AddProviderModal
@@ -436,6 +479,19 @@ const AddressField: React.FC<{
   );
 };
 
+/**
+ * Format a US phone number as (###) ###-#### while leaving partial input
+ * legible during typing. Strips all non-digits and re-formats; if user
+ * pastes "4077759705" they see "(407) 775-9705" the moment focus blurs.
+ */
+function maskPhone(raw: string): string {
+  const d = (raw || '').replace(/\D/g, '').slice(0, 10);
+  if (d.length === 0) return '';
+  if (d.length < 4) return `(${d}`;
+  if (d.length < 7) return `(${d.slice(0, 3)}) ${d.slice(3)}`;
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+}
+
 const Field: React.FC<{
   label: string;
   value: string;
@@ -443,20 +499,45 @@ const Field: React.FC<{
   saving?: boolean;
   type?: string;
   hint?: string;
-}> = ({ label, value, onSave, saving, type = 'text', hint }) => {
+  /** Apply phone-mask formatting on blur (digits → "(###) ###-####") */
+  format?: 'phone';
+  /**
+   * Loss-aversion warning shown when the field is blank — explains what
+   * breaks if the provider leaves it empty. Replaces vague "this field is
+   * required" copy with a concrete consequence (Hormozi: every empty box
+   * should answer "what do I lose if I skip this?").
+   */
+  blankWarning?: string;
+}> = ({ label, value, onSave, saving, type = 'text', hint, format, blankWarning }) => {
   const [local, setLocal] = useState(value);
   useEffect(() => { setLocal(value); }, [value]);
+  const isBlank = !local || !local.trim();
   return (
     <div className="space-y-1 mb-2">
       <Label className="text-xs">{label} {saving && <Loader2 className="h-3 w-3 animate-spin inline ml-1 text-gray-400" />}</Label>
       <Input
         type={type}
         value={local}
-        onChange={e => setLocal(e.target.value)}
-        onBlur={() => { if (local !== value) onSave(local); }}
+        onChange={e => {
+          // Live phone formatting — easier to read while typing without
+          // forcing the user to hit a specific cursor position.
+          if (format === 'phone') setLocal(maskPhone(e.target.value));
+          else setLocal(e.target.value);
+        }}
+        onBlur={() => {
+          const finalVal = format === 'phone' ? maskPhone(local) : local;
+          if (finalVal !== local) setLocal(finalVal);
+          if (finalVal !== value) onSave(finalVal);
+        }}
         className="h-9 text-sm"
       />
-      {hint && <p className="text-[10px] text-gray-500">{hint}</p>}
+      {hint && !isBlank && <p className="text-[10px] text-gray-500">{hint}</p>}
+      {isBlank && blankWarning && (
+        <p className="text-[10px] text-amber-700 flex items-start gap-1">
+          <span className="text-amber-500 flex-shrink-0">⚠</span>
+          <span>{blankWarning}</span>
+        </p>
+      )}
     </div>
   );
 };

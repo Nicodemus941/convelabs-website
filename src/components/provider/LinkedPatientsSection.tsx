@@ -278,11 +278,16 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               Build your roster so you can request labs in one click — no re-typing names every time.
             </CardDescription>
           </CardHeader>
-          <CardContent className="py-8 text-center">
+          {/* Reciprocity-loaded empty state. Hormozi: empty states are
+              billboards — give them a reason to act NOW, not "someday."
+              The offer (free first visit) costs us $50 in COGS and buys
+              us a fully-onboarded practice with N patients in their
+              roster, which is worth orders of magnitude more in LTV. */}
+          <CardContent className="py-7 text-center">
             <Users className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-            <p className="text-sm text-gray-700 font-medium">No patients on your roster yet</p>
-            <p className="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
-              Add patients now and you'll be able to bulk-request labs, track visits, and enroll them in your subscription.
+            <p className="text-sm text-gray-900 font-semibold">Add your first 3 patients — first visit on us</p>
+            <p className="text-xs text-gray-600 mt-1 max-w-md mx-auto leading-relaxed">
+              Build your roster so you can bulk-request labs in 1 click, track every visit, and enroll patients in subscriptions. <strong className="text-emerald-700">First patient's visit is free</strong> as a thank-you for completing onboarding.
             </p>
             <Button
               size="sm"
@@ -291,6 +296,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             >
               <UserPlus className="h-3.5 w-3.5" /> Add your first patient
             </Button>
+            <p className="text-[10px] text-gray-400 mt-2">~30 seconds per patient · we send them a welcome email</p>
           </CardContent>
         </Card>
         <AddPatientModal
