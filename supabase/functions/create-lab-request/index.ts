@@ -9,6 +9,11 @@
 // Response: { success: true, request_id, access_token, patient_url }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+
+const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
+// 100% mobile mirror of schedule-lab-request — keep these in sync
+const MOBILE_PRICE_CENTS = 15000;
 // NOTE: these used to import from ../_shared/. Inlined below because the MCP
 // edge-function deploy path doesn't bundle relative module imports cleanly.
 // Single source of truth for the library versions still lives at
@@ -245,6 +250,128 @@ Deno.serve(async (req) => {
     const providerDisplayName = user.user_metadata?.full_name || org.contact_name || `Your provider at ${org.name}`;
     const patientFirstName = patient_name.split(' ')[0];
 
+    // ── ORG-PAYS BRANCH ─────────────────────────────────────────────────
+    // If the org covers the visit (set on the org's default_billed_to or an
+    // explicit billed_to='org' override on this request), redirect the
+    // submitting provider to Stripe Checkout to collect payment NOW. We
+    // hold the patient SMS/email until Stripe confirms the org has paid —
+    // the webhook (handleLabRequestProviderPayment) flips org_payment_status
+    // to 'paid' and fires the deferred patient notifications. Patient sees
+    // a "covered by your provider — just pick a time" message at booking.
+    const effectiveBilling: 'org' | 'patient' = billedToClean
+      || (org.default_billed_to === 'org' || org.member_stacking_rule === 'org_covers' ? 'org' : 'patient');
+    const orgPays = effectiveBilling === 'org';
+
+    if (orgPays) {
+      const orgChargeCents = (org.org_invoice_price_cents
+        ?? org.locked_price_cents
+        ?? MOBILE_PRICE_CENTS) as number;
+
+      let stripeUrl: string | null = null;
+      try {
+        // Find or create a Stripe customer for this org so future invoices
+        // group under one customer record.
+        const orgEmail = (user.email || '').toLowerCase() || null;
+        let customerId: string | null = null;
+        if (orgEmail) {
+          const found = await stripe.customers.list({ email: orgEmail, limit: 5 });
+          const orgCustomer = found.data.find(c => c.metadata?.convelabs_org_id === organization_id);
+          if (orgCustomer) customerId = orgCustomer.id;
+          else {
+            const c = await stripe.customers.create({
+              email: orgEmail,
+              name: org.name,
+              metadata: { convelabs_org_id: organization_id, source: 'create_lab_request_org_pay' },
+            });
+            customerId = c.id;
+          }
+        }
+
+        const session = await stripe.checkout.sessions.create({
+          mode: 'payment',
+          customer: customerId || undefined,
+          customer_email: customerId ? undefined : orgEmail || undefined,
+          line_items: [{
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: `Mobile Blood Draw — ${patient_name}`,
+                description: `Covered by ${org.name} on behalf of ${patient_name}`,
+              },
+              unit_amount: orgChargeCents,
+            },
+            quantity: 1,
+          }],
+          success_url: `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_paid=${inserted.id}`,
+          cancel_url: `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_payment_cancelled=${inserted.id}`,
+          metadata: {
+            lab_request_id: inserted.id,
+            organization_id,
+            patient_name,
+            org_pays: 'true',
+            // Distinguishes this branch in the stripe-webhook switch
+            convelabs_flow: 'lab_request_org_pay',
+          },
+          payment_intent_data: {
+            metadata: {
+              lab_request_id: inserted.id,
+              organization_id,
+              convelabs_flow: 'lab_request_org_pay',
+            },
+          },
+        });
+        stripeUrl = session.url || null;
+
+        await admin.from('patient_lab_requests').update({
+          provider_payment_status: 'pending',
+          provider_stripe_session_id: session.id,
+          provider_payment_cents: orgChargeCents,
+          billed_to: 'org',
+          // Patient_notified_at stays NULL — the webhook fires the notify
+          // call once payment completes. Status stays 'pending_schedule'
+          // (or whatever the default is) so the public lab-request page
+          // is functional but admin can see who's gated on org payment.
+          status: 'pending_payment',
+        }).eq('id', inserted.id);
+
+        // Return EARLY — do not send patient SMS/email yet. Aliases both
+        // the new (`requires_org_payment` / `stripe_url`) and the legacy
+        // (`provider_pay_now` / `provider_checkout_url`) response keys so
+        // the existing CreateLabRequestModal redirect handler keeps working.
+        return new Response(JSON.stringify({
+          success: true,
+          request_id: inserted.id,
+          access_token: accessToken,
+          patient_url: patientUrl,
+          requires_org_payment: true,
+          stripe_url: stripeUrl,
+          provider_pay_now: true,
+          provider_checkout_url: stripeUrl,
+          amount_cents: orgChargeCents,
+          message: 'Lab request created. Redirecting to Stripe to collect organization payment. Patient will be notified once payment completes.',
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      } catch (stripeErr: any) {
+        console.error('[create-lab-request] Stripe session create failed:', stripeErr?.message);
+        // If Stripe fails, fall through to the normal patient-notify path
+        // so the lab request isn't lost. Admin can manually invoice later.
+        await admin.from('patient_lab_requests').update({
+          provider_payment_status: 'failed',
+          status: 'pending_schedule',
+          billed_to: 'org',
+        }).eq('id', inserted.id);
+      }
+    }
+
+    // Was the visit covered? Used downstream in patient SMS/email copy.
+    // For the inline path (patient pays), this is `false`. The webhook
+    // path that fires after org-payment-completed sends a separate copy
+    // with `covered=true`.
+    const coveredByOrg = orgPays;
+    const coveredLine = coveredByOrg
+      ? `<div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 14px;margin:14px 0;font-size:13px;color:#065f46;"><strong>✓ Covered by ${org.name}</strong> — no payment needed at booking. Just pick a time.</div>`
+      : '';
+    const smsCoverPart = coveredByOrg ? ` ${org.name} is covering this visit — no payment needed at booking.` : '';
+
     // ── EMAIL ────────────────────────────────────────────────────────────
     if (patient_email && MAILGUN_API_KEY) {
       const panelChips = detectedPanels.slice(0, 8).map((p: any) =>
@@ -278,6 +405,7 @@ Deno.serve(async (req) => {
     ${prepNotes ? `<p style="font-size:13px;color:#78350f;background:#fef3c7;border-radius:8px;padding:10px 14px;margin:12px 0;">${prepNotes}</p>` : ''}
     ` : ''}
 
+    ${coveredLine}
     ${admin_notes ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;margin:16px 0;font-size:13px;color:#374151;"><strong>Note from ${org.name}:</strong> ${admin_notes}</div>` : ''}
 
     <div style="text-align:center;margin:28px 0;">
@@ -317,7 +445,7 @@ Deno.serve(async (req) => {
         const nextShort = next_doctor_appt_date ? fmtDate(next_doctor_appt_date).replace(',', '') : '';
         const fastingPart = fasting ? ' Fasting required — no food 12h before.' : '';
         const nextVisitPart = nextShort ? ` to have results ready for your ${nextShort} visit` : '';
-        const smsBody = `Hi ${patientFirstName} — this is ConveLabs. ${org.name} has ordered your bloodwork through us.${fastingPart} Please schedule before ${drawShort}${nextVisitPart}. Your private booking link: ${patientUrl} · We look forward to serving you.`;
+        const smsBody = `Hi ${patientFirstName} — this is ConveLabs. ${org.name} has ordered your bloodwork through us.${smsCoverPart}${fastingPart} Please schedule before ${drawShort}${nextVisitPart}. Your private booking link: ${patientUrl} · We look forward to serving you.`;
         const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
         const fd = new URLSearchParams({ To: normalizePhone(patient_phone), From: TWILIO_FROM, Body: smsBody });
         await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {

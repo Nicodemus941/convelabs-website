@@ -92,6 +92,13 @@ Deno.serve(async (req) => {
       if (metadata.type === 'appointment_payment') {
         await handleAppointmentPayment(session);
       }
+      // Handle org paying upfront for a lab request (org_pays flow). The
+      // create-lab-request edge fn deferred the patient SMS+email; this
+      // handler stamps payment status on the lab_request and triggers the
+      // patient notification now that we know the org has paid.
+      else if (metadata.convelabs_flow === 'lab_request_org_pay' && metadata.lab_request_id) {
+        await handleLabRequestProviderPayment(session);
+      }
       // Handle lab-request unlock (membership + visit bundled in one checkout)
       else if (metadata.type === 'lab_request_unlock') {
         await handleLabRequestUnlock(session);
@@ -2060,5 +2067,153 @@ async function handleLabRequestUnlock(session: any) {
     console.log(`[unlock] success: request ${labRequestId} → appt ${appt.id} + ${tier} membership`);
   } catch (error: any) {
     console.error('[unlock] top-level error:', error);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// handleLabRequestProviderPayment
+// Fires when an org completes the upfront-payment Checkout that
+// create-lab-request started. We:
+//   1. Stamp provider_payment_status='paid' on patient_lab_requests
+//   2. Trigger the patient SMS + email (which create-lab-request deferred)
+// The patient lands on the lab-request page seeing "covered by your
+// provider — just pick a time" and books for free.
+// ─────────────────────────────────────────────────────────────────────────
+async function handleLabRequestProviderPayment(session: any) {
+  try {
+    const metadata = session.metadata || {};
+    const labRequestId = metadata.lab_request_id;
+    if (!labRequestId) {
+      console.error('[lab-request-org-pay] missing lab_request_id in metadata');
+      return;
+    }
+
+    // Idempotency: if we already marked this paid, skip
+    const { data: existing } = await supabaseClient
+      .from('patient_lab_requests')
+      .select('id, provider_payment_status, provider_paid_at, patient_notified_at, patient_name, patient_email, patient_phone, organization_id, draw_by_date, fasting_required, lab_order_panels, admin_notes, access_token, next_doctor_appt_date')
+      .eq('id', labRequestId)
+      .maybeSingle();
+    if (!existing) {
+      console.error(`[lab-request-org-pay] lab_request ${labRequestId} not found`);
+      return;
+    }
+    if (existing.provider_payment_status === 'paid' && existing.patient_notified_at) {
+      console.log(`[lab-request-org-pay] already processed ${labRequestId}, skipping`);
+      return;
+    }
+
+    const paymentIntentId = typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id || null;
+
+    await supabaseClient.from('patient_lab_requests').update({
+      provider_payment_status: 'paid',
+      provider_paid_at: new Date().toISOString(),
+      provider_stripe_payment_intent_id: paymentIntentId,
+      status: 'pending_schedule',
+      billed_to: 'org',
+    }).eq('id', labRequestId);
+
+    // Load org for the patient notification copy
+    const { data: org } = await supabaseClient
+      .from('organizations')
+      .select('id, name, contact_name')
+      .eq('id', existing.organization_id)
+      .maybeSingle();
+
+    if (!org) {
+      console.error(`[lab-request-org-pay] org ${existing.organization_id} not found for lab_request ${labRequestId}`);
+      return;
+    }
+
+    const PUBLIC_SITE_URL = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
+    const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY') || '';
+    const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
+    const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+    const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+    const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+
+    const patientUrl = `${PUBLIC_SITE_URL}/lab-request/${existing.access_token}`;
+    const patientFirstName = String(existing.patient_name || '').split(' ')[0] || 'there';
+    const drawBy = existing.draw_by_date as string;
+    const drawByDate = new Date(drawBy + 'T12:00:00');
+    const drawShort = drawByDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    const daysLeft = Math.max(0, Math.ceil((drawByDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    const fastingPart = existing.fasting_required ? ' Fasting required — no food 12h before.' : '';
+    const nextShort = existing.next_doctor_appt_date
+      ? new Date(existing.next_doctor_appt_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+      : '';
+    const nextVisitPart = nextShort ? ` to have results ready for your ${nextShort} visit` : '';
+
+    // ── PATIENT EMAIL ─────────────────────────────────────────────
+    if (existing.patient_email && MAILGUN_API_KEY) {
+      try {
+        const html = `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;margin:0;padding:20px;background:#f4f4f5;">
+<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #e5e7eb;">
+  <div style="background:linear-gradient(135deg,#B91C1C 0%,#7F1D1D 100%);color:#fff;padding:24px 28px;text-align:center;">
+    <h1 style="margin:0;font-size:22px;">${org.name} ordered your bloodwork</h1>
+    <p style="margin:4px 0 0;color:#fecaca;font-size:13px;">ConveLabs Concierge Lab Services</p>
+  </div>
+  <div style="padding:28px;line-height:1.6;color:#111827;">
+    <p>Hi ${patientFirstName},</p>
+    <p><strong>${org.name}</strong> requested bloodwork for you and has covered the cost. ${nextShort ? `Your next visit with them is <strong>${nextShort}</strong> — results need to be in their hands before then.` : ''}</p>
+
+    <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:14px 18px;margin:18px 0;">
+      <p style="margin:0;font-size:14px;color:#065f46;font-weight:700;">✓ Covered by ${org.name}</p>
+      <p style="margin:4px 0 0;font-size:14px;color:#065f46;">No payment needed at booking. Just pick a time that works for you.</p>
+    </div>
+
+    <p style="margin:18px 0 6px;">Draw by <strong>${drawShort}</strong> · ${daysLeft} day${daysLeft === 1 ? '' : 's'} from now.</p>
+    ${existing.fasting_required ? `<p style="font-size:13px;color:#78350f;background:#fef3c7;border-radius:8px;padding:10px 14px;margin:12px 0;">⚠️ Fasting required (12hrs, water only)</p>` : ''}
+    ${existing.admin_notes ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;margin:16px 0;font-size:13px;color:#374151;"><strong>Note from ${org.name}:</strong> ${existing.admin_notes}</div>` : ''}
+
+    <div style="text-align:center;margin:28px 0;">
+      <a href="${patientUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:15px 42px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">📅 Pick my time (90 seconds) →</a>
+    </div>
+
+    <p style="font-size:13px;color:#6b7280;">We come to you (mobile). Questions? Email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or call (941) 527-9169.</p>
+    <p style="margin-top:16px;">— Nicodemme "Nico" Jean-Baptiste<br><em>Founder, ConveLabs</em></p>
+  </div>
+  <div style="background:#f9fafb;padding:14px 28px;font-size:11px;color:#9ca3af;text-align:center;border-top:1px solid #e5e7eb;">
+    This link is specific to you and expires in 14 days. ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810
+  </div>
+</div></body></html>`;
+        const fd = new FormData();
+        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('to', existing.patient_email);
+        fd.append('subject', `${org.name} ordered your bloodwork — ${daysLeft}d to book (covered by your provider)`);
+        fd.append('html', html);
+        fd.append('o:tracking-clicks', 'no');
+        await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+          body: fd,
+        });
+      } catch (e) { console.warn('[lab-request-org-pay] patient email failed:', e); }
+    }
+
+    // ── PATIENT SMS ───────────────────────────────────────────────
+    if (existing.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+      try {
+        const smsBody = `Hi ${patientFirstName} — this is ConveLabs. ${org.name} has ordered your bloodwork through us and is covering the cost — no payment needed at booking.${fastingPart} Please schedule before ${drawShort}${nextVisitPart}. Your private booking link: ${patientUrl} · We look forward to serving you.`;
+        const phoneClean = existing.patient_phone.replace(/\D/g, '');
+        const phoneE164 = phoneClean.length === 10 ? `+1${phoneClean}` : phoneClean.length === 11 && phoneClean.startsWith('1') ? `+${phoneClean}` : `+${phoneClean}`;
+        const fd = new URLSearchParams({ To: phoneE164, From: TWILIO_FROM, Body: smsBody });
+        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: fd.toString(),
+        });
+      } catch (e) { console.warn('[lab-request-org-pay] patient SMS failed:', e); }
+    }
+
+    await supabaseClient.from('patient_lab_requests').update({
+      patient_notified_at: new Date().toISOString(),
+    }).eq('id', labRequestId);
+
+    console.log(`[lab-request-org-pay] paid + notified: ${labRequestId} for ${existing.patient_name} via ${org.name}`);
+  } catch (e: any) {
+    console.error('[lab-request-org-pay] top-level error:', e?.message || e);
   }
 }
