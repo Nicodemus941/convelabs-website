@@ -24,6 +24,7 @@ interface FamilyMember {
   name: string;
   dob: string;
   relationship: string;
+  fastingRequired?: boolean;
 }
 // Tier-aware companion pricing. Mirrors TIER_PRICING['additional'] server-side
 // so admin + public flows charge the same. Non-member $75, Member $55,
@@ -98,7 +99,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const additionalPatientsAll = (watch('additionalPatients') || []) as any[];
   const familyMembers = additionalPatientsAll.filter((p: any) => p?._source === 'family_member') as FamilyMember[];
   const [showFamilyForm, setShowFamilyForm] = useState(false);
-  const [familyForm, setFamilyForm] = useState({ name: '', dob: '', relationship: 'Spouse' });
+  const [familyForm, setFamilyForm] = useState({ name: '', dob: '', relationship: 'Spouse', fastingRequired: false });
   const BUNDLE_COUNT = 4;
   const BUNDLE_DISCOUNT = 0.15;
 
@@ -217,12 +218,18 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         phone: '',
         dob: familyForm.dob,
         relationship: familyForm.relationship,
+        // Per-patient fasting flag — drives a separate fasting-aware
+        // night-before reminder for THIS family member specifically. The
+        // Amy/Robert case (couple at one address, one fasts, one doesn't)
+        // routes through here when added at checkout instead of in
+        // PatientInfoStep.
+        fastingRequired: !!familyForm.fastingRequired,
         _source: 'family_member',
       },
     ] as any);
-    setFamilyForm({ name: '', dob: '', relationship: 'Spouse' });
+    setFamilyForm({ name: '', dob: '', relationship: 'Spouse', fastingRequired: false });
     setShowFamilyForm(false);
-    toast.success(`Family member added (+$${familyMemberPrice})`);
+    toast.success(`Family member added (+$${familyMemberPrice}) — add another or continue`);
   };
 
   const handleRemoveFamilyMember = (index: number) => {
@@ -514,11 +521,25 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             </div>
           </div>
 
+          {/* Running count + clear "you can add more" hint — without it,
+              users assume "Confirm" closes the affordance for good. */}
+          {familyMembers.length > 0 && (
+            <p className="text-[11px] text-blue-900 -mt-1 mb-1.5">
+              <strong>{familyMembers.length} family member{familyMembers.length === 1 ? '' : 's'} added</strong>
+              {' '}({familyMembers.length} × ${familyMemberPrice} = ${familyMemberTotal}). Add another below, or continue when done.
+            </p>
+          )}
+
           {/* Added family members list */}
           {familyMembers.map((fm, i) => (
             <div key={i} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-3 py-2">
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{fm.name}</p>
+                <p className="text-sm font-medium truncate">
+                  {fm.name}
+                  {(fm as any).fastingRequired && (
+                    <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">fasting</span>
+                  )}
+                </p>
                 <p className="text-[11px] text-muted-foreground">{fm.relationship} · DOB: {fm.dob}</p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -567,6 +588,26 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                   </select>
                 </div>
               </div>
+
+              {/* Per-patient fasting toggle — the Amy/Robert case (couple,
+                  one fasts, one doesn't). We drive a separate fasting-aware
+                  night-before reminder for THIS person off this flag. */}
+              <div className="rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 flex items-center justify-between gap-3">
+                <div className="text-[11px] text-amber-900 leading-snug">
+                  <strong>Fasting required for this person?</strong><br/>
+                  <span className="text-amber-800">We'll send them their own night-before reminder if so.</span>
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer select-none flex-shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={!!familyForm.fastingRequired}
+                    onChange={(e) => setFamilyForm(f => ({ ...f, fastingRequired: e.target.checked }))}
+                    className="h-4 w-4 accent-amber-600"
+                  />
+                  <span className="text-xs font-medium text-amber-900">{familyForm.fastingRequired ? 'Yes' : 'No'}</span>
+                </label>
+              </div>
+
               <div className="flex gap-2">
                 <Button type="button" size="sm" className="text-xs bg-blue-600 hover:bg-blue-700 text-white flex-1" onClick={handleAddFamilyMember}>
                   <UserPlus className="h-3.5 w-3.5 mr-1" /> Confirm (+${familyMemberPrice})
@@ -579,7 +620,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           ) : (
             <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 w-full"
               onClick={() => setShowFamilyForm(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add Family Member — ${familyMemberPrice}
+              <Plus className="h-3.5 w-3.5 mr-1" /> {familyMembers.length === 0 ? `Add Family Member — $${familyMemberPrice}` : `Add Another (+$${familyMemberPrice})`}
             </Button>
           )}
         </div>
