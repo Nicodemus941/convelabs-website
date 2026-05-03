@@ -26,6 +26,7 @@ import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import RequestLabOrderButton from './RequestLabOrderButton';
 import LabOrderRequestStatus from './LabOrderRequestStatus';
 import AppointmentEarningPill from './AppointmentEarningPill';
+import TubePredictionPanel from './TubePredictionPanel';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
@@ -546,6 +547,16 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   {/* Inline OCR + org-match status per lab order */}
                   <LabOrderStatusList
                     appointmentId={appointment.id}
+                    refreshKey={labOrderRefreshKey}
+                  />
+
+                  {/* Tube prediction — Hormozi "confidence at the visit"
+                      surface. Aggregates OCR'd test codes against the
+                      lab_test_catalog and shows phleb exactly what to
+                      draw, in CLSI order, with volumes + handling. */}
+                  <TubePredictionPanel
+                    appointmentId={appointment.id}
+                    labDestination={appointment.lab_destination}
                     refreshKey={labOrderRefreshKey}
                   />
 
