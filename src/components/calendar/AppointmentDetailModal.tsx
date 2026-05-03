@@ -576,38 +576,12 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         <Separator />
 
-        {/* Lab Destination — where phleb drops the specimen */}
-        <div className="px-5 py-4 space-y-2">
-          <p className="text-sm font-bold text-gray-900">Specimen Delivery Destination</p>
-          <p className="text-xs text-gray-500">Where the phleb should drop the drawn specimen.</p>
-          <select
-            className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm"
-            value={appt.lab_destination || ''}
-            onChange={async (e) => {
-              const val = e.target.value || null;
-              const { error } = await supabase.from('appointments').update({ lab_destination: val }).eq('id', appt.id);
-              if (error) { toast.error('Failed to save destination'); return; }
-              toast.success(val ? `Destination set to ${val}` : 'Destination cleared');
-              onUpdate();
-            }}
-          >
-            <option value="">— Not set —</option>
-            <option value="LabCorp">LabCorp</option>
-            <option value="Quest Diagnostics">Quest Diagnostics</option>
-            <option value="AdventHealth">AdventHealth</option>
-            <option value="Orlando Health">Orlando Health</option>
-            <option value="Genova Diagnostics">Genova Diagnostics (ship)</option>
-            <option value="UPS">UPS (specialty kit)</option>
-            <option value="FedEx">FedEx (specialty kit)</option>
-            <option value="Other">Other (see notes)</option>
-          </select>
-          {!appt.lab_destination && (
-            <p className="text-xs text-amber-600 flex items-center gap-1.5">
-              <AlertTriangle className="h-3 w-3" />
-              No destination set — phleb will not know where to deliver.
-            </p>
-          )}
-        </div>
+        {/* Lab Destination — where phleb drops the specimen.
+            Local state shadows the prop so the dropdown reflects the
+            saved value instantly even before the parent refetch lands.
+            When this appointment is part of a family group, the destination
+            propagates to all sibling rows (companions inherit primary). */}
+        <LabDestinationField appt={appt} onUpdate={onUpdate} />
 
         <Separator />
 
@@ -757,3 +731,110 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 };
 
 export default AppointmentDetailModal;
+
+/**
+ * LabDestinationField — controlled dropdown with two fixes baked in:
+ *   1. Optimistic local state so the dropdown reflects the saved value
+ *      INSTANTLY, not after the parent's slow refetch (was causing
+ *      "it doesn't save" UI illusion).
+ *   2. Family-group propagation: when the appointment is part of a
+ *      family_group_id, the destination saves to ALL siblings at once.
+ *      Companions don't have their own destination dropdown by default;
+ *      this keeps Meir + Shawna in sync.
+ */
+const LAB_DEST_OPTIONS = [
+  { value: '', label: '— Not set —' },
+  { value: 'LabCorp', label: 'LabCorp' },
+  { value: 'Quest Diagnostics', label: 'Quest Diagnostics' },
+  { value: 'AdventHealth', label: 'AdventHealth' },
+  { value: 'Orlando Health', label: 'Orlando Health' },
+  { value: 'Genova Diagnostics', label: 'Genova Diagnostics (ship)' },
+  { value: 'UPS', label: 'UPS (specialty kit)' },
+  { value: 'FedEx', label: 'FedEx (specialty kit)' },
+  { value: 'Other', label: 'Other (see notes)' },
+];
+
+const LabDestinationField: React.FC<{
+  appt: any;
+  onUpdate: () => void;
+}> = ({ appt, onUpdate }) => {
+  // Local override mirrors the saved value the moment we know it changed.
+  // Cleared whenever the prop changes (parent refetch eventually catches up).
+  const [local, setLocal] = useState<string>(appt.lab_destination || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setLocal(appt.lab_destination || '');
+  }, [appt.lab_destination, appt.id]);
+
+  const handleChange = async (val: string) => {
+    setLocal(val);
+    setSaving(true);
+    try {
+      const dest = val || null;
+      // Update the primary appointment row first
+      const { error } = await supabase
+        .from('appointments')
+        .update({ lab_destination: dest })
+        .eq('id', appt.id);
+      if (error) {
+        setLocal(appt.lab_destination || '');
+        toast.error(`Failed to save destination: ${error.message}`);
+        return;
+      }
+
+      // Family-group propagation: if this appt is part of a group,
+      // mirror the destination to every sibling so the phleb sees the
+      // same dropoff for all patients on the trip.
+      const groupId = appt.family_group_id;
+      if (groupId) {
+        const { error: groupErr } = await supabase
+          .from('appointments')
+          .update({ lab_destination: dest })
+          .eq('family_group_id', groupId)
+          .neq('status', 'cancelled');
+        if (groupErr) {
+          console.warn('[lab-destination] sibling propagation failed:', groupErr);
+        }
+      }
+
+      toast.success(
+        dest
+          ? `Destination set to ${dest}${groupId ? ' (applied to all family members)' : ''}`
+          : 'Destination cleared',
+      );
+      onUpdate();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="px-5 py-4 space-y-2">
+      <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
+        Specimen Delivery Destination
+        {saving && <span className="text-[10px] text-gray-500 font-normal">saving…</span>}
+      </p>
+      <p className="text-xs text-gray-500">
+        Where the phleb should drop the drawn specimen.
+        {appt.family_group_id && <span className="text-blue-600"> · Applied to all patients on this booking.</span>}
+      </p>
+      <select
+        className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm disabled:opacity-60"
+        value={local}
+        disabled={saving}
+        onChange={(e) => handleChange(e.target.value)}
+      >
+        {LAB_DEST_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+      {!local && (
+        <p className="text-xs text-amber-600 flex items-center gap-1.5">
+          <AlertTriangle className="h-3 w-3" />
+          No destination set — phleb will not know where to deliver.
+        </p>
+      )}
+    </div>
+  );
+};
