@@ -6,6 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
 import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { usePhlebotomistAppointments } from '@/hooks/usePhlebotomistAppointments';
+import PhlebEarningsCard from './PhlebEarningsCard';
 import { Calendar, MessageSquare, CheckCircle2, Settings, Home } from 'lucide-react';
 import BottomNav, { PhlebTab } from './BottomNav';
 import OnDutyToggle from './OnDutyToggle';
@@ -134,9 +135,15 @@ const PhlebDashboardShell: React.FC = () => {
           </div>
         </div>
 
+        {/* Earnings scoreboard — Hormozi: top-of-mind = top-of-screen.
+            Phleb opens dashboard wanting to know "what am I making today
+            and how does it stack up against my $5K monthly goal." Real-
+            time subscribed to appointments + staff_payouts. */}
+        {activeTab === 'schedule' && <PhlebEarningsCard />}
+
         {/* Quick Stats - only on schedule tab */}
         {activeTab === 'schedule' && (
-          <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 -mt-4 mb-4">
+          <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mb-4">
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white rounded-xl shadow-md p-3 text-center">
                 <p className="text-2xl font-bold text-[#B91C1C]">

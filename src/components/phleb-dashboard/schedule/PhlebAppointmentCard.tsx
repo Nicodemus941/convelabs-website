@@ -25,6 +25,7 @@ import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
 import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import RequestLabOrderButton from './RequestLabOrderButton';
 import LabOrderRequestStatus from './LabOrderRequestStatus';
+import AppointmentEarningPill from './AppointmentEarningPill';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
@@ -172,6 +173,16 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
+                    {/* Hormozi: show what THIS visit pays the phleb. Real
+                        amount via compute_phleb_take_cents — same RPC
+                        Stripe Connect uses to split the charge. Tips
+                        captured at online checkout are baked in. */}
+                    <AppointmentEarningPill
+                      appointmentId={appointment.id}
+                      serviceType={appointment.service_type}
+                      tipAmount={(appointment as any).tip_amount}
+                      hasCompanion={!!(appointment as any).family_group_id}
+                    />
                     {/* Org badge — phleb needs to know "billed through X" for
                         masked/org-covered patients (Aristotle, Elite Medical)
                         so they route questions + invoices correctly. */}
