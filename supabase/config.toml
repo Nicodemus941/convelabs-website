@@ -20,6 +20,16 @@ verify_jwt = false
 [functions.appointment-self-service]
 verify_jwt = false
 
+# Cron-only fns: they're invoked exclusively by pg_cron via pg_net.http_post.
+# verify_jwt=false matches the pattern used by remind-lab-request-patients,
+# reconcile-stripe-payments, daily-owner-brief, etc. The body has no
+# user-input — these just iterate DB rows on a schedule.
+[functions.remind-lab-order-requests]
+verify_jwt = false
+
+[functions.send-confirmation-requests]
+verify_jwt = false
+
 # Patient lab-order upload page hits this with the anon key only.
 # Token-based auth on the appointment_lab_order_requests row IS the
 # auth — we never trust the caller for anything beyond "I have this token."
