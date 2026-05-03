@@ -13,6 +13,7 @@ import AcquisitionByChannel from './AcquisitionByChannel';
 import RevenueTypeSplit from './RevenueTypeSplit';
 import Level0Tracker from './Level0Tracker';
 import BreakEvenTracker from './BreakEvenTracker';
+import LabOrderFunnelCard from './LabOrderFunnelCard';
 import ReviewsWidget from './ReviewsWidget';
 import OpsHealthCard from './OpsHealthCard';
 import TrendSparkline from './TrendSparkline';
@@ -160,6 +161,12 @@ const HormoziDashboard: React.FC = () => {
       <section>
         <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">This month at a glance</h2>
         <BreakEvenTracker />
+      </section>
+
+      {/* ─── LAB ORDER REQUEST FUNNEL (Sprint 2 metric) ───────────── */}
+      <section>
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Patient self-service</h2>
+        <LabOrderFunnelCard />
       </section>
 
       {/* ─── LEVEL 0 GATE TRACKER (master plan Part B) ───────────── */}

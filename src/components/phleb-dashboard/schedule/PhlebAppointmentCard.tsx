@@ -24,6 +24,7 @@ import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
 import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import RequestLabOrderButton from './RequestLabOrderButton';
+import LabOrderRequestStatus from './LabOrderRequestStatus';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
@@ -545,6 +546,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                         patientName={appointment.patient_name}
                       />
                     </div>
+                    <LabOrderRequestStatus appointmentId={appointment.id} />
                     {/* Inline OCR + org-match status — appears the moment a row exists */}
                     <LabOrderStatusList
                       appointmentId={appointment.id}
