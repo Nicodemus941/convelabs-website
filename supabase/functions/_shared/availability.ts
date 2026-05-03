@@ -256,7 +256,7 @@ export async function getAvailableSlotsForDate(
       .neq('status', 'cancelled'),
     supabase
       .from('time_blocks' as any)
-      .select('start_date, end_date')
+      .select('start_date, end_date, start_time, end_time')
       .lte('start_date', dateIso)
       .gte('end_date', dateIso),
   ]);
@@ -326,7 +326,25 @@ export async function getAvailableSlotsForDate(
     }
     return false;
   };
-  const fullyBlocked = (blockResp.data || []).length > 0;
+  // Split blocks into day-wide vs time-windowed. A row with start_time +
+  // end_time set blocks ONLY that window of the day (e.g. "block 6am
+  // 5/4 just for me"). A row with no times blocks the entire day.
+  const allBlocks = (blockResp.data || []) as any[];
+  const fullyBlocked = allBlocks.some(b => !b.start_time || !b.end_time);
+  const windowBlocks = allBlocks.filter(b => b.start_time && b.end_time);
+  const slotInsideWindowBlock = (t: string): boolean => {
+    if (windowBlocks.length === 0) return false;
+    const { h, m } = parseTime(t);
+    const tMin = h * 60 + m;
+    return windowBlocks.some(b => {
+      const { h: sh, m: sm } = parseTime(String(b.start_time));
+      const { h: eh, m: em } = parseTime(String(b.end_time));
+      const sMin = sh * 60 + sm;
+      const eMin = eh * 60 + em;
+      // start-inclusive, end-exclusive (matches our existing booking logic)
+      return tMin >= sMin && tMin < eMin;
+    });
+  };
 
   // Same-day lead time — phleb needs SAME_DAY_LEAD_MIN (90 min) to mobilize.
   // Removed the prior hard 11 AM cutoff; this is the only same-day filter now.
@@ -352,6 +370,7 @@ export async function getAvailableSlotsForDate(
 
   return localGrid.map(t => {
     if (fullyBlocked) return { time: t, available: false, reason: 'blocked' };
+    if (slotInsideWindowBlock(t)) return { time: t, available: false, reason: 'blocked' };
     if (!allowed.includes(t)) return { time: t, available: false, reason: 'outside_window' };
     if (!hasEnoughLead(t)) return { time: t, available: false, reason: 'past' };
     if (!fitsLabCutoff(t)) return { time: t, available: false, reason: 'outside_window' };

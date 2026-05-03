@@ -38,7 +38,11 @@ const AdminCalendar: React.FC = () => {
   const [stats, setStats] = useState({ today: 0, thisWeek: 0, upcoming: 0 });
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [recurringModalOpen, setRecurringModalOpen] = useState(false);
-  const [blockForm, setBlockForm] = useState({ startDate: '', endDate: '', reason: '', blockType: 'office_closure' });
+  // startTime / endTime are optional. When both are blank, the block
+  // covers the entire date range (legacy behavior). When set, they
+  // restrict the block to that time-of-day window so admins can carve
+  // out a single slot (e.g. 6am 5/4) without burning the whole day.
+  const [blockForm, setBlockForm] = useState({ startDate: '', endDate: '', startTime: '', endTime: '', reason: '', blockType: 'office_closure' });
   // Sprint 4 defaults — bundle pricing & % off baked in here so the UI + handler
   // agree on the math without duplication.
   const BUNDLE_DISCOUNT_PCT = 15;
@@ -658,6 +662,37 @@ const AdminCalendar: React.FC = () => {
               <div><Label>Start Date *</Label><Input type="date" value={blockForm.startDate} onChange={e => setBlockForm(p => ({ ...p, startDate: e.target.value }))} /></div>
               <div><Label>End Date *</Label><Input type="date" value={blockForm.endDate} onChange={e => setBlockForm(p => ({ ...p, endDate: e.target.value }))} /></div>
             </div>
+
+            {/* Optional time-of-day window — leave blank to block the
+                entire day(s). Useful for "I can't do 6am tomorrow" style
+                surgical blocks instead of taking the whole day off. */}
+            <div className="rounded-lg border border-dashed border-gray-300 p-3 bg-gray-50">
+              <p className="text-xs text-gray-600 mb-2">
+                <strong>Optional:</strong> block a specific time window only. Leave blank to block the entire day(s).
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Start Time</Label>
+                  <Input
+                    type="time"
+                    value={blockForm.startTime}
+                    onChange={e => setBlockForm(p => ({ ...p, startTime: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">End Time</Label>
+                  <Input
+                    type="time"
+                    value={blockForm.endTime}
+                    onChange={e => setBlockForm(p => ({ ...p, endTime: e.target.value }))}
+                  />
+                </div>
+              </div>
+              {blockForm.startTime && !blockForm.endTime && (
+                <p className="text-[11px] text-amber-700 mt-1.5">⚠ Add an end time too, or both fields will be ignored.</p>
+              )}
+            </div>
+
             <div><Label>Reason</Label><Input value={blockForm.reason} onChange={e => setBlockForm(p => ({ ...p, reason: e.target.value }))} placeholder="PTO, Office Closure, etc." /></div>
             <div>
               <Label>Block Type</Label>
@@ -673,13 +708,35 @@ const AdminCalendar: React.FC = () => {
               onClick={async () => {
                 setIsBlockSubmitting(true);
                 try {
+                  // Convert HH:MM (24h) → "h:mm AM/PM" to match the
+                  // format the rest of the slot-availability logic
+                  // expects (parseTime in the booking flow + edge fns).
+                  const to12h = (hhmm: string): string | null => {
+                    if (!hhmm) return null;
+                    const [hStr, mStr] = hhmm.split(':');
+                    const h = parseInt(hStr, 10);
+                    const m = parseInt(mStr, 10);
+                    if (isNaN(h) || isNaN(m)) return null;
+                    const period = h >= 12 ? 'PM' : 'AM';
+                    const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+                    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+                  };
+                  const startTime12 = to12h(blockForm.startTime);
+                  const endTime12 = to12h(blockForm.endTime);
+                  // Only persist time fields when BOTH are valid — partial
+                  // input gets ignored (warned in UI above).
+                  const useTimeWindow = !!(startTime12 && endTime12);
+
                   const { error } = await supabase.from('time_blocks' as any).insert({
                     start_date: blockForm.startDate, end_date: blockForm.endDate,
                     reason: blockForm.reason || 'Blocked', block_type: blockForm.blockType,
+                    ...(useTimeWindow ? { start_time: startTime12, end_time: endTime12 } : {}),
                   }).select();
                   if (error) throw error;
-                  toast.success('Dates blocked successfully');
-                  setBlockForm({ startDate: '', endDate: '', reason: '', blockType: 'office_closure' });
+                  toast.success(useTimeWindow
+                    ? `Blocked ${startTime12}–${endTime12} on ${blockForm.startDate}`
+                    : 'Dates blocked successfully');
+                  setBlockForm({ startDate: '', endDate: '', startTime: '', endTime: '', reason: '', blockType: 'office_closure' });
                   setBlockModalOpen(false);
                   fetchTimeBlocks();
                   fetchAppointments();

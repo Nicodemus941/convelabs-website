@@ -243,10 +243,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const [unlockSlot, setUnlockSlot] = useState<{ time: string; requiredTier?: MemberTier; reason?: string } | null>(null);
   const [heldSlots, setHeldSlots] = useState<Set<string>>(new Set());
 
-  // Fetch admin-blocked dates on mount
+  // Fetch admin-blocked dates on mount. Only FULL-day blocks (no
+  // start_time/end_time) gray out the date picker — time-windowed
+  // blocks (e.g. "block 6am 5/4") leave the date selectable and only
+  // gray out the specific slot in the time grid below.
   useEffect(() => {
-    supabase.from('time_blocks' as any).select('start_date, end_date').then(({ data }) => {
-      if (data) setBlockedDates(data.map((d: any) => ({ start: d.start_date, end: d.end_date })));
+    supabase.from('time_blocks' as any).select('start_date, end_date, start_time, end_time').then(({ data }) => {
+      if (data) {
+        const fullDayOnly = (data as any[]).filter((d: any) => !d.start_time || !d.end_time);
+        setBlockedDates(fullDayOnly.map((d: any) => ({ start: d.start_date, end: d.end_date })));
+      }
     });
   }, []);
 
@@ -389,6 +395,36 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         slotCounts.forEach((count, key) => {
           if (count >= maxPerSlot) booked.add(key);
         });
+
+        // Time-windowed admin blocks (e.g. "block 6am 5/4") — fold them
+        // into bookedSlots so the patient can't pick a slot that admin
+        // has explicitly carved out. Full-day blocks already make the
+        // date unselectable in the date picker via blockedDates.
+        try {
+          const { data: tBlocks } = await supabase
+            .from('time_blocks' as any)
+            .select('start_date, end_date, start_time, end_time')
+            .lte('start_date', dateStr)
+            .gte('end_date', dateStr);
+          for (const b of (tBlocks || []) as any[]) {
+            if (!b.start_time || !b.end_time) continue;
+            const parseTimeStr = (s: string) => {
+              const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(s).trim());
+              if (!m) return null;
+              let hh = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
+              if (m[3].toUpperCase() === 'PM' && hh !== 12) hh += 12;
+              if (m[3].toUpperCase() === 'AM' && hh === 12) hh = 0;
+              return hh * 60 + mm;
+            };
+            const sMin = parseTimeStr(b.start_time);
+            const eMin = parseTimeStr(b.end_time);
+            if (sMin === null || eMin === null) continue;
+            for (let t = sMin; t < eMin; t += 15) {
+              const h = Math.floor(t / 60); const m = t % 60;
+              booked.add(toSlotKey(h, m));
+            }
+          }
+        } catch (e) { console.warn('[time-block] window query failed:', e); }
 
         console.log('Slot blocking results:', {
           maxPerSlot,
