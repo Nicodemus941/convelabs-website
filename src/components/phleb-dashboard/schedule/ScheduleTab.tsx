@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import WeekStrip from './WeekStrip';
 import PhlebAppointmentCard from './PhlebAppointmentCard';
+import DaySummaryBanner from './DaySummaryBanner';
 import { CheckCircle2 } from 'lucide-react';
 
 interface ScheduleTabProps {
@@ -172,6 +173,11 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
             {isToday(selectedDate) ? 'Nothing scheduled for today.' : `Nothing scheduled for ${format(selectedDate, 'MMMM d')}.`}
           </p>
         </div>
+      )}
+
+      {/* Day summary — visits + projected earnings for the selected day */}
+      {!isLoading && dayAppointments.length > 0 && (
+        <DaySummaryBanner selectedDate={selectedDate} appointments={appointments as any} />
       )}
 
       {/* Active Appointments */}

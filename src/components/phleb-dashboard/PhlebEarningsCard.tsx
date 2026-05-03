@@ -13,11 +13,12 @@
  * a slot added or completed flips the numbers without a refresh.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
 import { DollarSign, TrendingUp, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface DayBucket {
   base_cents: number;
@@ -50,7 +51,11 @@ const PhlebEarningsCard: React.FC = () => {
   const [tomorrow, setTomorrow] = useState<DayBucket>(ZERO);
   const [week, setWeek] = useState<DayBucket>(ZERO);
   const [mtd, setMtd] = useState<DayBucket>(ZERO);
+  const [last7, setLast7] = useState<{ date: string; cents: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  // Track recent cancellations so we can ghost the lost $X (Hormozi
+  // "make the cost of cancellations visible"). Keyed by appt id.
+  const seenCancellations = useRef<Set<string>>(new Set());
 
   // Resolve staff_id from auth user
   useEffect(() => {
@@ -174,6 +179,39 @@ const PhlebEarningsCard: React.FC = () => {
       setTomorrow(buckets.tomorrow);
       setWeek(buckets.week);
       setMtd(buckets.mtd);
+
+      // Last-7-days mini sparkline. Sums per-day across both banked + projected
+      // for visits scheduled in those days. Banked dominates for past days,
+      // projected for today + future.
+      const sparkMap = new Map<string, number>();
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+        sparkMap.set(localISO(d), 0);
+      }
+      // Banked from payouts
+      payoutsByDate.forEach((v, dISO) => {
+        if (sparkMap.has(dISO)) sparkMap.set(dISO, (sparkMap.get(dISO) || 0) + v.amt);
+      });
+      // Projected from appts (only for today + future days within the 7-day window)
+      for (const a of (appts || []) as any[]) {
+        const apptDateISO = String(a.appointment_date).substring(0, 10);
+        if (!sparkMap.has(apptDateISO)) continue;
+        if (payoutAppointmentIds.has(a.id)) continue; // already counted via banked
+        // Cheap projection — match the per-day buckets we computed above
+        const tipCents = Math.round(((a.tip_amount || 0) as number) * 100);
+        const hasCompanion = !!(a.family_group_id && (groupCounts.get(a.family_group_id) || 0) > 1);
+        try {
+          const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
+            p_staff_id: staffId,
+            p_service_type: a.service_type || 'mobile',
+            p_tip_cents: tipCents,
+            p_has_companion: hasCompanion,
+          });
+          const take = parseInt(String(takeRes || 0), 10);
+          sparkMap.set(apptDateISO, (sparkMap.get(apptDateISO) || 0) + take);
+        } catch { /* skip */ }
+      }
+      setLast7(Array.from(sparkMap.entries()).map(([date, cents]) => ({ date, cents })));
     } finally {
       setLoading(false);
     }
@@ -182,10 +220,37 @@ const PhlebEarningsCard: React.FC = () => {
   useEffect(() => {
     if (!staffId) return;
     compute();
-    // Realtime: any appointment or staff_payouts insert/update flips the numbers
+    // Realtime: any appointment or staff_payouts insert/update flips the numbers.
+    // Bonus: when an appointment flips to cancelled, fire a "cost of cancel"
+    // toast so the phleb sees the lost $X. Hormozi rule: invisible costs are
+    // tolerated; visible costs get fixed.
     const ch = supabase
       .channel(`phleb-earnings-${staffId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, () => compute())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, async (payload: any) => {
+        try {
+          const newRow = payload.new || {};
+          const oldRow = payload.old || {};
+          const becameCancelled = newRow.status === 'cancelled' && oldRow.status !== 'cancelled';
+          if (becameCancelled && newRow.id && !seenCancellations.current.has(newRow.id)) {
+            seenCancellations.current.add(newRow.id);
+            const tipCents = Math.round(((newRow.tip_amount || 0) as number) * 100);
+            const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
+              p_staff_id: staffId,
+              p_service_type: newRow.service_type || 'mobile',
+              p_tip_cents: tipCents,
+              p_has_companion: !!newRow.family_group_id,
+            });
+            const lost = parseInt(String(takeRes || 0), 10);
+            if (lost > 0) {
+              toast.error(`Cancelled · lost $${(lost / 100).toFixed(0)}`, {
+                description: newRow.patient_name ? `${newRow.patient_name}'s visit was cancelled.` : undefined,
+                duration: 6000,
+              });
+            }
+          }
+        } catch { /* ignore */ }
+        compute();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_payouts' }, () => compute())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
@@ -249,6 +314,40 @@ const PhlebEarningsCard: React.FC = () => {
             <p className="text-[10px] text-emerald-700 mt-0.5">/ $5,040 goal</p>
           </div>
         </div>
+
+        {/* Last 7 days sparkline. Each bar = one day, height proportional
+            to that day's earnings (banked + projected). Today is the
+            rightmost bar with an emerald fill; past days are gray. */}
+        {last7.length > 0 && (() => {
+          const maxCents = Math.max(...last7.map(d => d.cents), 1);
+          const todayISO = localISO(new Date());
+          return (
+            <div className="px-3 py-2 border-t border-gray-100 bg-white">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Last 7 days</p>
+                <p className="text-[10px] text-gray-500">
+                  {fmt(last7.reduce((s, d) => s + d.cents, 0))} total
+                </p>
+              </div>
+              <div className="flex items-end gap-1 h-12">
+                {last7.map(d => {
+                  const isToday = d.date === todayISO;
+                  const heightPct = (d.cents / maxCents) * 100;
+                  const dayLabel = new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'narrow' });
+                  return (
+                    <div key={d.date} className="flex-1 flex flex-col items-center justify-end h-full" title={`${d.date}: ${fmt2(d.cents)}`}>
+                      <div
+                        className={`w-full rounded-t ${isToday ? 'bg-emerald-500' : 'bg-gray-300'}`}
+                        style={{ height: `${Math.max(heightPct, 4)}%` }}
+                      />
+                      <span className={`text-[9px] mt-0.5 ${isToday ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>{dayLabel}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </Card>
     </div>
   );
