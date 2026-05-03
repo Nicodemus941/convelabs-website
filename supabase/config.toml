@@ -8,6 +8,19 @@ schemas = ["public", "storage"]
 [functions.ai-sales-chat]
 verify_jwt = false
 
+# Twilio MMS webhook: Twilio doesn't include our JWT, just signs the
+# request body. Auth here is implicit via the From-number → request
+# row match (and could be tightened with Twilio signature validation
+# in a future hardening pass).
+[functions.twilio-mms-webhook]
+verify_jwt = false
+
+# Patient lab-order upload page hits this with the anon key only.
+# Token-based auth on the appointment_lab_order_requests row IS the
+# auth — we never trust the caller for anything beyond "I have this token."
+[functions.submit-appointment-lab-order]
+verify_jwt = false
+
 [functions.process-org-invoice-dunning]
 verify_jwt = false
 

@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
     if (patientPhone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
       try {
         // Hormozi: loss aversion > gain framing.
-        const smsBody = `Hi ${patientFirst} — ConveLabs here. We're prepping for your visit ${apptShort} but don't have your lab order yet. Without it we can't draw the right tubes. Quick 30-sec upload (photo or PDF works): ${patientUrl}`;
+        const smsBody = `Hi ${patientFirst} — ConveLabs here. We're prepping for your visit ${apptShort} but don't have your lab order yet. Without it we can't draw the right tubes. Two ways to send it: tap ${patientUrl} OR just text a photo back to this number.`;
         const fd = new URLSearchParams({
           To: normalizePhone(patientPhone),
           From: TWILIO_FROM,

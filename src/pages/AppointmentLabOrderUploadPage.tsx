@@ -25,7 +25,17 @@ import { resizeImageForUpload } from '@/lib/imageResize';
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
+interface FamilyMember {
+  appointment_id: string;
+  patient_name: string;
+  patient_first_name: string;
+  fasting_required: boolean;
+  already_uploaded: boolean;
+  is_primary: boolean;
+}
+
 interface ApptSummary {
+  appointment_id: string;
   patient_first_name: string;
   appointment_date: string;
   appointment_time: string | null;
@@ -34,6 +44,8 @@ interface ApptSummary {
   lab_destination: string | null;
   fasting_required: boolean | null;
   org_name: string | null;
+  family_group_id?: string | null;
+  family_members?: FamilyMember[];
 }
 
 const AppointmentLabOrderUploadPage: React.FC = () => {
@@ -69,9 +81,18 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
     })();
   }, [token]);
 
-  async function handleFile(rawFile: File) {
+  // Track which family member is currently being uploaded for so we can
+  // route the file + show a per-member spinner. null = single-patient
+  // mode (token's primary appointment).
+  const [activeMemberId, setActiveMemberId] = useState<string | null>(null);
+  // Local "this member is done" overlay so the UI flips immediately after
+  // upload without needing to re-fetch the summary.
+  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
+
+  async function handleFile(rawFile: File, targetAppointmentId?: string) {
     if (!token || uploading) return;
     setUploading(true);
+    if (targetAppointmentId) setActiveMemberId(targetAppointmentId);
     try {
       const file = await resizeImageForUpload(rawFile);
       // base64 encode
@@ -96,11 +117,24 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
           file_b64: fileB64,
           content_type: file.type || 'application/pdf',
           original_filename: file.name,
+          ...(targetAppointmentId ? { target_appointment_id: targetAppointmentId } : {}),
         }),
       });
       const j = await res.json();
       if (!res.ok) {
         setError(j.message || j.error || 'Upload failed. Please try again or call (941) 527-9169.');
+      } else if (targetAppointmentId) {
+        // Family-mode upload: mark this member done. Only flip to full
+        // success when EVERY sibling has uploaded.
+        setDoneIds(prev => {
+          const next = new Set(prev);
+          next.add(targetAppointmentId);
+          // Check completeness against summary
+          const allMembers = summary?.family_members || [];
+          const stillPending = allMembers.filter(m => !m.already_uploaded && !next.has(m.appointment_id));
+          if (stillPending.length === 0) setSuccess(true);
+          return next;
+        });
       } else {
         setSuccess(true);
       }
@@ -108,8 +142,18 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
       setError(e?.message || 'Upload crashed.');
     } finally {
       setUploading(false);
+      setActiveMemberId(null);
     }
   }
+
+  // Per-family-member file picker. Each card has its own hidden input.
+  const memberFileRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const onMemberChange = (memberId: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleFile(f, memberId);
+    const el = memberFileRefs.current[memberId];
+    if (el) el.value = '';
+  };
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -189,40 +233,118 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                 {summary.org_name && (
                   <p className="text-gray-600 text-xs mt-1">Ordered by {summary.org_name}</p>
                 )}
+                {summary.family_members && summary.family_members.length > 1 && (
+                  <p className="text-blue-700 text-xs mt-2 bg-blue-50 border border-blue-200 rounded px-2 py-1">
+                    👨‍👩‍👧 <strong>{summary.family_members.length} patients on this visit</strong> — please upload one lab order for each below.
+                  </p>
+                )}
               </div>
             )}
 
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*,application/pdf"
-              className="hidden"
-              onChange={onChange}
-            />
+            {/* FAMILY-GROUP MODE — one card per patient, each with own picker */}
+            {summary?.family_members && summary.family_members.length > 1 ? (
+              <div className="space-y-3">
+                {summary.family_members.map((m) => {
+                  const isDone = m.already_uploaded || doneIds.has(m.appointment_id);
+                  const isActive = activeMemberId === m.appointment_id && uploading;
+                  return (
+                    <div
+                      key={m.appointment_id}
+                      className={`border-2 rounded-xl p-4 transition ${
+                        isDone
+                          ? 'border-emerald-300 bg-emerald-50/60'
+                          : isActive
+                            ? 'border-blue-300 bg-blue-50/60'
+                            : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">
+                            {m.patient_name}
+                            {m.is_primary && <span className="ml-1.5 text-[10px] bg-gray-100 text-gray-600 border border-gray-200 rounded-full px-1.5 py-0.5">primary</span>}
+                          </p>
+                          {m.fasting_required && (
+                            <p className="text-[11px] text-amber-700 mt-0.5">⚠ Fasting required for this patient</p>
+                          )}
+                        </div>
+                        {isDone && (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
+                            <CheckCircle2 className="h-4 w-4" /> Done
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        ref={(el) => { memberFileRefs.current[m.appointment_id] = el; }}
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={onMemberChange(m.appointment_id)}
+                      />
+                      {!isDone && (
+                        <button
+                          type="button"
+                          onClick={() => memberFileRefs.current[m.appointment_id]?.click()}
+                          disabled={uploading}
+                          className={`w-full border-2 border-dashed rounded-lg p-4 text-center transition ${
+                            isActive
+                              ? 'border-blue-200 bg-white'
+                              : 'border-[#B91C1C]/30 bg-red-50/30 hover:bg-red-50/60'
+                          } ${uploading && !isActive ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                        >
+                          {isActive ? (
+                            <>
+                              <Loader2 className="h-7 w-7 animate-spin text-blue-600 mx-auto mb-1" />
+                              <p className="text-sm font-semibold text-blue-800">Uploading {m.patient_first_name}'s order…</p>
+                            </>
+                          ) : (
+                            <>
+                              <FileUp className="h-7 w-7 text-[#B91C1C] mx-auto mb-1" />
+                              <p className="text-sm font-bold text-gray-900">Upload {m.patient_first_name}'s lab order</p>
+                              <p className="text-[10px] text-gray-600 mt-0.5">📷 Photo · 📄 PDF / JPG / PNG</p>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,application/pdf"
+                  className="hidden"
+                  onChange={onChange}
+                />
 
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className={`w-full border-2 border-dashed rounded-xl p-8 text-center transition ${
-                uploading
-                  ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
-                  : 'border-[#B91C1C]/30 bg-red-50/30 hover:bg-red-50/60 cursor-pointer'
-              }`}
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="h-10 w-10 animate-spin text-[#B91C1C] mx-auto mb-3" />
-                  <p className="text-sm font-semibold text-gray-900">Uploading…</p>
-                </>
-              ) : (
-                <>
-                  <FileUp className="h-10 w-10 text-[#B91C1C] mx-auto mb-3" />
-                  <p className="text-base font-bold text-gray-900">Tap to upload</p>
-                  <p className="text-xs text-gray-600 mt-1">📷 Take a photo · 📄 Choose PDF / JPG / PNG</p>
-                </>
-              )}
-            </button>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className={`w-full border-2 border-dashed rounded-xl p-8 text-center transition ${
+                    uploading
+                      ? 'border-gray-200 bg-gray-50 cursor-not-allowed'
+                      : 'border-[#B91C1C]/30 bg-red-50/30 hover:bg-red-50/60 cursor-pointer'
+                  }`}
+                >
+                  {uploading ? (
+                    <>
+                      <Loader2 className="h-10 w-10 animate-spin text-[#B91C1C] mx-auto mb-3" />
+                      <p className="text-sm font-semibold text-gray-900">Uploading…</p>
+                    </>
+                  ) : (
+                    <>
+                      <FileUp className="h-10 w-10 text-[#B91C1C] mx-auto mb-3" />
+                      <p className="text-base font-bold text-gray-900">Tap to upload</p>
+                      <p className="text-xs text-gray-600 mt-1">📷 Take a photo · 📄 Choose PDF / JPG / PNG</p>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
 
             <p className="text-[11px] text-center text-gray-500 mt-3">
               Most patients finish in under 30 seconds.

@@ -55,7 +55,7 @@ async function loadRequestRow(admin: any, token: string) {
 async function loadAppointmentSummary(admin: any, appointmentId: string) {
   const { data: appt } = await admin
     .from('appointments')
-    .select('id, patient_name, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id')
+    .select('id, patient_name, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id, family_group_id')
     .eq('id', appointmentId)
     .maybeSingle();
   if (!appt) return null;
@@ -68,7 +68,36 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
       .maybeSingle();
     orgName = (org as any)?.name || null;
   }
+
+  // If this is part of a family group, pull all siblings so the upload
+  // page can show one card per patient. Each sibling that already has
+  // a lab order on file is marked done (still listed for clarity, just
+  // can't be re-uploaded from this page).
+  let familyMembers: any[] = [];
+  if (appt.family_group_id) {
+    const { data: sibs } = await admin
+      .from('appointments')
+      .select('id, patient_name, fasting_required, lab_order_file_path, companion_role')
+      .eq('family_group_id', appt.family_group_id)
+      .neq('status', 'cancelled');
+    familyMembers = (sibs || []).map((s: any) => ({
+      appointment_id: s.id,
+      patient_name: s.patient_name,
+      patient_first_name: String(s.patient_name || '').split(' ')[0] || 'patient',
+      fasting_required: !!s.fasting_required,
+      already_uploaded: !!s.lab_order_file_path,
+      is_primary: s.id === appt.id || s.companion_role === 'primary',
+    }));
+    // Sort: primary first, then alpha
+    familyMembers.sort((a, b) => {
+      if (a.is_primary && !b.is_primary) return -1;
+      if (!a.is_primary && b.is_primary) return 1;
+      return (a.patient_name || '').localeCompare(b.patient_name || '');
+    });
+  }
+
   return {
+    appointment_id: appt.id,
     patient_first_name: String(appt.patient_name || 'there').split(' ')[0],
     appointment_date: appt.appointment_date,
     appointment_time: appt.appointment_time,
@@ -77,6 +106,8 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
     lab_destination: appt.lab_destination,
     fasting_required: appt.fasting_required,
     org_name: orgName,
+    family_group_id: appt.family_group_id,
+    family_members: familyMembers,
   };
 }
 
@@ -126,6 +157,10 @@ Deno.serve(async (req) => {
     const fileB64: string = body?.file_b64 || '';
     const contentType: string = body?.content_type || 'application/pdf';
     const origName: string = body?.original_filename || 'lab-order';
+    // Optional — when the upload is for a sibling appointment in the same
+    // family group as the token's anchor, the page sends target_appointment_id
+    // so we route the file + DB writes to the correct row.
+    const targetAppointmentId: string | undefined = body?.target_appointment_id;
 
     if (!token || !fileB64) {
       return new Response(JSON.stringify({ error: 'token + file_b64 required' }), {
@@ -141,6 +176,29 @@ Deno.serve(async (req) => {
     }
     const requestRow = result.row;
 
+    // If a target appointment is specified, validate it belongs to the
+    // same family group as the token's anchor — prevents the link from
+    // being abused to upload to unrelated appointments.
+    let effectiveAppointmentId = requestRow.appointment_id;
+    if (targetAppointmentId && targetAppointmentId !== requestRow.appointment_id) {
+      const { data: anchor } = await admin
+        .from('appointments')
+        .select('family_group_id')
+        .eq('id', requestRow.appointment_id)
+        .maybeSingle();
+      const { data: target } = await admin
+        .from('appointments')
+        .select('id, family_group_id')
+        .eq('id', targetAppointmentId)
+        .maybeSingle();
+      if (!target || !anchor?.family_group_id || target.family_group_id !== anchor.family_group_id) {
+        return new Response(JSON.stringify({ error: 'cross_group_upload', message: 'That patient is not part of this booking.' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      effectiveAppointmentId = targetAppointmentId;
+    }
+
     const bytes = decodeB64ToUint8(fileB64);
     if (bytes.length > MAX_BYTES) {
       return new Response(JSON.stringify({ error: 'file_too_large', message: 'Please upload a file under 20 MB.' }), {
@@ -148,9 +206,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Build a safe filename
+    // Build a safe filename — uses the effective appointment so multi-
+    // family uploads each get a unique path tied to their patient row.
     const ext = (origName.split('.').pop() || (contentType.includes('pdf') ? 'pdf' : 'jpg')).toLowerCase().replace(/[^a-z0-9]/g, '');
-    const safeName = `patient_${requestRow.appointment_id.substring(0, 8)}_${Date.now()}.${ext}`;
+    const safeName = `patient_${effectiveAppointmentId.substring(0, 8)}_${Date.now()}.${ext}`;
 
     // Upload to storage
     const { error: upErr } = await admin.storage
@@ -169,7 +228,7 @@ Deno.serve(async (req) => {
     const { data: lo } = await admin
       .from('appointment_lab_orders')
       .insert({
-        appointment_id: requestRow.appointment_id,
+        appointment_id: effectiveAppointmentId,
         file_path: safeName,
         original_filename: origName,
         file_size: bytes.length,
@@ -182,8 +241,8 @@ Deno.serve(async (req) => {
     try {
       const { data: appt } = await admin
         .from('appointments')
-        .select('lab_order_file_path, patient_name, appointment_date, appointment_time')
-        .eq('id', requestRow.appointment_id)
+        .select('lab_order_file_path, patient_name, appointment_date, appointment_time, family_group_id')
+        .eq('id', effectiveAppointmentId)
         .maybeSingle();
       const existing = (appt as any)?.lab_order_file_path
         ? String((appt as any).lab_order_file_path).split('\n').filter(Boolean)
@@ -191,7 +250,7 @@ Deno.serve(async (req) => {
       if (!existing.includes(safeName)) existing.push(safeName);
       await admin.from('appointments')
         .update({ lab_order_file_path: existing.join('\n') })
-        .eq('id', requestRow.appointment_id);
+        .eq('id', effectiveAppointmentId);
 
       // Owner ping for next-24h visits — phleb wants to know the prep landed
       try {
@@ -218,12 +277,31 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn('[submit-lab-order] owner ping skipped:', e); }
     } catch (e) { console.warn('[submit-lab-order] legacy stamp failed:', e); }
 
-    // Mark the request complete
+    // Mark the request complete — but only if every sibling in the
+    // family group now has a lab order. Otherwise stay in 'opened'
+    // so reminder cron keeps nudging until the booker finishes the set.
+    let allDone = true;
+    try {
+      const { data: anchor } = await admin
+        .from('appointments')
+        .select('family_group_id')
+        .eq('id', requestRow.appointment_id)
+        .maybeSingle();
+      if (anchor?.family_group_id) {
+        const { data: sibs } = await admin
+          .from('appointments')
+          .select('id, lab_order_file_path')
+          .eq('family_group_id', anchor.family_group_id)
+          .neq('status', 'cancelled');
+        allDone = (sibs || []).every((s: any) => !!s.lab_order_file_path);
+      }
+    } catch (e) { console.warn('[submit-lab-order] family completion check failed:', e); }
+
     await admin.from('appointment_lab_order_requests')
       .update({
-        status: 'uploaded',
-        uploaded_at: new Date().toISOString(),
-        uploaded_file_path: safeName,
+        status: allDone ? 'uploaded' : 'opened',
+        uploaded_at: allDone ? new Date().toISOString() : null,
+        uploaded_file_path: allDone ? safeName : null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', requestRow.id);
