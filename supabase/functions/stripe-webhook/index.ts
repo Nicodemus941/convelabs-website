@@ -947,20 +947,38 @@ async function handleAppointmentPayment(session: any) {
         plan = newPlan;
       }
 
-      if (userId && plan) {
+      // Skip if userId is the literal string 'guest' (placeholder from a
+      // logged-out checkout) — there's no real user to attach the
+      // membership to, and 'guest' will fail the uuid cast on user_id.
+      // The orphan reconciler will surface this so admin can manually
+      // resolve via guest-claim email later.
+      const isRealUuid = (v: any) => typeof v === 'string' && /^[0-9a-f-]{32,36}$/i.test(v);
+      if (userId === 'guest' || !isRealUuid(userId)) {
+        console.warn(`[membership-signup] guest checkout — no DB row created (subscription ${session.subscription || 'none'}, email ${email || 'none'})`);
+      } else if (userId && plan) {
         // Create or update membership
         const nextRenewal = new Date();
         nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
 
+        // CRITICAL: onConflict must point at a column with a UNIQUE
+        // constraint. user_id has only a regular index — the actual
+        // unique constraint is uniq_user_memberships_stripe_sub on
+        // stripe_subscription_id. Using 'user_id' here threw
+        // "no unique or exclusion constraint matching the ON CONFLICT
+        // specification" and orphaned the Stripe payment.
+        const stripeSubscriptionId = typeof session.subscription === 'string'
+          ? session.subscription
+          : session.subscription?.id || null;
         await supabaseClient.from('user_memberships').upsert({
           user_id: userId,
           plan_id: plan.id,
           status: 'active',
           stripe_customer_id: session.customer || null,
+          stripe_subscription_id: stripeSubscriptionId,
           billing_frequency: 'annual',
           next_renewal: nextRenewal.toISOString(),
           is_primary_member: true,
-        }, { onConflict: 'user_id' });
+        }, { onConflict: 'stripe_subscription_id' });
 
         console.log(`Membership activated: ${planName} for user ${userId}`);
 
@@ -1265,6 +1283,9 @@ async function handleAppointmentPayment(session: any) {
             ? session.subscription
             : session.subscription?.id || null;
 
+          // onConflict must match a UNIQUE constraint — user_id only has
+          // a regular index. Use stripe_subscription_id which has
+          // uniq_user_memberships_stripe_sub on it.
           await supabaseClient.from('user_memberships').upsert({
             user_id: memberUserId,
             plan_id: plan.id,
@@ -1274,7 +1295,7 @@ async function handleAppointmentPayment(session: any) {
             billing_frequency: 'annual',
             next_renewal: nextRenewal.toISOString(),
             is_primary_member: true,
-          }, { onConflict: 'user_id' });
+          }, { onConflict: 'stripe_subscription_id' });
 
           // Stamp the appointment row with the new tier so the welcome flow
           // shows "your VIP rate is now active" instead of pay-as-you-go.
