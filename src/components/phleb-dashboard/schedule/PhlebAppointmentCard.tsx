@@ -22,6 +22,7 @@ import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
 import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
+import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
@@ -56,6 +57,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string }>({ open: false, path: null });
   // Bumped after every phleb-side lab-order upload so the status list re-fetches immediately
   const [labOrderRefreshKey, setLabOrderRefreshKey] = useState(0);
+  // Local override — flips the "Lab Orders" conditional branch the moment
+  // an upload finishes, without waiting for the parent appointment row to
+  // re-fetch. The DB stamp inside PhlebUploadLabOrderButton ensures next
+  // page-load is also consistent. Same pattern for insurance card.
+  const [labOrderJustUploaded, setLabOrderJustUploaded] = useState(false);
+  const [insuranceJustUploaded, setInsuranceJustUploaded] = useState<string | null>(null);
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
   // Pre-flight readiness: does this visit have everything the phleb needs?
@@ -439,7 +446,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               </div>
 
               {/* Lab Order files (uploaded requisitions) */}
-              {appointment.lab_order_file_path ? (() => {
+              {(appointment.lab_order_file_path || labOrderJustUploaded) ? (() => {
                 // Newline-first split (current trigger output); fall back to
                 // comma-split for legacy rows. Lab-order filenames CAN contain
                 // commas ("Rienzi, Mary Ellen.pdf") which broke the old
@@ -480,7 +487,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       appointmentId={appointment.id}
                       variant="subtle"
                       label="Add another"
-                      onUploaded={() => setLabOrderRefreshKey(k => k + 1)}
+                      onUploaded={() => { setLabOrderRefreshKey(k => k + 1); setLabOrderJustUploaded(true); }}
                     />
                   </div>
 
@@ -529,7 +536,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       appointmentId={appointment.id}
                       variant="primary"
                       label="Upload Lab Order"
-                      onUploaded={() => setLabOrderRefreshKey(k => k + 1)}
+                      onUploaded={() => { setLabOrderRefreshKey(k => k + 1); setLabOrderJustUploaded(true); }}
                     />
                     {/* Inline OCR + org-match status — appears the moment a row exists */}
                     <LabOrderStatusList
@@ -540,21 +547,36 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 )
               )}
 
-              {/* Insurance Card */}
-              {appointment.insurance_card_path ? (
+              {/* Insurance Card — view + capture from the field. Phleb
+                  can snap a photo of front/back; saves to the appointment
+                  AND to the patient's profile so future visits inherit. */}
+              {(appointment.insurance_card_path || insuranceJustUploaded) ? (
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
                     <Shield className="h-3.5 w-3.5 text-gray-500" />
                     Insurance Card
                   </p>
-                  <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setLabOrderViewer({ open: true, path: appointment.insurance_card_path!, name: 'Insurance Card' });
-                    }}>
-                    <Shield className="h-3.5 w-3.5" />
-                    <span>View Insurance Card</span>
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLabOrderViewer({
+                          open: true,
+                          path: insuranceJustUploaded || appointment.insurance_card_path!,
+                          name: 'Insurance Card',
+                        });
+                      }}>
+                      <Shield className="h-3.5 w-3.5" />
+                      <span>View Insurance Card</span>
+                    </Button>
+                    <PhlebUploadInsuranceCardButton
+                      appointmentId={appointment.id}
+                      patientId={(appointment as any).patient_id || null}
+                      label="Replace / Add back"
+                      variant="subtle"
+                      onUploaded={(p) => setInsuranceJustUploaded(p)}
+                    />
+                  </div>
                 </div>
               ) : (
                 // Only warn for services that usually need insurance
@@ -564,7 +586,16 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       <Shield className="h-3.5 w-3.5 text-gray-500" />
                       Insurance Card
                     </p>
-                    <p className="text-xs text-gray-500">No insurance card on file — ask patient at visit if required.</p>
+                    <p className="text-xs text-amber-600 mb-2">
+                      No insurance card on file. Snap a photo at the visit — we'll save it to the patient's chart.
+                    </p>
+                    <PhlebUploadInsuranceCardButton
+                      appointmentId={appointment.id}
+                      patientId={(appointment as any).patient_id || null}
+                      label="Capture Insurance Card"
+                      variant="primary"
+                      onUploaded={(p) => setInsuranceJustUploaded(p)}
+                    />
                   </div>
                 )
               )}

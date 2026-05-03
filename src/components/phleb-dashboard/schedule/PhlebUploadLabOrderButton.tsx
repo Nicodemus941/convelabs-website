@@ -82,6 +82,30 @@ const PhlebUploadLabOrderButton: React.FC<Props> = ({ appointmentId, onUploaded,
 
       const labOrderId = (row as any).id;
 
+      // 3a. Stamp appointments.lab_order_file_path so the legacy "is there
+      // a lab order yet?" UI conditional flips immediately. Without this,
+      // the phleb dashboard shows "No lab order uploaded" until a manual
+      // page refresh — caller's onUploaded() bumps a refreshKey but the
+      // parent appointment row isn't re-fetched, so the branch stays
+      // stuck. Most reliable fix: write the path to both places. The
+      // appointment row uses newline-delimited file paths to support
+      // multiple lab orders on the same appointment.
+      try {
+        const { data: appt } = await supabase
+          .from('appointments')
+          .select('lab_order_file_path')
+          .eq('id', appointmentId)
+          .maybeSingle();
+        const existing = (appt as any)?.lab_order_file_path
+          ? String((appt as any).lab_order_file_path).split('\n').filter(Boolean)
+          : [];
+        if (!existing.includes(safeName)) existing.push(safeName);
+        await supabase
+          .from('appointments')
+          .update({ lab_order_file_path: existing.join('\n') })
+          .eq('id', appointmentId);
+      } catch (e) { console.warn('[phleb-upload] legacy path stamp failed:', e); }
+
       // 4. Show progress toast — OCR can take 5-15s on Claude Vision
       toast.loading('Reading lab order — matching to provider…', { id: 'ocr-' + labOrderId, duration: 30000 });
 
