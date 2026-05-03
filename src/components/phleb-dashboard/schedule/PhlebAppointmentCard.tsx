@@ -66,6 +66,36 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   // page-load is also consistent. Same pattern for insurance card.
   const [labOrderJustUploaded, setLabOrderJustUploaded] = useState(false);
   const [insuranceJustUploaded, setInsuranceJustUploaded] = useState<string | null>(null);
+  // Pull the patient's profile insurance fields. OCR (ocr-lab-order edge fn)
+  // extracts provider/member/group from uploaded lab orders and writes
+  // them to tenant_patients. We display them even when the card IMAGE
+  // (insurance_card_path) is missing — they're separate signals.
+  const [patientInsurance, setPatientInsurance] = useState<{
+    provider: string | null;
+    member_id: string | null;
+    group_number: string | null;
+  } | null>(null);
+  useEffect(() => {
+    const pid = (appointment as any).patient_id;
+    if (!pid) { setPatientInsurance(null); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('tenant_patients')
+        .select('insurance_provider, insurance_member_id, insurance_group_number')
+        .eq('id', pid)
+        .maybeSingle();
+      if (!cancelled && data) {
+        setPatientInsurance({
+          provider: (data as any).insurance_provider || null,
+          member_id: (data as any).insurance_member_id || null,
+          group_number: (data as any).insurance_group_number || null,
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [(appointment as any).patient_id, insuranceJustUploaded]);
+  const hasInsuranceText = !!(patientInsurance?.provider || patientInsurance?.member_id);
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
   // Pre-flight readiness: does this visit have everything the phleb needs?
@@ -576,32 +606,61 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 )
               )}
 
-              {/* Insurance Card — view + capture from the field. Phleb
-                  can snap a photo of front/back; saves to the appointment
-                  AND to the patient's profile so future visits inherit. */}
-              {(appointment.insurance_card_path || insuranceJustUploaded) ? (
+              {/* Insurance — shows EITHER the card image OR the parsed
+                  text fields (extracted from the lab order via ocr-lab-order),
+                  whichever is available. Both can coexist. */}
+              {(appointment.insurance_card_path || insuranceJustUploaded || hasInsuranceText) ? (
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
                     <Shield className="h-3.5 w-3.5 text-gray-500" />
-                    Insurance Card
+                    Insurance
                   </p>
+
+                  {/* Parsed text fields from OCR / patient profile */}
+                  {hasInsuranceText && (
+                    <div className="mb-2 text-xs text-gray-700 space-y-0.5 bg-gray-50 border border-gray-100 rounded p-2">
+                      {patientInsurance?.provider && (
+                        <p>
+                          <span className="text-gray-500 uppercase tracking-wider text-[10px] mr-1">Provider</span>
+                          <span className="font-medium capitalize">{patientInsurance.provider}</span>
+                        </p>
+                      )}
+                      {patientInsurance?.member_id && (
+                        <p>
+                          <span className="text-gray-500 uppercase tracking-wider text-[10px] mr-1">Member ID</span>
+                          <span className="font-mono">{patientInsurance.member_id}</span>
+                        </p>
+                      )}
+                      {patientInsurance?.group_number && (
+                        <p>
+                          <span className="text-gray-500 uppercase tracking-wider text-[10px] mr-1">Group</span>
+                          <span className="font-mono">{patientInsurance.group_number}</span>
+                        </p>
+                      )}
+                      <p className="text-[10px] text-emerald-700 mt-1">✓ Auto-extracted from lab order</p>
+                    </div>
+                  )}
+
+                  {/* Card image actions */}
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setLabOrderViewer({
-                          open: true,
-                          path: insuranceJustUploaded || appointment.insurance_card_path!,
-                          name: 'Insurance Card',
-                        });
-                      }}>
-                      <Shield className="h-3.5 w-3.5" />
-                      <span>View Insurance Card</span>
-                    </Button>
+                    {(appointment.insurance_card_path || insuranceJustUploaded) && (
+                      <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setLabOrderViewer({
+                            open: true,
+                            path: insuranceJustUploaded || appointment.insurance_card_path!,
+                            name: 'Insurance Card',
+                          });
+                        }}>
+                        <Shield className="h-3.5 w-3.5" />
+                        <span>View Insurance Card</span>
+                      </Button>
+                    )}
                     <PhlebUploadInsuranceCardButton
                       appointmentId={appointment.id}
                       patientId={(appointment as any).patient_id || null}
-                      label="Replace / Add back"
+                      label={(appointment.insurance_card_path || insuranceJustUploaded) ? 'Replace / Add back' : 'Add card photo'}
                       variant="subtle"
                       onUploaded={(p) => setInsuranceJustUploaded(p)}
                     />

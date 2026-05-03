@@ -531,7 +531,11 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
             <ReadinessItem ok={!!appt.address} label="Address" />
             <ReadinessItem ok={!!(labOrderCount && labOrderCount > 0) || !!appt.lab_order_file_path} label={labOrderCount ? `${labOrderCount} lab order${labOrderCount === 1 ? '' : 's'}` : 'Lab order'} />
-            <ReadinessItem ok={!!appt.insurance_card_path} label="Insurance" partialOk={appt.service_type === 'in-office' || (appt.service_type || '').startsWith('partner-')} />
+            <ReadinessItem
+              ok={!!appt.insurance_card_path || !!patientData?.insurance_provider}
+              label="Insurance"
+              partialOk={appt.service_type === 'in-office' || (appt.service_type || '').startsWith('partner-')}
+            />
             <ReadinessItem ok={!!appt.lab_destination} label="Destination" />
           </div>
         </div>
