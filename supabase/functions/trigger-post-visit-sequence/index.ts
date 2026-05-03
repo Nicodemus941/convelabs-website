@@ -57,7 +57,12 @@ Deno.serve(async (req) => {
     steps.push({ step: 'specimen_confirm', delay: 0 });
     if (isFirstVisit) steps.push({ step: 'survey', delay: 120 });
     if (!hasRecentReview) steps.push({ step: 'review_request', delay: 1440 });
-    steps.push({ step: 'results_checkin', delay: 4320 });
+    // Disabled 2026-05-03 — owner doesn't want to be responsible for
+    // chasing lab-result delivery. Lab portal handoff is the lab's
+    // accountability, not ConveLabs's. Keep the step type registered
+    // in process-post-visit-sequences for backward compat; just stop
+    // seeding new ones.
+    // steps.push({ step: 'results_checkin', delay: 4320 });
     if (isFirstVisit) steps.push({ step: 'membership_upsell', delay: 10080 });
     if (isFirstVisit) steps.push({ step: 'referral_prompt', delay: 20160 });
     // 45 days for first-timers, 21 days for returning patients

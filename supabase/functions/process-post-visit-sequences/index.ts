@@ -198,6 +198,19 @@ Deno.serve(async (req) => {
             break;
           }
           case 'results_checkin': {
+            // Disabled 2026-05-03 — owner opted out of chasing lab-result
+            // delivery (the "no" reply triggered an owner SMS asking them
+            // to call the lab on the patient's behalf, which they don't
+            // want to be responsible for). Mark any leftover pending row
+            // as 'skipped' and short-circuit. Step seeding already removed
+            // from trigger-post-visit-sequence.
+            await admin.from('post_visit_sequences')
+              .update({ status: 'skipped' })
+              .eq('id', seq.id);
+            break;
+          }
+          // Legacy results_checkin send path — disabled, kept for git history
+          case '__results_checkin_legacy': {
             if (MAILGUN_API_KEY && seq.patient_email) {
               // 1-click yes/no → submit-results-checkin edge fn captures into
               // lab_results_checkin and SMS-alerts owner on "no" so they can
