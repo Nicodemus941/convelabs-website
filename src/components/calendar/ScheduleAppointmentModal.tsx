@@ -1095,8 +1095,14 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 value={address}
                 onChange={(v) => setAddress(v)}
                 onPlaceSelected={(place) => {
-                  const full = [place.address, place.city, place.state, place.zipCode].filter(Boolean).join(', ');
-                  setAddress(full || place.address);
+                  // Store the street-only portion in the address field;
+                  // city + zip get their own fields below. Previously we
+                  // crammed the full "street, city, state zip" string
+                  // into address AND left city/zip blank — admin had to
+                  // retype them. Now the picker fills all three at once.
+                  setAddress(place.address || place.street || '');
+                  if (place.city) setCity(place.city);
+                  if (place.zipCode) setZipcode(place.zipCode);
                 }}
                 placeholder="Start typing — Google suggests"
               />
