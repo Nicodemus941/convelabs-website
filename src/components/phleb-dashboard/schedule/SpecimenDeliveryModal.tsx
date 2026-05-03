@@ -30,6 +30,7 @@ import { Package, Loader2, Send, MapPin, Check, Users, Building2, AlertTriangle,
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
+import TubeConfirmation from './TubeConfirmation';
 
 const LABS = [
   { value: 'labcorp', label: 'LabCorp' },
@@ -673,6 +674,11 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                   <SignaturePad ref={signatureRef} />
                 </div>
               </div>
+
+              {/* Tube confirmation — Hormozi Sprint 3. One-tap "predicted
+                  tubes were correct" → bumps catalog rows to confidence 1.0.
+                  Mismatches captured for admin review. */}
+              <TubeConfirmation appointmentId={appointmentId} />
             </>
           )}
         </div>

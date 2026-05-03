@@ -64,6 +64,7 @@ const TubePredictionPanel: React.FC<Props> = ({ appointmentId, labDestination, r
   const [loading, setLoading] = useState(true);
   const [prediction, setPrediction] = useState<Prediction | null>(null);
   const [allCodes, setAllCodes] = useState<string[]>([]);
+  const [aiResolving, setAiResolving] = useState(false);
 
   useEffect(() => {
     if (!appointmentId || !labDestination) {
@@ -115,6 +116,33 @@ const TubePredictionPanel: React.FC<Props> = ({ appointmentId, labDestination, r
           });
         if (error) throw error;
         if (!cancelled) setPrediction(pred as Prediction);
+
+        // AI fallback — fire Claude lookups for any missing codes that
+        // look like real test codes (digits or short ALPHA tokens, not
+        // free-form text). Cached forever in lab_test_catalog. Once
+        // any lookup completes, we re-run predict_tube_requirements
+        // to fold the new rows in.
+        const missing = ((pred as Prediction)?.missing_codes || []).filter(c =>
+          /^[A-Z0-9-]{1,12}$/i.test(c) && !c.includes(' ')
+        );
+        if (missing.length > 0 && !cancelled) {
+          setAiResolving(true);
+          const lookups = missing.slice(0, 8).map(code =>
+            supabase.functions.invoke('lookup-lab-test-code', {
+              body: { lab_name: labDestination, test_code: code },
+            }).catch(() => null),
+          );
+          await Promise.all(lookups);
+          if (!cancelled) {
+            const { data: predRetry } = await supabase
+              .rpc('predict_tube_requirements' as any, {
+                p_lab_name: labDestination,
+                p_test_codes: codeArr,
+              });
+            if (predRetry) setPrediction(predRetry as Prediction);
+            setAiResolving(false);
+          }
+        }
       } catch (e) {
         console.warn('[tube-prediction] failed:', e);
         if (!cancelled) setPrediction(null);
@@ -161,6 +189,11 @@ const TubePredictionPanel: React.FC<Props> = ({ appointmentId, labDestination, r
         <p className="text-[10px] uppercase tracking-wider font-semibold text-indigo-700 flex items-center gap-1.5">
           <FlaskConical className="h-3 w-3" />
           Draw Plan · {labDestination}
+          {aiResolving && (
+            <span className="ml-1 text-[9px] normal-case tracking-normal text-indigo-500 flex items-center gap-1">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" /> resolving extra codes…
+            </span>
+          )}
         </p>
         <span className="text-[10px] text-indigo-600 font-medium">
           {totalTubeCount} tube{totalTubeCount === 1 ? '' : 's'} · {prediction.total_volume_ml} mL total
