@@ -25,7 +25,7 @@ interface LabOrderRow {
   id: string;
   file_path: string;
   original_filename: string | null;
-  file_size_bytes: number | null;
+  file_size: number | null;
   page_count: number | null;
   ocr_status: 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
   ocr_detected_panels: any;
@@ -172,7 +172,7 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
             file_path: path,
             original_filename: file.name,
             content_sha256: sha,
-            file_size_bytes: file.size,
+            file_size: file.size,
             mime_type: file.type || 'application/octet-stream',
             page_count: pages,
             ocr_status: 'pending',
@@ -338,7 +338,7 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
                     <div className="text-sm font-medium text-gray-900 truncate">{displayName}</div>
                     <div className="text-[11px] text-gray-500 flex items-center gap-1.5 flex-wrap mt-0.5">
                       {r.page_count && <span>{r.page_count} page{r.page_count === 1 ? '' : 's'}</span>}
-                      {r.file_size_bytes && <span>· {(r.file_size_bytes / 1024).toFixed(0)} KB</span>}
+                      {r.file_size && <span>· {(r.file_size / 1024).toFixed(0)} KB</span>}
                       {/* OCR status badge */}
                       {r.ocr_status === 'pending' && <span className="inline-flex items-center gap-0.5 text-blue-700"><Loader2 className="h-3 w-3 animate-spin" /> queued</span>}
                       {r.ocr_status === 'running' && <span className="inline-flex items-center gap-0.5 text-blue-700"><Sparkles className="h-3 w-3 animate-pulse" /> reading</span>}

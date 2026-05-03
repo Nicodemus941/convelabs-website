@@ -80,7 +80,7 @@ const LabOrderUpload: React.FC<LabOrderUploadProps> = ({
           file_path: filePath,
           original_filename: selectedFile.name,
           content_sha256: sha,
-          file_size_bytes: selectedFile.size,
+          file_size: selectedFile.size,
           mime_type: selectedFile.type || 'application/octet-stream',
           page_count: selectedFile.type === 'application/pdf' ? null : 1,
           ocr_status: 'pending',
