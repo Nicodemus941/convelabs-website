@@ -29,6 +29,8 @@ const BookNow = lazy(() => import('../pages/BookNow'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 const PatientLabRequestPage = lazy(() => import('../pages/PatientLabRequestPage'));
 const AppointmentLabOrderUploadPage = lazy(() => import('../pages/AppointmentLabOrderUploadPage'));
+const AppointmentConfirmPage = lazy(() => import('../pages/AppointmentConfirmPage'));
+const AppointmentTrackPage = lazy(() => import('../pages/AppointmentTrackPage'));
 const ProviderClaimPage = lazy(() => import('../pages/ProviderClaimPage'));
 const JoinTier = lazy(() => import('../pages/JoinTier'));
 const CheckoutSuccessPage = lazy(() => import('../pages/CheckoutSuccessPage'));
@@ -80,6 +82,10 @@ export const routes = [
   // Patient lands here from the "Request Lab Order" SMS/email an admin
   // fired off the appointment card.
   <Route key="appt-upload" path="/appt/:token/upload-order" element={<AppointmentLabOrderUploadPage />} />,
+  // Self-service confirm: 48h-out SMS link → confirm/reschedule/cancel
+  <Route key="appt-confirm" path="/appt/:token/confirm" element={<AppointmentConfirmPage />} />,
+  // Live "phleb is on the way" tracker; SMS fires when phleb taps OTW
+  <Route key="appt-track" path="/appt/:token/track" element={<AppointmentTrackPage />} />,
   // /join (no token) handles the email-upsell direct-checkout: ?tier=vip&email=…
   // Must come BEFORE /join/:token so the typed query path takes precedence
   // when there's no token segment in the URL.

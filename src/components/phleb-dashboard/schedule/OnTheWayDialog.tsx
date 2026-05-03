@@ -40,20 +40,49 @@ const OnTheWayDialog: React.FC<OnTheWayDialogProps> = ({
   const handleSend = async () => {
     setIsSending(true);
     try {
-      // Update status
+      // Update status + capture phleb's current location for the
+      // tracking page (best-effort; never blocks the status change).
+      const captureGeo = (): Promise<{ lat: number; lng: number; accuracy: number } | null> =>
+        new Promise((resolve) => {
+          if (!navigator.geolocation) return resolve(null);
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+            () => resolve(null),
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 60_000 },
+          );
+        });
+      const geo = await captureGeo();
+
       const { error: statusError } = await supabase
         .from('appointments')
-        .update({ status: 'en_route' })
+        .update({
+          status: 'en_route',
+          ...(geo ? { delivery_location: { ...geo, captured_at: new Date().toISOString() } } : {}),
+        })
         .eq('id', appointmentId);
 
       if (statusError) throw statusError;
 
-      // Build message
+      // Pull the appointment's view_token for the tracking link
+      const { data: apptRow } = await supabase
+        .from('appointments')
+        .select('view_token')
+        .eq('id', appointmentId)
+        .maybeSingle();
+      const trackUrl = (apptRow as any)?.view_token
+        ? `https://www.convelabs.com/appt/${(apptRow as any).view_token}/track`
+        : null;
+
+      // Build message — Uber-style trust signal with tracking link
       let smsMessage = `Great news! Your ConveLabs phlebotomist is on the way and will arrive in approximately ${etaMinutes} minutes. Please have a designated sterile, well-lit area where we can perform the collection.`;
       if (requiresUrine) {
         smsMessage += ` Also, your provider has ordered a urine sample. Your phlebotomist will provide you with a sterile urine container.`;
       }
-      smsMessage += ` We're looking forward to serving you. See you soon!`;
+      if (trackUrl) {
+        smsMessage += ` Track live: ${trackUrl}`;
+      } else {
+        smsMessage += ` We're looking forward to serving you. See you soon!`;
+      }
 
       // Send SMS if phone exists
       let smsSent = false;

@@ -15,6 +15,11 @@ verify_jwt = false
 [functions.twilio-mms-webhook]
 verify_jwt = false
 
+# Public confirm/track pages hit this with anon key only — view_token
+# IS the auth (and auto-expires 12h after appointment_date).
+[functions.appointment-self-service]
+verify_jwt = false
+
 # Patient lab-order upload page hits this with the anon key only.
 # Token-based auth on the appointment_lab_order_requests row IS the
 # auth — we never trust the caller for anything beyond "I have this token."
