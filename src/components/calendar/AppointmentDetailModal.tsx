@@ -70,6 +70,11 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const [appointmentHistory, setAppointmentHistory] = useState<any[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // Hormozi-rebuild: family-group siblings + readiness signals shown
+  // up top so the phleb sees who/what/ready in one glance.
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const [labOrderCount, setLabOrderCount] = useState<number | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
   const [editForm, setEditForm] = useState({
     patient_name: '', patient_email: '', patient_phone: '',
     address: '', gate_code: '', notes: '',
@@ -139,6 +144,34 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   useEffect(() => {
     setIsEditing(false);
   }, [appt?.id]);
+
+  // Load family-group siblings + lab order count for the readiness header.
+  useEffect(() => {
+    if (!appt?.id) return;
+    let cancelled = false;
+    (async () => {
+      // Family group: every sibling under the same family_group_id (or
+      // anchor on this appt's id if it's a primary). Excludes cancelled.
+      const groupId = appt.family_group_id || appt.id;
+      const { data: sibs } = await supabase
+        .from('appointments')
+        .select('id, patient_name, appointment_time, fasting_required, lab_order_file_path, companion_role, status, patient_phone')
+        .eq('family_group_id', groupId)
+        .neq('status', 'cancelled')
+        .order('appointment_time', { ascending: true });
+      if (!cancelled) setFamilyMembers((sibs || []).filter((s: any) => s.id !== appt.id));
+
+      // Live count of attached lab orders (the normalized table is the
+      // source of truth; legacy lab_order_file_path is now a mirror).
+      const { count } = await supabase
+        .from('appointment_lab_orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('appointment_id', appt.id)
+        .is('deleted_at', null);
+      if (!cancelled) setLabOrderCount(count || 0);
+    })();
+    return () => { cancelled = true; };
+  }, [appt?.id, appt?.family_group_id]);
 
   const startEditing = () => {
     setEditForm({
@@ -432,10 +465,75 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         <Separator />
 
-        {/* Time & Date */}
-        <div className="px-5 py-4 space-y-1">
-          <p className="text-sm font-semibold text-gray-900">{getTimeRange()}</p>
+        {/* Time & Date — concise. Visit duration in fine print, draw is
+            10-15 min not the full 60-min slot block. */}
+        <div className="px-5 py-3 space-y-0.5">
+          <p className="text-sm font-semibold text-gray-900">
+            Arrives {appt.appointment_time ? formatTimeAmPmSafe(appt.appointment_time) : '—'}
+            {appt.appointment_time && (
+              <span className="text-xs text-gray-500 font-normal ml-2">· slot blocked through {getTimeRange().split('–')[1]?.trim() || ''}</span>
+            )}
+          </p>
           <p className="text-sm text-gray-500">{formattedDate}</p>
+        </div>
+
+        {/* Critical signals: fasting, confirmation, family group, lab order ready */}
+        <div className="px-5 pb-3 flex flex-wrap gap-1.5">
+          {appt.fasting_required && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-100 text-amber-900 border border-amber-300 rounded-full px-2 py-1">
+              ⚠ FASTING REQUIRED
+            </span>
+          )}
+          {appt.patient_confirmed_at ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2 py-1">
+              ✓ Patient confirmed
+            </span>
+          ) : (appt.last_confirmation_sent_at || appt.patient_confirmation_sent_at) ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-gray-100 text-gray-700 border border-gray-200 rounded-full px-2 py-1">
+              ⏳ Awaiting confirm
+            </span>
+          ) : null}
+          {familyMembers.length > 0 && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-1">
+              👨‍👩‍👧 +{familyMembers.length} on this trip
+            </span>
+          )}
+        </div>
+
+        {/* Family group siblings — inline so phleb sees the whole household */}
+        {familyMembers.length > 0 && (
+          <div className="mx-5 mb-3 rounded-lg border border-blue-200 bg-blue-50/40 p-2.5">
+            <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold mb-1.5">Also on this booking</p>
+            <div className="space-y-1.5">
+              {familyMembers.map((m: any) => (
+                <div key={m.id} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900">{m.patient_name}</span>
+                    <span className="text-xs text-gray-500">@ {formatTimeAmPmSafe(m.appointment_time || '')}</span>
+                    {m.fasting_required && (
+                      <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">fasting</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className={m.lab_order_file_path ? 'text-emerald-700' : 'text-amber-700'}>
+                      {m.lab_order_file_path ? '✓ lab order' : '⚠ no lab order'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Readiness checklist — single glance: are we good to draw? */}
+        <div className="mx-5 mb-3 rounded-lg border border-gray-200 bg-white p-2.5">
+          <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">Pre-flight</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            <ReadinessItem ok={!!appt.address} label="Address" />
+            <ReadinessItem ok={!!(labOrderCount && labOrderCount > 0) || !!appt.lab_order_file_path} label={labOrderCount ? `${labOrderCount} lab order${labOrderCount === 1 ? '' : 's'}` : 'Lab order'} />
+            <ReadinessItem ok={!!appt.insurance_card_path} label="Insurance" partialOk={appt.service_type === 'in-office' || (appt.service_type || '').startsWith('partner-')} />
+            <ReadinessItem ok={!!appt.lab_destination} label="Destination" />
+          </div>
         </div>
 
         <Separator />
@@ -487,13 +585,36 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
           </>
         )}
 
-        {/* Booked by */}
-        <div className="px-5 py-4">
-          <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-0.5">Booked By</p>
-          <p className="text-sm text-gray-700">
-            {appt.booked_by_name || (appt.booking_source === 'manual' ? 'Admin (Manual)' : patientName)}
-            {appt.created_at && ` on ${format(new Date(appt.created_at), 'MMM d, yyyy \'at\' h:mm a')}`}
-          </p>
+        {/* Audit / History — collapsed by default. Hormozi-rebuild moves
+            booking provenance + reschedule trail out of the always-on
+            real estate so phleb-actionable info dominates above. */}
+        <div className="px-5 py-3">
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            className="flex items-center justify-between w-full text-[11px] uppercase tracking-wider text-gray-400 hover:text-gray-700 transition"
+          >
+            <span>History {showHistory ? '▾' : '▸'}</span>
+            <span className="text-gray-400 normal-case lowercase">
+              {appt.reschedule_count ? `${appt.reschedule_count}× rescheduled · ` : ''}
+              {appt.booking_source === 'manual' ? 'manual booking' : 'patient booking'}
+            </span>
+          </button>
+          {showHistory && (
+            <div className="mt-2 space-y-1 text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded p-2.5">
+              <p>
+                <span className="text-gray-400">Booked by:</span>{' '}
+                {appt.booked_by_name || (appt.booking_source === 'manual' ? 'Admin (Manual)' : patientName)}
+                {appt.created_at && ` · ${format(new Date(appt.created_at), 'MMM d, yyyy h:mm a')}`}
+              </p>
+              {appt.reschedule_count > 0 && appt.rescheduled_at && (
+                <p><span className="text-gray-400">Last rescheduled:</span> {format(new Date(appt.rescheduled_at), 'MMM d, yyyy h:mm a')}</p>
+              )}
+              {appt.stripe_payment_intent_id && (
+                <p className="font-mono text-[10px] text-gray-400 break-all">{appt.stripe_payment_intent_id}</p>
+              )}
+            </div>
+          )}
         </div>
 
         <Separator />
@@ -527,13 +648,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             <span>${((appt.total_amount || 0) + (appt.tip_amount || 0)).toFixed(2)}</span>
           </div>
 
-          {/* Invoice link if exists */}
-          {appt.stripe_invoice_id && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-1">
-              <FileText className="h-3 w-3" />
-              <span className="truncate">{appt.stripe_invoice_id}</span>
-            </div>
-          )}
+          {/* Stripe invoice id — admin/audit-only, hidden behind history toggle */}
         </div>
 
         <Separator />
@@ -731,6 +846,49 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 };
 
 export default AppointmentDetailModal;
+
+/**
+ * ReadinessItem — single row in the pre-flight grid. ok=green check,
+ * partialOk=gray "n/a" pill (for visit types that don't need this
+ * gate), neither=amber warning.
+ */
+const ReadinessItem: React.FC<{ ok: boolean; label: string; partialOk?: boolean }> = ({ ok, label, partialOk }) => {
+  if (ok) {
+    return (
+      <span className="flex items-center gap-1 text-emerald-700">
+        <span className="text-emerald-500">✓</span>{label}
+      </span>
+    );
+  }
+  if (partialOk) {
+    return (
+      <span className="flex items-center gap-1 text-gray-400">
+        <span>—</span>{label}
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-amber-700">
+      <span>⚠</span>{label}
+    </span>
+  );
+};
+
+/** Format a TIME column value ("06:20:00") as "6:20 AM". Handles
+    string variants ("6:30 AM", "06:30:00"); returns the input on no match. */
+function formatTimeAmPmSafe(t: string): string {
+  if (!t) return '';
+  // Already-formatted "6:30 AM"
+  if (/^\d{1,2}:\d{2}\s*(AM|PM)$/i.test(t)) return t.toUpperCase().replace(/\s+/g, ' ');
+  const m = /^(\d{1,2}):(\d{2})/.exec(t);
+  if (!m) return t;
+  let h = parseInt(m[1], 10);
+  const mins = m[2];
+  const pm = h >= 12;
+  if (h > 12) h -= 12;
+  if (h === 0) h = 12;
+  return `${h}:${mins} ${pm ? 'PM' : 'AM'}`;
+}
 
 /**
  * LabDestinationField — controlled dropdown with two fixes baked in:
