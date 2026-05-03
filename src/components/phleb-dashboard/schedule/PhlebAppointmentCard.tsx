@@ -23,6 +23,7 @@ import RunningLateModal from './RunningLateModal';
 import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
 import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
+import RequestLabOrderButton from './RequestLabOrderButton';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
@@ -530,14 +531,20 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       Lab Orders
                     </p>
                     <p className="text-xs text-amber-600 mb-2">
-                      No lab order uploaded. Capture it now — we'll match the provider automatically.
+                      No lab order uploaded. Capture it now — or text/email the patient a one-tap upload link.
                     </p>
-                    <PhlebUploadLabOrderButton
-                      appointmentId={appointment.id}
-                      variant="primary"
-                      label="Upload Lab Order"
-                      onUploaded={() => { setLabOrderRefreshKey(k => k + 1); setLabOrderJustUploaded(true); }}
-                    />
+                    <div className="flex flex-wrap gap-2">
+                      <PhlebUploadLabOrderButton
+                        appointmentId={appointment.id}
+                        variant="primary"
+                        label="Upload Lab Order"
+                        onUploaded={() => { setLabOrderRefreshKey(k => k + 1); setLabOrderJustUploaded(true); }}
+                      />
+                      <RequestLabOrderButton
+                        appointmentId={appointment.id}
+                        patientName={appointment.patient_name}
+                      />
+                    </div>
                     {/* Inline OCR + org-match status — appears the moment a row exists */}
                     <LabOrderStatusList
                       appointmentId={appointment.id}
