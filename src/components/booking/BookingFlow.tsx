@@ -290,9 +290,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           // Personalized welcome — Hormozi "second introduction removed"
           const greeting = p.first_name ? `, ${p.first_name}` : '';
           const skippedNote = hasIdentity && hasAddress
-            ? ' · we already have your info · just pick a time'
+            ? ' · we already have your info · pick a time, upload your lab order, done'
             : hasAddress
-              ? ' · address + service pre-loaded · just pick a time'
+              ? ' · address + service pre-loaded · pick a time'
               : ' · service pre-loaded';
           toast.success(`Welcome${greeting}${skippedNote}`);
         } catch (e: any) {
@@ -328,14 +328,24 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     }
 
     // Hormozi prefill fast-path: when a prefill token populated patient
-    // identity + address, skip the redundant Patient Info + Location
-    // steps and jump straight to Checkout. The form already holds every
-    // value those steps would collect.
+    // identity + address, skip Patient Info + Location entirely. Still
+    // prompt for the Lab Order upload (clinically required for most
+    // services) before Checkout. For services that don't need a lab
+    // order (in-office, partner-billed), jump straight to Checkout.
     if (prefillFastPath && currentStep === BookingStep.ServiceAndDate) {
-      // Date + time are picked at this step — go directly to Checkout
-      setCurrentStep(BookingStep.Checkout);
+      const vt = methods.getValues('serviceDetails.visitType') || '';
+      if (skipsLabOrder(vt)) {
+        setCurrentStep(BookingStep.Checkout);
+        setShowDatePicker(false);
+        setShowLabOrder(false);
+        return;
+      }
+      // Lab-order-required path: open the LocationAndLabOrder step in
+      // its lab-order phase (showLabOrder=true skips the address sub-step
+      // since location was prefilled). Patient uploads, then Checkout.
+      setCurrentStep(BookingStep.LocationAndLabOrder);
       setShowDatePicker(false);
-      setShowLabOrder(false);
+      setShowLabOrder(true);
       return;
     }
 
