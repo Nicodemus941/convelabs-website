@@ -80,6 +80,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   // Patient lands at the beginning of the wizard (VisitTypeSelector).
   const [currentStep, setCurrentStep] = useState(BookingStep.VisitType);
+  // Hormozi prefill fast-path. When a token is consumed, this flips to
+  // true and the handleNext skip-logic skips the steps whose data was
+  // already populated from the patient's record. Lets the patient go
+  // VisitType → Date/Time → Checkout in 3 clicks instead of 8.
+  const [prefillFastPath, setPrefillFastPath] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [bookingComplete, setBookingComplete] = useState(false);
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
@@ -248,7 +253,27 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
               lastName: p.last_name || '',
               email: p.email || '',
               phone: p.phone || '',
+              dateOfBirth: p.date_of_birth || '',
+              dob: p.date_of_birth || '',
             },
+            // Hormozi "make it simple" — pre-fill last-known address +
+            // insurance so the patient skips Location + Insurance steps
+            // entirely when data is on file. They land on Date/Time and
+            // go straight to checkout.
+            locationDetails: {
+              ...methods.getValues().locationDetails,
+              address: p.address || '',
+              city: p.city || '',
+              state: p.state || 'FL',
+              zipCode: p.zip_code || '',
+              gateCode: p.gate_code || '',
+            },
+            insurance: {
+              ...((methods.getValues() as any).insurance || {}),
+              provider: p.insurance_provider || '',
+              memberId: p.insurance_member_id || '',
+              groupNumber: p.insurance_group_number || '',
+            } as any,
             // Stamp token + org so handleCheckout passes them through
             prefillTokenId: p.token_id,
             organizationId: p.organization_id || undefined,
@@ -257,7 +282,19 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           // Skip Service Selection → go straight to Date/Time
           setShowDatePicker(true);
           setCurrentStep(BookingStep.ServiceAndDate);
-          toast.success(`Welcome${p.first_name ? `, ${p.first_name}` : ''} — your ${p.service_name || p.service_type} is pre-loaded.`);
+          // Enable fast-path so handleNext later skips Patient Info +
+          // Location Steps when their data was prefilled.
+          const hasIdentity = !!(p.first_name && p.email && p.phone);
+          const hasAddress = !!(p.address && p.zip_code);
+          if (hasIdentity && hasAddress) setPrefillFastPath(true);
+          // Personalized welcome — Hormozi "second introduction removed"
+          const greeting = p.first_name ? `, ${p.first_name}` : '';
+          const skippedNote = hasIdentity && hasAddress
+            ? ' · we already have your info · just pick a time'
+            : hasAddress
+              ? ' · address + service pre-loaded · just pick a time'
+              : ' · service pre-loaded';
+          toast.success(`Welcome${greeting}${skippedNote}`);
         } catch (e: any) {
           console.warn('[prefill] resolve failed:', e);
         }
@@ -288,6 +325,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       if (['therapeutic', 'specialty-kit', 'in-office'].includes(vt)) {
         methods.setValue('serviceDetails.selectedService', vt);
       }
+    }
+
+    // Hormozi prefill fast-path: when a prefill token populated patient
+    // identity + address, skip the redundant Patient Info + Location
+    // steps and jump straight to Checkout. The form already holds every
+    // value those steps would collect.
+    if (prefillFastPath && currentStep === BookingStep.ServiceAndDate) {
+      // Date + time are picked at this step — go directly to Checkout
+      setCurrentStep(BookingStep.Checkout);
+      setShowDatePicker(false);
+      setShowLabOrder(false);
+      return;
     }
 
     setCurrentStep(prev => prev + 1);

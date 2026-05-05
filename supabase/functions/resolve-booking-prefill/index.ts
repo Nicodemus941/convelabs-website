@@ -51,6 +51,34 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Hormozi "make it simple": also pull the patient's last-known address
+    // + insurance from tenant_patients so the booking flow can skip the
+    // Location and Insurance steps entirely when the data is on file.
+    let addressData: any = null;
+    let insuranceData: any = null;
+    if ((row as any).patient_id) {
+      const { data: tp } = await admin
+        .from('tenant_patients')
+        .select('address, city, state, zipcode, gate_code, date_of_birth, insurance_provider, insurance_member_id, insurance_group_number')
+        .eq('id', (row as any).patient_id)
+        .maybeSingle();
+      if (tp) {
+        addressData = {
+          address: (tp as any).address || null,
+          city: (tp as any).city || null,
+          state: (tp as any).state || null,
+          zip_code: (tp as any).zipcode || null,
+          gate_code: (tp as any).gate_code || null,
+        };
+        insuranceData = {
+          provider: (tp as any).insurance_provider || null,
+          member_id: (tp as any).insurance_member_id || null,
+          group_number: (tp as any).insurance_group_number || null,
+          date_of_birth: (tp as any).date_of_birth || null,
+        };
+      }
+    }
+
     const expired = new Date((row as any).expires_at).getTime() < Date.now();
     const consumed = !!((row as any).consumed_at);
 
@@ -87,6 +115,18 @@ Deno.serve(async (req) => {
         service_price_cents: (row as any).service_price_cents,
         organization_id: (row as any).organization_id,
         billed_to: (row as any).billed_to,
+        // Hormozi "make it simple" — patient's last-known address +
+        // insurance so the booking flow can skip those steps when data
+        // is on file.
+        address: addressData?.address || null,
+        city: addressData?.city || null,
+        state: addressData?.state || null,
+        zip_code: addressData?.zip_code || null,
+        gate_code: addressData?.gate_code || null,
+        date_of_birth: insuranceData?.date_of_birth || null,
+        insurance_provider: insuranceData?.provider || null,
+        insurance_member_id: insuranceData?.member_id || null,
+        insurance_group_number: insuranceData?.group_number || null,
       },
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
