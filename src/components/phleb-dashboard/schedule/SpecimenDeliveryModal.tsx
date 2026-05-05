@@ -120,6 +120,40 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
   /** Map a lab `value` to its canonical label */
   const labLabel = (v: string) => LABS.find(l => l.value === v)?.label || v;
 
+  /**
+   * localStorage draft layer — defensive fallback so PWA tab-suspend or
+   * service-worker refresh can't lose in-flight keystrokes. Keyed per row;
+   * cleared on successful confirmRow. On loadRows() we merge any cached
+   * draft OVER the DB-loaded value so unsaved entries always win.
+   */
+  const draftKey = (rk: string) => `specimen-draft:${rk}`;
+  const writeDraft = (rk: string, row: RowState) => {
+    try {
+      localStorage.setItem(draftKey(rk), JSON.stringify({
+        specimenId: row.specimenId,
+        labName: row.labName,
+        tubeCount: row.tubeCount,
+        tubeTypes: row.tubeTypes,
+        deliveryNotes: row.deliveryNotes,
+        ts: Date.now(),
+      }));
+    } catch { /* localStorage might be full or disabled — non-critical */ }
+  };
+  const readDraft = (rk: string): Partial<RowState> | null => {
+    try {
+      const raw = localStorage.getItem(draftKey(rk));
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      // Treat drafts older than 12 hours as stale (typical phleb shift)
+      if (typeof d?.ts === 'number' && Date.now() - d.ts > 12 * 60 * 60 * 1000) {
+        localStorage.removeItem(draftKey(rk));
+        return null;
+      }
+      return d;
+    } catch { return null; }
+  };
+  const clearDraft = (rk: string) => { try { localStorage.removeItem(draftKey(rk)); } catch { /* */ } };
+
   /** Pull every appointment in the family group (or just the one if not in a group) */
   const loadRows = useCallback(async () => {
     setLoading(true);
@@ -237,6 +271,22 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           };
         });
       }
+      // Merge any localStorage drafts OVER the DB-loaded values. This guards
+      // against the PWA losing in-flight keystrokes that hadn't yet hit the
+      // 600ms debounced save when the tab suspended or refreshed.
+      next = next.map(r => {
+        const rk = r.labOrderId || r.appointmentId;
+        const d = readDraft(rk);
+        if (!d || r.alreadyDelivered) return r;
+        return {
+          ...r,
+          specimenId: d.specimenId !== undefined ? String(d.specimenId) : r.specimenId,
+          labName: d.labName !== undefined ? String(d.labName) : r.labName,
+          tubeCount: d.tubeCount !== undefined ? String(d.tubeCount) : r.tubeCount,
+          tubeTypes: d.tubeTypes !== undefined ? String(d.tubeTypes) : r.tubeTypes,
+          deliveryNotes: d.deliveryNotes !== undefined ? String(d.deliveryNotes) : r.deliveryNotes,
+        };
+      });
       setRows(next);
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load companion patients');
@@ -258,9 +308,17 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
   /** Stable per-row key — labOrderId in per-lab-order mode, else appointmentId */
   const rowKey = (r: RowState) => r.labOrderId || r.appointmentId;
 
-  /** Mutate the row + schedule a debounced auto-save */
+  /** Mutate the row + schedule a debounced DB save + write localStorage draft immediately */
   const updateRow = (id: string, patch: Partial<RowState>) => {
-    setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, ...patch } : r));
+    setRows(rs => {
+      const next = rs.map(r => rowKey(r) === id ? { ...r, ...patch } : r);
+      // Write to localStorage SYNCHRONOUSLY on every keystroke — this is the
+      // tab-suspend / refresh insurance policy. DB save still happens
+      // debounced 600ms later via persistRow.
+      const updatedRow = next.find(r => rowKey(r) === id);
+      if (updatedRow) writeDraft(id, updatedRow);
+      return next;
+    });
     if (saveTimers.current[id]) clearTimeout(saveTimers.current[id]);
     saveTimers.current[id] = setTimeout(() => persistRow(id), 600);
   };
@@ -420,9 +478,19 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           }).eq('id', row.appointmentId);
         }
       } else {
-        // Family-group / single-appointment branch — stamp appointment row
+        // Family-group / single-appointment branch.
+        // BUG FIX 2026-05-04: previously this flipped status='specimen_delivered'
+        // on the FIRST sibling delivery, which removed the card from the
+        // schedule view before the phleb could deliver remaining companions
+        // (often to a DIFFERENT lab on a separate trip). Now we:
+        //   1. Stamp THIS sibling's per-row delivery timestamp (so audit + UI
+        //      knows it's done, and the green check shows in the modal).
+        //   2. Only flip status='specimen_delivered' across ALL siblings when
+        //      every sibling in the family has its specimens_delivered_at set.
+        const isFamilyGroup = rowsRef.current.length > 1;
+
+        // Stamp this sibling's delivery WITHOUT the terminal status
         await supabase.from('appointments').update({
-          status: 'specimen_delivered',
           delivered_at: nowIso,
           specimens_delivered_at: nowIso,
           specimen_tracking_id: row.specimenId.trim(),
@@ -430,6 +498,27 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           ...(geoStamp ? { delivery_location: geoStamp } : {}),
           ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
         }).eq('id', row.appointmentId);
+
+        // Compute "all siblings now delivered?" against post-update state
+        const postState = rowsRef.current.map(r => rowKey(r) === id ? { ...r, alreadyDelivered: true } : r);
+        const allNowDelivered = postState.every(r => r.alreadyDelivered);
+
+        if (allNowDelivered) {
+          // Every sibling delivered → flip status terminal on ALL siblings.
+          // Doing it as a batch keeps the schedule view consistent: family
+          // card disappears for everyone simultaneously, not piecemeal.
+          const allIds = postState.map(r => r.appointmentId);
+          await supabase.from('appointments').update({
+            status: 'specimen_delivered',
+          }).in('id', allIds);
+        } else if (!isFamilyGroup) {
+          // Solo appointment with no companions — terminal flip is fine.
+          await supabase.from('appointments').update({
+            status: 'specimen_delivered',
+          }).eq('id', row.appointmentId);
+        }
+        // Else (family group, only some delivered): leave status alone so the
+        // card stays visible on the schedule for the remaining companions.
       }
 
       // Fire the unified notification — scoped to this appointment + the
@@ -451,6 +540,12 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
       } catch (e) { console.warn('[specimen] notify failed (non-blocking):', e); }
 
       setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, alreadyDelivered: true, confirming: false } : r));
+      // Successful delivery — clear the localStorage draft for this row
+      clearDraft(id);
+      // BUG FIX 2026-05-04: bubble up to the parent on EVERY successful
+      // confirm (not just confirmAll) so the appointment card refreshes
+      // and the "Job Completed" button enables when status flipped.
+      try { onDelivered(); } catch { /* parent unmounted — fine */ }
       toast.success(`${row.patientName} delivered to ${lab}`);
       return true;
     } catch (e: any) {
@@ -471,10 +566,9 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
       }
     }
     setConfirmingAll(false);
-    if (anyConfirmed) {
-      onDelivered();
-      // Don't auto-close — let the phleb see the green checks first
-    }
+    // confirmRow already fires onDelivered() on every successful per-row
+    // confirm — the redundant call here was double-firing parent refetches.
+    // Don't auto-close — let the phleb see the green checks first
   };
 
   /** Render summary chip with org info — color-coded if companion org differs */

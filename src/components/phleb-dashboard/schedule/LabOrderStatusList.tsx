@@ -42,13 +42,33 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
   const pollTimer = useRef<number | null>(null);
 
   const fetchRows = async () => {
+    // Pull lab orders for this appointment AND all family-group siblings.
+    // Couple/family bookings put each patient's order on their OWN row;
+    // without this widening, the phleb opening the primary's card sees
+    // only the primary's order. (Westphal/Rowland 2026-05-04.)
+    const { data: anchor } = await supabase
+      .from('appointments')
+      .select('id, family_group_id')
+      .eq('id', appointmentId)
+      .maybeSingle();
+
+    let appointmentIds: string[] = [appointmentId];
+    if ((anchor as any)?.family_group_id) {
+      const { data: siblings } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('family_group_id', (anchor as any).family_group_id);
+      appointmentIds = (siblings as any[] || []).map(s => s.id);
+      if (!appointmentIds.includes(appointmentId)) appointmentIds.push(appointmentId);
+    }
+
     const { data } = await supabase
       .from('appointment_lab_orders' as any)
       .select(`
         id, original_filename, ocr_status, ocr_completed_at, ocr_detected_panels,
         org_match_status, org_match_reason, org_match_organization_id, uploaded_at
       `)
-      .eq('appointment_id', appointmentId)
+      .in('appointment_id', appointmentIds)
       .is('deleted_at', null)
       .order('uploaded_at', { ascending: false });
 

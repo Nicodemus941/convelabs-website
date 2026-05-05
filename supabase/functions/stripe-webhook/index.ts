@@ -1088,13 +1088,23 @@ async function handleAppointmentPayment(session: any) {
         })(),
         lab_destination: metadata.lab_destination || null,
         lab_destination_pending: metadata.lab_destination_pending === 'true',
-        // Partner / organization linkage
-        organization_id: metadata.organization_id || null,
-        billed_to: metadata.billed_to || 'patient',
-        patient_name_masked: metadata.patient_name_masked === 'true',
-        org_reference_id: metadata.organization_id && metadata.patient_name_masked === 'true'
-          ? `${String(metadata.organization_name || 'ORG').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4)}-${Date.now().toString().slice(-6)}`
-          : null,
+        // Partner / organization linkage. Reads new consolidated `org_json`
+        // first (2026-05-04 metadata-cap fix) with fallback to legacy
+        // top-level keys. Helper inline so we don't restructure the file.
+        ...(((): any => {
+          let orgInfo: any = null;
+          if (metadata.org_json) { try { orgInfo = JSON.parse(metadata.org_json); } catch { /* */ } }
+          const masked = orgInfo?.m === 1 || metadata.patient_name_masked === 'true';
+          const orgName = orgInfo?.n || metadata.organization_name || '';
+          return {
+            organization_id: metadata.organization_id || null,
+            billed_to: metadata.billed_to || 'patient',
+            patient_name_masked: masked,
+            org_reference_id: metadata.organization_id && masked
+              ? `${String(orgName || 'ORG').toUpperCase().replace(/[^A-Z]/g, '').substring(0, 4)}-${Date.now().toString().slice(-6)}`
+              : null,
+          };
+        })()),
         notes: [
           // Strip the file paths from notes (they're stored in their own columns)
           (metadata.additional_notes || '').replace(/Lab orders?:\s*[^|]+\|?\s*/g, '').replace(/Insurance:\s*[^|]+\|?\s*/g, '').trim(),
@@ -1114,14 +1124,25 @@ async function handleAppointmentPayment(session: any) {
         extended_hours: false,
         weekend_service: metadata.weekend === 'true',
         booking_source: 'online',
-        // H2: last-touch attribution from session — empty strings become null
-        utm_source: metadata.utm_source || null,
-        utm_medium: metadata.utm_medium || null,
-        utm_campaign: metadata.utm_campaign || null,
-        utm_content: metadata.utm_content || null,
-        utm_term: metadata.utm_term || null,
-        referrer_url: metadata.referrer_url || null,
-        landing_page: metadata.landing_page || null,
+        // H2: last-touch attribution from session — empty strings become null.
+        // Reads new consolidated `attribution_json` first; falls back to
+        // legacy top-level keys for in-flight Stripe sessions created before
+        // the 2026-05-04 metadata-cap fix.
+        ...(((): Record<string, string | null> => {
+          let parsed: any = null;
+          if (metadata.attribution_json) {
+            try { parsed = JSON.parse(metadata.attribution_json); } catch { /* fall through to legacy */ }
+          }
+          return {
+            utm_source: parsed?.s || metadata.utm_source || null,
+            utm_medium: parsed?.m || metadata.utm_medium || null,
+            utm_campaign: parsed?.c || metadata.utm_campaign || null,
+            utm_content: parsed?.ct || metadata.utm_content || null,
+            utm_term: parsed?.t || metadata.utm_term || null,
+            referrer_url: parsed?.r || metadata.referrer_url || null,
+            landing_page: parsed?.l || metadata.landing_page || null,
+          };
+        })()),
       }])
       .select()
       .single();
@@ -1216,10 +1237,16 @@ async function handleAppointmentPayment(session: any) {
             // render this as a sibling of the primary
             family_group_id: familyGroupId,
             companion_role: c.relationship || 'companion',
-            // Org / billing fields inherit from primary
+            // Org / billing fields inherit from primary (parses org_json
+            // with backward-compat fallback to legacy top-level keys)
             organization_id: metadata.organization_id || null,
             billed_to: metadata.billed_to || 'patient',
-            patient_name_masked: metadata.patient_name_masked === 'true',
+            patient_name_masked: (((): boolean => {
+              if (metadata.org_json) {
+                try { return JSON.parse(metadata.org_json).m === 1; } catch { /* */ }
+              }
+              return metadata.patient_name_masked === 'true';
+            })()),
             // Companions ride on the primary's checkout — no separate stripe row
             stripe_checkout_session_id: checkoutSessionId,
             // Total stays $0 on companion rows; fee is on primary's pricing_breakdown
@@ -1331,16 +1358,24 @@ async function handleAppointmentPayment(session: any) {
     // transfer happens automatically inside the same charge (transfer_data
     // on payment_intent_data); this row is the audit trail.
     try {
-      if (metadata.connect_transfer_destination && metadata.connect_staff_id) {
-        const baseCents = parseInt(metadata.connect_base_cents || '0', 10) || 0;
-        const companionCents = parseInt(metadata.connect_companion_cents || '0', 10) || 0;
-        const tipCents = parseInt(metadata.connect_tip_cents || '0', 10) || 0;
-        const amountCents = parseInt(metadata.connect_transfer_amount_cents || '0', 10) || 0;
+      // New consolidated `connect_json` shape (2026-05-04, metadata-cap fix)
+      // with backward-compat fallback to legacy top-level connect_* keys.
+      let connectInfo: { dst?: string; amt?: number; sid?: string; base?: number; comp?: number; tip?: number } | null = null;
+      if (metadata.connect_json) {
+        try { connectInfo = JSON.parse(metadata.connect_json); } catch { /* fall through */ }
+      }
+      const dst = connectInfo?.dst || metadata.connect_transfer_destination;
+      const sid = connectInfo?.sid || metadata.connect_staff_id;
+      if (dst && sid) {
+        const baseCents = (connectInfo?.base ?? parseInt(metadata.connect_base_cents || '0', 10)) || 0;
+        const companionCents = (connectInfo?.comp ?? parseInt(metadata.connect_companion_cents || '0', 10)) || 0;
+        const tipCents = (connectInfo?.tip ?? parseInt(metadata.connect_tip_cents || '0', 10)) || 0;
+        const amountCents = (connectInfo?.amt ?? parseInt(metadata.connect_transfer_amount_cents || '0', 10)) || 0;
         await supabaseClient.from('staff_payouts' as any).insert({
-          staff_id: metadata.connect_staff_id,
+          staff_id: sid,
           appointment_id: appointment.id,
           stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
-          stripe_destination_account_id: metadata.connect_transfer_destination,
+          stripe_destination_account_id: dst,
           service_type: metadata.service_type || null,
           base_per_visit_cents: baseCents,
           companion_addon_cents: companionCents,

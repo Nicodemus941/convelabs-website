@@ -41,6 +41,11 @@ Deno.serve(async (req) => {
     let address = body.address || '';
     let totalAmount = body.totalAmount ?? 0;
     let isWaived = body.isWaived || totalAmount === 0;
+    // BUG FIX 2026-05-04 (Westphal): when org-billed, suppress the dollar
+    // amount from patient-facing confirmation. The patient owes nothing —
+    // showing "$72.25" reads as an invoice and freaks out partners' patients.
+    let billedToOrg = false;
+    let orgNameForPatient: string | null = null;
 
     // If appointmentId provided, fetch details from DB
     let viewToken: string | null = null;
@@ -67,6 +72,19 @@ Deno.serve(async (req) => {
         totalAmount = appt.total_amount ?? totalAmount;
         isWaived = (appt.payment_status === 'completed' && appt.total_amount === 0) || isWaived;
         viewToken = (appt as any).view_token || null;
+        billedToOrg = (appt as any).billed_to === 'org' && !!(appt as any).organization_id;
+        if (billedToOrg) {
+          // Pull org display name so the patient sees "Covered by [Org]"
+          const supabase2 = createClient(
+            Deno.env.get('SUPABASE_URL') || '',
+            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+          );
+          const { data: orgRow } = await supabase2.from('organizations')
+            .select('name')
+            .eq('id', (appt as any).organization_id)
+            .maybeSingle();
+          orgNameForPatient = (orgRow as any)?.name || 'your provider';
+        }
         // Grab OCR'd lab order data so we can render the prep section
         (body as any).__labOrderPanels = Array.isArray((appt as any).lab_order_panels) ? (appt as any).lab_order_panels : [];
         (body as any).__labOrderOcrText = (appt as any).lab_order_ocr_text || '';
@@ -205,7 +223,12 @@ Deno.serve(async (req) => {
         }
 
         // If waived, surface that subtly at top of body
-        if (isWaived) {
+        if (billedToOrg) {
+          emailHtml = emailHtml.replace(
+            'Your appointment with ConveLabs is <strong>confirmed</strong>',
+            `Your appointment with ConveLabs is <strong>confirmed</strong> · <span style="color:#059669;font-weight:600;">Covered by ${orgNameForPatient || 'your provider'} — no payment due</span>`
+          );
+        } else if (isWaived) {
           emailHtml = emailHtml.replace(
             'Your appointment with ConveLabs is <strong>confirmed</strong>',
             'Your appointment with ConveLabs is <strong>confirmed</strong> · <span style="color:#059669;font-weight:600;">Complimentary</span>'
@@ -306,7 +329,11 @@ Deno.serve(async (req) => {
         if (normalizedPhone.length === 10) normalizedPhone = `+1${normalizedPhone}`;
         else if (!normalizedPhone.startsWith('+')) normalizedPhone = `+${normalizedPhone}`;
 
-        const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${displayTime ? ` at ${displayTime}` : ''}\n${address && address !== 'TBD' ? `Location: ${address}\n` : ''}${!isWaived ? `Amount: $${Number(totalAmount).toFixed(2)}\n` : ''}\nHave your lab order & insurance ready.\nQuestions? Call (941) 527-9169`;
+        // SMS: when org-billed, swap "Amount: $X" for "Covered by Org — no payment due"
+        const amountLine = billedToOrg
+          ? `Covered by ${orgNameForPatient || 'your provider'} — no payment due\n`
+          : (!isWaived ? `Amount: $${Number(totalAmount).toFixed(2)}\n` : '');
+        const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${displayTime ? ` at ${displayTime}` : ''}\n${address && address !== 'TBD' ? `Location: ${address}\n` : ''}${amountLine}\nHave your lab order & insurance ready.\nQuestions? Call (941) 527-9169`;
 
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
         const twilioBody = new URLSearchParams({

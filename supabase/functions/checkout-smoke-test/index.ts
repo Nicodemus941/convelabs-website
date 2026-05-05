@@ -187,11 +187,93 @@ async function sendSMS(body: string): Promise<{ ok: boolean; sid: string | null 
   return { ok: true, sid: (json as any)?.sid || null };
 }
 
+// ── Worst-case appointment-checkout smoke (Westphal-class metadata cap) ──
+// Sends a payload with EVERY conditional that adds metadata fired at once
+// so we'd catch a future "51 keys" regression before any patient does.
+async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
+  const results: CheckResult[] = [];
+  const url = `${SUPABASE_URL}/functions/v1/create-appointment-checkout`;
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+
+  const payload = {
+    serviceType: 'specialty-kit',
+    serviceName: 'Specialty Collection Kit (smoke)',
+    amount: 18500, // $185 base
+    tipAmount: 0,
+    appointmentDate: tomorrow,
+    appointmentTime: '10:00 AM',
+    memberTier: 'none',
+    patientDetails: {
+      firstName: 'SmokeTest', lastName: 'Patient',
+      email: 'checkout-smoke-test@convelabs.com',
+      phone: '+15555550100',
+    },
+    locationDetails: {
+      address: '123 Smoke Test Ln', city: 'Orlando', state: 'FL',
+      zipCode: '32801', locationType: 'home',
+      instructions: 'smoke test', aptUnit: '1A', gateCode: '#0000',
+    },
+    serviceDetails: { sameDay: false, weekend: false, additionalNotes: 'smoke test run' },
+    pricingBreakdown: { service: { type: 'specialty-kit', label: 'Specialty Kit', price: 185 } },
+    labOrderFilePaths: [], insuranceCardPath: null,
+    labDestination: 'ups', labDestinationPending: false,
+    specialtyKitBundle: { patients: [{ kits: 1 }], isGenova: false },
+  };
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json', 'Origin': 'https://www.convelabs.com' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await resp.text().catch(() => '');
+    if (!resp.ok) {
+      // Specifically detect the Stripe metadata cap error
+      const isMetadataCap = body.includes('up to 50 keys');
+      results.push({
+        step: 'appointment_checkout_post',
+        ok: false,
+        error: isMetadataCap
+          ? `STRIPE METADATA CAP HIT: ${body.substring(0, 200)}`
+          : `HTTP ${resp.status}: ${body.substring(0, 200)}`,
+      });
+      return results;
+    }
+    const data = JSON.parse(body || '{}');
+    if (!data.sessionId) {
+      results.push({ step: 'appointment_checkout_post', ok: false, error: 'no sessionId returned' });
+      return results;
+    }
+    results.push({ step: 'appointment_checkout_post', ok: true, details: { sessionId: data.sessionId } });
+
+    // Verify metadata key count by retrieving the actual session
+    try {
+      const sess: any = await stripe.checkout.sessions.retrieve(data.sessionId);
+      const keyCount = Object.keys(sess.metadata || {}).length;
+      if (keyCount > 48) {
+        results.push({ step: 'appointment_metadata_keys', ok: false, error: `${keyCount}/50 keys (over safety threshold)` });
+      } else {
+        results.push({ step: 'appointment_metadata_keys', ok: true, details: { keyCount } });
+      }
+    } catch (e: any) {
+      results.push({ step: 'appointment_metadata_keys', ok: false, error: `verify failed: ${e?.message || e}` });
+    }
+  } catch (e: any) {
+    results.push({ step: 'appointment_checkout_post', ok: false, error: e?.message || 'timeout' });
+  }
+  return results;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const startedAt = new Date().toISOString();
   const results = await smokeTestMembershipCheckout();
+  // Append appointment-checkout coverage so the 15-min cron also catches
+  // any future patient-facing booking regression (Westphal-class cap, etc.)
+  const apptResults = await smokeTestAppointmentCheckout();
+  results.push(...apptResults);
   const failures = results.filter((r) => !r.ok);
   const success = failures.length === 0;
 

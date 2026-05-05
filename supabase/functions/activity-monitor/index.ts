@@ -23,6 +23,7 @@
 // query activity_alerts_log to see the poller is alive.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { sendOwnerAlert } from '../_shared/alert-recipients.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -55,24 +56,14 @@ function nowIso(): string { return new Date().toISOString(); }
 
 async function sendSMS(body: string): Promise<{ ok: boolean; sid: string | null; error?: string }> {
   if (!TWILIO_SID || !TWILIO_TOKEN) return { ok: false, sid: null, error: 'twilio_not_configured' };
-  const to = OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`;
-  const params = new URLSearchParams();
-  params.append('To', to);
-  params.append('Body', body);
-  if (TWILIO_MSG_SERVICE) params.append('MessagingServiceSid', TWILIO_MSG_SERVICE);
-  else params.append('From', TWILIO_FROM);
-
-  const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: params.toString(),
-  });
-  const json = await resp.json().catch(() => ({}));
-  if (!resp.ok) return { ok: false, sid: null, error: (json as any)?.message || `http ${resp.status}` };
-  return { ok: true, sid: (json as any)?.sid || null };
+  // DB-first owner alert routing (multi-recipient ready). Returns count of sends.
+  const admin = createClient(
+    Deno.env.get('SUPABASE_URL') || '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+  );
+  const result = await sendOwnerAlert(admin, body);
+  if (result.sent > 0) return { ok: true, sid: `multi:${result.sent}` };
+  return { ok: false, sid: null, error: result.errors[0] || 'no_recipients' };
 }
 
 async function sendEmail(subject: string, html: string): Promise<string | null> {

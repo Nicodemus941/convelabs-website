@@ -67,6 +67,36 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   // page-load is also consistent. Same pattern for insurance card.
   const [labOrderJustUploaded, setLabOrderJustUploaded] = useState(false);
   const [insuranceJustUploaded, setInsuranceJustUploaded] = useState<string | null>(null);
+  // Sibling lab-order paths for family-group bookings. Couple/family bundles
+  // store each patient's PDF on their own appointment row's lab_order_file_path
+  // — without merging them, the primary's card only shows the primary's order.
+  // (Westphal/Rowland 2026-05-04.)
+  const [siblingLabOrderPaths, setSiblingLabOrderPaths] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const familyId = (appointment as any).family_group_id;
+    if (!familyId) { setSiblingLabOrderPaths([]); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('appointments')
+        .select('id, lab_order_file_path, patient_name')
+        .eq('family_group_id', familyId)
+        .neq('id', appointment.id);
+      if (cancelled) return;
+      const paths: string[] = [];
+      for (const row of (data || []) as any[]) {
+        const raw = String(row.lab_order_file_path || '');
+        if (!raw) continue;
+        const parts = raw.includes('\n') ? raw.split('\n') : raw.split(',');
+        for (const p of parts) {
+          const t = p.trim();
+          if (t) paths.push(t);
+        }
+      }
+      setSiblingLabOrderPaths(paths);
+    })();
+    return () => { cancelled = true; };
+  }, [appointment.id, (appointment as any).family_group_id, labOrderRefreshKey]);
   // Pull the patient's profile insurance fields. OCR (ocr-lab-order edge fn)
   // extracts provider/member/group from uploaded lab orders and writes
   // them to tenant_patients. We display them even when the card IMAGE
@@ -490,7 +520,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               </div>
 
               {/* Lab Order files (uploaded requisitions) */}
-              {(appointment.lab_order_file_path || labOrderJustUploaded) ? (() => {
+              {(appointment.lab_order_file_path || labOrderJustUploaded || siblingLabOrderPaths.length > 0) ? (() => {
                 // Newline-first split (current trigger output); fall back to
                 // comma-split for legacy rows. Lab-order filenames CAN contain
                 // commas ("Rienzi, Mary Ellen.pdf") which broke the old
@@ -503,9 +533,20 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 // crash; the LabOrderStatusList below will surface the new
                 // upload via its own realtime query.
                 const _raw = appointment.lab_order_file_path || '';
-                const _parts = _raw
+                const _own = _raw
                   ? (_raw.includes('\n') ? _raw.split('\n') : _raw.split(','))
                   : [];
+                // Merge family-group sibling paths so couple/family bookings
+                // show every patient's lab order on the primary's card. Dedup
+                // by trimmed path string.
+                const _seen = new Set<string>();
+                const _parts: string[] = [];
+                for (const p of [..._own, ...siblingLabOrderPaths]) {
+                  const t = String(p || '').trim();
+                  if (!t || _seen.has(t)) continue;
+                  _seen.add(t);
+                  _parts.push(t);
+                }
                 return (
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
@@ -825,7 +866,27 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientPhone={appointment.patient_phone}
         patientEmail={appointment.patient_email}
         serviceType={appointment.service_type}
-        onDelivered={() => onStatusUpdate(appointment.id, 'specimen_delivered')}
+        onDelivered={async () => {
+          // BUG FIX 2026-05-04: don't optimistically force status='specimen_delivered'.
+          // For family-group bookings the modal only flips status when ALL
+          // siblings are delivered — partial deliveries keep the row at
+          // 'in_progress'. Read the truth from DB and propagate, so the
+          // "Job Completed" button enables exactly when status really flipped.
+          try {
+            const { data: fresh } = await supabase
+              .from('appointments')
+              .select('status')
+              .eq('id', appointment.id)
+              .maybeSingle();
+            const realStatus = ((fresh as any)?.status || appointment.status) as typeof appointment.status;
+            if (realStatus !== appointment.status) {
+              await onStatusUpdate(appointment.id, realStatus);
+            }
+          } catch {
+            // Worst case: no propagation. The realtime subscription will
+            // catch up on the next tick.
+          }
+        }}
       />
 
       <CancelAppointmentModal

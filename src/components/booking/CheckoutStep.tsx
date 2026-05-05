@@ -11,7 +11,8 @@ import { ChevronLeft, Loader2, CreditCard, AlertTriangle } from 'lucide-react';
 import { FormField, FormItem, FormControl, FormLabel, FormMessage } from '@/components/ui/form';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { BookingFormValues } from '@/types/appointmentTypes';
-import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
+import { calculateTotal, getServiceById, isExtendedArea, type SpecialtyKitBundle } from '@/services/pricing/pricingService';
+import SpecialtyKitBundleCard from './SpecialtyKitBundleCard';
 import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
 import { toast } from '@/components/ui/sonner';
@@ -191,11 +192,19 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
   const service = getServiceById(serviceId);
   const extendedArea = isExtendedArea(locationCity);
+
+  // Hormozi specialty-kit bundle: when service is `specialty-kit*`, we
+  // ignore the flat additionalPatientCount path and compute via the bundle
+  // so the customer sees the volume-discounted total + savings chip.
+  const isSpecialtyKit = serviceId === 'specialty-kit' || serviceId === 'specialty-kit-genova';
+  const [specialtyBundle, setSpecialtyBundle] = useState<SpecialtyKitBundle | null>(null);
+
   const breakdown = calculateTotal(serviceId, {
     sameDay: serviceDetails?.sameDay,
     weekend: serviceDetails?.weekend,
     extendedArea,
-  }, tipAmount, additionalPatients.length, memberTier);
+    ...(isSpecialtyKit && specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
+  }, tipAmount, isSpecialtyKit ? 0 : additionalPatients.length, memberTier);
 
   const effectiveReferralDiscount = referralApplied ? referralDiscount : 0;
   const familyMemberPrice = FAMILY_MEMBER_PRICE_BY_TIER[memberTier] ?? 75;
@@ -423,6 +432,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             </div>
           </div>
         )}
+
+        {/* Specialty-kit bundle card — shown only for specialty-kit visits.
+            Lets the patient pick kit counts per person + see live volume discount. */}
+        <SpecialtyKitBundleCard
+          serviceId={serviceId}
+          memberTier={memberTier}
+          onBundleChange={(b) => setSpecialtyBundle(b)}
+        />
 
         {/* Price breakdown */}
         <div className="space-y-3">

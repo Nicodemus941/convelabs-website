@@ -17,6 +17,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
+import { parseTimeOrNull } from '../_shared/parse-time.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -35,21 +36,20 @@ function normalizePhone(p: string): string {
   return `+${d}`;
 }
 
+// Local wrapper — defers to the shared parser (Hormozi Layer-1 discipline).
+// Returns the strict {h,m} on success and a SENTINEL {h:-1,m:-1} on failure
+// so the caller can skip messaging instead of producing wrong copy.
 function parseTime(t: string): { h: number; m: number } {
-  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
-  if (!match) return { h: 0, m: 0 };
-  let h = parseInt(match[1], 10);
-  const m = parseInt(match[2], 10);
-  const p = match[3].toUpperCase();
-  if (p === 'PM' && h !== 12) h += 12;
-  if (p === 'AM' && h === 12) h = 0;
-  return { h, m };
+  const r = parseTimeOrNull(t);
+  return r || { h: -1, m: -1 };
 }
 
-// Returns a human-friendly cutoff time string. "by midnight tonight",
-// "by 10:00 PM tonight", "by 2:00 AM tomorrow".
-function formatCutoff(apptTimeStr: string): string {
+// Returns a human-friendly cutoff time string, or null if the appointment
+// time can't be parsed. Caller MUST skip outbound messaging when this
+// returns null — Hormozi Layer-1: never produce wrong copy from bad input.
+function formatCutoff(apptTimeStr: string): string | null {
   const { h, m } = parseTime(apptTimeStr);
+  if (h < 0 || m < 0) return null;
   const apptMin = h * 60 + m;
   const cutoffMin = apptMin - FASTING_HOURS * 60; // negative = previous day
 
@@ -118,11 +118,21 @@ Deno.serve(async (_req) => {
     for (const a of appts || []) {
       // Only reminders for morning appointments — afternoon draws don't have a
       // night-before fasting issue.
-      const { h } = parseTime(String(a.appointment_time || ''));
-      if (h >= 12) { skippedAfternoon++; continue; }
+      const parsed = parseTime(String(a.appointment_time || ''));
+      // Hormozi Layer-1: if we cannot parse the time, DO NOT send a wrong
+      // SMS. Skip + log; cron health monitor surfaces stuck rows.
+      if (parsed.h < 0) {
+        console.warn(`[fasting] unparseable appointment_time for ${a.id}: ${JSON.stringify(a.appointment_time)} — skipping`);
+        continue;
+      }
+      if (parsed.h >= 12) { skippedAfternoon++; continue; }
       if (!a.patient_phone && !a.patient_email) { skippedNoContact++; continue; }
 
       const cutoff = formatCutoff(String(a.appointment_time));
+      if (!cutoff) {
+        console.warn(`[fasting] formatCutoff returned null for ${a.id} — skipping`);
+        continue;
+      }
       const firstName = String(a.patient_name || 'there').split(' ')[0];
       const addrShort = a.address ? String(a.address).substring(0, 40) : '';
 

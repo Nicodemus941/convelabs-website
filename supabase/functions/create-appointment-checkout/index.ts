@@ -89,6 +89,11 @@ Deno.serve(async (req) => {
       referralCode = null,
       referralDiscountCents = 0,
       pricingBreakdown = null,
+      // Hormozi specialty-kit bundle: { patients: [{kits}], isGenova } — when
+      // present + service is `specialty-kit*`, the server reconstructs the
+      // expected total and rejects clientAmount if it claims LESS than the
+      // computed minimum. Prevents price-tampering by a malicious client.
+      specialtyKitBundle = null,
       // New first-class attachment fields (replaces notes-stuffing pattern)
       labOrderFilePaths = [],
       insuranceCardPath = null,
@@ -451,6 +456,59 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── SERVER-SIDE SPECIALTY-KIT BUNDLE GUARD ───────────────────
+    // If service is `specialty-kit*` and a bundle was supplied, recompute
+    // the minimum acceptable charge server-side and reject any clientAmount
+    // that's LOWER than the computed minimum. Defense-in-depth against a
+    // malicious client passing $0 to bypass payment.
+    //
+    // Mirror of pricingService.calculateSpecialtyKitBundle() — kept inline
+    // because edge functions can't import src/services/* TypeScript.
+    function pricePerPatientKitsServer(kits: number, isGenova: boolean): number {
+      if (kits <= 1) return 0;
+      const curve = isGenova ? [50, 50, 45] : [35, 35, 30];
+      let total = 0;
+      const additional = kits - 1;
+      for (let i = 0; i < additional; i++) {
+        total += curve[Math.min(i, curve.length - 1)];
+      }
+      return total;
+    }
+    function reconstructSpecialtyKitBundleCents(b: any, tier: MemberTier): number {
+      if (!b || !Array.isArray(b.patients) || b.patients.length === 0) return -1;
+      const isGenova = !!b.isGenova || serviceType === 'specialty-kit-genova';
+      const baseKey = (isGenova ? 'specialty-kit-genova' : 'specialty-kit') as keyof typeof TIER_PRICING;
+      const baseDollars = TIER_PRICING[baseKey]?.[tier] ?? TIER_PRICING[baseKey]?.['none'] ?? 185;
+      const COMP = isGenova ? 65 : 50;
+      const primaryKits = Math.max(1, Number(b.patients[0]?.kits || 1));
+      let dollars = baseDollars + pricePerPatientKitsServer(primaryKits, isGenova);
+      for (let i = 1; i < b.patients.length; i++) {
+        const ck = Math.max(1, Number(b.patients[i]?.kits || 1));
+        dollars += COMP + pricePerPatientKitsServer(ck, isGenova);
+      }
+      return Math.round(dollars * 100);
+    }
+
+    if (specialtyKitBundle && (serviceType === 'specialty-kit' || serviceType === 'specialty-kit-genova')) {
+      const expectedCents = reconstructSpecialtyKitBundleCents(specialtyKitBundle, (clientMemberTier as MemberTier) || 'none');
+      if (expectedCents > 0) {
+        // Allow tolerance for additive surcharges (same-day, weekend, etc.) AND tip.
+        // Reject ONLY if clientAmount is meaningfully LESS than expected base.
+        // (Tip + surcharges should make clientAmount >= expected, never less.)
+        if (clientAmount < expectedCents - 100) {
+          console.error(
+            `[bundle-guard] specialty-kit price-tamper attempt: ` +
+            `client=$${(clientAmount/100).toFixed(2)} expected≥$${(expectedCents/100).toFixed(2)} ` +
+            `bundle=${JSON.stringify(specialtyKitBundle)} email=${patientDetails?.email || '?'}`
+          );
+          return new Response(JSON.stringify({
+            error: 'pricing_mismatch',
+            message: 'The amount we received does not match the expected specialty-kit bundle price. Please reload and try again.',
+          }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+    }
+
     // ─── SERVER-SIDE MEMBERSHIP VALIDATION ─────────────────────────
     // If the patient is a member but the frontend didn't apply the
     // discount (or claimed a lesser tier), we apply the correction
@@ -778,15 +836,20 @@ Deno.serve(async (req) => {
       insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',
       lab_destination: labDestination ? String(labDestination).substring(0, 50) : '',
       lab_destination_pending: labDestinationPending ? 'true' : 'false',
-      // H2: attribution (last-touch) — stripe-webhook reads these into the
-      // appointments row for CAC-per-channel reporting
-      utm_source: String(attribution?.utm_source || '').substring(0, 100),
-      utm_medium: String(attribution?.utm_medium || '').substring(0, 100),
-      utm_campaign: String(attribution?.utm_campaign || '').substring(0, 100),
-      utm_content: String(attribution?.utm_content || '').substring(0, 100),
-      utm_term: String(attribution?.utm_term || '').substring(0, 100),
-      referrer_url: String(attribution?.referrer_url || '').substring(0, 500),
-      landing_page: String(attribution?.landing_page || '').substring(0, 500),
+      // H2: attribution (last-touch) — stripe-webhook parses this JSON key
+      // for CAC-per-channel reporting. Was 7 separate metadata keys until
+      // 2026-05-04 when partner+promo+connect bookings hit Stripe's 50-key
+      // cap (Westphal-class regression). Webhook keeps backward-compat
+      // for in-flight Stripe sessions still carrying the old top-level keys.
+      attribution_json: JSON.stringify({
+        s: String(attribution?.utm_source || '').substring(0, 100),
+        m: String(attribution?.utm_medium || '').substring(0, 100),
+        c: String(attribution?.utm_campaign || '').substring(0, 100),
+        ct: String(attribution?.utm_content || '').substring(0, 100),
+        t: String(attribution?.utm_term || '').substring(0, 100),
+        r: String(attribution?.referrer_url || '').substring(0, 200),
+        l: String(attribution?.landing_page || '').substring(0, 200),
+      }).substring(0, 500),
       // Service-type-aware block duration. Webhook uses this on insert; the
       // appointments_autofill DB trigger is the safety net if it's missing.
       duration_minutes: String((() => {
@@ -854,24 +917,33 @@ Deno.serve(async (req) => {
     // Create the checkout session
     // Tag metadata with credit info for Stripe dashboard visibility
     metadata.apology_credit_applied_cents = String(apologyCreditApplied);
+    // Promo consolidated into a single JSON key (was 4 keys) to stay under
+    // Stripe's 50-key metadata cap. Webhook reads promo_json with fallback
+    // to the legacy keys for in-flight sessions.
     if (promoCodeApplied) {
-      metadata.promo_code = promoCodeApplied.code;
-      metadata.promo_code_id = promoCodeApplied.id;
-      metadata.promo_discount_type = promoCodeApplied.discount_type;
-      metadata.promo_applied_cents = String(promoCodeApplied.applied_cents);
+      metadata.promo_json = JSON.stringify({
+        c: promoCodeApplied.code,
+        id: promoCodeApplied.id,
+        t: promoCodeApplied.discount_type,
+        a: promoCodeApplied.applied_cents,
+      }).substring(0, 500);
     }
     metadata.referral_credit_applied_cents = String(referralCreditApplied);
     metadata.redeemed_referral_credit_ids = referralCreditIdsToMark.join(',').substring(0, 500);
     metadata.member_benefit_used = willUseMemberBenefit ? 'true' : 'false';
 
-    // Partner linkage — webhook + verify use these to stamp organization_id +
-    // billed_to + patient_name_masked on the appointment row
+    // Partner linkage consolidated into a single JSON key (was 5 keys).
+    // organization_id + billed_to are kept as top-level keys because
+    // they're queried frequently by other webhook branches without parsing
+    // the JSON. The other 3 fields ride along in org_json.
     if (partnerOrg) {
       metadata.organization_id = partnerOrg.id;
-      metadata.organization_name = String(partnerOrg.name).substring(0, 80);
       metadata.billed_to = partnerOrg.default_billed_to || 'patient';
-      metadata.patient_name_masked = partnerOrg.show_patient_name_on_appointment === false ? 'true' : 'false';
-      metadata.org_invoice_price_cents = String(partnerOrg.org_invoice_price_cents || 0);
+      metadata.org_json = JSON.stringify({
+        n: String(partnerOrg.name).substring(0, 80),
+        m: partnerOrg.show_patient_name_on_appointment === false ? 1 : 0,
+        p: partnerOrg.org_invoice_price_cents || 0,
+      }).substring(0, 250);
     }
 
     // ─── BUNDLE-SUBSCRIBE: optional membership + this visit, one Stripe session ──
@@ -942,18 +1014,46 @@ Deno.serve(async (req) => {
               .eq('service_type', serviceType || 'mobile')
               .is('effective_to', null)
               .maybeSingle();
-            metadata.connect_transfer_destination = phleb.stripe_connect_account_id;
-            metadata.connect_transfer_amount_cents = String(takeCents);
-            metadata.connect_staff_id = phleb.id;
-            metadata.connect_base_cents = String((rate as any)?.base_per_visit_cents || 0);
-            metadata.connect_companion_cents = String(hasCompanion ? ((rate as any)?.companion_addon_cents || 0) : 0);
-            metadata.connect_tip_cents = String(Math.round(((tipAmount || 0) * (((rate as any)?.tip_pct ?? 100))) / 100));
+            // Consolidated to a single JSON key (was 6) so we stay under
+            // Stripe's 50-key metadata cap. Webhook parses connect_json
+            // with fallback to legacy top-level keys.
+            metadata.connect_json = JSON.stringify({
+              dst: phleb.stripe_connect_account_id,
+              amt: takeCents,
+              sid: phleb.id,
+              base: (rate as any)?.base_per_visit_cents || 0,
+              comp: hasCompanion ? ((rate as any)?.companion_addon_cents || 0) : 0,
+              tip: Math.round(((tipAmount || 0) * (((rate as any)?.tip_pct ?? 100))) / 100),
+            }).substring(0, 500);
             console.log(`[connect] transfer ${takeCents} cents → ${phleb.stripe_connect_account_id}`);
           }
         }
       } catch (err: any) {
         console.warn('[connect] transfer setup failed (non-blocking):', err?.message || err);
       }
+    }
+
+    // ─── METADATA CAP GUARD (Hormozi Layer-1 prevention) ─────────────
+    // Stripe rejects sessions with >50 metadata keys. Westphal-class bug
+    // (2026-05-04): partner+promo+connect bookings hit 51. Even after
+    // consolidation we run a runtime check + drop the least-critical keys
+    // before Stripe sees the payload. Never let a patient see a 400 here.
+    const metadataKeyCount = Object.keys(metadata).length;
+    if (metadataKeyCount > 50) {
+      const dropOrder = [
+        'utm_term', 'utm_content', 'referrer_url', 'landing_page',
+        'gate_code', 'apt_unit', 'instructions', 'additional_notes',
+        'lab_destination_pending', 'redeemed_referral_credit_ids',
+        'org_invoice_price_cents', 'organization_name',
+      ];
+      const dropped: string[] = [];
+      for (const k of dropOrder) {
+        if (metadataKeyCount - dropped.length <= 48) break;
+        if (k in metadata) { delete metadata[k]; dropped.push(k); }
+      }
+      console.warn(`[metadata-cap-guard] had ${metadataKeyCount} keys, dropped: ${dropped.join(',')} → ${Object.keys(metadata).length}`);
+    } else if (metadataKeyCount >= 45) {
+      console.warn(`[metadata-cap-guard] approaching cap: ${metadataKeyCount}/50 keys for service ${serviceType}`);
     }
 
     const session = await stripe.checkout.sessions.create({

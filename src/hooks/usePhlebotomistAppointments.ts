@@ -60,6 +60,11 @@ export interface PhlebAppointment {
   organization_id: string | null;
   organization_name: string | null;
   billed_to: 'patient' | 'org' | null;
+  // Family-bundle linkage. Used by PhlebAppointmentCard to merge sibling
+  // lab orders/insurance/specimen-delivery onto the primary's card.
+  // (Westphal/Rowland 2026-05-04 — the card was strictly per-row before.)
+  family_group_id: string | null;
+  companion_role: string | null;
 }
 
 export function usePhlebotomistAppointments() {
@@ -298,6 +303,8 @@ export function usePhlebotomistAppointments() {
             organization_id: appt.organization_id || null,
             organization_name: appt.organization_id ? (orgNameById.get(appt.organization_id) || null) : null,
             billed_to: (appt.billed_to as 'patient' | 'org') || null,
+            family_group_id: appt.family_group_id || null,
+            companion_role: appt.companion_role || null,
           };
         })
       );

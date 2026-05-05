@@ -324,11 +324,27 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // Pricing-drift smoke caught Mary Rienzi (Clermont, $250 charged
       // vs $175 expected, refunded $75 via pyr_1TRaRvAPnMg8iHarG6WoO5pt).
       const locationCity = data.locationDetails?.city || '';
+
+      // Hormozi specialty-kit bundle: if service is `specialty-kit*` and
+      // the patient configured kit counts via SpecialtyKitBundleCard, route
+      // through the bundle pricing so what we charge matches what they saw.
+      const isSpecialtyKit = visitType === 'specialty-kit' || visitType === 'specialty-kit-genova';
+      const specialtyBundle = isSpecialtyKit ? {
+        patients: [
+          { kits: Math.max(1, Number(data.primaryKitsCount || 1)) },
+          ...((data.additionalPatients || []) as any[]).map((p: any) => ({
+            kits: Math.max(1, Number(p?.kitsCount || 1)),
+          })),
+        ],
+        isGenova: visitType === 'specialty-kit-genova',
+      } : null;
+
       const breakdown = calculateTotal(visitType, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
         extendedArea: isExtendedArea(locationCity),
-      }, tipAmount, additionalPatientCount, memberTier);
+        ...(specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
+      }, tipAmount, isSpecialtyKit ? 0 : additionalPatientCount, memberTier);
 
       // Lab orders + insurance — trust the upload-on-drop in
       // LabOrderUploadStep / InsuranceUploadStep entirely. Re-uploading
@@ -530,6 +546,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           annualPriceCents: bundledSubscription.annualPriceCents,
           agreementId: bundledSubscription.agreementId,
         } : null,
+        // Specialty-kit bundle — sent to server for price-tamper guard
+        specialtyKitBundle: specialtyBundle,
       } as any);
 
       if (result.error) {

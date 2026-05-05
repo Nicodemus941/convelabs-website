@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { sendOwnerAlert } from '../_shared/alert-recipients.ts';
 
 /**
  * DAILY OWNER BRIEF — Hormozi-Style Morning Standup
@@ -47,10 +48,7 @@ Deno.serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
-    const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
-    const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
+    // OWNER_PHONE is now resolved at send-time via sendOwnerAlert (DB-first, env fallback).
 
     const yesterday = dateET(-1);
     const today = dateET(0);
@@ -232,23 +230,7 @@ Deno.serve(async (req) => {
     const message = lines.join('\n');
 
     // ── SEND SMS ────────────────────────────────────────────────────────
-    if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-      await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
-          Body: message.substring(0, 1500),
-          ...(TWILIO_MESSAGING_SERVICE_SID
-            ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
-            : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
-        }).toString(),
-      });
-    }
+    await sendOwnerAlert(supabase, message.substring(0, 1500));
 
     console.log('Daily brief sent:', message);
 

@@ -70,32 +70,37 @@ const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patient
 
   const usedTime = markedAt || now;
 
-  const copy = useCallback(async (label: string, value: string) => {
+  // "John Doe" → "Doe, John". "Mary Jane Smith" → "Smith, Mary Jane".
+  // Single-word names → returned as-is (no comma).
+  const formatLastFirst = (full: string): string => {
+    const trimmed = (full || '').trim();
+    if (!trimmed) return '—';
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 2) return trimmed;
+    const last = parts[parts.length - 1];
+    const first = parts.slice(0, -1).join(' ');
+    return `${last}, ${first}`;
+  };
+  const lastFirstName = formatLastFirst(patientName);
+
+  // Single-click label payload: 3 lines, ordered exactly the way the
+  // phleb wants to read it on a tube — surname-first for chart matching.
+  const labelText = [
+    lastFirstName,
+    displayDob,
+    `${displayTime(usedTime)} ${displayDate(usedTime)}`,
+  ].join('\n');
+
+  const copyLabel = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(value);
-      setCopied(label);
-      setTimeout(() => setCopied((c) => (c === label ? null : c)), 1500);
+      await navigator.clipboard.writeText(labelText);
+      setCopied('all');
+      toast.success('Label copied — paste into NIIMBOT');
+      setTimeout(() => setCopied((c) => (c === 'all' ? null : c)), 2000);
     } catch {
       toast.error('Copy failed — long-press to select manually');
     }
-  }, []);
-
-  const copyAll = useCallback(async () => {
-    const block = [
-      `Name: ${patientName}`,
-      `DOB: ${displayDob}`,
-      `Date: ${displayDate(usedTime)}`,
-      `Time: ${displayTime(usedTime)}`,
-    ].join('\n');
-    try {
-      await navigator.clipboard.writeText(block);
-      setCopied('all');
-      toast.success('All 4 fields copied — paste into NIIMBOT');
-      setTimeout(() => setCopied((c) => (c === 'all' ? null : c)), 2000);
-    } catch {
-      toast.error('Copy failed');
-    }
-  }, [patientName, displayDob, usedTime]);
+  }, [labelText]);
 
   const markCollection = async () => {
     setMarking(true);
@@ -138,28 +143,6 @@ const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patient
     }
   };
 
-  const FieldRow: React.FC<{ icon: any; label: string; value: string; k: string }> = ({ icon: Icon, label, value, k }) => (
-    <div className="flex items-stretch gap-2 border rounded-lg overflow-hidden bg-white">
-      <div className="flex items-center px-3 bg-gray-50 border-r flex-shrink-0">
-        <Icon className="h-3.5 w-3.5 text-gray-500" />
-      </div>
-      <div className="flex-1 min-w-0 py-2">
-        <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">{label}</p>
-        <p className="text-sm font-mono font-semibold text-gray-900 truncate">{value}</p>
-      </div>
-      <button
-        type="button"
-        onClick={() => copy(k, value)}
-        className="px-3 flex items-center border-l hover:bg-gray-50 transition"
-        title={`Copy ${label}`}
-      >
-        {copied === k
-          ? <Check className="h-4 w-4 text-emerald-600" />
-          : <Copy className="h-4 w-4 text-gray-500" />}
-      </button>
-    </div>
-  );
-
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !marking && onClose()}>
       <DialogContent className="max-w-md w-[95vw] p-4 sm:p-5 max-h-[90vh] overflow-y-auto">
@@ -172,24 +155,47 @@ const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patient
 
         <div className="space-y-3">
           <p className="text-xs text-gray-600">
-            Paste these fields into the NIIMBOT app and print. Collection time defaults to now —
+            Tap the label below to copy all 3 lines, then paste into the NIIMBOT app and print. Collection time defaults to now —
             hit <strong>Mark collection time</strong> when you finish the draw to lock the timestamp.
           </p>
 
-          <FieldRow icon={User} label="Patient Name" value={patientName} k="name" />
-          <FieldRow icon={FileText} label="DOB" value={displayDob} k="dob" />
-          <FieldRow icon={Calendar} label="Collection Date" value={displayDate(usedTime)} k="date" />
-          <FieldRow icon={Clock} label="Collection Time" value={displayTime(usedTime)} k="time" />
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full h-10 gap-1.5"
-            onClick={copyAll}
+          {/* Single-click label preview — entire block is the copy target */}
+          <button
+            type="button"
+            onClick={copyLabel}
+            className="w-full text-left border-2 rounded-xl bg-white hover:bg-gray-50 active:bg-gray-100 transition overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/40"
+            style={{ borderColor: copied === 'all' ? '#10b981' : '#e5e7eb' }}
+            title="Tap to copy all 3 lines"
           >
-            {copied === 'all' ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-            Copy all 4 fields
-          </Button>
+            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+              <span className="flex items-center gap-1.5">
+                <FileText className="h-3 w-3" /> NIIMBOT label preview
+              </span>
+              <span className="flex items-center gap-1 text-[10px] normal-case tracking-normal">
+                {copied === 'all' ? (
+                  <><Check className="h-3.5 w-3.5 text-emerald-600" /> <span className="text-emerald-700 font-bold">Copied</span></>
+                ) : (
+                  <><Copy className="h-3.5 w-3.5 text-gray-500" /> <span className="text-gray-600">Tap to copy</span></>
+                )}
+              </span>
+            </div>
+            <div className="p-4 font-mono">
+              <div className="flex items-center gap-2 mb-1">
+                <User className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                <span className="text-base font-bold text-gray-900 truncate">{lastFirstName}</span>
+              </div>
+              <div className="flex items-center gap-2 mb-1">
+                <Calendar className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                <span className="text-sm font-semibold text-gray-800">{displayDob}</span>
+                <span className="text-[10px] uppercase text-gray-400 ml-1">DOB</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                <span className="text-sm font-semibold text-gray-800">{displayTime(usedTime)} {displayDate(usedTime)}</span>
+                <span className="text-[10px] uppercase text-gray-400 ml-1">collected</span>
+              </div>
+            </div>
+          </button>
 
           {markedAt ? (
             <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-xs text-emerald-800">

@@ -101,10 +101,31 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
   const dropRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
+    // Fetch ALL lab orders for this appointment AND any family-group sibling
+    // appointments. Couple/family bundles upload one PDF per patient on
+    // their own appointment row, so the phleb opening the primary's card
+    // would otherwise only see the primary's order. (Westphal/Rowland
+    // 2026-05-04 — phleb saw Robert's order but not Amy's.)
+    const { data: anchor } = await supabase
+      .from('appointments')
+      .select('id, family_group_id')
+      .eq('id', appointmentId)
+      .maybeSingle();
+
+    let appointmentIds: string[] = [appointmentId];
+    if ((anchor as any)?.family_group_id) {
+      const { data: siblings } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('family_group_id', (anchor as any).family_group_id);
+      appointmentIds = (siblings as any[] || []).map(s => s.id);
+      if (!appointmentIds.includes(appointmentId)) appointmentIds.push(appointmentId);
+    }
+
     const { data } = await supabase
       .from('appointment_lab_orders')
       .select('*')
-      .eq('appointment_id', appointmentId)
+      .in('appointment_id', appointmentIds)
       .is('deleted_at', null)
       .order('uploaded_at', { ascending: true });
     setRows((data as any as LabOrderRow[]) || []);

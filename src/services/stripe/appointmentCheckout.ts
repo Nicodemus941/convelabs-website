@@ -42,6 +42,10 @@ export interface AppointmentCheckoutParams {
    *  the webhook copies it to appointments.pricing_breakdown so any future
    *  pricing-drift alert can be triaged in one query. */
   pricingBreakdown?: Record<string, unknown> | null;
+  /** Hormozi specialty-kit bundle — sent verbatim to the server so it can
+   *  reconstruct expected total + reject price-tampering. Only set when
+   *  serviceType is `specialty-kit*`. */
+  specialtyKitBundle?: { patients: Array<{ kits: number }>; isGenova?: boolean } | null;
 }
 
 export interface AppointmentCheckoutResult {

@@ -21,6 +21,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
+import { sendOwnerAlert } from '../_shared/alert-recipients.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,10 +30,7 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
-const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
-const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
-const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+// Twilio creds + owner phone now resolved inside sendOwnerAlert (DB-first).
 
 // Map metadata.type → (description, check function)
 // Each check returns { found: boolean, note: string } so the orphan row
@@ -146,20 +144,9 @@ async function checkDownstreamRecord(
 }
 
 async function sendOwnerSms(message: string) {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return;
+  const admin = createClient(SUPABASE_URL, SERVICE_KEY);
   try {
-    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
-        Body: message.substring(0, 1550), // Twilio hard-caps longer
-        From: TWILIO_FROM,
-      }).toString(),
-    });
+    await sendOwnerAlert(admin, message.substring(0, 1550));
   } catch (e) {
     console.warn('[reconcile] owner SMS failed:', e);
   }

@@ -104,6 +104,15 @@ verify_jwt = false
 [functions.remind-lab-request-patients]
 verify_jwt = false
 
+[functions.notify-provider-deadline-risk]
+verify_jwt = false
+
+[functions.provider-weekly-digest]
+verify_jwt = false
+
+[functions.nightly-message-smoke-test]
+verify_jwt = false
+
 [functions.backfill-provider-phone-auth]
 verify_jwt = false
 

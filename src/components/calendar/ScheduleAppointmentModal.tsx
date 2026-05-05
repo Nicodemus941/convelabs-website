@@ -11,7 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
-import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea } from '@/services/pricing/pricingService';
+import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea, calculateTotal } from '@/services/pricing/pricingService';
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -126,6 +126,13 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [companionName, setCompanionName] = useState('');
   const [companionDob, setCompanionDob] = useState('');
   const [companionRelationship, setCompanionRelationship] = useState<'Spouse' | 'Child' | 'Parent' | 'Sibling' | 'Other'>('Spouse');
+
+  // Specialty-kit bundle: per-patient kit count for `specialty-kit*` services.
+  // Active only when service is specialty-kit. Preview/submit math routes
+  // through calculateTotal({ specialtyKitBundle }) to apply Hormozi volume
+  // discount + couple/family bundle savings.
+  const [primaryKitsCount, setPrimaryKitsCount] = useState(1);
+  const [companionKitsCount, setCompanionKitsCount] = useState(1);
   const [invoiceMemo, setInvoiceMemo] = useState('');
   const [orgBilling, setOrgBilling] = useState(false);
 
@@ -445,7 +452,26 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   })();
   const companionAdd = addCompanion ? companionPrice : 0;
 
-  const previewBaseWithAddons = previewBasePrice + previewSurchargeTotal + companionAdd;
+  // Hormozi specialty-kit bundle path. When the admin picks a `specialty-kit*`
+  // service, the bundle pricing handles primary + companion + multi-kit math
+  // including the savings line. Falls back to the old companion-add for
+  // non-kit services.
+  const isSpecialtyKitService = serviceType === 'specialty-kit' || serviceType === 'specialty-kit-genova';
+  const specialtyBundleBreakdown = isSpecialtyKitService
+    ? calculateTotal(serviceType, {
+        specialtyKitBundle: {
+          patients: [
+            { kits: Math.max(1, primaryKitsCount) },
+            ...(addCompanion ? [{ kits: Math.max(1, companionKitsCount) }] : []),
+          ],
+          isGenova: serviceType === 'specialty-kit-genova',
+        },
+      }, 0, 0, (detectedTier as any) || 'none')
+    : null;
+
+  const previewBaseWithAddons = isSpecialtyKitService && specialtyBundleBreakdown
+    ? specialtyBundleBreakdown.subtotal + previewSurchargeTotal
+    : previewBasePrice + previewSurchargeTotal + companionAdd;
   const previewTotal = discountType === 'waive' ? 0
     : discountType === 'custom' && discountValue ? Math.max(parseFloat(discountValue) || 0, 0)
     : discountType === 'percentage' && discountValue ? Math.round(previewBaseWithAddons * (1 - (parseFloat(discountValue) || 0) / 100) * 100) / 100
@@ -527,9 +553,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       // invoice went out at $150 instead of $225 and admin had to create a
       // manual make-up invoice for $75.
       const companionFeeApplied = addCompanion ? companionPrice : 0;
-      let finalPrice = basePrice + surchargeTotal + companionFeeApplied;
+      // Specialty-kit bundle override: replace base+companion math with the
+      // bundle subtotal so the admin invoice matches what the patient-facing
+      // bundle card would have produced.
+      let finalPrice = isSpecialtyKitService && specialtyBundleBreakdown
+        ? specialtyBundleBreakdown.subtotal + surchargeTotal
+        : basePrice + surchargeTotal + companionFeeApplied;
       let discountNote = surchargeItems.join(', ');
-      if (companionFeeApplied > 0) {
+      if (isSpecialtyKitService && specialtyBundleBreakdown?.bundleLabel) {
+        discountNote += (discountNote ? ' | ' : '') + `${specialtyBundleBreakdown.bundleLabel}`;
+      } else if (companionFeeApplied > 0) {
         discountNote += (discountNote ? ' | ' : '') + `Companion visit +$${companionFeeApplied.toFixed(2)}${companionName ? ` (${companionName})` : ''}`;
       }
       if (memberSavings > 0) {
@@ -1206,6 +1239,50 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Specialty-kit bundle controls — appears only for `specialty-kit*`
+                services. Mirrors the patient-facing booking flow's bundle card. */}
+            {isSpecialtyKitService && (
+              <div className="border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-white rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-bold text-purple-900">🧪 Specialty Kits</span>
+                  {specialtyBundleBreakdown?.bundleSavings ? (
+                    <span className="ml-auto text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                      {specialtyBundleBreakdown.bundleLabel}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label className="text-[11px]">Primary kits</Label>
+                    <div className="flex items-center gap-2 mt-1">
+                      <button type="button" onClick={() => setPrimaryKitsCount(Math.max(1, primaryKitsCount - 1))}
+                        className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={primaryKitsCount <= 1}>−</button>
+                      <span className="w-8 text-center font-mono font-bold">{primaryKitsCount}</span>
+                      <button type="button" onClick={() => setPrimaryKitsCount(Math.min(6, primaryKitsCount + 1))}
+                        className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={primaryKitsCount >= 6}>+</button>
+                    </div>
+                  </div>
+                  {addCompanion && (
+                    <div>
+                      <Label className="text-[11px]">Companion kits</Label>
+                      <div className="flex items-center gap-2 mt-1">
+                        <button type="button" onClick={() => setCompanionKitsCount(Math.max(1, companionKitsCount - 1))}
+                          className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={companionKitsCount <= 1}>−</button>
+                        <span className="w-8 text-center font-mono font-bold">{companionKitsCount}</span>
+                        <button type="button" onClick={() => setCompanionKitsCount(Math.min(6, companionKitsCount + 1))}
+                          className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={companionKitsCount >= 6}>+</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {specialtyBundleBreakdown?.bundleSavings ? (
+                  <p className="text-[11px] text-emerald-700 mt-2">
+                    Volume discount: <strong>save ${specialtyBundleBreakdown.bundleSavings.toFixed(0)}</strong> vs unbundled.
+                  </p>
+                ) : null}
+              </div>
+            )}
 
             {/* Pricing & Invoicing */}
             <div className="border-t pt-3">
