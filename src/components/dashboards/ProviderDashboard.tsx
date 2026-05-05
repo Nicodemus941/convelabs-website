@@ -229,7 +229,7 @@ const ProviderDashboard: React.FC = () => {
     );
   }
 
-  const { org, liveOps, thisMonth, upcoming, patients, invoices, team, labRequests = [] } = data;
+  const { org, liveOps, thisMonth, upcoming, patients, invoices, team, labRequests = [], recentActivity = [] } = data;
   const billingLabel = org.default_billed_to === 'org' ? 'Organization pays' : org.default_billed_to === 'patient' ? 'Patient pays' : 'Mixed';
   const patientPrice = org.locked_price_cents != null ? `$${(org.locked_price_cents / 100).toFixed(2)}` : '—';
   const orgInvoicePrice = org.org_invoice_price_cents != null ? `$${(org.org_invoice_price_cents / 100).toFixed(2)}` : '—';
@@ -426,6 +426,69 @@ const ProviderDashboard: React.FC = () => {
                     <Badge variant="outline" className="text-[10px] capitalize">{a.status}</Badge>
                   </div>
                 ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* RECENT ACTIVITY — last 30 days of completed/delivered visits.
+            Permanent timeline so org sees the work we did for them even
+            after the date rolls over. Each row shows tracking + lab. */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Recent activity · last 30 days</CardTitle>
+            <CardDescription className="text-xs">
+              {recentActivity.length} completed visit{recentActivity.length === 1 ? '' : 's'}
+              {recentActivity.length > 0 && ' · specimen tracking + lab destination'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {recentActivity.length === 0 ? (
+              <div className="text-center py-8 text-sm text-gray-500">
+                No completed visits in the last 30 days.
+              </div>
+            ) : (
+              <div className="divide-y">
+                {recentActivity.map((a: any) => {
+                  const dt = a.delivered_at ? new Date(a.delivered_at) : null;
+                  const apptDt = a.appointment_date ? new Date(a.appointment_date) : null;
+                  const statusLabel = a.status === 'completed' ? 'Completed' : 'Specimen delivered';
+                  const statusColor = a.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-blue-50 text-blue-700 border-blue-200';
+                  return (
+                    <div key={a.id} className="p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-900 truncate">{a.patient_label}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {apptDt && apptDt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                            {a.appointment_time && <> at {a.appointment_time}</>}
+                            {a.service_name && <> · {a.service_name}</>}
+                          </p>
+                          {(a.specimen_tracking_id || a.specimen_lab_name) && (
+                            <div className="mt-1.5 flex flex-wrap gap-1.5 text-[11px]">
+                              {a.specimen_lab_name && (
+                                <span className="bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5">
+                                  📦 {a.specimen_lab_name}
+                                </span>
+                              )}
+                              {a.specimen_tracking_id && (
+                                <span className="bg-blue-50 border border-blue-200 text-blue-800 rounded-full px-2 py-0.5 font-mono">
+                                  {a.specimen_tracking_id}
+                                </span>
+                              )}
+                              {dt && (
+                                <span className="text-gray-400">
+                                  delivered {dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {dt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <Badge variant="outline" className={`text-[10px] ${statusColor}`}>{statusLabel}</Badge>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>

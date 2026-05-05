@@ -499,6 +499,24 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
         }).eq('id', row.appointmentId);
 
+        // Sync the per-row appointment_lab_orders entry for this sibling so
+        // the provider portal + admin views see consistent delivery info.
+        // (2026-05-05: Westphal/Rowland family-group branch was updating
+        // appointments only — appointment_lab_orders rows stayed null.)
+        try {
+          await supabase.from('appointment_lab_orders' as any).update({
+            delivery_specimen_id: row.specimenId.trim(),
+            delivery_lab_name: lab,
+            delivery_tube_count: parseInt(row.tubeCount) || 1,
+            delivery_tube_types: row.tubeTypes || null,
+            delivered_at: nowIso,
+            delivered_by: deliveredBy,
+          })
+          .eq('appointment_id', row.appointmentId)
+          .is('deleted_at', null)
+          .is('delivered_at', null); // don't overwrite already-stamped rows
+        } catch (e) { console.warn('[specimen] family-branch lab_orders sync failed:', e); }
+
         // Compute "all siblings now delivered?" against post-update state
         const postState = rowsRef.current.map(r => rowKey(r) === id ? { ...r, alreadyDelivered: true } : r);
         const allNowDelivered = postState.every(r => r.alreadyDelivered);

@@ -180,6 +180,44 @@ Deno.serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(100);
 
+    // ── RECENT ACTIVITY (last 30 days of completed/delivered visits) ────
+    // Provider needs a permanent timeline of work we did for them so
+    // completed visits don't disappear after the date rolls over. Each
+    // row includes the specimen tracking ID + lab destination so the
+    // org can match it to their results inbox.
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().substring(0, 10);
+    const { data: recentRows } = await admin
+      .from('appointments')
+      .select(`
+        id, patient_name, patient_email, patient_name_masked, org_reference_id,
+        appointment_date, appointment_time, status, service_name, service_type,
+        total_amount, lab_destination,
+        specimens_delivered_at, delivered_at,
+        specimen_tracking_id, specimen_lab_name,
+        collection_at, result_received_at
+      `)
+      .eq('organization_id', orgId)
+      .gte('appointment_date', thirtyDaysAgo)
+      .in('status', ['specimen_delivered', 'completed'])
+      .order('specimens_delivered_at', { ascending: false, nullsFirst: false })
+      .order('appointment_date', { ascending: false })
+      .limit(50);
+
+    // Build the timeline rows — masked-aware, includes tracking
+    const recentActivity = ((recentRows as any[]) || []).map(r => ({
+      id: r.id,
+      patient_label: r.patient_name_masked ? (r.org_reference_id || 'Confidential') : r.patient_name,
+      appointment_date: r.appointment_date,
+      appointment_time: r.appointment_time,
+      status: r.status,
+      service_name: r.service_name || r.service_type,
+      delivered_at: r.specimens_delivered_at || r.delivered_at,
+      specimen_tracking_id: r.specimen_tracking_id,
+      specimen_lab_name: r.specimen_lab_name,
+      collection_at: r.collection_at,
+      result_received_at: r.result_received_at,
+    }));
+
     // ── TEAM ROSTER (other users with this org_id in metadata) ───────────
     const allUsers: any[] = [];
     for (let page = 1; page <= 10; page++) {
@@ -220,6 +258,7 @@ Deno.serve(async (req) => {
       invoices,
       team,
       labRequests: labRequests || [],
+      recentActivity,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('provider-dashboard-data error:', error);
