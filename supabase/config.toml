@@ -119,6 +119,9 @@ verify_jwt = false
 [functions.create-booking-prefill-link]
 verify_jwt = true
 
+[functions.org-outreach-action]
+verify_jwt = false
+
 [functions.resolve-booking-prefill]
 verify_jwt = false
 

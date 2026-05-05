@@ -54,10 +54,20 @@ interface DiscoveredOrg {
   contact_phone: string | null;
   manager_email: string | null;
   npi: string | null;
+  ordering_physician: string | null;
+  address_street: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  address_zip: string | null;
+  office_phone: string | null;
   outreach_status: string | null;
+  outreach_note: string | null;
   referral_count: number | null;
   first_discovered_at: string | null;
   last_referral_at: string | null;
+  // Joined: most recent appointment for this org (the patient who triggered the discovery)
+  last_patient_name?: string | null;
+  last_appointment_date?: string | null;
 }
 
 const InboxTab: React.FC = () => {
@@ -91,20 +101,53 @@ const InboxTab: React.FC = () => {
       }));
       setInsuranceQ(ins);
 
-      // Discovered orgs missing comms metadata. Filter out inactive orgs
-      // so manually-merged duplicates (e.g. when an OCR-discovered "new
-      // practice" turns out to be a known org under a different legal
-      // name) drop out of the inbox the moment is_active=false is set.
+      // Discovered orgs awaiting admin action.
+      //   - Live org row (is_active=true)
+      //   - Missing email (so we can welcome them)
+      //   - NOT yet marked unreachable (those drop out of the inbox)
+      //   - NOT yet welcomed (welcomed orgs don't need admin touch)
       const { data: orgs } = await supabase
         .from('organizations')
-        .select('id, name, contact_email, contact_phone, manager_email, npi, outreach_status, referral_count, first_discovered_at, last_referral_at')
+        .select(`
+          id, name, contact_email, contact_phone, manager_email, npi,
+          ordering_physician, address_street, address_city, address_state,
+          address_zip, office_phone, outreach_status, outreach_note,
+          referral_count, first_discovered_at, last_referral_at
+        `)
         .eq('discovered_from_lab_order', true as any)
         .eq('is_active', true)
+        .or('outreach_status.is.null,outreach_status.in.(pending,untouched,contacted)')
         .or('manager_email.is.null,contact_email.is.null')
-        .order('referral_count', { ascending: false })
+        .order('referral_count', { ascending: false, nullsFirst: false })
         .order('first_discovered_at', { ascending: false })
         .limit(50);
-      setOrgsQ((orgs as any[]) || []);
+
+      // Enrich each org with the most-recent patient who referred them
+      // (so admin sees "Discovered from Sarah Lee's lab order"). One query
+      // for all orgs, then map back.
+      const orgIds = ((orgs as any[]) || []).map(o => o.id);
+      const lastPatientByOrg = new Map<string, { name: string; date: string }>();
+      if (orgIds.length > 0) {
+        const { data: lastAppts } = await supabase
+          .from('appointments')
+          .select('organization_id, patient_name, appointment_date, created_at')
+          .in('organization_id', orgIds)
+          .order('created_at', { ascending: false });
+        for (const a of (lastAppts as any[] || [])) {
+          if (!lastPatientByOrg.has(a.organization_id)) {
+            lastPatientByOrg.set(a.organization_id, {
+              name: a.patient_name || 'Unknown',
+              date: a.appointment_date,
+            });
+          }
+        }
+      }
+      const enriched = ((orgs as any[]) || []).map(o => ({
+        ...o,
+        last_patient_name: lastPatientByOrg.get(o.id)?.name || null,
+        last_appointment_date: lastPatientByOrg.get(o.id)?.date || null,
+      }));
+      setOrgsQ(enriched as any);
 
       // Pre-seed inline edit state
       const seed: typeof orgEdit = {};
@@ -242,18 +285,62 @@ const InboxTab: React.FC = () => {
     }
   };
 
-  const dismissOrg = async (org: DiscoveredOrg) => {
+  // Hormozi flow: admin obtained the org's email → save it + auto-fire
+  // welcome email → org disappears from inbox.
+  const saveEmailAndWelcome = async (org: DiscoveredOrg) => {
+    const edit = orgEdit[org.id];
+    const targetEmail = (edit?.contact_email || edit?.manager_email || '').trim();
+    if (!targetEmail || !targetEmail.includes('@')) {
+      toast.error('Enter a valid email first');
+      return;
+    }
     setBusy(org.id);
     try {
-      // Mark as dismissed/declined so it stops surfacing
-      await supabase.from('organizations').update({
-        outreach_status: 'declined',
-        outreach_note: 'Dismissed from inbox',
-        outreached_at: new Date().toISOString(),
-      }).eq('id', org.id);
-      toast.success(`${org.name} dismissed`);
+      const { data, error } = await supabase.functions.invoke('org-outreach-action', {
+        body: {
+          organizationId: org.id,
+          action: 'save_email_send_welcome',
+          email: targetEmail,
+          samplePatientName: org.last_patient_name || null,
+        },
+      });
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'save failed');
+      if ((data as any).welcome_sent) {
+        toast.success(`Saved + welcome email sent to ${org.name}`);
+      } else {
+        toast.warning((data as any).warning || `Email saved but welcome failed`);
+      }
+      refresh();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed');
+      toast.error(e?.message || 'Save+welcome failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Hormozi: admin tried to reach the org, they refused or unavailable.
+  // Mark unreachable with a notation; org stays in Organizations tab
+  // (with the badge) but disappears from the inbox.
+  const markUnreachable = async (org: DiscoveredOrg) => {
+    const note = window.prompt(
+      `Mark ${org.name} as unreachable?\n\nAdd a note (optional but recommended):\n• "Refused to share email"\n• "No response after 3 calls"\n• "Front desk said send fax instead"`,
+      'Refused to share email'
+    );
+    if (note === null) return; // cancelled
+    setBusy(org.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('org-outreach-action', {
+        body: {
+          organizationId: org.id,
+          action: 'mark_unreachable',
+          note: note || 'Marked unreachable from inbox',
+        },
+      });
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'mark failed');
+      toast.success(`${org.name} marked unreachable — moved to Organizations tab`);
+      refresh();
+    } catch (e: any) {
+      toast.error(e?.message || 'Mark failed');
     } finally {
       setBusy(null);
     }
@@ -383,24 +470,43 @@ const InboxTab: React.FC = () => {
                 <Card key={org.id} className="border-blue-200">
                   <CardContent className="p-4 space-y-3">
                     <div className="flex items-start justify-between flex-wrap gap-2">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold truncate">{org.name}</p>
-                        <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] text-gray-600">
-                          {org.npi && <span>NPI {org.npi}</span>}
-                          {org.referral_count != null && (
-                            <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-1.5 py-0.5">{org.referral_count} referral{org.referral_count === 1 ? '' : 's'}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold text-gray-900 truncate">
+                          🆕 {org.name || <span className="text-amber-700 italic">Unnamed organization · review</span>}
+                        </p>
+                        {org.ordering_physician && (
+                          <p className="text-xs text-gray-700 mt-0.5">
+                            Dr. {org.ordering_physician.replace(/^Dr\.?\s*/i, '')}
+                          </p>
+                        )}
+                        {org.last_patient_name && (
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            Discovered from <strong className="text-gray-700">{org.last_patient_name}</strong>'s lab order
+                            {org.last_appointment_date && (
+                              <span> · appt {format(new Date(org.last_appointment_date), 'MMM d')}</span>
+                            )}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[11px] text-gray-600">
+                          {(org.address_street || org.address_city) && (
+                            <span className="bg-gray-50 border border-gray-200 rounded-full px-2 py-0.5">
+                              📍 {[org.address_street, org.address_city, org.address_state, org.address_zip].filter(Boolean).join(', ')}
+                            </span>
                           )}
-                          {org.outreach_status && (
-                            <span className="bg-gray-100 text-gray-700 border border-gray-200 rounded-full px-1.5 py-0.5">{org.outreach_status}</span>
+                          {(org.office_phone || org.contact_phone) && (
+                            <span className="bg-gray-50 border border-gray-200 rounded-full px-2 py-0.5">
+                              📞 <a href={`tel:${(org.office_phone || org.contact_phone || '').replace(/\D/g, '')}`} className="underline">{org.office_phone || org.contact_phone}</a>
+                            </span>
+                          )}
+                          {org.npi && <span className="bg-gray-50 border border-gray-200 rounded-full px-2 py-0.5">NPI {org.npi}</span>}
+                          {org.referral_count != null && org.referral_count > 0 && (
+                            <span className="bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">{org.referral_count} referral{org.referral_count === 1 ? '' : 's'}</span>
                           )}
                           {org.first_discovered_at && (
                             <span className="text-gray-400">discovered {formatDistanceToNow(new Date(org.first_discovered_at), { addSuffix: true })}</span>
                           )}
                         </div>
                       </div>
-                      <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px]">
-                        missing {refsMissing.length} field{refsMissing.length === 1 ? '' : 's'}
-                      </Badge>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -424,19 +530,24 @@ const InboxTab: React.FC = () => {
                       </div>
                     </div>
 
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 mt-1">
+                      <strong>No email on file yet.</strong> Call the office to retrieve it, then save below.
+                      If they refuse to provide one, click <em>Mark unreachable</em> — they'll move to the Organizations tab with a note.
+                    </p>
                     <div className="flex flex-wrap gap-2 justify-end pt-1">
-                      <Button size="sm" variant="ghost" className="text-xs h-8"
-                        onClick={() => dismissOrg(org)} disabled={busy === org.id}>
-                        Dismiss
+                      <Button size="sm" variant="outline" className="text-xs h-8 border-red-200 text-red-700 hover:bg-red-50"
+                        onClick={() => markUnreachable(org)} disabled={busy === org.id}>
+                        <AlertTriangle className="h-3 w-3 mr-1" /> Mark unreachable
                       </Button>
                       <Button size="sm" variant="outline" className="text-xs h-8"
                         onClick={() => saveOrgComms(org)} disabled={busy === org.id}>
-                        Save
+                        Save (no email yet)
                       </Button>
                       <Button size="sm" className="text-xs h-8 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1"
-                        onClick={() => sendOrgInvite(org)} disabled={busy === org.id || (!edit.manager_email && !edit.contact_email)}>
-                        {busy === org.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
-                        Save &amp; invite manager
+                        onClick={() => saveEmailAndWelcome(org)}
+                        disabled={busy === org.id || !((edit.contact_email || edit.manager_email || '').trim().includes('@'))}>
+                        {busy === org.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                        Save email + send welcome
                       </Button>
                     </div>
                   </CardContent>

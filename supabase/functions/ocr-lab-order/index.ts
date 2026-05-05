@@ -675,6 +675,30 @@ Deno.serve(async (req) => {
               org_match_organization_id: orgId,
             }).eq('id', labOrderRowId);
 
+            // FIRST-DETECTION AUTO-WELCOME (Hormozi partnership flywheel)
+            // When OCR auto-creates an org AND we have an email for it,
+            // fire the welcome email immediately — no admin touch required.
+            // The org-outreach-action fn no-ops if no email is on file,
+            // so this hook is safe regardless of OCR completeness.
+            if (status === 'auto_created') {
+              try {
+                await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/org-outreach-action`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    organizationId: orgId,
+                    action: 'send_welcome_now',
+                    sourceLabOrderId: labOrderRowId,
+                  }),
+                });
+              } catch (welcomeErr) {
+                console.warn('[ocr->org] auto-welcome invoke failed (non-blocking):', welcomeErr);
+              }
+            }
+
             // FIRST-DETECTION OWNER ALERT
             // When OCR auto-creates a brand-new org, page the owner once so
             // they can fill in manager_email + contact_email proactively
