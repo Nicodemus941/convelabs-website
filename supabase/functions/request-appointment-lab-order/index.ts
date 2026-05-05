@@ -64,11 +64,20 @@ Deno.serve(async (req) => {
     });
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
-    const { data: userResp } = await admin.auth.getUser(jwt);
-    const requester = userResp?.user;
-    if (!requester) return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+
+    // Allow cron / internal callers using the service-role key to skip the
+    // user-JWT check. The auto-request cron uses this path. External admin
+    // / phleb callers still get user-JWT verification.
+    const isServiceRole = !!SERVICE_KEY && jwt === SERVICE_KEY;
+    let requesterId: string | null = null;
+    if (!isServiceRole) {
+      const { data: userResp } = await admin.auth.getUser(jwt);
+      const requester = userResp?.user;
+      if (!requester) return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+      requesterId = requester.id;
+    }
 
     const body = await req.json().catch(() => ({}));
     const appointmentId: string = body?.appointmentId;
@@ -81,7 +90,7 @@ Deno.serve(async (req) => {
     // Load appointment + check it's a real visit needing the request
     const { data: appt } = await admin
       .from('appointments')
-      .select('id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, lab_order_file_path, status, service_type, organization_id')
+      .select('id, patient_id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, lab_order_file_path, status, service_type, organization_id')
       .eq('id', appointmentId)
       .maybeSingle();
     if (!appt) {
@@ -90,8 +99,38 @@ Deno.serve(async (req) => {
       });
     }
 
-    const patientEmail = (appt.patient_email || '').toLowerCase().trim() || null;
-    const patientPhone = (appt.patient_phone || '').trim() || null;
+    let patientEmail = (appt.patient_email || '').toLowerCase().trim() || null;
+    let patientPhone = (appt.patient_phone || '').trim() || null;
+
+    // Stale-contact fallback: if appointment row is missing phone OR email,
+    // pull from tenant_patients (the canonical record) and quietly write back
+    // so the appointment row stays in sync. Eliminates the silent "SMS to
+    // old number" failure mode when admin updated the patient record but
+    // not the appointment.
+    if ((!patientEmail || !patientPhone) && appt.patient_id) {
+      const { data: tp } = await admin
+        .from('tenant_patients')
+        .select('email, phone')
+        .or(`id.eq.${appt.patient_id},user_id.eq.${appt.patient_id}`)
+        .limit(1)
+        .maybeSingle();
+      const fallbackEmail = (tp as any)?.email ? String((tp as any).email).toLowerCase().trim() : null;
+      const fallbackPhone = (tp as any)?.phone ? String((tp as any).phone).trim() : null;
+      const updates: Record<string, string> = {};
+      if (!patientEmail && fallbackEmail) {
+        patientEmail = fallbackEmail;
+        updates.patient_email = fallbackEmail;
+      }
+      if (!patientPhone && fallbackPhone) {
+        patientPhone = fallbackPhone;
+        updates.patient_phone = fallbackPhone;
+      }
+      if (Object.keys(updates).length > 0) {
+        await admin.from('appointments').update(updates).eq('id', appt.id);
+        console.log(`[request-lab-order] backfilled appt ${appt.id} contact from tenant_patients: ${Object.keys(updates).join(', ')}`);
+      }
+    }
+
     if (!patientEmail && !patientPhone) {
       return new Response(JSON.stringify({
         error: 'no_contact',
@@ -166,7 +205,7 @@ Deno.serve(async (req) => {
           access_token: accessToken,
           expires_at: expiresAt.toISOString(),
           status: 'pending',
-          requested_by: requester.id,
+          requested_by: requesterId,
           patient_email_at_send: patientEmail,
           patient_phone_at_send: patientPhone,
         })

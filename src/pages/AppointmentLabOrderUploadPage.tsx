@@ -56,6 +56,10 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
   const [summary, setSummary] = useState<ApptSummary | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
+  // Hormozi auto-magic-link: server returns a Supabase magiclink on
+  // successful upload. We surface it as a "View my dashboard" CTA so the
+  // patient lands on /dashboard already authed — no password wall, ever.
+  const [dashboardMagicLink, setDashboardMagicLink] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) { setError('No token'); setLoading(false); return; }
@@ -135,8 +139,10 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
           if (stillPending.length === 0) setSuccess(true);
           return next;
         });
+        if (j?.dashboard_url) setDashboardMagicLink(j.dashboard_url);
       } else {
         setSuccess(true);
+        if (j?.dashboard_url) setDashboardMagicLink(j.dashboard_url);
       }
     } catch (e: any) {
       setError(e?.message || 'Upload crashed.');
@@ -205,6 +211,17 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
               <li>Have a photo ID + insurance card ready</li>
             </ul>
           </div>
+          {/* Hormozi auto-magic-link CTA — patient is one tap away from
+              their dashboard with no password wall. Biggest "wow" of
+              the post-upload experience. */}
+          {dashboardMagicLink && (
+            <a
+              href={dashboardMagicLink}
+              className="inline-block mt-4 w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white font-semibold rounded-xl px-5 py-3 text-sm transition"
+            >
+              View my dashboard →
+            </a>
+          )}
           <p className="text-xs text-gray-400 mt-4">Need to reach us? <a href="mailto:info@convelabs.com" className="text-[#B91C1C] underline">info@convelabs.com</a> · (941) 527-9169</p>
         </div>
       </div>

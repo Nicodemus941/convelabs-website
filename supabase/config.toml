@@ -113,6 +113,9 @@ verify_jwt = false
 [functions.nightly-message-smoke-test]
 verify_jwt = false
 
+[functions.auto-request-missing-lab-orders]
+verify_jwt = false
+
 [functions.backfill-provider-phone-auth]
 verify_jwt = false
 

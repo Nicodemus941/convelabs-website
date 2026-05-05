@@ -22,6 +22,7 @@ const corsHeaders = {
 };
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
+const PUBLIC_SITE_URL = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
 const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
@@ -313,10 +314,40 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn('[submit-lab-order] OCR invoke skipped:', e); }
     }
 
+    // Hormozi auto-magic-link sign-in: when the patient finishes the upload,
+    // generate a Supabase magiclink keyed on their email so they land on
+    // /dashboard already authenticated. They never see a password wall.
+    // Biggest "wow" moment of the post-upload experience + retention lever
+    // for follow-up bookings.
+    let dashboardMagicLink: string | null = null;
+    try {
+      const { data: appt2 } = await admin
+        .from('appointments')
+        .select('patient_email')
+        .eq('id', effectiveAppointmentId)
+        .maybeSingle();
+      const email = ((appt2 as any)?.patient_email || '').trim().toLowerCase();
+      if (email) {
+        const { data: linkRes } = await admin.auth.admin.generateLink({
+          type: 'magiclink',
+          email,
+          options: {
+            redirectTo: `${PUBLIC_SITE_URL || 'https://www.convelabs.com'}/dashboard`,
+          },
+        } as any);
+        dashboardMagicLink = (linkRes as any)?.properties?.action_link || (linkRes as any)?.action_link || null;
+      }
+    } catch (e) {
+      console.warn('[submit-lab-order] magiclink generation skipped:', e);
+    }
+
     return new Response(JSON.stringify({
       ok: true,
       file_path: safeName,
       message: 'Got it ✓',
+      // Front-end can present a "View my dashboard" CTA that pre-auths the
+      // patient. If null, fallback to a regular sign-in prompt.
+      dashboard_url: dashboardMagicLink,
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('[submit-lab-order] unhandled:', e);
