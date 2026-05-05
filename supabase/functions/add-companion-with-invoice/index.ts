@@ -139,9 +139,32 @@ Deno.serve(async (req) => {
         customerId = newCustomer.id;
       }
 
-      // Create invoice item
+      // Create the EMPTY invoice FIRST so we can attach the item directly
+      // to it via the `invoice` parameter. Stripe API default for
+      // `pending_invoice_items_behavior` was changed to `exclude` — the
+      // older "create item then create invoice and items auto-sweep" path
+      // silently leaves items pending. (Bug seen 2026-05-05: Jennifer
+      // Gibson's companion invoice sent at $0 because the $75 item never
+      // attached.)
+      const invoice = await stripe.invoices.create({
+        customer: customerId!,
+        collection_method: 'send_invoice',
+        days_until_due: 7,
+        description: `Companion visit add-on for ${companionFullName} — ${new Date(String((primary as any).appointment_date).substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`,
+        metadata: {
+          primary_appointment_id: primaryAppointmentId,
+          companion_appointment_id: (compRow as any).id,
+          source: 'admin_companion_addon',
+          type: 'companion_addon_invoice',
+        },
+        auto_advance: false,
+        pending_invoice_items_behavior: 'exclude',
+      });
+
+      // Attach the line item EXPLICITLY to the just-created invoice
       await stripe.invoiceItems.create({
         customer: customerId!,
+        invoice: invoice.id,
         amount: companionFeeCents,
         currency: 'usd',
         description: `Companion visit add-on — ${companionFullName} — ${String((primary as any).appointment_date).substring(0, 10)} at ${(primary as any).appointment_time || ''}`,
@@ -152,21 +175,6 @@ Deno.serve(async (req) => {
           relationship,
           source: 'admin_companion_addon',
         },
-      });
-
-      // Create the invoice + finalize + send
-      const invoice = await stripe.invoices.create({
-        customer: customerId!,
-        collection_method: 'send_invoice',
-        days_until_due: 7,
-        description: `Companion visit add-on for ${companionFullName} — Wed ${new Date(String((primary as any).appointment_date).substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`,
-        metadata: {
-          primary_appointment_id: primaryAppointmentId,
-          companion_appointment_id: (compRow as any).id,
-          source: 'admin_companion_addon',
-          type: 'companion_addon_invoice',
-        },
-        auto_advance: false,
       });
 
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
