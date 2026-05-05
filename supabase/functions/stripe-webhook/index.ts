@@ -154,6 +154,9 @@ Deno.serve(async (req) => {
     else if (event.type === 'invoice.paid') {
       const invoice = event.data.object;
       const appointmentId = invoice.metadata?.appointment_id;
+      const primaryApptId = invoice.metadata?.primary_appointment_id;
+      const companionApptId = invoice.metadata?.companion_appointment_id;
+
       if (appointmentId) {
         console.log(`Invoice paid for appointment: ${appointmentId}`);
         const { error } = await supabaseClient
@@ -167,7 +170,6 @@ Deno.serve(async (req) => {
         if (error) console.error('Error updating appointment payment:', error);
         else console.log(`Appointment ${appointmentId} marked as paid via invoice`);
       } else if (invoice.id) {
-        // Try matching by stripe_invoice_id
         const { error } = await supabaseClient
           .from('appointments')
           .update({
@@ -176,6 +178,59 @@ Deno.serve(async (req) => {
           })
           .eq('stripe_invoice_id', invoice.id);
         if (error) console.error('Error updating by invoice ID:', error);
+      }
+
+      // ─── HORMOZI: AUTO-ROUTE PHLEB CUT ON EVERY PAID INVOICE ────────
+      // Stripe Invoice payments don't auto-Connect-transfer like Checkout
+      // sessions do. Without this, every org-billed visit + companion
+      // add-on invoice strands the phleb cut on the platform balance and
+      // gets swept by auto-payouts. We attempt a transfer; if balance is
+      // insufficient (auto-payouts), log a manual_owed staff_payouts row
+      // so owner can settle from their bank / Profit-First bucket.
+      try {
+        // Resolve which appointments to credit:
+        //   - primary_appointment_id + companion_appointment_id (companion add-on invoice)
+        //   - appointment_id (single-patient invoice)
+        //   - else: stripe_invoice_id lookup matched in main update above
+        const credits: string[] = [];
+        if (primaryApptId) credits.push(primaryApptId);
+        if (companionApptId) credits.push(companionApptId);
+        if (credits.length === 0 && appointmentId) credits.push(appointmentId);
+        if (credits.length === 0 && invoice.id) {
+          const { data: matched } = await supabaseClient
+            .from('appointments')
+            .select('id, family_group_id')
+            .eq('stripe_invoice_id', invoice.id)
+            .limit(10);
+          for (const m of (matched as any[] | null) || []) credits.push((m as any).id);
+        }
+
+        for (const apptId of credits) {
+          // Skip if already credited
+          const { data: existing } = await supabaseClient
+            .from('staff_payouts' as any)
+            .select('id, status, stripe_transfer_id')
+            .eq('appointment_id', apptId)
+            .limit(1)
+            .maybeSingle();
+          if ((existing as any)?.stripe_transfer_id) continue; // already routed
+
+          // Fire the catch-up transfer fn (which handles compute + transfer + log)
+          try {
+            await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/transfer-invoice-phleb-cut`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ appointment_id: apptId }),
+            });
+          } catch (transferErr: any) {
+            console.warn(`[invoice-paid->phleb-route] transfer fire failed for ${apptId}:`, transferErr?.message);
+          }
+        }
+      } catch (routeErr: any) {
+        console.warn('[invoice-paid->phleb-route] outer error (non-blocking):', routeErr?.message);
       }
     }
 

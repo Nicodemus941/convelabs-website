@@ -124,31 +124,51 @@ Deno.serve(async (req) => {
     }
 
     // Fire Stripe transfer (source_transaction ties it to the original charge so
-    // refunds flow correctly + the transfer is funded from that specific charge)
-    const transfer = await stripe.transfers.create({
-      amount: takeCents,
-      currency: 'usd',
-      destination: phleb.stripe_connect_account_id,
-      source_transaction: chargeId,
-      description: `Phleb cut for ${appt.patient_name || 'patient'} (appt ${appointment_id.substring(0, 8)})`,
-      metadata: {
-        appointment_id,
-        invoice_id: appt.stripe_invoice_id || '',
-        source: 'invoice_catchup_transfer',
-      },
-    });
+    // refunds flow correctly + the transfer is funded from that specific charge).
+    // If Stripe rejects with insufficient_funds (auto-payouts swept the balance
+    // before we could transfer), fall back to logging as 'manual_owed' so the
+    // owner can settle from their bank / Profit-First bucket.
+    let transferId: string | null = null;
+    let transferErr: any = null;
+    try {
+      const transfer = await stripe.transfers.create({
+        amount: takeCents,
+        currency: 'usd',
+        destination: phleb.stripe_connect_account_id,
+        source_transaction: chargeId,
+        description: `Phleb cut for ${appt.patient_name || 'patient'} (appt ${appointment_id.substring(0, 8)})`,
+        metadata: {
+          appointment_id,
+          invoice_id: appt.stripe_invoice_id || '',
+          source: 'invoice_catchup_transfer',
+        },
+      });
+      transferId = transfer.id;
+    } catch (e: any) {
+      transferErr = e;
+      // balance_insufficient = auto-payouts already swept the funds.
+      // Other errors (Connect not enabled, dest account inactive, etc.)
+      // fall into the same manual-settle path so phleb is never silently
+      // shorted.
+      console.warn(`[transfer-invoice-phleb-cut] transfer failed (${e?.code || 'unknown'}): ${e?.message || e}. Falling back to manual_owed.`);
+    }
 
-    // Update or insert the staff_payouts row
+    const isManualOwed = !transferId;
+    const status = isManualOwed ? 'manual_owed' : 'succeeded';
+    const notes = isManualOwed
+      ? `Manual owed (transfers.create failed: ${transferErr?.code || 'unknown'} - ${(transferErr?.message || '').substring(0, 120)}). Owner to settle from bank / Profit-First bucket and flip to manual_settled.`
+      : 'Catch-up transfer for Stripe Invoice payment';
+
     if (existing && existing.length > 0) {
       await admin.from('staff_payouts' as any)
         .update({
-          stripe_transfer_id: transfer.id,
+          stripe_transfer_id: transferId,
           stripe_charge_id: chargeId,
           stripe_payment_intent_id: paymentIntentId,
           stripe_destination_account_id: phleb.stripe_connect_account_id,
-          status: 'succeeded',
-          transferred_at: new Date().toISOString(),
-          notes: 'Catch-up transfer for Stripe Invoice payment',
+          status,
+          transferred_at: transferId ? new Date().toISOString() : null,
+          notes,
         })
         .eq('appointment_id', appointment_id);
     } else {
@@ -160,18 +180,20 @@ Deno.serve(async (req) => {
         companion_addon_cents: hasCompanion ? 1500 : 0,
         tip_cents: tipCents,
         amount_cents: takeCents,
-        stripe_transfer_id: transfer.id,
+        stripe_transfer_id: transferId,
         stripe_charge_id: chargeId,
         stripe_payment_intent_id: paymentIntentId,
         stripe_destination_account_id: phleb.stripe_connect_account_id,
-        status: 'succeeded',
-        transferred_at: new Date().toISOString(),
-        notes: 'Catch-up transfer for Stripe Invoice payment (auto-split bypassed since charge came from invoice flow, not Checkout)',
+        status,
+        transferred_at: transferId ? new Date().toISOString() : null,
+        notes,
       });
     }
 
     return new Response(JSON.stringify({
-      ok: true, transfer_id: transfer.id, amount_cents: takeCents, charge_id: chargeId,
+      ok: true, transfer_id: transferId, amount_cents: takeCents, charge_id: chargeId,
+      manual_owed: isManualOwed,
+      transfer_error: transferErr?.code || null,
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('[transfer-invoice-phleb-cut] unhandled:', e);
