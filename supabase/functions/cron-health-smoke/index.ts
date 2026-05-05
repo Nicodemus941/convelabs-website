@@ -116,11 +116,17 @@ Deno.serve(async (req) => {
       const gap = lastRunMs ? now - lastRunMs : Infinity;
       const isNeverRun = !lastRunMs;
 
-      // Suppress "never run" alerts for monthly/weekly crons — they
-      // legitimately won't have a last_run until their first scheduled
-      // trigger lands. A monthly cron added on the 28th of the month
-      // shouldn't page until after the 1st of next month + 1 day cushion.
-      if (isNeverRun && interval > ONE_DAY_MS) {
+      // Suppress "never run" alerts entirely. A never-run cron can either
+      // be (a) brand-new and hasn't reached its scheduled fire window yet,
+      // or (b) genuinely broken. Case (a) is most common — false-flag
+      // pages the owner. Case (b) is caught by the failing_cron rule
+      // below the moment the cron fires for the first time and errors,
+      // AND by pg_cron's own status='failed' rows which surface in the
+      // get_cron_health RPC's recent_failures count. Removing this alert
+      // class loses no real signal. (2026-05-05: auto-request-missing-
+      // lab-orders flagged at 9:54 UTC because its 12-23 UTC window
+      // hadn't arrived yet — false positive.)
+      if (isNeverRun) {
         continue;
       }
 
