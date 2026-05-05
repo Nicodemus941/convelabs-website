@@ -191,6 +191,22 @@ interface OcrExtraction {
     memberId?: string | null;
     groupNumber?: string | null;
   } | null;
+  // Hormozi partnership flywheel — Claude returns the provider/practice
+  // block as structured JSON. Replaces the regex-only extractProviderBlock
+  // path that silently failed on Quest e-scripts (Justin Porter case
+  // 2026-05-05) where the OCR prompt didn't ask Claude to transcribe the
+  // header — so the regex had nothing to match against.
+  practice: {
+    practiceName?: string | null;
+    orderingPhysician?: string | null;
+    addressStreet?: string | null;
+    addressCity?: string | null;
+    addressState?: string | null;
+    addressZip?: string | null;
+    officePhone?: string | null;
+    email?: string | null;
+    npi?: string | null;
+  } | null;
 }
 
 async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<OcrExtraction | { error: string }> {
@@ -224,16 +240,24 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
           text: [
             'This is a medical lab order / test requisition.',
             '',
-            'Extract THREE things:',
+            'Extract FOUR things:',
             '1. A plain-text transcription of ALL ordered tests, panels, CPT codes, and special instructions (especially fasting requirements).',
             '2. A structured list of the panels/tests ordered. Normalize names to their common abbreviation when obvious (e.g. "Comprehensive Metabolic Panel" → "CMP").',
             '3. The patient\'s insurance information IF present on the form. Look for boxes/sections labeled "Insurance", "Carrier", "Member ID", "Group #", "Subscriber ID", "Policy #". Return the carrier name (e.g. "Aetna", "BCBS Florida", "United Healthcare", "Medicare", "Self-Pay"), the member/subscriber ID, and the group number. If the form says "Self-Pay" or "Cash", return provider="Self-Pay" with empty IDs. If no insurance section is present, return null.',
+            '4. The ORDERING PROVIDER / PRACTICE block. This is usually at the top of the form (Quest, LabCorp, Genova) or in a "Client/Account" / "Ordering Site" / "Ordering Physician" section. Extract:',
+            '   - practiceName: the clinic/practice/medical group name (e.g. "Functional Wellness PLLC", "Restoration Place"). NOT the lab company (Quest/LabCorp/Genova) — that\'s the destination, not the practice.',
+            '   - orderingPhysician: the doctor\'s full name as written (e.g. "Anna Martinez MD", "Cristelle Renta NP-C").',
+            '   - addressStreet, addressCity, addressState, addressZip: the practice\'s street + city/state/zip.',
+            '   - officePhone: the practice\'s phone (NOT the lab company\'s phone, NOT the patient\'s phone).',
+            '   - email: the practice\'s contact email if visible (often near phone or in footer).',
+            '   - npi: the 10-digit NPI number if shown.',
+            '   If the form is a Quest e-script / Quanum order, the practice block may be on a separate header strip — look carefully. If genuinely absent, return practice: null.',
             '',
             'Reply ONLY with valid JSON in this exact shape, no prose:',
-            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}}',
+            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}}',
             '',
-            'If no insurance is on the form, set "insurance": null.',
-            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null}',
+            'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null.',
+            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null}',
           ].join('\n'),
         },
       ],
@@ -281,9 +305,28 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
         const looksReal = provider && !/^(none|n\/a|null|n a|—|-)$/i.test(provider);
         if (looksReal) insurance = { provider, memberId, groupNumber };
       }
-      return { text, panels, insurance };
+      // Practice block — keep nulls when Claude returned them so the
+      // consumer can fall back to the regex parser without ambiguity.
+      let practice: OcrExtraction['practice'] = null;
+      if (parsed.practice && typeof parsed.practice === 'object') {
+        const trim = (v: any, n: number) => v == null ? null : String(v).trim().substring(0, n) || null;
+        practice = {
+          practiceName: trim(parsed.practice.practiceName, 120),
+          orderingPhysician: trim(parsed.practice.orderingPhysician, 120),
+          addressStreet: trim(parsed.practice.addressStreet, 200),
+          addressCity: trim(parsed.practice.addressCity, 80),
+          addressState: trim(parsed.practice.addressState, 4),
+          addressZip: trim(parsed.practice.addressZip, 12),
+          officePhone: trim(parsed.practice.officePhone, 30),
+          email: parsed.practice.email ? String(parsed.practice.email).trim().toLowerCase().substring(0, 120) : null,
+          npi: parsed.practice.npi ? String(parsed.practice.npi).replace(/\D/g, '').substring(0, 10) : null,
+        };
+        // Treat all-null as null (no practice block)
+        if (Object.values(practice).every(v => !v)) practice = null;
+      }
+      return { text, panels, insurance, practice };
     } catch {
-      return { text: content.substring(0, 8000), panels: [], insurance: null };
+      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null };
     }
   } catch (e: any) {
     console.error('[ocr] request exception', e);
@@ -599,7 +642,26 @@ Deno.serve(async (req) => {
     // Non-blocking — failures here should not break OCR.
     if (targetId && result.text) {
       try {
-        const extracted = extractProviderBlock(result.text);
+        // Prefer Claude's structured practice block (added 2026-05-05 to
+        // fix Justin Porter case where Quest e-script OCR text had no
+        // labeled "Account Name:" / "Ordering Physician:" headers for
+        // the regex parser to match against).
+        const regexExtracted = extractProviderBlock(result.text);
+        const claude = (result as any).practice as OcrExtraction['practice'];
+        const extracted: ExtractedProvider = {
+          practiceName: claude?.practiceName
+            ? normalizePracticeName(String(claude.practiceName).trim())
+            : regexExtracted.practiceName,
+          orderingPhysician: claude?.orderingPhysician || regexExtracted.orderingPhysician,
+          addressStreet: claude?.addressStreet || regexExtracted.addressStreet,
+          addressCity: claude?.addressCity || regexExtracted.addressCity,
+          addressState: claude?.addressState || regexExtracted.addressState,
+          addressZip: claude?.addressZip || regexExtracted.addressZip,
+          officePhone: claude?.officePhone || regexExtracted.officePhone,
+          npi: claude?.npi || regexExtracted.npi,
+        };
+        // Email is only on Claude's path — regex extractor doesn't pull it
+        const claudeEmail = claude?.email || null;
 
         // Physician-based fallback: if the practice name is missing or
         // didn't trigger an alias hit, but the ordering physician maps
@@ -624,6 +686,34 @@ Deno.serve(async (req) => {
             org_match_reason: 'no_provider_block_in_ocr',
           }).eq('id', labOrderRowId);
         }
+        // Owner SMS safety net (Justin Porter 2026-05-05): when OCR
+        // completes but practice block is empty, the org-extraction path
+        // silently no-ops and we never know to call the office. This
+        // alert surfaces it so admin can manually retrieve the org info.
+        if (!extracted.practiceName && targetId) {
+          try {
+            const { data: appt } = await supabase
+              .from('appointments')
+              .select('patient_name')
+              .eq('id', targetId)
+              .maybeSingle();
+            const TWILIO_SID  = Deno.env.get('TWILIO_ACCOUNT_SID');
+            const TWILIO_AUTH = Deno.env.get('TWILIO_AUTH_TOKEN');
+            const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
+            const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+            if (TWILIO_SID && TWILIO_AUTH) {
+              await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+                method: 'POST',
+                headers: { Authorization: `Basic ${btoa(`${TWILIO_SID}:${TWILIO_AUTH}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                  To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
+                  Body: `⚠️ OCR couldn't find practice info on ${(appt as any)?.patient_name || 'a patient'}'s lab order. Open admin → calendar → appt → lab order to manually link the org so we can retrieve their email + welcome them.`,
+                  From: TWILIO_FROM,
+                }).toString(),
+              });
+            }
+          } catch (alertErr) { console.warn('[ocr->org] no-practice alert failed (non-blocking):', alertErr); }
+        }
         if (extracted.practiceName) {
           const { data: linkRes } = await supabase.rpc('discover_or_link_provider_org' as any, {
             p_appointment_id: targetId,
@@ -643,6 +733,30 @@ Deno.serve(async (req) => {
           // upload UI can render a tailored success toast ("Matched to X" vs
           // "New lead created"). Determine action by checking the returned
           // org's discovered_from_ocr flag + recency.
+          if (linkRes && (linkRes as any).org_id) {
+            const orgId = (linkRes as any).org_id;
+
+            // If Claude extracted an email AND the org row doesn't have one
+            // yet, write it now so send_welcome_now can fire below.
+            if (claudeEmail) {
+              try {
+                const { data: existingOrg } = await supabase
+                  .from('organizations')
+                  .select('contact_email')
+                  .eq('id', orgId)
+                  .maybeSingle();
+                if (!(existingOrg as any)?.contact_email) {
+                  await supabase
+                    .from('organizations')
+                    .update({ contact_email: claudeEmail })
+                    .eq('id', orgId);
+                  console.log(`[ocr->org] saved Claude-extracted email ${claudeEmail} on org ${orgId}`);
+                }
+              } catch (emailErr) {
+                console.warn('[ocr->org] email write failed (non-blocking):', emailErr);
+              }
+            }
+          }
           if (labOrderRowId && linkRes && (linkRes as any).org_id) {
             const orgId = (linkRes as any).org_id;
             const linkAction = (linkRes as any).action || (linkRes as any).status;
