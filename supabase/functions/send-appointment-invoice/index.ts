@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     // is marked org-billed we route to the org's Stripe customer + email.
     const { data: appt, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, billed_to, organization_id, patient_name, patient_email, patient_phone, patient_name_masked, org_reference_id, family_group_id, total_amount')
+      .select('id, billed_to, organization_id, patient_name, patient_email, patient_phone, patient_name_masked, org_reference_id, family_group_id, total_amount, tip_amount, service_type')
       .eq('id', appointmentId)
       .maybeSingle();
     if (apptErr || !appt) {
@@ -163,6 +163,29 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── CONNECT ROUTING LOOKUP ───────────────────────────────────────────
+    // Find the single connected phleb (owner-phleb pattern). If/when we
+    // hire additional phlebs, this needs to resolve from an assignment
+    // table; for now there is exactly one Connect account in the system.
+    // We compute the phleb's take here so we can pass transfer_data on
+    // invoice creation. Works for BOTH patient-billed and org-billed:
+    // Stripe routes the configured cents to the destination on payment.
+    let phlebConnectId: string | null = null;
+    let phlebStaffId: string | null = null;
+    {
+      const { data: connected } = await supabase
+        .from('staff_profiles')
+        .select('id, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_payouts_enabled')
+        .not('stripe_connect_account_id', 'is', null)
+        .eq('stripe_connect_charges_enabled', true)
+        .eq('stripe_connect_payouts_enabled', true)
+        .limit(2);
+      if (connected && connected.length === 1) {
+        phlebConnectId = (connected[0] as any).stripe_connect_account_id;
+        phlebStaffId = (connected[0] as any).id;
+      }
+    }
+
     // ─── CREATE INVOICE ───────────────────────────────────────────────────
     const invoiceDescription = memo
       ? `ConveLabs — ${memo}`
@@ -248,6 +271,79 @@ Deno.serve(async (req) => {
         }
       } catch (companionErr) {
         console.warn('[send-invoice] companion line-items failed (non-blocking):', companionErr);
+      }
+    }
+
+    // ─── COMPUTE PHLEB TAKE + ATTACH transfer_data BEFORE FINALIZE ──────
+    // For each appointment on this invoice (primary + invoiced companions),
+    // call compute_phleb_take_cents and sum into a single transfer_data.amount
+    // routed to the connected phleb. Cap at total invoice amount for safety.
+    // Skipped if no Connect account is configured or take is zero.
+    let totalTakeCents = 0;
+    if (phlebConnectId && phlebStaffId) {
+      try {
+        const apptsForTake: Array<{ id: string; total_amount: number; tip_amount: number; service_type: string; family_group_id: string | null }> = [
+          {
+            id: appt.id,
+            total_amount: Number(appt.total_amount || servicePrice || 0),
+            tip_amount: Number((appt as any).tip_amount || 0),
+            service_type: appt.service_type || serviceType || 'mobile',
+            family_group_id: appt.family_group_id || null,
+          },
+        ];
+        if (appt.family_group_id) {
+          const { data: companionAppts } = await supabase
+            .from('appointments')
+            .select('id, total_amount, tip_amount, service_type, family_group_id')
+            .eq('family_group_id', appt.family_group_id)
+            .neq('id', appointmentId)
+            .eq('stripe_invoice_id', invoice.id);
+          for (const c of (companionAppts || [])) {
+            apptsForTake.push({
+              id: (c as any).id,
+              total_amount: Number((c as any).total_amount || 0),
+              tip_amount: Number((c as any).tip_amount || 0),
+              service_type: (c as any).service_type || appt.service_type || 'mobile',
+              family_group_id: (c as any).family_group_id || null,
+            });
+          }
+        }
+
+        for (const a of apptsForTake) {
+          const tipCents = Math.round((a.tip_amount || 0) * 100);
+          const hasCompanion = !!a.family_group_id;
+          const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
+            p_staff_id: phlebStaffId,
+            p_service_type: a.service_type,
+            p_tip_cents: tipCents,
+            p_has_companion: hasCompanion,
+            p_surcharges: {},
+            p_is_owner: true,
+          });
+          const t = parseInt(String(takeRes || 0), 10);
+          if (t > 0) totalTakeCents += t;
+        }
+
+        // Cap at total invoice amount minus a tiny safety margin (Stripe
+        // requires transfer amount <= charge amount net of fees).
+        const primaryCents = Math.round((servicePrice || appt.total_amount || 0) * 100);
+        const totalInvoiceCents = primaryCents + companionTotalCents;
+        if (totalTakeCents > totalInvoiceCents) totalTakeCents = totalInvoiceCents;
+
+        if (totalTakeCents > 0) {
+          await stripe.invoices.update(invoice.id, {
+            transfer_data: {
+              destination: phlebConnectId,
+              amount: totalTakeCents,
+            },
+          } as any);
+          console.log(`[send-invoice] attached transfer_data ${totalTakeCents}¢ → ${phlebConnectId} on invoice ${invoice.id}`);
+        }
+      } catch (takeErr) {
+        // Non-blocking: invoice still goes out, phleb cut falls back to
+        // the invoice.paid webhook → transfer-invoice-phleb-cut catch-up
+        // path (which will log manual_owed if balance is insufficient).
+        console.warn('[send-invoice] transfer_data attach failed (non-blocking):', takeErr);
       }
     }
 
@@ -364,6 +460,8 @@ Deno.serve(async (req) => {
         invoiceUrl: finalizedInvoice.hosted_invoice_url,
         billedTo: billedToOrg ? 'org' : 'patient',
         recipient: invoiceToEmail,
+        phlebTakeCents: totalTakeCents,
+        phlebConnect: phlebConnectId,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
