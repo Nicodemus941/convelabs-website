@@ -89,7 +89,11 @@ const PatientProfileTab: React.FC = () => {
   useEffect(() => {
     const loadAll = async () => {
       const [{ data: pts }, { data: appts }, { data: mems }] = await Promise.all([
-        supabase.from('tenant_patients').select('*').eq('is_active', true).is('deleted_at', null).order('first_name', { ascending: true }).limit(1000),
+        // BUG FIX 2026-05-05: was filtering by is_active=true AND deleted_at IS NULL.
+        // The is_active column is legacy — deleted_at is the canonical
+        // soft-delete signal. Filtering by is_active hid 2 live patients
+        // (incl. "nicq test") that admin couldn't find via search.
+        supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name', { ascending: true }).limit(1000),
         supabase.from('appointments').select('patient_id').not('patient_id', 'is', null),
         supabase.from('user_memberships' as any)
           .select('user_id, status, membership_plans(name)')
