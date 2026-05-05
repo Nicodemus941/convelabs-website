@@ -45,6 +45,11 @@ const PatientProfileTab: React.FC = () => {
   const [showMembershipModal, setShowMembershipModal] = useState(false);
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [savingPatient, setSavingPatient] = useState(false);
+  // Inline error surface for the Edit Patient modal. Toasts can be hidden
+  // behind the dialog overlay or scroll off-screen — the inline banner is
+  // the don't-miss-it path. (2026-05-05: owner reported "Save Changes
+  // refreshes but nothing saves" — toast was firing but invisible.)
+  const [editError, setEditError] = useState<string | null>(null);
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({
     amount: '',
@@ -253,6 +258,7 @@ const PatientProfileTab: React.FC = () => {
           <div className="flex flex-wrap gap-2 pl-10 sm:pl-0">
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
               setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '', address: p.address || '', city: p.city || '', state: p.state || '', zipcode: p.zipcode || '', gateCode: p.gate_code || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '', insuranceGroup: p.insurance_group_number || '' });
+              setEditError(null);
               setEditModalOpen(true);
             }}>
               <Edit3 className="h-3.5 w-3.5" /> Edit Info
@@ -720,6 +726,11 @@ const PatientProfileTab: React.FC = () => {
                 Delete Patient
               </Button>
               <div className="flex gap-3">
+              {editError && (
+                <div className="basis-full rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 mb-2">
+                  <strong>Save failed:</strong> {editError}
+                </div>
+              )}
               <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
               <Button
                 type="button"
@@ -730,8 +741,20 @@ const PatientProfileTab: React.FC = () => {
                 e.stopPropagation();
                 if (savingPatient) return;
                 setSavingPatient(true);
+                setEditError(null);
                 console.log('[patient-save] click fired for', p.id, 'email:', editForm.email);
                 try {
+                  // Pre-flight: confirm the session is still valid. An expired
+                  // JWT silently turns auth.role() into 'anon' and RLS blocks
+                  // both UPDATE + the .select() return — looks like "0 rows
+                  // returned" with no error. Catch it here and prompt re-auth.
+                  const { data: { session } } = await supabase.auth.getSession();
+                  if (!session?.user) {
+                    setEditError('Your session expired. Please refresh the page and sign in again, then re-open Edit.');
+                    toast.error('Session expired — refresh + sign in again', { duration: 12000 });
+                    return;
+                  }
+
                   const updatePayload: any = {
                     first_name: editForm.firstName, last_name: editForm.lastName,
                     email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
@@ -750,20 +773,27 @@ const PatientProfileTab: React.FC = () => {
 
                   if (error) {
                     console.error('[patient-save] DB error:', error);
-                    toast.error(
-                      `Update failed — code ${error.code || 'n/a'}: ${error.message || 'no message'}${error.hint ? ` · hint: ${error.hint}` : ''}`,
-                      { duration: 12000 }
-                    );
+                    const detail = `Update failed — code ${error.code || 'n/a'}: ${error.message || 'no message'}${error.hint ? ` · hint: ${error.hint}` : ''}`;
+                    setEditError(detail);
+                    toast.error(detail, { duration: 12000 });
                     return;
                   }
                   if (!data || data.length === 0) {
-                    // Diagnose role for the user
-                    const { data: { session } } = await supabase.auth.getSession();
-                    const role = (session?.user as any)?.user_metadata?.role || 'unknown';
-                    toast.error(
-                      `Update returned 0 rows — likely a permissions issue. You're signed in as: ${role}. Need super_admin / admin / office_manager.`,
-                      { duration: 12000 }
-                    );
+                    // Diagnose: role + does the patient still exist?
+                    const role = (session.user as any)?.user_metadata?.role || 'unknown';
+                    // Probe a SELECT to disambiguate "row missing" vs "RLS blocked"
+                    const { data: probe } = await supabase
+                      .from('tenant_patients')
+                      .select('id, deleted_at')
+                      .eq('id', p.id)
+                      .maybeSingle();
+                    const detail = !probe
+                      ? `No patient row found for id ${p.id}. Reload and try again — the patient may have been deleted in another tab.`
+                      : (probe as any).deleted_at
+                        ? `This patient was soft-deleted on ${(probe as any).deleted_at}. Reload to see the current list.`
+                        : `Update returned 0 rows — RLS blocked the write. Your role: ${role}. Need super_admin / office_manager. Sign out + back in.`;
+                    setEditError(detail);
+                    toast.error(detail, { duration: 12000 });
                     return;
                   }
                   toast.success('Patient info updated');
@@ -837,10 +867,9 @@ const PatientProfileTab: React.FC = () => {
                   }
                 } catch (err: any) {
                   console.error('[patient-save] threw:', err);
-                  toast.error(
-                    `Save crashed: ${err?.message || String(err)}. Open DevTools Console for the full trace.`,
-                    { duration: 12000 }
-                  );
+                  const detail = `Save crashed: ${err?.message || String(err)}. Open DevTools Console for the full trace.`;
+                  setEditError(detail);
+                  toast.error(detail, { duration: 12000 });
                 } finally {
                   setSavingPatient(false);
                 }
