@@ -1143,6 +1143,9 @@ async function handleAppointmentPayment(session: any) {
             landing_page: parsed?.l || metadata.landing_page || null,
           };
         })()),
+        // Hormozi prefill-token attribution: stamp the token id on the
+        // appointment so we can report sent→opened→booked conversion.
+        prefill_token_id: metadata.prefill_token_id || null,
       }])
       .select()
       .single();
@@ -1152,6 +1155,19 @@ async function handleAppointmentPayment(session: any) {
     }
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
+
+    // ─── PREFILL TOKEN: mark consumed so the funnel report flips to "booked"
+    if (metadata.prefill_token_id) {
+      try {
+        await supabaseClient.from('booking_prefill_tokens').update({
+          consumed_at: new Date().toISOString(),
+          appointment_id: appointment.id,
+          payment_total_cents: parseInt(String(metadata.service_price || '0'), 10) || null,
+        }).eq('id', metadata.prefill_token_id);
+      } catch (e: any) {
+        console.warn('[prefill-token] consume failed (non-blocking):', e?.message || e);
+      }
+    }
 
     // ─── COPY PRICING BREAKDOWN onto appointment row ─────────────────
     // create-appointment-checkout stashed the itemized cart in

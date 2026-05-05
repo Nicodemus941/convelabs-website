@@ -21,9 +21,18 @@ import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 import RecurringGapsCard from './RecurringGapsCard';
+import ScheduleAppointmentModal from '@/components/calendar/ScheduleAppointmentModal';
+import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
+import { Zap } from 'lucide-react';
 
 const PatientProfileTab: React.FC = () => {
   const bookingModal = useBookingModalSafe();
+  // Hormozi: clicking Schedule on a patient chart opens the in-app
+  // ScheduleAppointmentModal (admin context with override powers), NOT
+  // the public /book-now flow. The previous bookingModal.openModal was
+  // routing to /book-now — wrong context entirely.
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [sendLinkModalOpen, setSendLinkModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [patients, setPatients] = useState<any[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<any>(null);
@@ -270,18 +279,28 @@ const PatientProfileTab: React.FC = () => {
                 }));
               } catch (e) { /* non-blocking */ }
 
-              // Open the in-app booking modal (overlays admin UI) instead of
-              // navigating away. Previous code redirected to the public
-              // calendar page which dumped the admin into the patient-facing
-              // booking flow — wrong context entirely.
-              if (bookingModal?.openModal) {
-                bookingModal.openModal('admin_patient_chart');
-              } else {
-                toast.error('Booking modal not available in this context');
-              }
+              // FIX 2026-05-05: open the admin ScheduleAppointmentModal
+              // directly. Previous code went through bookingModal.openModal
+              // which navigated to /book-now (the patient-facing flow) —
+              // wrong context. Admin needs override powers (waivers,
+              // forced phleb assign, no-buffer same-day, etc.) that the
+              // public flow doesn't expose.
+              setScheduleModalOpen(true);
             }}>
               <CalendarPlus className="h-3.5 w-3.5" /> Schedule
             </Button>
+            {/* Hormozi "send the patient a pre-loaded booking link" button.
+                4-second loop: click ⚡ → pick service → SMS+email fly. */}
+            {(p.email || p.phone) && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-xs border-amber-300 text-amber-800 hover:bg-amber-50"
+                onClick={() => setSendLinkModalOpen(true)}
+              >
+                <Zap className="h-3.5 w-3.5" /> Send booking link
+              </Button>
+            )}
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
               setInvoiceForm({ amount: '', description: '', memo: '' });
               setInvoiceModalOpen(true);
@@ -313,6 +332,30 @@ const PatientProfileTab: React.FC = () => {
           patientEmail={p.email || ''}
           patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
           onSuccess={() => loadPatientData(p)}
+        />
+
+        {/* Admin schedule modal — opens with admin override powers. Stash
+            patient prefill in sessionStorage so the modal's internal form
+            picks it up on mount (matches the convention BookingFlow uses). */}
+        <ScheduleAppointmentModal
+          open={scheduleModalOpen}
+          onClose={() => setScheduleModalOpen(false)}
+          onCreated={() => { setScheduleModalOpen(false); loadPatientData(p); }}
+        />
+
+        {/* "Send booking link" — Hormozi 4-second loop: click ⚡, pick
+            service, SMS+email fly with token URL. Patient lands on
+            /book-now?prefill=… with service + identity pre-loaded. */}
+        <SendBookingLinkModal
+          open={sendLinkModalOpen}
+          onClose={() => setSendLinkModalOpen(false)}
+          patient={{
+            id: p.id,
+            firstName: p.first_name || '',
+            lastName: p.last_name || '',
+            email: p.email,
+            phone: p.phone,
+          }}
         />
 
         {/* Recurring-series gap detector — only renders if gaps exist. */}

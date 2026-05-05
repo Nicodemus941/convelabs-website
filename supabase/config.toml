@@ -116,6 +116,12 @@ verify_jwt = false
 [functions.auto-request-missing-lab-orders]
 verify_jwt = false
 
+[functions.create-booking-prefill-link]
+verify_jwt = true
+
+[functions.resolve-booking-prefill]
+verify_jwt = false
+
 [functions.backfill-provider-phone-auth]
 verify_jwt = false
 

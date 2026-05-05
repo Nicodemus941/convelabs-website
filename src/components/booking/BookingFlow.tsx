@@ -209,6 +209,63 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Public ?prefill=<token> consumer (Hormozi "send the patient a
+  //    pre-loaded link" flow). Resolves the token via the public edge fn,
+  //    populates patient identity + service, jumps the patient straight to
+  //    Date/Time. Token gets stamped onto the booking session for
+  //    attribution at checkout (BookingFlow.handleCheckout reads the same).
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const url = new URL(window.location.href);
+      const token = url.searchParams.get('prefill');
+      if (!token) return;
+      (async () => {
+        try {
+          const SUPA = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://yluyonhrxxtyuiyrdixl.supabase.co';
+          const ANON = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+          const r = await fetch(`${SUPA}/functions/v1/resolve-booking-prefill?token=${encodeURIComponent(token)}`, {
+            headers: { 'apikey': ANON, 'Authorization': `Bearer ${ANON}` },
+          });
+          const j = await r.json();
+          if (cancelled) return;
+          if (!j?.ok || !j?.prefill) {
+            // Show inline guidance if expired/consumed
+            if (j?.expired) toast.error('That booking link has expired — please ask for a fresh one.');
+            else if (j?.consumed) toast.info('That booking link has already been used.');
+            return;
+          }
+          const p = j.prefill;
+          methods.reset({
+            ...methods.getValues(),
+            serviceDetails: {
+              ...methods.getValues().serviceDetails,
+              visitType: p.service_type,
+              selectedService: p.service_type,
+            },
+            patientDetails: {
+              firstName: p.first_name || '',
+              lastName: p.last_name || '',
+              email: p.email || '',
+              phone: p.phone || '',
+            },
+            // Stamp token + org so handleCheckout passes them through
+            prefillTokenId: p.token_id,
+            organizationId: p.organization_id || undefined,
+            billedTo: p.billed_to || 'patient',
+          } as any);
+          // Skip Service Selection → go straight to Date/Time
+          setShowDatePicker(true);
+          setCurrentStep(BookingStep.ServiceAndDate);
+          toast.success(`Welcome${p.first_name ? `, ${p.first_name}` : ''} — your ${p.service_name || p.service_type} is pre-loaded.`);
+        } catch (e: any) {
+          console.warn('[prefill] resolve failed:', e);
+        }
+      })();
+    } catch { /* ignore — non-prefill page */ }
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleNext = () => {
     prevStepRef.current = currentStep;
 
@@ -548,6 +605,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         } : null,
         // Specialty-kit bundle — sent to server for price-tamper guard
         specialtyKitBundle: specialtyBundle,
+        // Hormozi "send the patient a pre-loaded link" attribution token —
+        // stamped on the appointment row via stripe-webhook for funnel
+        // reporting (sent → opened → booked).
+        prefillTokenId: (data as any).prefillTokenId || null,
       } as any);
 
       if (result.error) {

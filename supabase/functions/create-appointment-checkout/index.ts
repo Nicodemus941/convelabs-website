@@ -94,6 +94,11 @@ Deno.serve(async (req) => {
       // expected total and rejects clientAmount if it claims LESS than the
       // computed minimum. Prevents price-tampering by a malicious client.
       specialtyKitBundle = null,
+      // Hormozi prefill-token attribution. When the patient came from a
+      // "send booking link" SMS/email, this stamps the resulting
+      // appointment row via the webhook so we can report sent→booked
+      // conversion. Stored in metadata, picked up at webhook time.
+      prefillTokenId = null,
       // New first-class attachment fields (replaces notes-stuffing pattern)
       labOrderFilePaths = [],
       insuranceCardPath = null,
@@ -850,6 +855,8 @@ Deno.serve(async (req) => {
         r: String(attribution?.referrer_url || '').substring(0, 200),
         l: String(attribution?.landing_page || '').substring(0, 200),
       }).substring(0, 500),
+      // Prefill-token attribution (1 metadata key — well within cap)
+      prefill_token_id: prefillTokenId ? String(prefillTokenId).substring(0, 64) : '',
       // Service-type-aware block duration. Webhook uses this on insert; the
       // appointments_autofill DB trigger is the safety net if it's missing.
       duration_minutes: String((() => {
