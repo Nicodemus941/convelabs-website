@@ -727,7 +727,7 @@ const PatientProfileTab: React.FC = () => {
               </Button>
               <div className="flex gap-3">
               {editError && (
-                <div className="basis-full rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 mb-2">
+                <div className="basis-full rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 mb-2 whitespace-pre-wrap">
                   <strong>Save failed:</strong> {editError}
                 </div>
               )}
@@ -773,6 +773,30 @@ const PatientProfileTab: React.FC = () => {
 
                   if (error) {
                     console.error('[patient-save] DB error:', error);
+                    // Special-case 23505 (unique violation on email) — look up
+                    // who else has this email so the admin can decide:
+                    // merge, pick a different email, or fix the other row.
+                    if (error.code === '23505' && /email/i.test(error.message || '')) {
+                      const target = (editForm.email || '').trim().toLowerCase();
+                      let conflictDetail = '';
+                      try {
+                        const { data: collide } = await supabase
+                          .from('tenant_patients')
+                          .select('id, first_name, last_name, phone, deleted_at, created_at')
+                          .ilike('email', target)
+                          .is('deleted_at', null)
+                          .neq('id', p.id)
+                          .limit(3);
+                        const list = (collide as any[] | null) || [];
+                        if (list.length > 0) {
+                          conflictDetail = list.map(r => `• ${r.first_name || ''} ${r.last_name || ''} (id ${String(r.id).slice(0, 8)}…${r.phone ? ` · ${r.phone}` : ''})`).join('\n');
+                        }
+                      } catch { /* probe is best-effort */ }
+                      const msg = `Email "${editForm.email}" is already used by another active patient${conflictDetail ? `:\n${conflictDetail}` : '.'}\n\nFix options:\n  1. Edit the OTHER patient first (change or remove their email)\n  2. Use a different email here\n  3. Soft-delete the other patient if it's a duplicate`;
+                      setEditError(msg);
+                      toast.error('Email already in use by another patient — see the red banner above for details', { duration: 14000 });
+                      return;
+                    }
                     const detail = `Update failed — code ${error.code || 'n/a'}: ${error.message || 'no message'}${error.hint ? ` · hint: ${error.hint}` : ''}`;
                     setEditError(detail);
                     toast.error(detail, { duration: 12000 });
