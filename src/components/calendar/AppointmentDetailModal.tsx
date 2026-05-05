@@ -33,6 +33,8 @@ import AppointmentLabOrdersPanel from './AppointmentLabOrdersPanel';
 import StaffRefundButton from '@/components/admin/StaffRefundButton';
 import AssignOrgButton from '@/components/admin/AssignOrgButton';
 import MarkSpecimenDeliveredButton from '@/components/admin/MarkSpecimenDeliveredButton';
+import RequestLabOrderButton from '@/components/phleb-dashboard/schedule/RequestLabOrderButton';
+import LabOrderRequestStatus from '@/components/phleb-dashboard/schedule/LabOrderRequestStatus';
 
 interface AppointmentDetailModalProps {
   appointment: any | null;
@@ -538,6 +540,25 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             />
             <ReadinessItem ok={!!appt.lab_destination} label="Destination" />
           </div>
+
+          {/* When no lab order is on file, surface the one-click "Request from
+              patient" button + live status. Admin can see send attempts,
+              opened-at, and upload state without leaving the modal. */}
+          {!(labOrderCount && labOrderCount > 0) && !appt.lab_order_file_path && (
+            <div className="mt-2.5 pt-2.5 border-t border-gray-100">
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <p className="text-[11px] text-amber-800 flex-1">
+                  No lab order on file. Send the patient a magic link to upload theirs.
+                </p>
+                <RequestLabOrderButton
+                  appointmentId={appt.id}
+                  patientName={appt.patient_name}
+                  variant="primary"
+                />
+              </div>
+              <LabOrderRequestStatus appointmentId={appt.id} />
+            </div>
+          )}
         </div>
 
         <Separator />
