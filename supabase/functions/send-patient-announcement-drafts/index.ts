@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
 
     const fd = new FormData();
     fd.append('from', overrideTo
-      ? `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`
+      ? `Nico at Nicodemme Jean-Baptiste <info@convelabs.com>`
       : `ConveLabs Drafts <noreply@${MAILGUN_DOMAIN}>`);
     fd.append('to', sendTo);
     fd.append('h:Reply-To', 'info@convelabs.com');

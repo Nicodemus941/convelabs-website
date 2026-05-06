@@ -176,7 +176,7 @@ Deno.serve(async (_req) => {
   </div>
 </div>`;
           const fd = new FormData();
-          fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+          fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', a.patient_email);
           fd.append('subject', `Fasting reminder — draw tomorrow at ${a.appointment_time}`);
           fd.append('html', html);

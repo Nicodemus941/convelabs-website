@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
           </div>
         </div>`;
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', request.patient_email);
         fd.append('subject', `${orgName} cancelled your lab request`);
         fd.append('html', html);

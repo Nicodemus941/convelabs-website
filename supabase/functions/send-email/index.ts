@@ -20,7 +20,7 @@ serve(async (req) => {
     
     console.log(`Sending email to ${to} with subject: ${subject}`);
     
-    const emailFrom = from || "ConveLabs <noreply@convelabs.com>";
+    const emailFrom = from || "Nicodemme Jean-Baptiste <info@convelabs.com>";
     
     // Prepare form data for Mailgun
     const formData = new FormData();

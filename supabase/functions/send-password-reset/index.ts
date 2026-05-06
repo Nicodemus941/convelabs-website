@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     </div>`;
 
     const formData = new FormData();
-    formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+    formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
     formData.append('to', email.trim());
     formData.append('subject', 'Reset Your ConveLabs Password');
     formData.append('html', emailHtml);

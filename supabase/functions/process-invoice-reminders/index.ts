@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
     const sendEmail = async (to: string, subject: string, html: string) => {
       if (!MAILGUN_API_KEY || !to) return;
       const fd = new FormData();
-      fd.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+      fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
       fd.append('to', to);
       fd.append('subject', subject);
       fd.append('html', html);

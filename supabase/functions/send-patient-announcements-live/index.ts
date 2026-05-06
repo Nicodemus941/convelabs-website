@@ -495,7 +495,7 @@ Deno.serve(async (req) => {
       });
 
       const fd = new FormData();
-      fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+      fd.append('from', `Nico at Nicodemme Jean-Baptiste <info@convelabs.com>`);
       fd.append('to', item.email);
       fd.append('h:Reply-To', 'info@convelabs.com');
       fd.append('subject', PATIENT_SUBJECT);

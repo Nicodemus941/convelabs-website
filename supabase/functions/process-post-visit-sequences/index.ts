@@ -536,7 +536,7 @@ Deno.serve(async (req) => {
     const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY')!;
     const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
     const formData = new FormData();
-    formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+    formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
     formData.append('to', to);
     formData.append('subject', subject);
     formData.append('html', html);

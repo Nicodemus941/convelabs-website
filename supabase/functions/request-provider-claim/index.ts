@@ -182,7 +182,7 @@ Deno.serve(async (req) => {
   </div>
 </div></body></html>`;
       const fd = new FormData();
-      fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+      fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
       fd.append('to', normalized);
       fd.append('subject', `Activate your ConveLabs provider portal`);
       fd.append('html', html);

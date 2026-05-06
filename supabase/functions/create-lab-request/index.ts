@@ -424,7 +424,7 @@ Deno.serve(async (req) => {
 </div></body></html>`;
 
       const fd = new FormData();
-      fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+      fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
       fd.append('to', patient_email);
       fd.append('subject', `${providerDisplayName} ordered your bloodwork — ${daysLeft}d to book`);
       fd.append('html', html);

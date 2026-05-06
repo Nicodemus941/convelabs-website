@@ -241,7 +241,7 @@ Deno.serve(async (req) => {
         }
 
         const formData = new FormData();
-        formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+        formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
         formData.append('to', patientEmail);
         formData.append('subject', `Appointment Confirmed - ${displayDate}`);
         formData.append('html', emailHtml);

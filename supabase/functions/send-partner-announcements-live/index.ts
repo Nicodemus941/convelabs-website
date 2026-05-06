@@ -489,7 +489,7 @@ async function sendOne(draft: typeof emails[0]) {
     return { ok: false, status: reserveResp.status, to: draft.to, error: `reserve_failed: ${errText.substring(0, 200)}` };
   }
   const fd = new FormData();
-  fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+  fd.append('from', `Nico at Nicodemme Jean-Baptiste <info@convelabs.com>`);
   fd.append('to', draft.to);
   fd.append('bcc', BCC);
   fd.append('h:Reply-To', 'info@convelabs.com');

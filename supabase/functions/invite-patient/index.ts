@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
         </div>
       </div>`;
       const form = new FormData();
-      form.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+      form.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
       form.append('to', email);
       form.append('subject', 'Finish your ConveLabs account — set your password');
       form.append('html', html);

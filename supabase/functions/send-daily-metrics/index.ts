@@ -100,7 +100,7 @@ Deno.serve(async (req) => {
 
     if (MAILGUN_API_KEY) {
       const formData = new FormData();
-      formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+      formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
       formData.append('to', OWNER_EMAIL);
       formData.append('subject', `ConveLabs Daily Report: $${revenue.toFixed(0)} revenue, ${completed} completed (${dateLabel})`);
       formData.append('html', emailHtml);

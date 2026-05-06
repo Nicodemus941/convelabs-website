@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
   </div>
 </div>`;
           const fd = new FormData();
-          fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+          fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', providerEmail);
           fd.append('subject', `Lab request expired: ${r.patient_name}`);
           fd.append('html', html);
@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
 </div>`;
         try {
           const fd = new FormData();
-          fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+          fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', r.patient_email);
           fd.append('subject', `${urgencyTag}: only ${daysLeft}d to book your bloodwork`);
           fd.append('html', html);

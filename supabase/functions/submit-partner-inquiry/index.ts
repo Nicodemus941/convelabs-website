@@ -47,7 +47,7 @@ interface InquiryPayload {
 async function sendMailgun(to: string, subject: string, html: string, replyTo = 'info@convelabs.com') {
   if (!MAILGUN_API_KEY) return;
   const fd = new FormData();
-  fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+  fd.append('from', `Nico at Nicodemme Jean-Baptiste <info@convelabs.com>`);
   fd.append('to', to);
   fd.append('h:Reply-To', replyTo);
   fd.append('subject', subject);

@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
 
     // Send via Mailgun
     const formData = new FormData();
-    formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+    formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
     formData.append('to', OWNER_EMAIL);
     formData.append('subject', `ConveLabs Daily Inquiry Digest - ${inquiries.length} questions (${dateStr})`);
     formData.append('html', emailHtml);

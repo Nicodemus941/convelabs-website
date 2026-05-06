@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
   </div>
 </div></body></html>`;
           const fd = new FormData();
-          fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+          fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', email);
           fd.append('subject', `Confirm your ConveLabs visit on ${apptShort}`);
           fd.append('html', html);

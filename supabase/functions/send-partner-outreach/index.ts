@@ -167,7 +167,7 @@ async function finalizeSendRow(supabase: any, campaignKey: string, email: string
 
 async function sendMailgun(to: string, subject: string, html: string, replyTo = 'info@convelabs.com'): Promise<{ ok: boolean; id: string | null; error?: string }> {
   const fd = new FormData();
-  fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+  fd.append('from', `Nico at Nicodemme Jean-Baptiste <info@convelabs.com>`);
   fd.append('to', to);
   fd.append('h:Reply-To', replyTo);
   fd.append('subject', subject);

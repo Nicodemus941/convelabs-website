@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
   </div>
 </div>`;
             const fd = new FormData();
-            fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+            fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
             fd.append('to', recipient);
             fd.append('subject', `Specimen delivered for ${labelPatient}${body.labName ? ` · ${body.labName}` : ''}`);
             fd.append('html', html);
@@ -239,7 +239,7 @@ Deno.serve(async (req) => {
         });
 
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', appt.patient_email);
         fd.append('subject', `Specimen delivered to ${labLabel}${body.specimenId ? ` · Tracking ${body.specimenId}` : ''}`);
         fd.append('html', html);
@@ -333,7 +333,7 @@ Deno.serve(async (req) => {
 </div>`;
 
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', recipient);
         fd.append('subject', `Specimen delivered for ${displayPatient}${body.labName ? ` · ${body.labName}` : ''}`);
         fd.append('html', html);

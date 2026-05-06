@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
           });
 
           const mgFormData = new FormData();
-          mgFormData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+          mgFormData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
           mgFormData.append('to', patientEmail);
           mgFormData.append('subject', `Reminder: Your ConveLabs Appointment Tomorrow at ${appointmentTime}`);
           mgFormData.append('html', emailHtml);

@@ -337,7 +337,7 @@ Deno.serve(async (req) => {
   </div>
 </div>`;
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', providerEmail);
         fd.append('subject', `✓ ${request.patient_name} booked: ${fmtDate(appointment_date)} at ${appointment_time}`);
         fd.append('html', html);
@@ -383,7 +383,7 @@ Deno.serve(async (req) => {
   </div>
 </div>`;
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', patientEmail);
         fd.append('subject', `✓ Booked: ${fmtDate(appointment_date)} at ${appointment_time}`);
         fd.append('html', html);
@@ -450,7 +450,7 @@ Deno.serve(async (req) => {
   </div>
 </div>`;
           const fd = new FormData();
-          fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+          fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', c.patient_email);
           fd.append('subject', `✓ Booked with ${request.patient_name}: ${fmtDate(appointment_date)} at ${appointment_time}`);
           fd.append('html', html);

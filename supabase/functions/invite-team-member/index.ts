@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
         </div>
       </div>`;
       const fd = new FormData();
-      fd.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+      fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
       fd.append('to', normalizedEmail);
       fd.append('subject', `You've been added to ${org.name}'s ConveLabs portal`);
       fd.append('html', html);

@@ -1751,7 +1751,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
         </div>`;
 
         const formData = new FormData();
-        formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+        formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
         formData.append('to', email);
         formData.append('subject', `Appointment Confirmed - ${displayDate}`);
         formData.append('html', emailHtml);
@@ -2178,7 +2178,7 @@ async function handleLabRequestUnlock(session: any) {
     if (providerEmail && Deno.env.get('MAILGUN_API_KEY')) {
       try {
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com'}>`);
+        fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
         fd.append('to', providerEmail);
         fd.append('subject', `✓ ${request.patient_name} booked + joined ${tier}: ${apptDate} at ${apptTime}`);
         fd.append('html', `<p>${request.patient_name} booked their draw for <strong>${apptDate} at ${apptTime}</strong>, and while they were at it, joined our <strong>${tier} membership</strong>. Win-win.</p><p>— Nico</p>`);
@@ -2307,7 +2307,7 @@ async function handleLabRequestProviderPayment(session: any) {
   </div>
 </div></body></html>`;
         const fd = new FormData();
-        fd.append('from', `ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', existing.patient_email);
         fd.append('subject', `${org.name} ordered your bloodwork — ${daysLeft}d to book (covered by your provider)`);
         fd.append('html', html);
