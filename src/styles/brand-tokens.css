@@ -1,0 +1,134 @@
+/**
+ * ConveLabs Brand System v2 — Source of Truth
+ * ─────────────────────────────────────────────
+ * Locked from the business card + rack card design language (May 2026).
+ * Hormozi rule: if you can't reproduce it, you don't own it. These tokens
+ * are how every surface stays cohesive — every component reads from here.
+ *
+ * Patterns we name (so we can defend them):
+ *   • The Drop          — the burgundy logo mark with the gold curl
+ *   • The Gold Bar      — divider line with diamond inflection at center
+ *   • The YOUR Italic   — gold serif italic emphasis inside a serif headline
+ *   • The Lockup        — "Labs At YOUR Convenience®" footer signature
+ *   • The Cream Canvas  — cream page background (NEVER pure white)
+ */
+
+:root {
+  /* ── Burgundy (primary CTA, headers, accent) ─────────────────── */
+  --brand-burgundy:        #7F1D1D;
+  --brand-burgundy-deep:   #5C1414;
+  --brand-burgundy-darker: #3F0A0A;
+  --brand-burgundy-soft:   #A02828;
+
+  /* ── Gold (dividers, italic accent, decorative) ──────────────── */
+  --brand-gold:        #C9A961;
+  --brand-gold-deep:   #B8924A;
+  --brand-gold-soft:   #DDC586;
+
+  /* ── Cream Canvas (page backgrounds — never pure white) ──────── */
+  --brand-cream:       #F8F4ED;
+  --brand-cream-soft:  #FBF8F2;
+  --brand-cream-warm:  #F0EAE0;
+
+  /* ── Text ─────────────────────────────────────────────────────── */
+  --brand-charcoal:    #0F0F10;
+  --brand-gray-warm:   #6B5E54;
+
+  /* ── Semantic gradients used in the cards ────────────────────── */
+  --brand-burgundy-gradient: linear-gradient(135deg, #7F1D1D 0%, #5C1414 100%);
+  --brand-burgundy-deep-gradient: linear-gradient(180deg, #3F0A0A 0%, #1F0505 100%);
+
+  /* ── Shadows tuned to burgundy ───────────────────────────────── */
+  --brand-shadow-soft:    0 8px 24px rgba(127, 29, 29, 0.18);
+  --brand-shadow-hover:   0 12px 32px rgba(127, 29, 29, 0.28);
+  --brand-shadow-card:    0 4px 12px rgba(15, 15, 16, 0.08);
+
+  /* ── Typography ───────────────────────────────────────────────── */
+  --brand-font-display: 'Playfair Display', 'Georgia', serif;
+  --brand-font-body:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* ─── The YOUR Italic — gold serif italic emphasis inside a headline ───
+ * Usage: <h1>Lab work, <span class="brand-italic-accent">where you are.</span></h1>
+ */
+.brand-italic-accent {
+  font-family: var(--brand-font-display);
+  font-style: italic;
+  color: var(--brand-gold);
+  font-weight: 500;
+}
+
+/* ─── The Gold Bar — divider with diamond inflection at center ───
+ * Usage: <div class="brand-gold-divider" />
+ */
+.brand-gold-divider {
+  position: relative;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--brand-gold) 30%,
+    var(--brand-gold) 70%,
+    transparent 100%
+  );
+  margin: 1.5rem auto;
+  max-width: 280px;
+}
+.brand-gold-divider::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  background: var(--brand-gold);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* ─── Display headlines — serif by default on customer surfaces ─── */
+.brand-display {
+  font-family: var(--brand-font-display);
+  letter-spacing: -0.01em;
+  color: var(--brand-charcoal);
+}
+
+/* ─── The Cream Canvas — page background ─── */
+.brand-canvas {
+  background-color: var(--brand-cream);
+  color: var(--brand-charcoal);
+}
+
+/* ─── The Lockup — footer trademark line ─── */
+.brand-lockup {
+  font-family: var(--brand-font-display);
+  font-size: 0.75rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--brand-burgundy);
+}
+.brand-lockup .your {
+  font-style: italic;
+  color: var(--brand-gold);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1em;
+}
+
+/* ─── Burgundy CTA — primary button ─── */
+.brand-cta {
+  display: inline-block;
+  background: var(--brand-burgundy-gradient);
+  color: #fff;
+  font-family: var(--brand-font-body);
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0.875rem 2rem;
+  border-radius: 0.625rem;
+  text-decoration: none;
+  box-shadow: var(--brand-shadow-soft);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.brand-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--brand-shadow-hover);
+}

@@ -70,12 +70,41 @@ export default {
 					ring: 'hsl(var(--sidebar-ring))'
 				},
 				conve: {
-					red: '#B91C1C', // Deep red for CTAs and icons
-					gold: '#D4AF37', // Gold accent color
+					red: '#B91C1C', // [legacy] Deep red for CTAs and icons
+					gold: '#D4AF37', // [legacy] Gold accent color
 					black: '#111111', // Rich black for text
 					light: '#F9F9F9', // Light background shade
 					'red-light': '#FEF2F2', // Light red background
 					'red-dark': '#991B1B', // Dark red variant
+				},
+				// ─── BRAND SYSTEM v2 (rack-card aesthetic, 2026-05) ──────────
+				// Source of truth: business card + rack card design language.
+				// Use these tokens going forward — `conve.*` legacy tokens are
+				// preserved so existing pages don't visually shift until each
+				// surface is intentionally migrated. Once every page migrates,
+				// the legacy tokens can be deleted.
+				brand: {
+					// Burgundy — deep wine red. Primary CTA, headers, accent blocks.
+					burgundy: {
+						DEFAULT: '#7F1D1D',
+						deep:    '#5C1414',
+						darker:  '#3F0A0A',
+						soft:    '#A02828', // for hover states on light backgrounds
+					},
+					// Gold — warm muted champagne. Dividers, accent text, italics.
+					gold: {
+						DEFAULT: '#C9A961',
+						deep:    '#B8924A',
+						soft:    '#DDC586', // for soft glow / borders
+					},
+					// Cream — warm off-white. NEVER pure #FFFFFF for backgrounds.
+					cream: {
+						DEFAULT: '#F8F4ED',
+						soft:    '#FBF8F2',
+						warm:    '#F0EAE0',
+					},
+					charcoal: '#0F0F10',     // body text on cream
+					'gray-warm': '#6B5E54',  // secondary text
 				}
 			},
 			borderRadius: {

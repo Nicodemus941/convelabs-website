@@ -6,6 +6,7 @@ import Home from '../pages/Home';
 
 // All other pages lazy-loaded
 const Pricing = lazy(() => import('../pages/Pricing'));
+const Brand = lazy(() => import('../pages/Brand'));
 const About = lazy(() => import('../pages/About'));
 const Contact = lazy(() => import('../pages/Contact'));
 const Login = lazy(() => import('../pages/Login'));
@@ -60,6 +61,7 @@ export const routes = [
   <Route key="home" path="/" element={<Home />} />,
   <Route key="book-now" path="/book-now" element={<BookNow />} />,
   <Route key="pricing" path="/pricing" element={<Pricing />} />,
+  <Route key="brand" path="/brand" element={<Brand />} />,
   <Route key="about" path="/about" element={<About />} />,
   <Route key="contact" path="/contact" element={<Contact />} />,
   <Route key="faq" path="/faq" element={<FAQ />} />,
