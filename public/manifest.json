@@ -4,8 +4,8 @@
   "description": "Mobile phlebotomy trusted by NFL athletes. Licensed phlebotomist at your door in Central Florida.",
   "start_url": "/dashboard",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#B91C1C",
+  "background_color": "#F8F4ED",
+  "theme_color": "#7F1D1D",
   "orientation": "portrait-primary",
   "icons": [
     {

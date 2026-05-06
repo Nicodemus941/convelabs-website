@@ -62,7 +62,7 @@ const Home = () => {
 
         {/* Mobile */}
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <meta name="theme-color" content="#B91C1C" />
+        <meta name="theme-color" content="#7F1D1D" />
 
         {/* Open Graph */}
         <meta property="og:type" content="website" />

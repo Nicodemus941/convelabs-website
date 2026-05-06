@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+import { brandedEmailWrapper } from '../_shared/branded-email.ts';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
 /**
@@ -380,63 +381,49 @@ Deno.serve(async (req) => {
         ? `This invoice covers a ConveLabs concierge lab visit completed on behalf of your organization${maskPatient ? '' : ` for ${patientLabel}`}.`
         : 'Your appointment has been scheduled. Please review the details below and complete your payment to confirm.';
 
-      const emailHtml = `
-<!DOCTYPE html>
-<html>
-<body style="font-family:Arial,sans-serif;margin:0;padding:0;background:#f4f4f5;">
-  <div style="max-width:600px;margin:0 auto;padding:20px;">
-    <div style="background:linear-gradient(135deg,#B91C1C,#991B1B);color:white;padding:32px;border-radius:16px 16px 0 0;text-align:center;">
-      <h1 style="margin:0;font-size:24px;">${headerTitle}</h1>
-      <p style="margin:8px 0 0;opacity:0.9;font-size:14px;">ConveLabs Concierge Lab Services</p>
-    </div>
-    <div style="background:white;border:1px solid #e5e7eb;border-top:none;padding:32px;border-radius:0 0 16px 16px;">
-      <p style="font-size:16px;color:#374151;">Hello ${greetingName},</p>
-      <p style="font-size:14px;color:#6b7280;line-height:1.6;">${purposeLine}</p>
+      // Compose body inside the unified branded wrapper. Visit-details
+      // table + the urgency / VIP / org-net-30 callouts are body HTML.
+      const bodyHtml = `
+        <div style="background:#FBF8F2;border:1px solid rgba(127,29,29,0.12);border-radius:12px;padding:18px;margin:8px 0 18px;">
+          <h3 style="margin:0 0 10px;color:#7F1D1D;font-size:15px;font-family:'Playfair Display',serif;">Visit Details</h3>
+          <table style="width:100%;font-size:14px;color:#1F1410;border-collapse:collapse;">
+            <tr><td style="padding:4px 0;color:#6B5E54;">Service</td><td style="text-align:right;font-weight:600;">${serviceName || serviceType || 'Mobile Blood Draw'}</td></tr>
+            ${billedToOrg && !maskPatient ? `<tr><td style="padding:4px 0;color:#6B5E54;">Patient</td><td style="text-align:right;font-weight:600;">${patientLabel}</td></tr>` : ''}
+            ${billedToOrg && maskPatient ? `<tr><td style="padding:4px 0;color:#6B5E54;">Ref #</td><td style="text-align:right;font-weight:600;">${patientLabel}</td></tr>` : ''}
+            ${formattedDate ? `<tr><td style="padding:4px 0;color:#6B5E54;">Date</td><td style="text-align:right;font-weight:600;">${formattedDate}</td></tr>` : ''}
+            ${appointmentTime ? `<tr><td style="padding:4px 0;color:#6B5E54;">Time</td><td style="text-align:right;font-weight:600;">${appointmentTime}</td></tr>` : ''}
+            ${address && !billedToOrg ? `<tr><td style="padding:4px 0;color:#6B5E54;">Location</td><td style="text-align:right;">${address}</td></tr>` : ''}
+            <tr><td colspan="2" style="padding:8px 0 0;"><hr style="border:none;border-top:1px solid rgba(201,169,97,0.5);"></td></tr>
+            <tr><td style="padding:8px 0;color:#7F1D1D;font-weight:700;font-size:15px;">Amount Due</td><td style="text-align:right;font-weight:700;font-size:20px;color:#7F1D1D;">$${(servicePrice || 0).toFixed(2)}</td></tr>
+          </table>
+        </div>
 
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:20px;margin:20px 0;">
-        <h3 style="margin:0 0 12px;color:#B91C1C;font-size:16px;">Visit Details</h3>
-        <table style="width:100%;font-size:14px;color:#374151;">
-          <tr><td style="padding:4px 0;color:#6b7280;">Service</td><td style="text-align:right;font-weight:600;">${serviceName || serviceType || 'Mobile Blood Draw'}</td></tr>
-          ${billedToOrg && !maskPatient ? `<tr><td style="padding:4px 0;color:#6b7280;">Patient</td><td style="text-align:right;font-weight:600;">${patientLabel}</td></tr>` : ''}
-          ${billedToOrg && maskPatient ? `<tr><td style="padding:4px 0;color:#6b7280;">Ref #</td><td style="text-align:right;font-weight:600;">${patientLabel}</td></tr>` : ''}
-          ${formattedDate ? `<tr><td style="padding:4px 0;color:#6b7280;">Date</td><td style="text-align:right;font-weight:600;">${formattedDate}</td></tr>` : ''}
-          ${appointmentTime ? `<tr><td style="padding:4px 0;color:#6b7280;">Time</td><td style="text-align:right;font-weight:600;">${appointmentTime}</td></tr>` : ''}
-          ${address && !billedToOrg ? `<tr><td style="padding:4px 0;color:#6b7280;">Location</td><td style="text-align:right;">${address}</td></tr>` : ''}
-          <tr><td colspan="2" style="padding:8px 0 0;"><hr style="border:none;border-top:1px solid #fecaca;"></td></tr>
-          <tr><td style="padding:8px 0;color:#B91C1C;font-weight:700;font-size:16px;">Amount Due</td><td style="text-align:right;font-weight:700;font-size:20px;color:#B91C1C;">$${(servicePrice || 0).toFixed(2)}</td></tr>
-        </table>
-      </div>
+        ${!billedToOrg ? `
+        <div style="background:#FFFBEB;border:1px solid #FBBF24;border-radius:10px;padding:14px;margin:16px 0;">
+          <p style="margin:0;font-size:13px;color:#92400E;font-weight:700;">Payment required within 12 hours</p>
+          <p style="margin:6px 0 0;font-size:12px;color:#A16207;line-height:1.5;">
+            Due to patient volume, payment must be received within 12 hours or your appointment may be released to the next patient on standby.
+          </p>
+        </div>
+        ` : `
+        <p style="font-size:13px;color:#6B5E54;margin:16px 0;">Net 30 terms. Questions on this invoice? Reply or call (941) 527-9169.</p>
+        `}
 
-      <div style="text-align:center;margin:24px 0;">
-        <a href="${paymentUrl}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">
-          Pay Now — $${(servicePrice || 0).toFixed(2)}
-        </a>
-      </div>
+        ${isVip && !billedToOrg ? '<p style="text-align:center;margin:14px 0;font-size:13px;color:#7F1D1D;font-weight:700;background:#FBF8F2;border:1px solid #C9A961;border-radius:10px;padding:10px;">★ VIP Patient — Priority Scheduling</p>' : ''}
+      `;
 
-      ${!billedToOrg ? `
-      <div style="background:#fffbeb;border:1px solid #fbbf24;border-radius:10px;padding:16px;margin:20px 0;">
-        <p style="margin:0;font-size:13px;color:#92400e;font-weight:600;">Payment required within 12 hours</p>
-        <p style="margin:6px 0 0;font-size:12px;color:#a16207;line-height:1.5;">
-          Due to patient volume, payment must be received within 12 hours. If payment is not received, your appointment may be released to the next patient on standby.
-        </p>
-      </div>
-      ` : `
-      <p style="font-size:13px;color:#6b7280;margin:16px 0;">Net 30 terms. Questions on this invoice? Reply to this email or call (941) 527-9169.</p>
-      `}
-
-      ${isVip && !billedToOrg ? '<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:12px;margin:16px 0;text-align:center;"><p style="margin:0;font-size:13px;color:#166534;font-weight:600;">VIP Patient — Priority Scheduling</p></div>' : ''}
-
-      <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb;text-align:center;">
-        <p style="font-size:11px;color:#9ca3af;">ConveLabs Concierge Lab Services · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
-        <p style="font-size:11px;color:#9ca3af;">Questions? Call (941) 527-9169</p>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
+      const emailHtml = brandedEmailWrapper({
+        headline: headerTitle,
+        greeting: `Hello ${greetingName},`,
+        bodyHtml: `<p style="font-size:14px;color:#3F2A20;margin:0 0 12px;">${purposeLine}</p>${bodyHtml}`,
+        ctaLabel: `Pay Now — $${(servicePrice || 0).toFixed(2)}`,
+        ctaHref: paymentUrl,
+        trustCloser: !billedToOrg ? 'Pays for itself in 1 visit' : undefined,
+        footerNote: 'Questions? Call (941) 527-9169 or reply to this email.',
+      });
 
       const formData = new FormData();
-      formData.append('from', 'ConveLabs <noreply@mg.convelabs.com>');
+      formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
       formData.append('to', invoiceToEmail);
       formData.append('subject', billedToOrg
         ? `Invoice from ConveLabs — $${(servicePrice || 0).toFixed(2)} (${org!.name})`

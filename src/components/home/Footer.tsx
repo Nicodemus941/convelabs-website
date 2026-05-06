@@ -4,6 +4,7 @@ import { Container } from "@/components/ui/container";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield, Phone, ShieldCheck, Mail } from "lucide-react";
+import BrandFooterLockup from "@/components/brand/BrandFooterLockup";
 import { ENROLLMENT_URL, TESTS_URL, BOOKING_URL, AUTH_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
@@ -212,6 +213,11 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
             "I pray that you may enjoy good health and that all may go well with you"
             <span className="text-gray-600 text-xs ml-1.5">— 3 John 1:2</span>
           </p>
+        </div>
+
+        {/* Brand lockup — the trademark signature ends every page */}
+        <div className="pt-2 pb-4">
+          <BrandFooterLockup inverted />
         </div>
 
         <div className="border-t border-gray-800 pt-6 flex flex-col md:flex-row justify-between items-center">
