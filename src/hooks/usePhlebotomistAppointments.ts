@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { toast } from '@/components/ui/sonner';
 import { cacheAppointments, readCachedAppointments, subscribeToOnlineStatus } from '@/lib/offlineAppointments';
 
@@ -81,13 +81,16 @@ export function usePhlebotomistAppointments() {
 
     // When targetMonth is passed (user navigated to a specific month),
     // fetch ONLY that month — efficient calendar paging.
-    // When no targetMonth (default load), fetch a rolling 4-month window:
-    // current month through end of (today + 3 months). Without this,
-    // upcoming bookings (recurring series, advance schedules) didn't
-    // show on default PWA load and phleb had to manually scroll forward
-    // to discover them — a real bug we hit with Meriruth Gregg's May 5
-    // booking on April 29, and Lawrence Carpenter's recurring series
-    // through July.
+    // When no targetMonth (default load), fetch a rolling 5-month window:
+    // PRIOR month through end of (today + 3 months). Including last
+    // month is critical so the phleb can review recently-completed
+    // visits (payroll, lab-result follow-ups, patient history) without
+    // having to manually navigate the calendar backward — bug reported
+    // 2026-05-05: PWA hid all April appointments on May 1 boot.
+    //
+    // Forward window keeps the original 3-month look-ahead for
+    // recurring series + advance bookings (Meriruth Gregg's May 5
+    // booking on April 29, Lawrence Carpenter's recurring through July).
     let monthStart: string;
     let monthEnd: string;
     if (targetMonth) {
@@ -95,8 +98,9 @@ export function usePhlebotomistAppointments() {
       monthEnd = format(endOfMonth(targetMonth), 'yyyy-MM-dd');
     } else {
       const now = new Date();
-      monthStart = format(startOfMonth(now), 'yyyy-MM-dd');
-      // End of (today + 3 months). 4-month rolling window total.
+      // Look back 1 month so prior-month completed visits stay visible
+      monthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
+      // End of (today + 3 months). 5-month rolling window total.
       const farMonth = new Date(now.getFullYear(), now.getMonth() + 3, 1);
       monthEnd = format(endOfMonth(farMonth), 'yyyy-MM-dd');
     }
