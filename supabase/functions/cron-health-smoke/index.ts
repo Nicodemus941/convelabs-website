@@ -43,6 +43,15 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 // Convert a 5-field cron schedule into a maximum expected gap between runs,
 // in milliseconds. We're conservative — if the cron is "every 15 min" we
 // expect a run every 15 min, so flag silence after 30 min (2× cushion).
+//
+// Restricted-hour schedules (e.g. "*/30 12-23,0 * * *" — fires every 30 min
+// only during 12-23 UTC + 0 UTC) cannot use the simple "interval × 2" check
+// because there's a 11-12h intentional idle window every night. For any
+// schedule whose hour field is a range/list (anything besides `*` or `*/N`),
+// fall back to a 25h ceiling — long enough to absorb any overnight gap, short
+// enough that a fully-dead cron still pages within two days.
+// (2026-05-06: auto-request-missing-lab-orders smoke false-positives every
+// morning 1-11 UTC under the old logic.)
 function expectedIntervalMs(schedule: string): number {
   const m = (schedule || '').trim().split(/\s+/);
   if (m.length < 5) return 60 * 60 * 1000; // unknown → 1h
@@ -55,6 +64,21 @@ function expectedIntervalMs(schedule: string): number {
   if (dom !== '*' && /^\d+$/.test(dom)) return 31 * 24 * 60 * 60 * 1000;
   // weekly (specific day of week) → 7 days
   if (dow !== '*' && /^\d+$/.test(dow)) return 7 * 24 * 60 * 60 * 1000;
+
+  // Hour field has a restricted window (range, list, or literal — but NOT
+  // `*` and NOT a `*/N` stride). These fire only during specific hours and
+  // are intentionally silent the rest of the day. Use a 25h ceiling.
+  const hourIsRestrictedWindow =
+    hour !== '*' &&
+    !/^\*\/\d+$/.test(hour) &&
+    (hour.includes('-') || hour.includes(',') || /^\d+$/.test(hour));
+  if (hourIsRestrictedWindow) {
+    // Daily-once schedule (single hour, single minute) → 24h gap
+    if (/^\d+$/.test(hour) && /^\d+$/.test(minute)) return 24 * 60 * 60 * 1000;
+    // Multi-fire restricted window — 25h tolerance
+    return 25 * 60 * 60 * 1000;
+  }
+
   // daily (specific hour, * minute) → 24h
   if (hour !== '*' && minute === '0') return 24 * 60 * 60 * 1000;
   if (hour !== '*' && /^\d+$/.test(minute)) return 24 * 60 * 60 * 1000;
