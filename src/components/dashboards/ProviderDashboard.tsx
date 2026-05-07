@@ -23,6 +23,7 @@ import PracticeProfilePanel from '@/components/provider/PracticeProfilePanel';
 import SubscribeYourPracticeCard from '@/components/provider/SubscribeYourPracticeCard';
 import ManageSubscriptionCard from '@/components/provider/ManageSubscriptionCard';
 import BAASigningModal from '@/components/provider/BAASigningModal';
+import OrgStaffList from '@/components/admin/OrgStaffList';
 import { Activity } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
 
@@ -578,38 +579,13 @@ const ProviderDashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* TEAM */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-base flex items-center gap-2"><Users className="h-4 w-4 text-blue-600" /> Team</CardTitle>
-              <CardDescription className="text-xs">{team.length} {team.length === 1 ? 'member' : 'members'} can log in to this portal</CardDescription>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => setShowInvite(true)} className="gap-1">
-              <UserPlus className="h-3.5 w-3.5" /> Invite
-            </Button>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="divide-y">
-              {team.map((m: any) => (
-                <div key={m.id} className="p-3 flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium truncate text-sm">
-                      {m.name || m.email}
-                      {m.is_self && <Badge className="ml-2 text-[9px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100">You</Badge>}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      {m.email} {m.phone && <>· {m.phone}</>}
-                    </p>
-                  </div>
-                  <p className="text-[11px] text-gray-400 flex-shrink-0">
-                    {m.last_sign_in ? `Active ${formatDistanceToNow(new Date(m.last_sign_in), { addSuffix: true })}` : 'Never signed in'}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        {/* TEAM — org self-serve staff invites (Hormozi G1, 2026-05-07).
+            Replaces the legacy InviteTeamMemberDialog that used the older
+            invite-team-member edge fn (no email_send_log, no error
+            visibility). OrgStaffList uses the unified invite-org-manager
+            pipeline so practices get the same delivery state + resend
+            controls that the platform admin sees. */}
+        <OrgStaffList organizationId={org.id} organizationName={org.name} />
 
         {/* RECOLLECTION GUARANTEE (promise made — must be visible) */}
         <Card className="shadow-sm bg-emerald-50 border-emerald-200">

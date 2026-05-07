@@ -1,12 +1,18 @@
 /**
- * INVITE-ORG-MANAGER — admin-side onboarding for a new manager / front-desk
- * staffer at a partner practice. Creates an auth.users row stamped with
- * { organization_id, role:'office_manager' } in user_metadata so RPCs that
- * read auth.jwt()->'user_metadata'->>'organization_id' (e.g. the provider
- * dashboard's get_org_linked_patients) Just Work for them.
+ * INVITE-ORG-MANAGER — admin OR org-self-serve onboarding for a new
+ * manager / front-desk staffer at a partner practice. Creates an
+ * auth.users row stamped with { organization_id, role:'office_manager' }
+ * in user_metadata so RPCs (e.g. the provider dashboard's
+ * get_org_linked_patients) Just Work for them.
  *
- * Body: { email, organizationId, fullName?, redirectTo? (default /dashboard/provider) }
- * Returns: { ok, user_id, action_link }
+ * Body: { email, organizationId, fullName?, roleLabel?, redirectTo? }
+ * Returns: { ok, user_id, action_link, email_status, email_log_id }
+ *
+ * Auth: caller must be either
+ *   (a) platform staff (super_admin / admin / owner), OR
+ *   (b) an office_manager / provider whose user_metadata.organization_id
+ *       matches the requested organizationId (org self-serve, 2026-05-07).
+ * Cross-org invites by org-staff are explicitly rejected.
  *
  * Sends a branded Mailgun invite email with a "Set My Password" CTA.
  */
@@ -27,6 +33,7 @@ Deno.serve(async (req) => {
     const email = String(body?.email || '').trim().toLowerCase();
     const organizationId = String(body?.organizationId || '');
     const fullName = String(body?.fullName || '').trim() || null;
+    const roleLabel = String(body?.roleLabel || '').trim() || null;
     const redirectTo = String(body?.redirectTo || '/dashboard/provider');
     if (!email || !organizationId) {
       return new Response(JSON.stringify({ error: 'email and organizationId are required' }), {
@@ -38,6 +45,40 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
     );
+
+    // ─── AUTH GATE ────────────────────────────────────────────────
+    // Resolve caller from the Authorization header. If they aren't
+    // platform staff, require their JWT user_metadata.organization_id
+    // to match the requested one (org self-serve). Cross-org invites
+    // by org-staff are rejected with 403.
+    {
+      const authHeader = req.headers.get('Authorization') || '';
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const { data: callerData } = await supabase.auth.getUser(token);
+      const caller = callerData?.user;
+      if (!caller) {
+        return new Response(JSON.stringify({ error: 'Invalid auth token' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const callerRole = String(caller.user_metadata?.role || '').toLowerCase();
+      const callerOrg = caller.user_metadata?.organization_id || null;
+      const isPlatform = ['super_admin','admin','owner'].includes(callerRole);
+      const isOrgSelfServe =
+        ['office_manager','provider'].includes(callerRole) &&
+        callerOrg && String(callerOrg) === organizationId;
+      if (!isPlatform && !isOrgSelfServe) {
+        return new Response(JSON.stringify({
+          error: 'forbidden',
+          detail: 'caller cannot invite staff for this organization',
+        }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
 
     // Confirm the org exists
     const { data: org, error: orgErr } = await supabase
@@ -65,6 +106,7 @@ Deno.serve(async (req) => {
           full_name: fullName,
           firstName: fullName ? fullName.split(' ')[0] : null,
           lastName: fullName ? fullName.split(' ').slice(1).join(' ') : null,
+          role_label: roleLabel,
         },
       },
     });
