@@ -46,6 +46,21 @@ const Dashboard = () => {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
 
+  // Raw Supabase user metadata — useAuth().user is mapped through
+  // useAuthSession.mapUserData and does NOT expose user_metadata. We need
+  // raw metadata (organization_id, role_label) to detect partner-org staff
+  // like Lara/Dianelis. Without this, partner staff fell through to the
+  // internal ConveLabs admin dashboard. Bug shipped 2026-05-07.
+  const [rawMeta, setRawMeta] = React.useState<Record<string, any> | null>(null);
+  useEffect(() => {
+    if (!user) { setRawMeta(null); return; }
+    let cancel = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!cancel) setRawMeta((data?.user?.user_metadata as any) || {});
+    }).catch(() => { if (!cancel) setRawMeta({}); });
+    return () => { cancel = true; };
+  }, [user]);
+
   // Parse the URL path to extract role and adminTab - use location.pathname as fallback
   const actualPath = urlPath || location.pathname.replace('/dashboard/', '');
   const pathParts = actualPath?.split('/').filter(Boolean) || [];
@@ -115,10 +130,17 @@ const Dashboard = () => {
   // The `office_manager` role label is overloaded:
   //   - Internal ConveLabs ops manager → no organization_id → uses OfficeManagerDashboard (admin sidebar)
   //   - External partner-org staff → has organization_id in metadata → must use ProviderDashboard
-  // Without this branch, partner staff land on the internal ConveLabs admin
-  // dashboard and see things they shouldn't (Staff, Services, Inbox, etc.).
-  const meta = (user as any)?.user_metadata || {};
-  const partnerOrgId = meta.organization_id || meta.org_id || null;
+  // Reads from rawMeta (fetched via supabase.auth.getUser) because useAuth().user
+  // strips user_metadata in the mapping layer.
+  if (rawMeta === null) {
+    // Still loading metadata — show spinner instead of flashing the wrong dashboard
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-10 h-10 border-4 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  const partnerOrgId = rawMeta.organization_id || rawMeta.org_id || null;
   const isPartnerOrgStaff = !!partnerOrgId && (userRole === "office_manager" || userRole === "provider");
 
   if (isPartnerOrgStaff) {

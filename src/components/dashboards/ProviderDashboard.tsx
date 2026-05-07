@@ -68,6 +68,30 @@ const ProviderDashboard: React.FC = () => {
   const [showInvite, setShowInvite] = useState(false);
   const [showLabRequest, setShowLabRequest] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
+  // Raw Supabase metadata for the welcome header — useAuth().user strips
+  // user_metadata in the mapping layer, so we have to fetch it directly.
+  // Without this, Lara saw "larak" (email prefix fallback) instead of her
+  // real name and role.
+  const [staffName, setStaffName] = useState<string>('there');
+  const [staffRoleLabel, setStaffRoleLabel] = useState<string | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancel) return;
+      const m: any = data?.user?.user_metadata || {};
+      const fn = m.full_name
+        || [m.firstName || m.first_name, m.lastName || m.last_name].filter(Boolean).join(' ').trim()
+        || data?.user?.email?.split('@')[0]
+        || 'there';
+      setStaffName(fn);
+      const roleLbl = m.role_label
+        || (m.role === 'office_manager' ? 'Office Manager'
+          : m.role === 'provider' ? 'Provider'
+          : null);
+      setStaffRoleLabel(roleLbl);
+    }).catch(() => { /* keep defaults */ });
+    return () => { cancel = true; };
+  }, []);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false);
   const [showPwPrompt, setShowPwPrompt] = useState(false);
@@ -314,20 +338,10 @@ const ProviderDashboard: React.FC = () => {
                   org.contact_name as the headline made staff feel like the
                   dashboard belonged to someone else. */}
               <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Welcome back</p>
-              <h1 className="text-2xl sm:text-3xl font-bold">
-                {(() => {
-                  const meta = (user as any)?.user_metadata || {};
-                  const fn = meta.full_name || [meta.firstName, meta.lastName].filter(Boolean).join(' ').trim();
-                  return fn || (user?.email?.split('@')[0]) || 'there';
-                })()}
-              </h1>
+              <h1 className="text-2xl sm:text-3xl font-bold">{staffName}</h1>
               <p className="text-sm text-gray-600 mt-0.5">
                 <span className="font-semibold text-gray-800">{org.name}</span>
-                {(() => {
-                  const meta = (user as any)?.user_metadata || {};
-                  const role = meta.role_label || (meta.role === 'office_manager' ? 'Office Manager' : meta.role === 'provider' ? 'Provider' : null);
-                  return role ? <> · {role}</> : null;
-                })()}
+                {staffRoleLabel && <> · {staffRoleLabel}</>}
               </p>
               <p className="text-[11px] text-gray-500 mt-0.5">{user?.email}</p>
             </div>
