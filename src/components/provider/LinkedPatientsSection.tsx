@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw, Search, UserPlus, History } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import AddPatientModal from '@/components/shared/AddPatientModal';
+import BulkAddPatientsModal from '@/components/shared/BulkAddPatientsModal';
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 
 /**
@@ -69,6 +70,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   // Search + add-patient — shipped alongside the admin Org drawer Patients tab
   const [searchQ, setSearchQ] = useState('');
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [focusedPatient, setFocusedPatient] = useState<string | null>(null);
 
@@ -288,14 +290,24 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             <p className="text-xs text-gray-600 mt-1 max-w-md mx-auto leading-relaxed">
               Add the patients you order labs for and you'll be able to <strong>bulk-request labs in 1 click</strong>, track every visit, and enroll them in subscriptions — no re-typing names every time.
             </p>
-            <Button
-              size="sm"
-              className="mt-4 bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5"
-              onClick={() => setAddOpen(true)}
-            >
-              <UserPlus className="h-3.5 w-3.5" /> Add your first patient
-            </Button>
-            <p className="text-[10px] text-gray-400 mt-2">~30 seconds per patient · they get a welcome email</p>
+            <div className="flex flex-wrap gap-2 justify-center mt-4">
+              <Button
+                size="sm"
+                className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5"
+                onClick={() => setAddOpen(true)}
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Add your first patient
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs gap-1.5"
+                onClick={() => setBulkAddOpen(true)}
+              >
+                <Users className="h-3.5 w-3.5" /> Bulk paste a list
+              </Button>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-2">~30 seconds per patient · or paste 30+ at once</p>
           </CardContent>
         </Card>
         <AddPatientModal
@@ -303,6 +315,12 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
           onOpenChange={setAddOpen}
           organizationId={orgId}
           onCreated={() => { setAddOpen(false); load(); }}
+        />
+        <BulkAddPatientsModal
+          open={bulkAddOpen}
+          onOpenChange={setBulkAddOpen}
+          organizationId={orgId}
+          onCreated={load}
         />
       </>
     );
@@ -321,6 +339,9 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
           <div className="flex gap-2 flex-wrap">
             <Button size="sm" variant="outline" onClick={() => setAddOpen(true)} className="text-xs gap-1.5">
               <UserPlus className="h-3.5 w-3.5" /> Add patient
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setBulkAddOpen(true)} className="text-xs gap-1.5" title="Paste a list of patients to add many at once">
+              <Users className="h-3.5 w-3.5" /> Bulk add
             </Button>
             <Button size="sm" variant="outline" onClick={toggleAll} className="text-xs">
               {selected.size === patients.length ? 'Deselect all' : 'Select all'}
@@ -512,6 +533,14 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
         onOpenChange={setAddOpen}
         organizationId={orgId}
         onCreated={() => { setAddOpen(false); load(); }}
+      />
+
+      {/* Bulk paste-list modal — Hormozi force-multiplier for clinical coordinators */}
+      <BulkAddPatientsModal
+        open={bulkAddOpen}
+        onOpenChange={setBulkAddOpen}
+        organizationId={orgId}
+        onCreated={load}
       />
 
       {/* Patient detail drawer — full history + edit */}
