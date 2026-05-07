@@ -24,6 +24,7 @@ import SubscribeYourPracticeCard from '@/components/provider/SubscribeYourPracti
 import ManageSubscriptionCard from '@/components/provider/ManageSubscriptionCard';
 import BAASigningModal from '@/components/provider/BAASigningModal';
 import OrgStaffList from '@/components/admin/OrgStaffList';
+import ServicesPricingModal from '@/components/provider/ServicesPricingModal';
 import { Activity } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
 
@@ -66,6 +67,7 @@ const ProviderDashboard: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
   const [showLabRequest, setShowLabRequest] = useState(false);
+  const [showPricing, setShowPricing] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [needsPasswordSetup, setNeedsPasswordSetup] = useState(false);
   const [showPwPrompt, setShowPwPrompt] = useState(false);
@@ -330,10 +332,12 @@ const ProviderDashboard: React.FC = () => {
               variant="outline" className="h-12 px-5 gap-2 text-[15px]">
               <Calendar className="h-4 w-4" /> Schedule a visit
             </Button>
-            <Button asChild variant="outline" className="h-12 px-5 gap-2 text-[15px]">
-              <Link to="/for-providers" target="_blank">
-                <FileText className="h-4 w-4" /> Services & pricing
-              </Link>
+            {/* "Services & pricing" opens an in-page modal — Hormozi-style
+                tier comparison with VIP anchored as "Most popular". Avoids
+                bouncing the partner out to /for-providers (marketing site)
+                where they lose the dashboard context. */}
+            <Button onClick={() => setShowPricing(true)} variant="outline" className="h-12 px-5 gap-2 text-[15px]">
+              <FileText className="h-4 w-4" /> Services & pricing
             </Button>
           </div>
         </div>
@@ -679,6 +683,14 @@ const ProviderDashboard: React.FC = () => {
         orgDefaultBilledTo={org.default_billed_to as 'org' | 'patient' | null}
         orgInvoicePriceCents={org.org_invoice_price_cents ?? null}
         onCreated={loadData}
+      />
+
+      {/* Services & Pricing — Hormozi-style tier modal with VIP anchored. */}
+      <ServicesPricingModal
+        open={showPricing}
+        onOpenChange={setShowPricing}
+        organizationName={org.name}
+        onSchedule={() => setShowLabRequest(true)}
       />
 
       {/* INLINE "SET A PASSWORD" DIALOG (from the yellow status banner) */}
