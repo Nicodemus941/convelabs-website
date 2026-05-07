@@ -29,14 +29,25 @@ export function useAppointmentStatus() {
       if (specimenTrackingId) updateData.specimen_tracking_id = specimenTrackingId;
     }
 
-    const { error } = await supabase
+    // Defense-in-depth: .select() so a silent RLS no-op surfaces as
+    // an actual error instead of a misleading green toast. Without this,
+    // the previous broken phleb_update_assigned_appointments policy let
+    // the UI show "saved" while the DB row never advanced (Anita /
+    // Patricia / Lawrence 2026-05-07).
+    const { data, error } = await supabase
       .from('appointments')
       .update(updateData)
-      .eq('id', appointmentId);
+      .eq('id', appointmentId)
+      .select('id');
 
     if (error) {
       console.error('Status update failed:', error);
       toast.error('Failed to update status');
+      return false;
+    }
+    if (!data || data.length === 0) {
+      console.error('Status update affected 0 rows (likely RLS):', appointmentId);
+      toast.error("Couldn't save — your account may not have permission. Refresh and retry, or contact admin.");
       return false;
     }
 

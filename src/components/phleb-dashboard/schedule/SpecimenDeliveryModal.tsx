@@ -467,15 +467,24 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           // for backwards-compatible reads (calendar, reports).
           const aggIds = postState.map(r => r.specimenId.trim()).filter(Boolean).join(' / ');
           const labels = Array.from(new Set(postState.map(r => labLabel(r.labName)).filter(Boolean)));
-          await supabase.from('appointments').update({
-            status: 'specimen_delivered',
-            delivered_at: nowIso,
-            specimens_delivered_at: nowIso,
-            specimen_tracking_id: aggIds,
-            specimen_lab_name: labels.join(' / '),
-            ...(geoStamp ? { delivery_location: geoStamp } : {}),
-            ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
-          }).eq('id', row.appointmentId);
+          // Defense-in-depth (Anita/Patricia/Lawrence case 2026-05-07):
+          // .update() with RLS that matches 0 rows returns NO ERROR but
+          // also writes nothing. Force .select() and verify a row came
+          // back so a silent RLS failure can never look like success.
+          const { data: aggRows, error: aggErr } = await supabase
+            .from('appointments').update({
+              status: 'specimen_delivered',
+              delivered_at: nowIso,
+              specimens_delivered_at: nowIso,
+              specimen_tracking_id: aggIds,
+              specimen_lab_name: labels.join(' / '),
+              ...(geoStamp ? { delivery_location: geoStamp } : {}),
+              ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
+            }).eq('id', row.appointmentId).select('id');
+          if (aggErr) throw aggErr;
+          if (!aggRows || aggRows.length === 0) {
+            throw new Error('Delivery save failed — your account may not have permission to update this visit. Refresh and try again, or contact admin.');
+          }
         }
       } else {
         // Family-group / single-appointment branch.
@@ -489,15 +498,22 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         //      every sibling in the family has its specimens_delivered_at set.
         const isFamilyGroup = rowsRef.current.length > 1;
 
-        // Stamp this sibling's delivery WITHOUT the terminal status
-        await supabase.from('appointments').update({
-          delivered_at: nowIso,
-          specimens_delivered_at: nowIso,
-          specimen_tracking_id: row.specimenId.trim(),
-          specimen_lab_name: lab,
-          ...(geoStamp ? { delivery_location: geoStamp } : {}),
-          ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
-        }).eq('id', row.appointmentId);
+        // Stamp this sibling's delivery WITHOUT the terminal status.
+        // Defense-in-depth: .select() to detect a silent RLS no-op
+        // (Anita/Patricia/Lawrence 2026-05-07).
+        const { data: stampRows, error: stampErr } = await supabase
+          .from('appointments').update({
+            delivered_at: nowIso,
+            specimens_delivered_at: nowIso,
+            specimen_tracking_id: row.specimenId.trim(),
+            specimen_lab_name: lab,
+            ...(geoStamp ? { delivery_location: geoStamp } : {}),
+            ...(signaturePath ? { delivery_signature_path: signaturePath } : {}),
+          }).eq('id', row.appointmentId).select('id');
+        if (stampErr) throw stampErr;
+        if (!stampRows || stampRows.length === 0) {
+          throw new Error('Delivery save failed — your account may not have permission to update this visit. Refresh and try again, or contact admin.');
+        }
 
         // Sync the per-row appointment_lab_orders entry for this sibling so
         // the provider portal + admin views see consistent delivery info.
@@ -526,14 +542,22 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           // Doing it as a batch keeps the schedule view consistent: family
           // card disappears for everyone simultaneously, not piecemeal.
           const allIds = postState.map(r => r.appointmentId);
-          await supabase.from('appointments').update({
-            status: 'specimen_delivered',
-          }).in('id', allIds);
+          const { data: flipRows, error: flipErr } = await supabase
+            .from('appointments').update({ status: 'specimen_delivered' })
+            .in('id', allIds).select('id');
+          if (flipErr) throw flipErr;
+          if (!flipRows || flipRows.length === 0) {
+            throw new Error('Status update failed — your account may not have permission. Refresh and try again, or contact admin.');
+          }
         } else if (!isFamilyGroup) {
           // Solo appointment with no companions — terminal flip is fine.
-          await supabase.from('appointments').update({
-            status: 'specimen_delivered',
-          }).eq('id', row.appointmentId);
+          const { data: flipRows, error: flipErr } = await supabase
+            .from('appointments').update({ status: 'specimen_delivered' })
+            .eq('id', row.appointmentId).select('id');
+          if (flipErr) throw flipErr;
+          if (!flipRows || flipRows.length === 0) {
+            throw new Error('Status update failed — your account may not have permission. Refresh and try again, or contact admin.');
+          }
         }
         // Else (family group, only some delivered): leave status alone so the
         // card stays visible on the schedule for the remaining companions.

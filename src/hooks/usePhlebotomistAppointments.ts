@@ -372,12 +372,21 @@ export function usePhlebotomistAppointments() {
 
   const updateStatus = useCallback(async (appointmentId: string, newStatus: AppointmentStatus) => {
     try {
-      const { error } = await supabase
+      // Defense-in-depth: .select() to detect silent RLS no-op.
+      // Anita/Patricia/Lawrence case 2026-05-07: the prior broken phleb
+      // RLS policy let UPDATEs return success-with-zero-rows, so the
+      // UI optimistically advanced status while the DB row stayed stuck.
+      // We now require at least one row back from the UPDATE.
+      const { data, error } = await supabase
         .from('appointments')
         .update({ status: newStatus })
-        .eq('id', appointmentId);
+        .eq('id', appointmentId)
+        .select('id');
 
       if (error) throw error;
+      if (!data || data.length === 0) {
+        throw new Error("Couldn't save status — your account may not have permission to update this visit. Refresh and retry, or contact admin.");
+      }
 
       setAppointments(prev =>
         prev.map(a => a.id === appointmentId ? { ...a, status: newStatus } : a)
@@ -403,9 +412,11 @@ export function usePhlebotomistAppointments() {
       }
 
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error updating status:', err);
-      toast.error('Failed to update status');
+      // Surface the specific error message (e.g. RLS / permission) so
+      // the phleb knows whether to retry vs contact admin.
+      toast.error(err?.message || 'Failed to update status');
       return false;
     }
   }, []);
