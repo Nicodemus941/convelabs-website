@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Navigation } from 'lucide-react';
+import { openInMaps } from '@/lib/openInMaps';
 
 interface NavigateButtonProps {
   address: string;
@@ -8,14 +9,9 @@ interface NavigateButtonProps {
 
 const NavigateButton: React.FC<NavigateButtonProps> = ({ address }) => {
   const handleNavigate = () => {
-    const encoded = encodeURIComponent(address);
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-
-    if (isIOS) {
-      window.open(`maps://maps.apple.com/?daddr=${encoded}`, '_blank');
-    } else {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encoded}`, '_blank');
-    }
+    // Centralized OS-aware deep link: iOS → Apple Maps, Android → default
+    // geo: handler (Google Maps / Waze / Maps.me), else web Google Maps.
+    openInMaps({ kind: 'address', address });
   };
 
   return (

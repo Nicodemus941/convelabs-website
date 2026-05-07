@@ -97,36 +97,93 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
     })();
     return () => { cancelled = true; };
   }, [appointment.id, (appointment as any).family_group_id, labOrderRefreshKey]);
-  // Pull the patient's profile insurance fields. OCR (ocr-lab-order edge fn)
-  // extracts provider/member/group from uploaded lab orders and writes
-  // them to tenant_patients. We display them even when the card IMAGE
-  // (insurance_card_path) is missing — they're separate signals.
-  const [patientInsurance, setPatientInsurance] = useState<{
+  // Pull the patient's insurance(s) — multi-row from patient_insurances
+  // (primary + optional secondary). Falls back to legacy single-row on
+  // tenant_patients if the patient has no patient_insurances rows yet.
+  // 2026-05-07 multi-insurance rollout.
+  type InsRow = {
+    id: string;
+    rank: 'primary' | 'secondary';
     provider: string | null;
     member_id: string | null;
     group_number: string | null;
-  } | null>(null);
+    card_front_path: string | null;
+    verified_at: string | null;
+  };
+  const [patientInsurances, setPatientInsurances] = useState<InsRow[]>([]);
   useEffect(() => {
     const pid = (appointment as any).patient_id;
-    if (!pid) { setPatientInsurance(null); return; }
+    if (!pid) { setPatientInsurances([]); return; }
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
+      // 1) Try the new multi-row source
+      const { data: rows } = await supabase
+        .from('patient_insurances' as any)
+        .select('id, rank, provider, member_id, group_number, card_front_path, verified_at')
+        .eq('patient_id', pid)
+        .eq('is_active', true)
+        .order('rank', { ascending: true }); // primary < secondary alphabetically
+      if (cancelled) return;
+      if (rows && rows.length > 0) {
+        setPatientInsurances(rows as any);
+        return;
+      }
+      // 2) Fallback to legacy tenant_patients single row
+      const { data: tp } = await supabase
         .from('tenant_patients')
-        .select('insurance_provider, insurance_member_id, insurance_group_number')
+        .select('id, insurance_provider, insurance_member_id, insurance_group_number, insurance_card_path')
         .eq('id', pid)
         .maybeSingle();
-      if (!cancelled && data) {
-        setPatientInsurance({
-          provider: (data as any).insurance_provider || null,
-          member_id: (data as any).insurance_member_id || null,
-          group_number: (data as any).insurance_group_number || null,
-        });
+      if (cancelled) return;
+      if (tp && ((tp as any).insurance_provider || (tp as any).insurance_member_id || (tp as any).insurance_card_path)) {
+        setPatientInsurances([{
+          id: 'legacy',
+          rank: 'primary',
+          provider: (tp as any).insurance_provider || null,
+          member_id: (tp as any).insurance_member_id || null,
+          group_number: (tp as any).insurance_group_number || null,
+          card_front_path: (tp as any).insurance_card_path || null,
+          verified_at: null,
+        }]);
+      } else {
+        setPatientInsurances([]);
       }
     })();
     return () => { cancelled = true; };
   }, [(appointment as any).patient_id, insuranceJustUploaded]);
+  const primaryInsurance = patientInsurances.find(i => i.rank === 'primary') || null;
+  const secondaryInsurance = patientInsurances.find(i => i.rank === 'secondary') || null;
+  // Legacy compatibility shim — many downstream renders still reference these
+  const patientInsurance = primaryInsurance ? {
+    provider: primaryInsurance.provider,
+    member_id: primaryInsurance.member_id,
+    group_number: primaryInsurance.group_number,
+  } : null;
   const hasInsuranceText = !!(patientInsurance?.provider || patientInsurance?.member_id);
+
+  // Phleb verifies an insurance row at draw time. Stamps verified_at +
+  // verified_by_user_id so the chart shows "✓ verified by phleb today."
+  const handleVerifyInsurance = async (row: InsRow) => {
+    if (row.id === 'legacy') {
+      toast.info('Add this insurance to the new chart first by re-uploading the card.');
+      return;
+    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('patient_insurances' as any)
+        .update({
+          verified_at: new Date().toISOString(),
+          verified_by_user_id: user?.id || null,
+        })
+        .eq('id', row.id);
+      if (error) throw error;
+      toast.success(`${row.rank === 'primary' ? 'Primary' : 'Secondary'} insurance verified ✓`);
+      setInsuranceJustUploaded(`verify-${Date.now()}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Verify failed');
+    }
+  };
   const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
 
   // Pre-flight readiness: does this visit have everything the phleb needs?
@@ -411,19 +468,64 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <Mail className="h-3 w-3" /> Email
                   </Button>
                 </div>
-                {appointment.patient_insurance && (
-                  <div className="bg-gray-50 rounded-lg p-3 mb-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Shield className="h-3.5 w-3.5 text-muted-foreground" />
-                      <p className="text-xs text-muted-foreground">Insurance</p>
-                    </div>
-                    <p className="text-sm font-medium">
-                      {appointment.patient_insurance}
-                      {appointment.patient_insurance_id && ` (ID: ${appointment.patient_insurance_id})`}
-                    </p>
-                    {appointment.patient_insurance_group && (
-                      <p className="text-xs text-muted-foreground">Group: {appointment.patient_insurance_group}</p>
-                    )}
+                {/* Insurance — primary + (optional) secondary, each verifiable */}
+                {patientInsurances.length > 0 && (
+                  <div className="space-y-2 mb-2">
+                    {patientInsurances.map((ins) => {
+                      const isVerified = !!ins.verified_at;
+                      return (
+                        <div key={ins.id} className={`rounded-lg p-3 border ${ins.rank === 'primary' ? 'bg-gray-50 border-gray-200' : 'bg-blue-50/50 border-blue-100'}`}>
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <div className="flex items-center gap-2">
+                              <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                                {ins.rank === 'primary' ? 'Primary insurance' : 'Secondary insurance'}
+                              </p>
+                            </div>
+                            {isVerified ? (
+                              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] gap-1 hover:bg-emerald-100">
+                                <CheckCircle2 className="h-2.5 w-2.5" /> Verified
+                              </Badge>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-[10px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                onClick={(e) => { e.stopPropagation(); handleVerifyInsurance(ins); }}
+                              >
+                                Verify
+                              </Button>
+                            )}
+                          </div>
+                          {(ins.provider || ins.member_id) ? (
+                            <>
+                              <p className="text-sm font-medium">
+                                {ins.provider || 'Carrier on card'}
+                                {ins.member_id && ` (ID: ${ins.member_id})`}
+                              </p>
+                              {ins.group_number && (
+                                <p className="text-xs text-muted-foreground">Group: {ins.group_number}</p>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-xs text-amber-700 italic">Card on file — fields not yet OCR'd</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {/* No secondary on file — offer phleb a one-tap upload */}
+                {primaryInsurance && !secondaryInsurance && (appointment as any).patient_id && (
+                  <div className="mb-2">
+                    <PhlebUploadInsuranceCardButton
+                      appointmentId={appointment.id}
+                      patientId={(appointment as any).patient_id}
+                      onUploaded={() => setInsuranceJustUploaded(`secondary-${Date.now()}`)}
+                      variant="subtle"
+                      label="+ Add secondary insurance"
+                      rank="secondary"
+                    />
                   </div>
                 )}
                 {appointment.patient_dob && (

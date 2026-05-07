@@ -30,10 +30,18 @@ interface Props {
   onUploaded?: (path: string) => void;
   variant?: 'primary' | 'subtle';
   label?: string;
+  /**
+   * Insurance rank — 'primary' (default) or 'secondary'. The patient's
+   * primary always goes on appointments.insurance_card_path AND
+   * tenant_patients.insurance_card_path for legacy compatibility.
+   * Secondary only writes to the new patient_insurances table.
+   * 2026-05-07 multi-insurance feature.
+   */
+  rank?: 'primary' | 'secondary';
 }
 
 const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
-  appointmentId, patientId, onUploaded, variant = 'subtle', label,
+  appointmentId, patientId, onUploaded, variant = 'subtle', label, rank = 'primary',
 }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -57,33 +65,56 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
         return;
       }
 
-      // 2. Stamp the appointment (immediate visibility on this visit)
-      await supabase
-        .from('appointments')
-        .update({ insurance_card_path: safeName })
-        .eq('id', appointmentId);
+      // 2. Primary card: stamp legacy fields on appointment + tenant_patients
+      // so existing surfaces keep working. Secondary skips the legacy stamps
+      // (those columns only hold one insurance).
+      if (rank === 'primary') {
+        await supabase
+          .from('appointments')
+          .update({ insurance_card_path: safeName })
+          .eq('id', appointmentId);
+        if (patientId) {
+          try {
+            await supabase
+              .from('tenant_patients')
+              .update({ insurance_card_path: safeName, updated_at: new Date().toISOString() })
+              .eq('id', patientId);
+          } catch (e) { console.warn('[insurance-upload] patient profile stamp failed:', e); }
+        }
+      }
 
-      // 3. Stamp the patient's profile too — so future visits inherit
-      // the card automatically. Best-effort: if patient_id is missing
-      // (rare), skip silently.
+      // 3. NEW source of truth — patient_insurances row (one per rank).
+      // Upsert via deactivate-old + insert-new so existing primary becomes
+      // historical and the fresh upload becomes the active row.
       if (patientId) {
         try {
+          // Deactivate any prior active row at this rank
           await supabase
-            .from('tenant_patients')
-            .update({ insurance_card_path: safeName, updated_at: new Date().toISOString() })
-            .eq('id', patientId);
-        } catch (e) { console.warn('[insurance-upload] patient profile stamp failed:', e); }
+            .from('patient_insurances' as any)
+            .update({ is_active: false })
+            .eq('patient_id', patientId)
+            .eq('rank', rank)
+            .eq('is_active', true);
+          // Insert new active row
+          await supabase
+            .from('patient_insurances' as any)
+            .insert({
+              patient_id: patientId,
+              rank,
+              card_front_path: safeName,
+              is_active: true,
+            });
+        } catch (e) { console.warn('[insurance-upload] patient_insurances write failed:', e); }
       }
 
       // 4. Fire OCR (non-blocking — captures member ID / group / provider).
-      // We don't await; status surfaces via realtime to admin Inbox.
       try {
         supabase.functions.invoke('ocr-insurance-card', {
-          body: { filePath: safeName, appointmentId, patientId: patientId || null },
+          body: { filePath: safeName, appointmentId, patientId: patientId || null, rank },
         }).catch(() => {});
       } catch (e) { console.warn('[insurance-upload] OCR invoke skipped:', e); }
 
-      toast.success('Insurance card saved to chart ✓');
+      toast.success(`${rank === 'secondary' ? 'Secondary' : 'Primary'} insurance saved ✓`);
       onUploaded?.(safeName);
     } catch (e: any) {
       toast.error(`Upload crashed: ${e?.message || String(e)}`);

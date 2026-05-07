@@ -185,8 +185,22 @@ export function buildLabRouteUrl(labDestination: string | null | undefined, pati
   return buildMapsUrl(`${labBrand} near ${patientZip || 'me'}`);
 }
 
+/**
+ * OS-aware maps URL for a SEARCH query (e.g. "LabCorp near 32801").
+ * iOS → Apple Maps query URL, Android → geo: with q=, else web Google Maps.
+ * Used by buildLabRouteUrl so the phleb's "route to nearest X" tap opens
+ * their default map app instead of forcing Safari/Chrome web Google Maps.
+ */
 function buildMapsUrl(query: string): string {
   const encoded = encodeURIComponent(query);
+  if (typeof navigator !== 'undefined') {
+    if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+      return `maps://maps.apple.com/?q=${encoded}`;
+    }
+    if (/Android/i.test(navigator.userAgent)) {
+      return `geo:0,0?q=${encoded}`;
+    }
+  }
   return `https://www.google.com/maps/search/?api=1&query=${encoded}`;
 }
 

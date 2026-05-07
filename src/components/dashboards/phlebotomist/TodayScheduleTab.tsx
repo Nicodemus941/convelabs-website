@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { calculateDistance, GeoCoordinates } from '@/services/geocodingService';
+import { openInMaps } from '@/lib/openInMaps';
 import { Map, Navigation, Clock, MapPin } from 'lucide-react';
 import AppointmentCard, { AppointmentType } from './AppointmentCard';
 
@@ -158,9 +159,9 @@ const TodayScheduleTab = () => {
     fetchAppointments();
   }, [user]);
   
-  // Navigation URL to open in maps
-  const getNavigationUrl = (latitude: number, longitude: number) => {
-    return `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
+  // OS-aware "open in default maps app" — iOS → Apple Maps, Android → geo:, else web Google
+  const handleOpenMaps = (latitude: number, longitude: number) => {
+    openInMaps({ kind: 'coords', lat: latitude, lng: longitude });
   };
   
   const handleStartAppointment = (appointment: AppointmentType) => {
@@ -267,10 +268,9 @@ const TodayScheduleTab = () => {
                             {appointment.zipcode}
                           </Badge>
                           
-                          <a 
-                            href={getNavigationUrl(appointment.latitude, appointment.longitude)} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
+                          <a
+                            href="#"
+                            onClick={(e) => { e.preventDefault(); handleOpenMaps(appointment.latitude, appointment.longitude); }}
                           >
                             <Button size="sm" variant="outline" className="text-xs">
                               <Map className="h-3 w-3 mr-1" /> Get Directions

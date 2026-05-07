@@ -3,6 +3,7 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { MapPin, Navigation, Camera, CheckCircle } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
+import { openInMaps } from "@/lib/openInMaps";
 
 export type AppointmentType = {
   id: string;
@@ -30,7 +31,8 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({
   onStartAppointment
 }) => {
   const handleGetDirections = (address: string) => {
-    window.open(`https://maps.google.com?q=${encodeURIComponent(address)}`, '_blank');
+    // OS-aware: iOS → Apple Maps, Android → default geo handler, else web Google Maps
+    openInMaps({ kind: 'address', address });
     toast.success("Opening directions to patient location");
   };
 
