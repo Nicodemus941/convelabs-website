@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { full_name, title, password, mark_onboarded, accepted_terms } = body || {};
+    const { full_name, title, password, mark_onboarded, accepted_terms, phone } = body || {};
 
     // Password validation
     if (password !== undefined && password !== null) {
@@ -59,6 +59,13 @@ Deno.serve(async (req) => {
     if (accepted_terms === true) {
       nextMetadata.terms_accepted_at = new Date().toISOString();
       nextMetadata.terms_accepted_version = 'v1.0-2026-05';
+    }
+    if (typeof phone === 'string' && phone.trim()) {
+      const cleaned = phone.replace(/[^\d+]/g, '');
+      if (cleaned.length >= 7) {
+        nextMetadata.phone = cleaned;
+        nextMetadata.phoneNumber = cleaned;
+      }
     }
 
     const updatePayload: any = { user_metadata: nextMetadata };

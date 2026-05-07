@@ -98,6 +98,7 @@ const ProviderDashboard: React.FC = () => {
   const [newPw, setNewPw] = useState('');
   const [newPwConfirm, setNewPwConfirm] = useState('');
   const [agreedTerms, setAgreedTerms] = useState(false);
+  const [newPhone, setNewPhone] = useState('');
   // BAA signing gate — blocks the portal until the provider has signed.
   const [baaLoaded, setBaaLoaded] = useState(false);
   const [baaSignature, setBaaSignature] = useState<{ id: string; signed_at: string; baa_version: string; signer_full_name: string } | null>(null);
@@ -187,8 +188,9 @@ const ProviderDashboard: React.FC = () => {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
           password: newPw,
-          // For first-login invited staff, also stamp terms acceptance
+          // For first-login invited staff, also stamp terms acceptance + phone
           ...(needsPasswordSetup && agreedTerms ? { accepted_terms: true } : {}),
+          ...(needsPasswordSetup && newPhone.trim() ? { phone: newPhone.trim() } : {}),
         }),
       });
       const j = await resp.json();
@@ -431,6 +433,40 @@ const ProviderDashboard: React.FC = () => {
               <Button size="sm" className="bg-amber-600 hover:bg-amber-700 text-white gap-1" onClick={() => setShowPwPrompt(true)}>
                 <KeyRound className="h-3.5 w-3.5" /> Set password
               </Button>
+            </div>
+          </div>
+        )}
+
+        {/* FIRST-ACTION COACHMARK — shows on the genuinely-empty dashboard.
+            Hormozi UX: don't dump invited staff into a cold roster with no
+            breadcrumb of what to do first. Tells them the exact next two
+            actions, then disappears once they fire their first request. */}
+        {patients.length === 0 && data.labRequests.length === 0 && data.upcoming.length === 0 && (
+          <div className="rounded-xl bg-gradient-to-br from-red-50 to-amber-50 border-2 border-red-100 p-5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-[#B91C1C] text-white flex items-center justify-center flex-shrink-0 font-bold">
+                ✓
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-gray-900">You're all set up. Here's how to send your first lab request:</h3>
+                <p className="text-xs text-gray-600 mt-0.5">2 quick steps. Most coordinators get a patient on the calendar in under 90 seconds.</p>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setShowLabRequest(true)}
+                    className="text-left rounded-lg border-2 border-red-200 bg-white p-3 hover:border-[#B91C1C] hover:shadow-md transition group"
+                  >
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#B91C1C]">Step 1</div>
+                    <div className="text-sm font-semibold text-gray-900 mt-0.5">Add a patient + send their lab order</div>
+                    <div className="text-[11px] text-gray-500 mt-1 leading-snug">Upload the doctor's order PDF. We'll text the patient a booking link.</div>
+                    <div className="text-[11px] text-[#B91C1C] font-semibold mt-2 group-hover:underline">Start →</div>
+                  </button>
+                  <div className="rounded-lg border-2 border-gray-200 bg-white/60 p-3 opacity-75">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Step 2 · auto</div>
+                    <div className="text-sm font-semibold text-gray-700 mt-0.5">Watch the patient book + draw in real-time</div>
+                    <div className="text-[11px] text-gray-500 mt-1 leading-snug">A 6-step timeline appears here: Notified → Opened → Booked → Drawn → Delivered → Done.</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -775,21 +811,37 @@ const ProviderDashboard: React.FC = () => {
         if (!v && needsPasswordSetup) return;
         setShowPwPrompt(v);
       }}>
-        <DialogContent className="max-w-sm" hideCloseButton={needsPasswordSetup}>
+        <DialogContent className={needsPasswordSetup ? "max-w-md" : "max-w-sm"} hideCloseButton={needsPasswordSetup}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-5 w-5 text-[#B91C1C]" />
-              {needsPasswordSetup ? 'Create your password' : 'Set a password'}
+              {needsPasswordSetup ? "You're in. Let's lock it down." : 'Set a password'}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 pt-2">
-            <p className="text-sm text-gray-600">
-              {needsPasswordSetup
-                ? "Welcome! Set a password so you can sign back into your dashboard anytime."
-                : 'Once set, you can sign in with email + password instead of waiting for an SMS code.'}
-            </p>
+          {needsPasswordSetup && (
+            <div className="rounded-lg bg-gradient-to-br from-red-50 to-amber-50 border border-red-100 p-3 -mt-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#B91C1C]">Step 1 of 2 · ~30 seconds</div>
+              <div className="text-sm font-semibold text-gray-900 mt-0.5 leading-snug">
+                Your patients can now book at-home labs in 90 seconds — and you'll see every step in real-time.
+              </div>
+              <div className="text-[11px] text-gray-600 mt-1">Set a password so you can sign back in anytime, then we'll drop you into the dashboard.</div>
+            </div>
+          )}
+          <div className="space-y-3 pt-1">
+            {!needsPasswordSetup && (
+              <p className="text-sm text-gray-600">
+                Once set, you can sign in with email + password instead of waiting for an SMS code.
+              </p>
+            )}
             <div><Label>New password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" minLength={8} autoFocus /></div>
             <div><Label>Confirm</Label><Input type="password" value={newPwConfirm} onChange={e => setNewPwConfirm(e.target.value)} placeholder="Type it again" minLength={8} /></div>
+            {needsPasswordSetup && (
+              <div>
+                <Label>Mobile phone <span className="text-gray-400 font-normal">(optional)</span></Label>
+                <Input type="tel" value={newPhone} onChange={e => setNewPhone(e.target.value)} placeholder="(407) 555-1234" />
+                <p className="text-[10px] text-gray-500 mt-0.5">For SMS notifications when a patient books a visit. We never share it.</p>
+              </div>
+            )}
             {needsPasswordSetup && (
               <label className="flex items-start gap-2 cursor-pointer pt-1">
                 <input
@@ -802,6 +854,11 @@ const ProviderDashboard: React.FC = () => {
                   I agree to the <a href="/terms" target="_blank" className="text-[#B91C1C] underline">Terms of Service</a> and <a href="/privacy" target="_blank" className="text-[#B91C1C] underline">Privacy Policy</a>, and confirm that I'm authorized to access patient records on behalf of my organization (HIPAA).
                 </span>
               </label>
+            )}
+            {needsPasswordSetup && (
+              <p className="text-[10px] text-gray-400 text-center pt-1 border-t mt-3">
+                Need help? Text <strong className="text-gray-600">RESEND</strong> to <strong className="text-gray-600">(941) 527-9169</strong> or reply to your invite email.
+              </p>
             )}
           </div>
           <DialogFooter className="gap-2">
