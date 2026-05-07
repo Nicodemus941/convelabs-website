@@ -102,6 +102,14 @@ Deno.serve(async (req) => {
       // New first-class attachment fields (replaces notes-stuffing pattern)
       labOrderFilePaths = [],
       insuranceCardPath = null,
+      // OCR-extracted insurance fields (from booking flow). Forwarded to
+      // Stripe metadata; webhook writes them to tenant_patients on payment.
+      // Prior bug: these were never persisted at all — only 1 of 495
+      // recent patients had insurance_card_path saved. (2026-05-06)
+      insuranceProvider = null,
+      insuranceMemberId = null,
+      insuranceGroupNumber = null,
+      insurancePlanType = null,
       labDestination = null,
       labDestinationPending = false,
       // Optional: redeem specific referral credits on THIS booking
@@ -839,6 +847,14 @@ Deno.serve(async (req) => {
       // First-class attachment metadata — stripe metadata values must be strings
       lab_order_file_paths: Array.isArray(labOrderFilePaths) ? labOrderFilePaths.slice(0, 10).join(',').substring(0, 500) : '',
       insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',
+      // Insurance fields packed into one key to respect the 50-key Stripe
+      // metadata cap. Webhook decodes and writes to tenant_patients.
+      insurance_json: JSON.stringify({
+        provider:    String(insuranceProvider || '').substring(0, 100),
+        member_id:   String(insuranceMemberId || '').substring(0, 80),
+        group_no:    String(insuranceGroupNumber || '').substring(0, 80),
+        plan_type:   String(insurancePlanType || '').substring(0, 80),
+      }).substring(0, 500),
       lab_destination: labDestination ? String(labDestination).substring(0, 50) : '',
       lab_destination_pending: labDestinationPending ? 'true' : 'false',
       // H2: attribution (last-touch) — stripe-webhook parses this JSON key

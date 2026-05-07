@@ -233,6 +233,16 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
 
           if (!error && data?.success && data?.data) {
             setOcrResult(data.data);
+            // CRITICAL: persist OCR result to the form so BookingFlow picks
+            // it up and forwards to the checkout payload. Prior bug: the
+            // result was rendered to the screen only, never saved to the
+            // patient's chart. Out of 495 bookings in the last 30 days,
+            // only 1 had insurance_card_path on file. (2026-05-06.)
+            const ocr = data.data as any;
+            if (ocr.provider) setValue('insurance.provider' as any, ocr.provider);
+            if (ocr.memberId) setValue('insurance.memberId' as any, ocr.memberId);
+            if (ocr.groupNumber) setValue('insurance.groupNumber' as any, ocr.groupNumber);
+            if (ocr.planType) setValue('insurance.planType' as any, ocr.planType);
             toast.success('Insurance info extracted from card!');
           }
         } catch (err) {

@@ -1211,6 +1211,66 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // ─── INSURANCE PERSISTENCE ────────────────────────────────────
+    // Decode the OCR-extracted insurance fields packed into metadata.insurance_json
+    // and write them onto the patient's chart. Prior bug: the booking flow's
+    // insurance card OCR extracted provider/memberId/groupNo/planType but ONLY
+    // rendered them to the screen — never persisted. Out of 495 patients in
+    // the last 30 days, only 1 had insurance_card_path saved. (2026-05-06)
+    //
+    // Upsert by email into tenant_patients. We do NOT clobber existing
+    // values: if a patient previously had insurance_provider='Aetna' on
+    // file and the current booking didn't extract a provider (e.g. they
+    // skipped the upload or OCR failed), we keep the old value.
+    try {
+      let insurance: any = null;
+      if (metadata.insurance_json) {
+        try { insurance = JSON.parse(metadata.insurance_json); } catch { /* */ }
+      }
+      const patch: any = {};
+      if (insurance?.provider)  patch.insurance_provider     = String(insurance.provider).substring(0, 100);
+      if (insurance?.member_id) patch.insurance_member_id    = String(insurance.member_id).substring(0, 80);
+      if (insurance?.group_no)  patch.insurance_group_number = String(insurance.group_no).substring(0, 80);
+      if (metadata.insurance_card_path) {
+        patch.insurance_card_path = String(metadata.insurance_card_path).substring(0, 500);
+      }
+      if (Object.keys(patch).length > 0 && metadata.patient_email) {
+        // Find by email (case-insensitive). If multiple match (rare), update
+        // the most recent. Don't create a new row here — patient lookup
+        // earlier in this fn already created/found one.
+        const { data: tps } = await supabaseClient
+          .from('tenant_patients')
+          .select('id, insurance_provider, insurance_member_id, insurance_group_number, insurance_card_path')
+          .ilike('email', metadata.patient_email.trim())
+          .order('created_at', { ascending: false })
+          .limit(1);
+        const tp = (tps && tps[0]) || null;
+        if (tp) {
+          // Only update fields that don't already have a value, so we never
+          // wipe known-good insurance with a partial booking.
+          const safeMerge: any = {};
+          for (const k of Object.keys(patch)) {
+            if (!(tp as any)[k]) safeMerge[k] = patch[k];
+          }
+          if (Object.keys(safeMerge).length > 0) {
+            const { error: upErr } = await supabaseClient
+              .from('tenant_patients')
+              .update(safeMerge)
+              .eq('id', tp.id);
+            if (upErr) {
+              console.warn(`[insurance-persist] tenant_patients update failed for ${metadata.patient_email}: ${upErr.message}`);
+            } else {
+              console.log(`[insurance-persist] saved ${Object.keys(safeMerge).join(',')} on tenant_patients[${tp.id}] for ${metadata.patient_email}`);
+            }
+          }
+        }
+      }
+    } catch (insErr: any) {
+      // Non-fatal: appointment is still created; insurance persistence is
+      // a side effect the admin can fix in the UI. Log for triage.
+      console.warn(`[insurance-persist] non-fatal error: ${insErr?.message || insErr}`);
+    }
+
     // ─── PREFILL TOKEN: mark consumed so the funnel report flips to "booked"
     if (metadata.prefill_token_id) {
       try {

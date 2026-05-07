@@ -475,6 +475,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       ];
       const insurancePath: string | null =
         ((data as any)?.insurance?.uploadedPath as string | null) || null;
+      // OCR-extracted structured insurance fields (from LabOrderUploadStep).
+      // These get forwarded to the checkout payload + Stripe metadata so the
+      // webhook can write them to tenant_patients. Prior bug: these were
+      // rendered to the screen but never persisted. (2026-05-06)
+      const insuranceProvider = String((data as any)?.insurance?.provider || '').trim() || null;
+      const insuranceMemberId = String((data as any)?.insurance?.memberId || '').trim() || null;
+      const insuranceGroupNumber = String((data as any)?.insurance?.groupNumber || '').trim() || null;
+      const insurancePlanType = String((data as any)?.insurance?.planType || '').trim() || null;
 
       // CRITICAL: store the LOCAL calendar date, not a UTC ISO string.
       //
@@ -653,6 +661,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // First-class attachment fields (new — bypass the notes-stuffing pattern)
         labOrderFilePaths: labOrderPaths,
         insuranceCardPath: insurancePath,
+        insuranceProvider,
+        insuranceMemberId,
+        insuranceGroupNumber,
+        insurancePlanType,
         labDestination,
         labDestinationPending,
         // Bundled membership subscription (Hormozi anchor-flip upsell — one
