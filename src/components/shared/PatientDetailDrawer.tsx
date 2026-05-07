@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import PatientAddressPicker from '@/components/shared/PatientAddressPicker';
+import PatientStatusChip from '@/components/shared/PatientStatusChip';
 
 /**
  * PatientDetailDrawer — shared slide-in panel with full patient history.
@@ -193,7 +194,12 @@ const PatientDetailDrawer: React.FC<Props> = ({
         <SheetHeader className="border-b p-5 sticky top-0 bg-white z-10">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <SheetTitle className="text-xl text-gray-900 truncate">{patientName}</SheetTitle>
+              <div className="flex items-center gap-2 flex-wrap">
+                <SheetTitle className="text-xl text-gray-900 truncate">{patientName}</SheetTitle>
+                {profile?.id && (
+                  <PatientStatusChip patientId={profile.id} patientEmail={profile.email || null} />
+                )}
+              </div>
               {!loading && profile && (
                 <p className="text-xs text-gray-500 mt-1">
                   {profile.date_of_birth && <span>DOB {profile.date_of_birth}</span>}

@@ -27,6 +27,7 @@ import RequestLabOrderButton from './RequestLabOrderButton';
 import LabOrderRequestStatus from './LabOrderRequestStatus';
 import AppointmentEarningPill from './AppointmentEarningPill';
 import { getLabHoursStatus, logMileage, type LabRow } from '@/lib/labStatus';
+import PatientStatusChip from '@/components/shared/PatientStatusChip';
 import TubePredictionPanel from './TubePredictionPanel';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
@@ -323,6 +324,15 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       onClick={(e) => { e.stopPropagation(); openPatientEdit(); }}
                       title="Click to edit patient details"
                     >{appointment.patient_name}</h3>
+                    {/* Membership status chip — distinguishes formal paid
+                        VIP/Member/Concierge tier from informal "loyal
+                        patient" tenure so phleb sees real status at a
+                        glance (Aditya Patel case 2026-05-07). */}
+                    <PatientStatusChip
+                      patientId={(appointment as any).patient_id || null}
+                      patientEmail={appointment.patient_email || null}
+                      compact
+                    />
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
