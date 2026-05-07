@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { getRenderedTemplate, sendEmail, logEmailSend, userHasOptedIn } from "../_shared/email/index.ts";
 import { shouldSendNow } from "../_shared/quiet-hours.ts";
+import { formatApptDateLong, formatApptTime } from "../_shared/format-appt-date.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -167,42 +168,24 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
     );
   }
   
-  // ── TIME-BUG FIX (2026-04-30) ────────────────────────────────────
-  // appointment_date is a UTC timestamptz; the visit's CLOCK-time the
-  // patient cares about lives in the separate `appointment_time` column
-  // (e.g. '09:00:00'). Lawrence Carpenter's appointment_date was stored
-  // as 2026-05-01 13:00:00+00 (= 9 AM ET during DST) but the old code
-  // formatted that with the server's UTC locale → "1 PM" reminder for a
-  // 9 AM visit. Fix:
-  //   • Format the DATE in America/New_York so we never roll into the
-  //     prior day for late-evening UTC stamps.
-  //   • Use appointment_time directly for the TIME string.
-  const TZ = 'America/New_York';
-  const appointmentDate = new Date(appointment.appointment_date);
-  const formattedDate = appointmentDate.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: TZ,
-  });
-
-  const fmtTimeFromHHMMSS = (s: string | null | undefined): string => {
-    if (!s) {
-      // Fallback: use the date column's hour-of-day in ET
-      return appointmentDate.toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ,
-      });
-    }
-    const m = s.match(/^(\d{1,2}):(\d{2})/);
-    if (!m) return s;
-    let h = parseInt(m[1], 10);
-    const min = m[2];
-    const period = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    return `${h}:${min} ${period}`;
-  };
-  const formattedTime = fmtTimeFromHHMMSS(appointment.appointment_time);
+  // ── DATE-BUG FIX (2026-05-06) ────────────────────────────────────
+  // appointment_date is stored as `2026-05-08 00:00:00+00` (UTC midnight
+  // on the visit day). When that's converted to Date and formatted in
+  // America/New_York, DST drops it back to the prior evening
+  // (Thursday May 7 8 PM ET) and the patient sees the WRONG WEEKDAY.
+  // Hawthorn Mertz got "tomorrow Thursday" on Wednesday for a Friday
+  // visit. (2026-05-06.)
+  //
+  // Fix: treat appointment_date as a CALENDAR-DATE STRING (slice the
+  // first 10 chars) and format with timeZone:'UTC' anchored at noon UTC.
+  // Noon UTC can't roll into a different day in any worldwide timezone.
+  // appointment_time is the patient-facing clock value — render as-is.
+  //
+  // The shared `_shared/format-appt-date.ts` helper makes this the only
+  // correct path forward; every reminder/confirmation/notice email
+  // should use it.
+  const formattedDate = formatApptDateLong(appointment.appointment_date);
+  const formattedTime = formatApptTime(appointment.appointment_time);
   
   // Create data for the template
   const templateData = {

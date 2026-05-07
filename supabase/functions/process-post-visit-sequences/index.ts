@@ -87,7 +87,15 @@ Deno.serve(async (req) => {
                 .select('appointment_date, appointment_time, address, service_name')
                 .eq('id', seq.appointment_id).maybeSingle();
               if (appt) {
-                try { apptDate = new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }); } catch { apptDate = appt.appointment_date?.substring(0,10) || ''; }
+                // Treat appointment_date as a calendar-date string (yyyy-MM-dd)
+                // anchored at noon UTC so format never rolls into prior day.
+                // (Bug avoided: Hawthorn-pattern off-by-one weekday.)
+                try {
+                  const dStr = String(appt.appointment_date).substring(0, 10);
+                  apptDate = new Date(dStr + 'T12:00:00Z').toLocaleDateString('en-US', {
+                    weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC',
+                  });
+                } catch { apptDate = appt.appointment_date?.substring(0,10) || ''; }
                 apptTime = appt.appointment_time || '';
                 apptAddress = appt.address || '';
                 serviceName = appt.service_name || 'Blood Draw';

@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
           const recipient = org?.contact_email || org?.billing_email;
           if (recipient) {
             const apptDate = appt.appointment_date
-              ? new Date(appt.appointment_date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+              ? new Date(String(appt.appointment_date).substring(0, 10) + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' })
               : 'recently';
             const svc = appt.service_name || appt.service_type || 'lab draw';
             const labLine = body.labName ? `<p style="margin:6px 0 0;"><strong>Delivered to:</strong> ${body.labName}</p>` : '';
