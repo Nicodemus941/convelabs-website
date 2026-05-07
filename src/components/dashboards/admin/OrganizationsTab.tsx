@@ -22,6 +22,7 @@ import OrgRoiCard from './OrgRoiCard';
 import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
 import OrgPatientsTab from '@/components/admin/OrgPatientsTab';
 import OrgNotesTab from '@/components/admin/OrgNotesTab';
+import OrgStaffList from '@/components/admin/OrgStaffList';
 import OrgSubscriptionStatusCard from '@/components/admin/OrgSubscriptionStatusCard';
 import OrgCommunicationsTab from '@/components/admin/OrgCommunicationsTab';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
@@ -694,17 +695,12 @@ ConveLabs · (941) 527-9169`
             <OrgPatientsTab orgId={selectedOrg.id} orgName={selectedOrg.name} />
           </TabsContent>
 
-          {/* ─── STAFF (stub) ─────────────────────────────────────── */}
+          {/* ─── STAFF — invite + manage org portal users ─────────── */}
           <TabsContent value="staff" className="mt-4">
-            <Card className="shadow-sm border-dashed">
-              <CardContent className="p-10 text-center">
-                <Users className="h-10 w-10 text-gray-300 mx-auto mb-2" />
-                <p className="font-semibold text-sm">Staff management — coming soon</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-                  Invite org staff with scoped roles (Admin / MA / Front desk), see who has portal access, revoke access. Phase 2 of the org console rollout.
-                </p>
-              </CardContent>
-            </Card>
+            <OrgStaffList
+              organizationId={selectedOrg.id}
+              organizationName={selectedOrg.name}
+            />
           </TabsContent>
 
           {/* ─── SERVICES (stub) ──────────────────────────────────── */}
