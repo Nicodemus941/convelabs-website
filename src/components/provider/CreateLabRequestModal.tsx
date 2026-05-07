@@ -45,6 +45,16 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   // patient gets a "no DOB on file" error and is blocked from booking.
   // (2026-05-07: Michael Percopo case.)
   const [patientDob, setPatientDob] = useState('');
+  // Optional inline address — for business-owner patients whose draw should
+  // happen at their office instead of home (e.g. Michael Percopo). The
+  // create-lab-request edge fn writes this into patient_addresses on the
+  // chart so the next visit auto-suggests the right place.
+  const [addrLabel, setAddrLabel] = useState<'home' | 'office' | 'other'>('home');
+  const [addrLine1, setAddrLine1] = useState('');
+  const [addrCity, setAddrCity] = useState('');
+  const [addrZip, setAddrZip] = useState('');
+  const [addrAccessNotes, setAddrAccessNotes] = useState('');
+  const [showAddrSection, setShowAddrSection] = useState(false);
   const [drawByDate, setDrawByDate] = useState('');
   const [nextApptDate, setNextApptDate] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
@@ -114,8 +124,10 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   }, [roster, rosterQ]);
 
   const reset = () => {
-    setPatientName(''); setPatientEmail(''); setPatientPhone('');
+    setPatientName(''); setPatientEmail(''); setPatientPhone(''); setPatientDob('');
     setDrawByDate(''); setNextApptDate(''); setAdminNotes('');
+    setAddrLabel('home'); setAddrLine1(''); setAddrCity(''); setAddrZip('');
+    setAddrAccessNotes(''); setShowAddrSection(false);
     setFile(null); setFilePath(null); setOcr(null); setShowPreview(false);
     setShowAllPanels(false);
     setBilledTo(orgDefaultBilledTo || 'patient');
@@ -223,6 +235,16 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
           patient_email: patientEmail.trim() || null,
           patient_phone: patientPhone.trim() || null,
           patient_dob: patientDob || null,
+          // Inline address — only sent if provider explicitly opened the
+          // optional address section AND filled the street line. Edge fn
+          // writes it into patient_addresses + stamps the patient row.
+          patient_address: addrLine1.trim() ? {
+            label: addrLabel,
+            line1: addrLine1.trim(),
+            city: addrCity.trim() || null,
+            zipcode: addrZip.trim() || null,
+            access_notes: addrAccessNotes.trim() || null,
+          } : null,
           lab_order_file_path: labOrderPath,
           draw_by_date: drawByDate,
           next_doctor_appt_date: nextApptDate || null,
@@ -363,6 +385,50 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
               </p>
             </div>
             <p className="text-[11px] text-gray-500">At least one of email or phone required — that's how we reach them.</p>
+
+            {/* OPTIONAL ADDRESS — for business-owner patients (Michael Percopo
+                case 2026-05-07: business owner, draws should happen at his
+                OFFICE not home). Provider can label it home / office / other
+                so the chart knows. Edge fn syncs to patient_addresses. */}
+            <div className="border rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setShowAddrSection(s => !s)}
+                className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+              >
+                <span className="text-xs font-semibold text-gray-700">
+                  Address for this draw <span className="text-gray-400 font-normal">(optional · home or office)</span>
+                </span>
+                {showAddrSection ? <ChevronUp className="h-4 w-4 text-gray-500" /> : <ChevronDown className="h-4 w-4 text-gray-500" />}
+              </button>
+              {showAddrSection && (
+                <div className="p-3 space-y-2 bg-white">
+                  <div className="flex gap-1.5">
+                    {(['home','office','other'] as const).map(lab => (
+                      <button
+                        key={lab}
+                        type="button"
+                        onClick={() => setAddrLabel(lab)}
+                        className={`flex-1 px-2 py-1.5 rounded-md text-xs border transition ${
+                          addrLabel === lab
+                            ? 'bg-[#B91C1C] text-white border-[#B91C1C]'
+                            : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {lab === 'home' ? '🏠 Home' : lab === 'office' ? '💼 Office' : '📍 Other'}
+                      </button>
+                    ))}
+                  </div>
+                  <Input value={addrLine1} onChange={e => setAddrLine1(e.target.value)} placeholder="Street address" className="h-8 text-xs" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={addrCity} onChange={e => setAddrCity(e.target.value)} placeholder="City" className="h-8 text-xs" />
+                    <Input value={addrZip} onChange={e => setAddrZip(e.target.value)} placeholder="ZIP" className="h-8 text-xs" />
+                  </div>
+                  <Input value={addrAccessNotes} onChange={e => setAddrAccessNotes(e.target.value)} placeholder="Access notes (gate code, suite #, parking) — optional" className="h-8 text-xs" />
+                  <p className="text-[10px] text-gray-500">Saved to the patient's chart. Future visits can switch between home / office in one tap.</p>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* BILLING TOGGLE — Hormozi's #1 gap */}

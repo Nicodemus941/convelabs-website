@@ -12,6 +12,7 @@ import {
   Pencil, Loader2, Send, X, CreditCard, FileText, Copy,
 } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
+import PatientAddressPicker from '@/components/shared/PatientAddressPicker';
 
 /**
  * PatientDetailDrawer — shared slide-in panel with full patient history.
@@ -311,6 +312,23 @@ const PatientDetailDrawer: React.FC<Props> = ({
                   <p className="text-lg sm:text-xl font-bold text-gray-900 mt-1">${totalSpent.toFixed(0)}</p>
                 </div>
               </div>
+
+              {/* Addresses on file — home / office / other. Provider can
+                  switch which one is the default with one tap. Critical for
+                  business owners (Michael Percopo case). */}
+              {profile?.id && (
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 mb-2" style={{ fontFamily: 'Georgia, serif' }}>
+                    Addresses on file
+                  </p>
+                  <PatientAddressPicker
+                    patientId={profile.id}
+                    value={null}
+                    onChange={() => { /* read-only on chart drawer */ }}
+                    allowAdd={canEdit}
+                  />
+                </div>
+              )}
 
               {/* Visit timeline */}
               <div>
