@@ -110,8 +110,26 @@ const Dashboard = () => {
   
   // Convert string parameter to UserRole type, fallback to user role if param not provided
   const userRole = (role || user.role) as UserRole;
-  
-  // Check if this is an admin tab route (super_admin OR office_manager)
+
+  // Partner-org staff detection — Lara at Littleton, Dianelis at Aristotle, etc.
+  // The `office_manager` role label is overloaded:
+  //   - Internal ConveLabs ops manager → no organization_id → uses OfficeManagerDashboard (admin sidebar)
+  //   - External partner-org staff → has organization_id in metadata → must use ProviderDashboard
+  // Without this branch, partner staff land on the internal ConveLabs admin
+  // dashboard and see things they shouldn't (Staff, Services, Inbox, etc.).
+  const meta = (user as any)?.user_metadata || {};
+  const partnerOrgId = meta.organization_id || meta.org_id || null;
+  const isPartnerOrgStaff = !!partnerOrgId && (userRole === "office_manager" || userRole === "provider");
+
+  if (isPartnerOrgStaff) {
+    return (
+      <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "provider"]}>
+        <ProviderDashboard />
+      </RoleProtectedRoute>
+    );
+  }
+
+  // Check if this is an admin tab route (super_admin OR internal office_manager)
   if ((userRole === "super_admin" || userRole === "office_manager") && adminTab) {
     // Owner-only tabs — visible to the platform owner alone, hidden from
     // operational super_admins (e.g. Naquala). UI sidebar already filters
@@ -198,7 +216,7 @@ const Dashboard = () => {
         );
       case "provider":
         return (
-          <RoleProtectedRoute allowedRoles={["super_admin", "provider"]}>
+          <RoleProtectedRoute allowedRoles={["super_admin", "provider", "office_manager"]}>
             <ProviderDashboard />
           </RoleProtectedRoute>
         );
