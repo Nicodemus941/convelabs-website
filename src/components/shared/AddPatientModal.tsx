@@ -29,13 +29,14 @@ const AddPatientModal: React.FC<Props> = ({ open, onOpenChange, organizationId, 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
+  const [emailSecondary, setEmailSecondary] = useState('');
   const [phone, setPhone] = useState('');
   const [dob, setDob] = useState('');
   const [reminderDays, setReminderDays] = useState('7');
   const [submitting, setSubmitting] = useState(false);
 
   const reset = () => {
-    setFirstName(''); setLastName(''); setEmail(''); setPhone(''); setDob('');
+    setFirstName(''); setLastName(''); setEmail(''); setEmailSecondary(''); setPhone(''); setDob('');
     setReminderDays('7');
   };
 
@@ -62,6 +63,7 @@ const AddPatientModal: React.FC<Props> = ({ open, onOpenChange, organizationId, 
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         email: email.trim() || null,
+        email_secondary: emailSecondary.trim() || null,
         phone: phone.trim() || null,
         date_of_birth: dob || null,
         organization_id: organizationId,
@@ -152,6 +154,23 @@ const AddPatientModal: React.FC<Props> = ({ open, onOpenChange, organizationId, 
             </div>
           </div>
           <p className="text-[11px] text-gray-500 -mt-2">Phone or email required — we use it to send the booking link + reminders.</p>
+
+          {/* Optional secondary email — for patients whose referring practice
+              uses a different address than their personal one (e.g. Michael
+              Percopo: mike@pccusa.com via Elite, micheal.percopo@convelabs.com
+              personal). Both stay on the chart so notifications can target
+              either depending on context. */}
+          <div>
+            <Label className="text-xs font-semibold">Secondary email <span className="text-gray-400 font-normal">(optional · e.g. work / referring office)</span></Label>
+            <Input
+              type="email"
+              value={emailSecondary}
+              onChange={(e) => setEmailSecondary(e.target.value)}
+              placeholder="patient@theirpractice.com"
+              className="mt-1"
+              disabled={submitting}
+            />
+          </div>
 
           {/* Reminder cadence — Hormozi no-show killer */}
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
