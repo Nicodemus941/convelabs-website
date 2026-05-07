@@ -308,12 +308,28 @@ const ProviderDashboard: React.FC = () => {
               <Building2 className="h-7 w-7 text-[#B91C1C]" />
             </div>
             <div>
+              {/* Greeting addresses the SIGNED-IN PERSON (Lara), not the org's
+                  contact_name (the doctor). Org sits underneath as context.
+                  Hormozi UX: people respond to their own name. Surfacing
+                  org.contact_name as the headline made staff feel like the
+                  dashboard belonged to someone else. */}
               <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Welcome back</p>
-              <h1 className="text-2xl sm:text-3xl font-bold">{org.name}</h1>
+              <h1 className="text-2xl sm:text-3xl font-bold">
+                {(() => {
+                  const meta = (user as any)?.user_metadata || {};
+                  const fn = meta.full_name || [meta.firstName, meta.lastName].filter(Boolean).join(' ').trim();
+                  return fn || (user?.email?.split('@')[0]) || 'there';
+                })()}
+              </h1>
               <p className="text-sm text-gray-600 mt-0.5">
-                {org.contact_name && <>{org.contact_name} · </>}
-                {org.contact_email} {org.contact_phone && <>· {org.contact_phone}</>}
+                <span className="font-semibold text-gray-800">{org.name}</span>
+                {(() => {
+                  const meta = (user as any)?.user_metadata || {};
+                  const role = meta.role_label || (meta.role === 'office_manager' ? 'Office Manager' : meta.role === 'provider' ? 'Provider' : null);
+                  return role ? <> · {role}</> : null;
+                })()}
               </p>
+              <p className="text-[11px] text-gray-500 mt-0.5">{user?.email}</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
@@ -415,14 +431,14 @@ const ProviderDashboard: React.FC = () => {
               <CardTitle className="text-base">Upcoming · next 7 days</CardTitle>
               <CardDescription className="text-xs">{upcoming.length} {upcoming.length === 1 ? 'visit' : 'visits'} scheduled</CardDescription>
             </div>
-            <Button asChild variant="outline" size="sm" className="gap-1">
-              <Link to={`/book-now?orgId=${org.id}`}><Plus className="h-3.5 w-3.5" /> Add</Link>
+            <Button onClick={() => setShowLabRequest(true)} variant="outline" size="sm" className="gap-1">
+              <Plus className="h-3.5 w-3.5" /> Add
             </Button>
           </CardHeader>
           <CardContent className="p-0">
             {upcoming.length === 0 ? (
               <div className="text-center py-8 text-sm text-gray-500">
-                No upcoming visits. <Link to={`/book-now?orgId=${org.id}`} className="text-[#B91C1C] underline">Schedule one →</Link>
+                No upcoming visits. <button onClick={() => setShowLabRequest(true)} className="text-[#B91C1C] underline">Schedule one →</button>
               </div>
             ) : (
               <div className="divide-y">
@@ -528,8 +544,8 @@ const ProviderDashboard: React.FC = () => {
               <CardTitle className="text-base">My patients</CardTitle>
               <CardDescription className="text-xs">{patients.length} {patients.length === 1 ? 'patient' : 'patients'} from recent visits</CardDescription>
             </div>
-            <Button asChild variant="outline" size="sm" className="gap-1">
-              <Link to={`/book-now?orgId=${org.id}`}><Plus className="h-3.5 w-3.5" /> Add patient</Link>
+            <Button onClick={() => setShowLabRequest(true)} variant="outline" size="sm" className="gap-1">
+              <Plus className="h-3.5 w-3.5" /> Add patient
             </Button>
           </CardHeader>
           <CardContent className="p-0">
