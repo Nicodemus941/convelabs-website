@@ -236,7 +236,40 @@ export function usePhlebotomistAppointments() {
             patientInsurance = tpData.insurance_provider || null;
             patientInsuranceId = tpData.insurance_member_id || null;
             patientInsuranceGroup = tpData.insurance_group_number || null;
-            // Sync address from tenant_patients if appointment address is missing or placeholder
+          }
+
+          // PRIORITY 3: Fallback DOB lookup against patient_lab_requests.
+          // The NIIMBOT label needs DOB to identify the tube; if tenant_patients
+          // didn't have it (the case for ~57% of recently-booked patients
+          // pre-2026-05-07 fix), try the linked lab request. The doctor's
+          // order PDF + Elite Medical's intake both store DOB there.
+          if (!patientDob && patientEmail) {
+            try {
+              const { data: lr } = await supabase
+                .from('patient_lab_requests')
+                .select('patient_dob')
+                .ilike('patient_email', patientEmail)
+                .not('patient_dob', 'is', null)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              if (lr?.patient_dob) {
+                patientDob = lr.patient_dob;
+                // Backfill tenant_patients so future card renders are
+                // single-query — best-effort, non-blocking.
+                if (tpData?.id) {
+                  supabase.from('tenant_patients')
+                    .update({ date_of_birth: lr.patient_dob })
+                    .eq('id', tpData.id)
+                    .then(() => {});
+                }
+              }
+            } catch { /* non-fatal */ }
+          }
+
+          // Sync address from tenant_patients if appointment address is
+          // missing or placeholder (back inside the tpData-required guard).
+          if (tpData) {
             const apptAddr = (appt.address || '').trim().toLowerCase();
             if (!apptAddr || apptAddr === 'tbd' || apptAddr === 'address pending') {
               if (tpData.address) {
