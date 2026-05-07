@@ -163,7 +163,7 @@ const Dashboard = () => {
       return <Navigate to={`/dashboard/${userRole}`} replace />;
     }
     return (
-      <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "admin"]}>
+      <RoleProtectedRoute allowedRoles={["super_admin", "office_manager"]}>
         <AdminLayout>
           {adminTab === "users" && <UserManagementTab />}
           {adminTab === "staff" && <StaffManagementTab />}
@@ -225,6 +225,14 @@ const Dashboard = () => {
           </RoleProtectedRoute>
         );
       case "patient":
+        // Patient dashboard route gate.
+        // ROLE allowlist below is permissive on PURPOSE — the actual PHI
+        // protection happens via RLS on tables (appointments, lab_results,
+        // tenant_patients) which scope every read to the auth.uid() of the
+        // patient. office_manager / super_admin retain access for legitimate
+        // support workflows (verifying a patient's membership tier on a call,
+        // re-sending a booking link, etc.) but RLS still bars them from
+        // seeing patients outside their org.
         return (
           <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "patient"]}>
             <PatientDashboard />

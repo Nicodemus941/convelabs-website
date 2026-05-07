@@ -29,10 +29,10 @@ export const routes = [
   <Route key="tenant-book" path="/tenant/book/:tenantId" element={<ProtectedRoute><TenantBookAppointment /></ProtectedRoute>} />,
   <Route key="tenant-booking" path="/tenant/booking/:tenantId" element={<ProtectedRoute><BookAppointment /></ProtectedRoute>} />,
   <Route key="book-tenant" path="/book/:tenantId" element={<BookAppointment />} />,
-  <Route key="admin-marketing-campaigns" path="/admin/marketing/campaigns" element={<RoleProtectedRoute allowedRoles={['admin', 'office_manager', 'super_admin']}><MarketingCampaigns /></RoleProtectedRoute>} />,
-  <Route key="admin-marketing-scheduled" path="/admin/marketing/scheduled" element={<RoleProtectedRoute allowedRoles={['admin', 'office_manager', 'super_admin']}><ScheduledCampaigns /></RoleProtectedRoute>} />,
-  <Route key="admin-marketing-analytics" path="/admin/marketing/analytics" element={<RoleProtectedRoute allowedRoles={['admin', 'office_manager', 'super_admin']}><MarketingAnalytics /></RoleProtectedRoute>} />,
-  <Route key="phleb-app" path="/phleb-app" element={<ProtectedRoute><PhlebotomistApp /></ProtectedRoute>} />,
+  <Route key="admin-marketing-campaigns" path="/admin/marketing/campaigns" element={<RoleProtectedRoute allowedRoles={['office_manager', 'super_admin']}><MarketingCampaigns /></RoleProtectedRoute>} />,
+  <Route key="admin-marketing-scheduled" path="/admin/marketing/scheduled" element={<RoleProtectedRoute allowedRoles={['office_manager', 'super_admin']}><ScheduledCampaigns /></RoleProtectedRoute>} />,
+  <Route key="admin-marketing-analytics" path="/admin/marketing/analytics" element={<RoleProtectedRoute allowedRoles={['office_manager', 'super_admin']}><MarketingAnalytics /></RoleProtectedRoute>} />,
+  <Route key="phleb-app" path="/phleb-app" element={<RoleProtectedRoute allowedRoles={['phlebotomist','super_admin','office_manager']}><PhlebotomistApp /></RoleProtectedRoute>} />,
 ];
 
 export const ProtectedRoutes = () => null;

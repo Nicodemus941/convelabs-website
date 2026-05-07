@@ -259,7 +259,7 @@ const ProviderClaimPage: React.FC = () => {
         </div>
 
         <p className="text-center text-[11px] text-gray-500 mt-6">
-          Questions? Reply to Nico at <a href="mailto:nico@convelabs.com" className="text-[#B91C1C]">nico@convelabs.com</a> or call (941) 527-9169.
+          Questions? Reply to Nico at <a href="mailto:info@convelabs.com" className="text-[#B91C1C]">info@convelabs.com</a> or call (941) 527-9169.
         </p>
       </div>
     </div>
