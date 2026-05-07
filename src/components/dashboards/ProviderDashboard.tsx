@@ -123,14 +123,37 @@ const ProviderDashboard: React.FC = () => {
   //   - onboarded_at missing → show blocking onboarding modal
   //   - onboarded_at set but password_set flag missing → show dismissible
   //     yellow banner "Set a password to skip SMS next time"
+  //
+  // 2026-05-07 fix: for INVITED partner-org staff who already have
+  // full_name + organization_id stamped on their metadata at invite time
+  // (Lara, Dianelis, etc.), skip the blocking onboarding modal entirely
+  // and silently mark them onboarded. They've already accepted the invite,
+  // already chose a password during the Supabase invite flow, and already
+  // have role_label assigned — there's nothing to ask them. The doctor
+  // self-signup flow that ProviderOnboardingModal was built for doesn't
+  // apply to invited staff.
   useEffect(() => {
     (async () => {
       try {
         const { data: { user: supaUser } } = await supabase.auth.getUser();
         const meta = supaUser?.user_metadata || {};
-        // Accept both provider and office_manager — same onboarding flow.
-        // (Lara at Littleton case 2026-05-07.)
         if (!['provider','office_manager'].includes(String(meta.role || ''))) return;
+
+        const isInvitedStaff =
+          !!(meta.organization_id || meta.org_id) &&
+          !!(meta.full_name || (meta.firstName && meta.lastName));
+
+        if (!meta.onboarded_at && isInvitedStaff) {
+          // Silent stamp — no modal, no friction. They're invited staff,
+          // not a self-signup doctor.
+          try {
+            await supabase.auth.updateUser({
+              data: { onboarded_at: new Date().toISOString(), password_set: true },
+            });
+          } catch { /* non-blocking */ }
+          return;
+        }
+
         if (!meta.onboarded_at) setShowOnboarding(true);
         else if (!meta.password_set) setNeedsPasswordSetup(true);
       } catch { /* non-blocking */ }
