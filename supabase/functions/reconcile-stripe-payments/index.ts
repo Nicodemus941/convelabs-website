@@ -120,6 +120,27 @@ async function checkDownstreamRecord(
       };
     }
     default: {
+      // Org-pays-upfront lab-request flow — identified by convelabs_flow rather
+      // than metadata.type. The org's Checkout session writes
+      // metadata.convelabs_flow='lab_request_org_pay' + metadata.lab_request_id.
+      // Match by patient_lab_requests.provider_stripe_session_id.
+      // (2026-05-06: 2 Elite Medical Concierge charges orphaned because this
+      // branch was missing AND the webhook handler was writing an invalid
+      // value 'paid' against the CHECK constraint that requires 'completed'.)
+      if (session.metadata?.convelabs_flow === 'lab_request_org_pay' && session.metadata?.lab_request_id) {
+        const lrId = session.metadata.lab_request_id;
+        const { data } = await admin
+          .from('patient_lab_requests')
+          .select('id, provider_payment_status, provider_stripe_session_id')
+          .eq('id', lrId)
+          .maybeSingle();
+        const ok = !!data && data.provider_payment_status === 'completed' && data.provider_stripe_session_id === sessionId;
+        return {
+          expected_type: 'lab_request_org_pay',
+          found: ok,
+          missing_record: ok ? '' : `patient_lab_requests[${lrId}].provider_payment_status='completed' AND provider_stripe_session_id='${sessionId}'`,
+        };
+      }
       // Membership (no metadata.type) — identified by subscription mode + absence of known types
       if (session.mode === 'subscription' && session.subscription) {
         const { data } = await admin

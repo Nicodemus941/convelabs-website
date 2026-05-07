@@ -2201,7 +2201,7 @@ async function handleLabRequestUnlock(session: any) {
 // handleLabRequestProviderPayment
 // Fires when an org completes the upfront-payment Checkout that
 // create-lab-request started. We:
-//   1. Stamp provider_payment_status='paid' on patient_lab_requests
+//   1. Stamp provider_payment_status='completed' on patient_lab_requests
 //   2. Trigger the patient SMS + email (which create-lab-request deferred)
 // The patient lands on the lab-request page seeing "covered by your
 // provider — just pick a time" and books for free.
@@ -2225,7 +2225,7 @@ async function handleLabRequestProviderPayment(session: any) {
       console.error(`[lab-request-org-pay] lab_request ${labRequestId} not found`);
       return;
     }
-    if (existing.provider_payment_status === 'paid' && existing.patient_notified_at) {
+    if (existing.provider_payment_status === 'completed' && existing.patient_notified_at) {
       console.log(`[lab-request-org-pay] already processed ${labRequestId}, skipping`);
       return;
     }
@@ -2233,14 +2233,31 @@ async function handleLabRequestProviderPayment(session: any) {
     const paymentIntentId = typeof session.payment_intent === 'string'
       ? session.payment_intent
       : session.payment_intent?.id || null;
+    const amountCents = Number(session.amount_total || 0) || null;
 
-    await supabaseClient.from('patient_lab_requests').update({
-      provider_payment_status: 'paid',
+    // CRITICAL: provider_payment_status has a CHECK constraint allowing only
+    // ('none','pending','completed','failed','refunded'). Writing 'paid' here
+    // silently fails the UPDATE — the row stays as 'none' and the reconciler
+    // flags the Stripe payment as orphaned 6h later. Use 'completed'.
+    // (2026-05-06: 2 Elite Medical Concierge org-pay charges orphaned for
+    // exactly this reason — Michael Williams + michael Percopo, $72.25 each.)
+    //
+    // Also stamp provider_stripe_session_id so the reconciler can match the
+    // Stripe session.id to a DB row and avoid the orphan-detection path.
+    const { error: lrUpdErr } = await supabaseClient.from('patient_lab_requests').update({
+      provider_payment_status: 'completed',
       provider_paid_at: new Date().toISOString(),
+      provider_stripe_session_id: session.id,
       provider_stripe_payment_intent_id: paymentIntentId,
+      provider_payment_cents: amountCents,
       status: 'pending_schedule',
       billed_to: 'org',
     }).eq('id', labRequestId);
+    if (lrUpdErr) {
+      // Log loudly + surface so the alert daemon catches it. Don't swallow.
+      console.error(`[lab-request-org-pay] CRITICAL: lab_request UPDATE failed for ${labRequestId}: ${lrUpdErr.message}`);
+      throw new Error(`patient_lab_requests UPDATE failed: ${lrUpdErr.message}`);
+    }
 
     // Load org for the patient notification copy
     const { data: org } = await supabaseClient
