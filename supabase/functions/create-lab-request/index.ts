@@ -207,6 +207,7 @@ Deno.serve(async (req) => {
     let detectedPanels: any[] = [];
     let fullText = '';
     let fasting = false, urine = false, gtt = false;
+    let ocrDob: string | null = null;
     if (lab_order_file_path) {
       try {
         const ocrResp = await fetch(`${SUPABASE_URL}/functions/v1/ocr-lab-order`, {
@@ -221,9 +222,21 @@ Deno.serve(async (req) => {
           fasting = !!ocr.fastingRequired;
           urine = !!ocr.urineRequired;
           gtt = !!ocr.gttRequired;
+          // Patient DOB straight off the doctor's order. Used as the source
+          // of truth when the provider didn't manually enter a DOB. Closes
+          // the "no DOB on file" HIPAA-gate lockout (Michael Percopo case
+          // 2026-05-07). Only accept YYYY-MM-DD-shaped strings.
+          const rawOcrDob = ocr?.patient?.dateOfBirth ? String(ocr.patient.dateOfBirth) : null;
+          if (rawOcrDob && /^\d{4}-\d{2}-\d{2}$/.test(rawOcrDob)) {
+            ocrDob = rawOcrDob;
+          }
         }
       } catch (e) { console.warn('OCR failed (non-blocking):', e); }
     }
+    // Prefer manually-entered DOB. Fall back to whatever OCR pulled off
+    // the order. This closes the gap: even when the provider forgets to
+    // type the DOB into the modal, the lab order itself has it.
+    const finalDob: string | null = dobClean || ocrDob;
 
     // Generate one-time token
     const accessToken = crypto.randomUUID() + '-' + crypto.randomUUID().split('-')[0];
@@ -248,7 +261,7 @@ Deno.serve(async (req) => {
         admin_notes: admin_notes?.trim() || null,
         access_token: accessToken,
         billed_to: billedToClean,
-        patient_dob: dobClean,
+        patient_dob: finalDob,
       })
       .select('*')
       .single();

@@ -207,6 +207,17 @@ interface OcrExtraction {
     email?: string | null;
     npi?: string | null;
   } | null;
+  // Patient demographics extracted from the order. DOB on the form is the
+  // canonical source of truth (per the doctor's office). Used to backfill
+  // tenant_patients.date_of_birth + patient_lab_requests.patient_dob when
+  // missing — closes the "no DOB on file" HIPAA-gate lockout. (Michael
+  // Percopo case 2026-05-07.)
+  patient: {
+    fullName?: string | null;
+    dateOfBirth?: string | null;   // YYYY-MM-DD
+    phone?: string | null;
+    sex?: string | null;
+  } | null;
 }
 
 async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<OcrExtraction | { error: string }> {
@@ -240,7 +251,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
           text: [
             'This is a medical lab order / test requisition.',
             '',
-            'Extract FOUR things:',
+            'Extract FIVE things:',
             '1. A plain-text transcription of ALL ordered tests, panels, CPT codes, and special instructions (especially fasting requirements).',
             '2. A structured list of the panels/tests ordered. Normalize names to their common abbreviation when obvious (e.g. "Comprehensive Metabolic Panel" → "CMP").',
             '3. The patient\'s insurance information IF present on the form. Look for boxes/sections labeled "Insurance", "Carrier", "Member ID", "Group #", "Subscriber ID", "Policy #". Return the carrier name (e.g. "Aetna", "BCBS Florida", "United Healthcare", "Medicare", "Self-Pay"), the member/subscriber ID, and the group number. If the form says "Self-Pay" or "Cash", return provider="Self-Pay" with empty IDs. If no insurance section is present, return null.',
@@ -252,12 +263,18 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
             '   - email: the practice\'s contact email if visible (often near phone or in footer).',
             '   - npi: the 10-digit NPI number if shown.',
             '   If the form is a Quest e-script / Quanum order, the practice block may be on a separate header strip — look carefully. If genuinely absent, return practice: null.',
+            '5. The PATIENT demographic block. Look for sections labeled "Patient", "Patient Name", "DOB", "Date of Birth", "Sex/Gender". Extract:',
+            '   - fullName: patient\'s full name as written (e.g. "John Smith", "Smith, John")',
+            '   - dateOfBirth: patient\'s date of birth in YYYY-MM-DD format. The form often shows MM/DD/YYYY or DD-MMM-YYYY — convert to YYYY-MM-DD. If only 2-digit year, assume 19YY for years > 25, 20YY otherwise. NEVER guess; only return DOB if explicitly visible on the form.',
+            '   - phone: patient\'s phone if listed (NOT practice phone, NOT lab phone)',
+            '   - sex: patient\'s sex/gender if shown (M, F, or other)',
+            '   If the form genuinely has no patient block (rare), return patient: null.',
             '',
             'Reply ONLY with valid JSON in this exact shape, no prose:',
-            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}}',
+            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}}',
             '',
-            'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null.',
-            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null}',
+            'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null. If patient demographics are absent (rare), set "patient": null.',
+            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null, "patient": null}',
           ].join('\n'),
         },
       ],
@@ -290,7 +307,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
     const content = json?.content?.[0]?.text || '';
     // Claude may wrap JSON in prose or code blocks — extract the JSON object
     const match = content.match(/\{[\s\S]*\}/);
-    if (!match) return { text: content, panels: [] };
+    if (!match) return { text: content, panels: [], insurance: null, practice: null, patient: null };
     try {
       const parsed = JSON.parse(match[0]);
       const text = String(parsed.text || '').substring(0, 8000);
@@ -324,9 +341,29 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
         // Treat all-null as null (no practice block)
         if (Object.values(practice).every(v => !v)) practice = null;
       }
-      return { text, panels, insurance, practice };
+      // Patient demographics block — DOB is the high-leverage field
+      // (closes the HIPAA-gate "no DOB on file" lockout). Only accept a
+      // YYYY-MM-DD-shaped string; reject anything else so a malformed OCR
+      // can't wedge the date column.
+      let patient: OcrExtraction['patient'] = null;
+      if (parsed.patient && typeof parsed.patient === 'object') {
+        const trim = (v: any, n: number) => v == null ? null : String(v).trim().substring(0, n) || null;
+        const rawDob = parsed.patient.dateOfBirth ? String(parsed.patient.dateOfBirth).trim() : null;
+        const dob = rawDob && /^\d{4}-\d{2}-\d{2}$/.test(rawDob) ? rawDob : null;
+        const sexRaw = trim(parsed.patient.sex, 16);
+        const sex = sexRaw ? sexRaw.charAt(0).toUpperCase() : null; // 'M' / 'F'
+        patient = {
+          fullName: trim(parsed.patient.fullName, 120),
+          dateOfBirth: dob,
+          phone: parsed.patient.phone ? String(parsed.patient.phone).replace(/[^\d+]/g, '').substring(0, 20) : null,
+          sex,
+        };
+        // Treat all-null as null
+        if (Object.values(patient).every(v => !v)) patient = null;
+      }
+      return { text, panels, insurance, practice, patient };
     } catch {
-      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null };
+      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null, patient: null };
     }
   } catch (e: any) {
     console.error('[ocr] request exception', e);
@@ -556,6 +593,73 @@ Deno.serve(async (req) => {
         lab_order_panels: result.panels,
         ocr_processed_at: new Date().toISOString(),
       }).eq('id', targetId);
+    }
+
+    // ─── PATIENT DOB BACKFILL ─────────────────────────────────────
+    // OCR pulled the DOB off the doctor's order — that's the canonical
+    // source per the practice's records. If the patient's chart
+    // (tenant_patients OR patient_lab_requests OR appointments.patient_dob
+    // when present) is missing DOB, write it now. Never overwrite an
+    // existing DOB — admin/patient may have entered a corrected value.
+    //
+    // Hormozi: "Capture once, persist everywhere." The DOB on the lab
+    // order is free data we already pay to extract — let it close the
+    // HIPAA-gate lockout that blocked Michael Percopo from booking
+    // (2026-05-07).
+    if (result.patient?.dateOfBirth && /^\d{4}-\d{2}-\d{2}$/.test(result.patient.dateOfBirth)) {
+      const ocrDob = result.patient.dateOfBirth;
+      try {
+        // Resolve the patient row(s) we should backfill from the appointment
+        // tied to this OCR run.
+        let patientEmail: string | null = null;
+
+        if (targetId) {
+          const { data: appt } = await supabase
+            .from('appointments')
+            .select('patient_id, patient_email')
+            .eq('id', targetId).maybeSingle();
+          patientEmail = (appt as any)?.patient_email || null;
+          // Also stamp tenant_patients.date_of_birth if patient_id is set + DOB null
+          if ((appt as any)?.patient_id) {
+            const { data: tp } = await supabase
+              .from('tenant_patients')
+              .select('id, date_of_birth')
+              .eq('id', (appt as any).patient_id).maybeSingle();
+            if (tp && !(tp as any).date_of_birth) {
+              await supabase.from('tenant_patients')
+                .update({ date_of_birth: ocrDob })
+                .eq('id', (tp as any).id);
+              console.log(`[ocr-dob] tenant_patients[${(tp as any).id}] backfilled date_of_birth=${ocrDob}`);
+            }
+          }
+        }
+
+        // Match by email if we didn't get a direct patient_id hit
+        if (patientEmail) {
+          const { data: tps } = await supabase
+            .from('tenant_patients')
+            .select('id, date_of_birth')
+            .ilike('email', patientEmail)
+            .order('created_at', { ascending: false })
+            .limit(1);
+          const tp = (tps && tps[0]) || null;
+          if (tp && !(tp as any).date_of_birth) {
+            await supabase.from('tenant_patients')
+              .update({ date_of_birth: ocrDob })
+              .eq('id', (tp as any).id);
+            console.log(`[ocr-dob] tenant_patients[${(tp as any).id}] (by email) backfilled date_of_birth=${ocrDob}`);
+          }
+        }
+
+        // The patient_lab_requests path runs OCR via create-lab-request
+        // BEFORE the lab_request row exists, so we can't backfill it here —
+        // create-lab-request consumes ocr.patient.dateOfBirth from the OCR
+        // response and stamps it directly at insert time.
+      } catch (dobErr: any) {
+        // Non-fatal — OCR result still returns successfully even if backfill
+        // fails. Surface the error for admin triage.
+        console.warn(`[ocr-dob] backfill failed (non-blocking): ${dobErr?.message || dobErr}`);
+      }
     }
 
     // ─── INSURANCE COMPARE + QUEUE ────────────────────────────────
