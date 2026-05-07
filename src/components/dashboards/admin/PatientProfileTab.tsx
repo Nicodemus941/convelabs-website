@@ -152,45 +152,82 @@ const PatientProfileTab: React.FC = () => {
     setSelectedPatient(patient);
     setLoading(true);
 
-    // Fetch referring provider info — shows "Referred by Dr. X at Practice Y"
-    // at the top of the chart so every conversation starts warmer.
-    if (patient.email) {
-      const { data: refs } = await supabase
-        .from('patient_referring_providers')
-        .select('provider_name, practice_name, practice_city, status, matched_org_id, converted_at')
-        .ilike('patient_email', patient.email)
-        .order('discovered_at', { ascending: false })
-        .limit(1);
-      setReferringProvider(refs && refs.length > 0 ? refs[0] : null);
-    } else {
-      setReferringProvider(null);
+    // PERMANENT-SPINNER FIX (Naquala 2026-05-07): every fetch below is now
+    // independently guarded. If any one query throws (RLS denial, network
+    // blip, stale JWT), the others still run and `setLoading(false)`
+    // ALWAYS fires in finally. Previously, a single throw left the chart
+    // spinning forever.
+    //
+    // Strategy: Promise.allSettled so one failure doesn't cancel the others.
+    try {
+      const results = await Promise.allSettled([
+        // 1) Referring provider (skip query entirely if no email)
+        patient.email
+          ? supabase
+              .from('patient_referring_providers')
+              .select('provider_name, practice_name, practice_city, status, matched_org_id, converted_at')
+              .ilike('patient_email', patient.email)
+              .order('discovered_at', { ascending: false })
+              .limit(1)
+          : Promise.resolve({ data: [] as any[], error: null }),
+        // 2) Appointments
+        supabase
+          .from('appointments')
+          .select('*')
+          .eq('patient_id', patient.id)
+          .order('appointment_date', { ascending: false }),
+        // 3) Specimens
+        supabase
+          .from('specimen_deliveries' as any)
+          .select('*')
+          .eq('patient_id', patient.id)
+          .order('delivered_at', { ascending: false }),
+        // 4) Activity log
+        supabase
+          .from('activity_log' as any)
+          .select('*')
+          .eq('patient_id', patient.id)
+          .order('created_at', { ascending: false }),
+      ]);
+
+      const [refsRes, apptsRes, specsRes, actsRes] = results as PromiseSettledResult<any>[];
+
+      // Referring provider
+      if (refsRes.status === 'fulfilled') {
+        const refs = (refsRes.value?.data as any[]) || [];
+        setReferringProvider(refs.length > 0 ? refs[0] : null);
+      } else {
+        console.warn('[patient-chart] referring-provider fetch failed:', refsRes.reason);
+        setReferringProvider(null);
+      }
+      // Appointments
+      if (apptsRes.status === 'fulfilled') {
+        setAppointments((apptsRes.value?.data as any[]) || []);
+      } else {
+        console.warn('[patient-chart] appointments fetch failed:', apptsRes.reason);
+        setAppointments([]);
+        toast.error("Couldn't load appointment history — refresh, or check your sign-in.");
+      }
+      // Specimens
+      if (specsRes.status === 'fulfilled') {
+        setSpecimens((specsRes.value?.data as any[]) || []);
+      } else {
+        console.warn('[patient-chart] specimens fetch failed:', specsRes.reason);
+        setSpecimens([]);
+      }
+      // Activity log
+      if (actsRes.status === 'fulfilled') {
+        setActivities((actsRes.value?.data as any[]) || []);
+      } else {
+        console.warn('[patient-chart] activity-log fetch failed:', actsRes.reason);
+        setActivities([]);
+      }
+    } catch (e) {
+      console.error('[patient-chart] unexpected load error:', e);
+      toast.error("Couldn't load this patient's chart. Try again or refresh.");
+    } finally {
+      setLoading(false);
     }
-
-    // Fetch appointments
-    const { data: appts } = await supabase
-      .from('appointments')
-      .select('*')
-      .eq('patient_id', patient.id)
-      .order('appointment_date', { ascending: false });
-    setAppointments(appts || []);
-
-    // Fetch specimens
-    const { data: specs } = await supabase
-      .from('specimen_deliveries' as any)
-      .select('*')
-      .eq('patient_id', patient.id)
-      .order('delivered_at', { ascending: false });
-    setSpecimens((specs as any[]) || []);
-
-    // Fetch activity log
-    const { data: acts } = await supabase
-      .from('activity_log' as any)
-      .select('*')
-      .eq('patient_id', patient.id)
-      .order('created_at', { ascending: false });
-    setActivities((acts as any[]) || []);
-
-    setLoading(false);
   }, []);
 
   const STATUS_COLORS: Record<string, string> = {
