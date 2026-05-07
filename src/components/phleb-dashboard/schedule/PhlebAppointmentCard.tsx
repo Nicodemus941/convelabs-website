@@ -26,6 +26,7 @@ import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import RequestLabOrderButton from './RequestLabOrderButton';
 import LabOrderRequestStatus from './LabOrderRequestStatus';
 import AppointmentEarningPill from './AppointmentEarningPill';
+import { getLabHoursStatus, logMileage, type LabRow } from '@/lib/labStatus';
 import TubePredictionPanel from './TubePredictionPanel';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
@@ -160,6 +161,40 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
     group_number: primaryInsurance.group_number,
   } : null;
   const hasInsuranceText = !!(patientInsurance?.provider || patientInsurance?.member_id);
+
+  // Lab directory lookup for hours-aware routing. Picks the closest lab
+  // matching the appointment's lab_destination brand (best-effort: by
+  // brand keyword, falls back to null if no row matches). Used to:
+  //   1. Render the "Closes in 18 min" chip
+  //   2. Pass the lab_id into phleb_mileage_log for the IRS audit trail
+  const [nearestLab, setNearestLab] = useState<LabRow | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const dest = appointment.lab_destination;
+      if (!dest) { setNearestLab(null); return; }
+      // Map dest string to brand keyword used in labs.brand
+      const brand = (() => {
+        const d = dest.toLowerCase();
+        if (d.includes('labcorp')) return 'labcorp';
+        if (d.includes('quest')) return 'quest';
+        if (d.includes('adventhealth')) return 'adventhealth';
+        if (d.includes('orlando') && d.includes('health')) return 'orlando_health';
+        return null;
+      })();
+      if (!brand) { setNearestLab(null); return; }
+      const { data } = await supabase
+        .from('labs' as any)
+        .select('id, brand, name, street_address, city, state, zipcode, phone, hours, is_24_7, accepts_after_hours_drop, notes')
+        .eq('brand', brand)
+        .eq('is_active', true)
+        .limit(1)
+        .maybeSingle();
+      if (!cancelled) setNearestLab(data as any);
+    })();
+    return () => { cancelled = true; };
+  }, [appointment.lab_destination]);
+  const labHoursStatus = nearestLab ? getLabHoursStatus(nearestLab) : null;
 
   // Phleb verifies an insurance row at draw time. Stamps verified_at +
   // verified_by_user_id so the chart shows "✓ verified by phleb today."
@@ -567,12 +602,41 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                         <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-0.5">Drop off at</p>
                         <p className="text-sm font-semibold text-gray-900">{appointment.lab_destination}</p>
                       </div>
+                      {/* Lab hours chip — only shows if we have a directory match */}
+                      {labHoursStatus && (
+                        <Badge className={
+                          labHoursStatus.warning === 'closing_soon'
+                            ? 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100 gap-1'
+                            : labHoursStatus.warning === 'closed'
+                              ? 'bg-red-100 text-red-800 border-red-200 hover:bg-red-100 gap-1'
+                              : 'bg-emerald-100 text-emerald-800 border-emerald-200 hover:bg-emerald-100 gap-1'
+                        }>
+                          <Clock className="h-3 w-3" /> {labHoursStatus.label}
+                        </Badge>
+                      )}
                       {labRouteUrl && (
                         <Button
                           size="sm"
                           variant="outline"
                           className="w-full gap-1.5 h-8 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                          onClick={(e) => { e.stopPropagation(); window.open(labRouteUrl, '_blank'); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // 1) Stamp mileage log (fire-and-forget IRS audit trail)
+                            logMileage({
+                              appointmentId: appointment.id,
+                              labId: nearestLab?.id || null,
+                              tripKind: 'to_lab',
+                              originAddress: appointment.address || null,
+                              originZip: appointment.zipcode || null,
+                              destinationAddress: nearestLab
+                                ? `${nearestLab.street_address}, ${nearestLab.city}, ${nearestLab.state} ${nearestLab.zipcode}`
+                                : appointment.lab_destination || null,
+                              destinationZip: nearestLab?.zipcode || null,
+                              notes: 'Route to lab from phleb appointment card',
+                            });
+                            // 2) Open in OS-native maps
+                            window.open(labRouteUrl, '_blank');
+                          }}
                         >
                           <Route className="h-3.5 w-3.5" />
                           Route to nearest {appointment.lab_destination}

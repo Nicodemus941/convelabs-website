@@ -107,9 +107,15 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
         } catch (e) { console.warn('[insurance-upload] patient_insurances write failed:', e); }
       }
 
-      // 4. Fire OCR (non-blocking — captures member ID / group / provider).
+      // 4. Fire OCR — calls extract-insurance-ocr which writes parsed
+      // fields directly into patient_insurances at the matching rank
+      // (and into tenant_patients legacy fields if rank=primary).
+      // Non-blocking so the phleb sees "saved" immediately even if OCR
+      // is slow. Prior bug: this called a non-existent fn name
+      // ('ocr-insurance-card') and silently swallowed the 404, which
+      // meant insurance text fields were never auto-populated.
       try {
-        supabase.functions.invoke('ocr-insurance-card', {
+        supabase.functions.invoke('extract-insurance-ocr', {
           body: { filePath: safeName, appointmentId, patientId: patientId || null, rank },
         }).catch(() => {});
       } catch (e) { console.warn('[insurance-upload] OCR invoke skipped:', e); }
