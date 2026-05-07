@@ -111,23 +111,26 @@ const ServicesPricingModal: React.FC<Props> = ({ open, onOpenChange, onSchedule,
         </div>
 
         <div className="p-6 sm:p-8">
-          {/* Tier headers — anchor with VIP as "most popular" */}
-          <div className="grid grid-cols-4 gap-2 sm:gap-3 mb-2 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-500 sticky top-0 bg-white py-2 z-10">
-            <div className="pl-2">Service</div>
-            <div className="text-center">
-              <div>Standard</div>
-              <div className="font-normal normal-case text-[10px] text-gray-400">no membership</div>
+          {/* Tier headers — anchor with VIP as "most popular".
+              Layout: 2fr|1fr|1fr|1fr so the Service column has room for
+              its blurb without squeezing the 3 numeric columns. The
+              membership header lines stay neatly stacked + centered. */}
+          <div className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 sm:gap-3 mb-2 sticky top-0 bg-white pt-3 pb-2 z-10 border-b">
+            <div className="pl-2 text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-500 self-end">Service</div>
+            <div className="text-center px-1">
+              <div className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-gray-700">Standard</div>
+              <div className="text-[10px] text-gray-400 mt-0.5 leading-tight">No membership</div>
             </div>
-            <div className="text-center">
-              <div className="text-emerald-700">Member <span className="font-normal text-[10px]">($99/yr)</span></div>
-              <div className="font-normal normal-case text-[10px] text-gray-400">save ~13%</div>
+            <div className="text-center px-1">
+              <div className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-emerald-700">Member</div>
+              <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">$99/yr · save ~13%</div>
             </div>
-            <div className="text-center relative">
-              <div className="absolute -top-2 left-1/2 -translate-x-1/2">
-                <Badge className="bg-amber-500 text-white border-amber-500 text-[9px] px-1.5 py-0 h-4">★ Most popular</Badge>
+            <div className="text-center px-1 relative pt-3">
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap">
+                <Badge className="bg-amber-500 text-white border-amber-500 text-[9px] px-1.5 py-0 h-4 leading-none">★ Most popular</Badge>
               </div>
-              <div className="text-amber-700 mt-1">VIP <span className="font-normal text-[10px]">($199/yr)</span></div>
-              <div className="font-normal normal-case text-[10px] text-gray-400">save ~23%</div>
+              <div className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-amber-700">VIP</div>
+              <div className="text-[10px] text-amber-700/80 mt-0.5 leading-tight">$199/yr · save ~23%</div>
             </div>
           </div>
 
@@ -138,7 +141,7 @@ const ServicesPricingModal: React.FC<Props> = ({ open, onOpenChange, onSchedule,
               const memberSave = s.none - s.member;
               const vipSave = s.none - s.vip;
               return (
-                <div key={s.id} className="grid grid-cols-4 gap-2 sm:gap-3 p-3 sm:p-4 items-center hover:bg-gray-50">
+                <div key={s.id} className="grid grid-cols-[2fr_1fr_1fr_1fr] gap-2 sm:gap-3 p-3 sm:p-4 items-center hover:bg-gray-50">
                   <div className="flex items-start gap-2 min-w-0">
                     <Icon className="h-4 w-4 text-[#B91C1C] flex-shrink-0 mt-0.5" />
                     <div className="min-w-0">

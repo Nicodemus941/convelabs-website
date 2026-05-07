@@ -97,6 +97,7 @@ const ProviderDashboard: React.FC = () => {
   const [showPwPrompt, setShowPwPrompt] = useState(false);
   const [newPw, setNewPw] = useState('');
   const [newPwConfirm, setNewPwConfirm] = useState('');
+  const [agreedTerms, setAgreedTerms] = useState(false);
   // BAA signing gate — blocks the portal until the provider has signed.
   const [baaLoaded, setBaaLoaded] = useState(false);
   const [baaSignature, setBaaSignature] = useState<{ id: string; signed_at: string; baa_version: string; signer_full_name: string } | null>(null);
@@ -174,6 +175,7 @@ const ProviderDashboard: React.FC = () => {
   const handleInlinePasswordSet = async () => {
     if (newPw.length < 8) { toast.error('Password must be at least 8 characters'); return; }
     if (newPw !== newPwConfirm) { toast.error('Passwords do not match'); return; }
+    if (needsPasswordSetup && !agreedTerms) { toast.error('Please accept the Terms of Service and Privacy Policy'); return; }
     try {
       // Route through edge fn (admin API) to bypass 'Secure password change'
       // reauth on SMS-only sessions — same reason as the onboarding modal.
@@ -183,7 +185,11 @@ const ProviderDashboard: React.FC = () => {
       const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/complete-provider-onboarding', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ password: newPw }),
+        body: JSON.stringify({
+          password: newPw,
+          // For first-login invited staff, also stamp terms acceptance
+          ...(needsPasswordSetup && agreedTerms ? { accepted_terms: true } : {}),
+        }),
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j.error || 'Failed to save');
@@ -784,12 +790,29 @@ const ProviderDashboard: React.FC = () => {
             </p>
             <div><Label>New password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" minLength={8} autoFocus /></div>
             <div><Label>Confirm</Label><Input type="password" value={newPwConfirm} onChange={e => setNewPwConfirm(e.target.value)} placeholder="Type it again" minLength={8} /></div>
+            {needsPasswordSetup && (
+              <label className="flex items-start gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={agreedTerms}
+                  onChange={(e) => setAgreedTerms(e.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-[#B91C1C] focus:ring-[#B91C1C]"
+                />
+                <span className="text-[12px] text-gray-700 leading-snug">
+                  I agree to the <a href="/terms" target="_blank" className="text-[#B91C1C] underline">Terms of Service</a> and <a href="/privacy" target="_blank" className="text-[#B91C1C] underline">Privacy Policy</a>, and confirm that I'm authorized to access patient records on behalf of my organization (HIPAA).
+                </span>
+              </label>
+            )}
           </div>
           <DialogFooter className="gap-2">
             {!needsPasswordSetup && (
               <Button variant="outline" onClick={() => setShowPwPrompt(false)}>Cancel</Button>
             )}
-            <Button onClick={handleInlinePasswordSet} disabled={newPw.length < 8 || newPw !== newPwConfirm} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
+            <Button
+              onClick={handleInlinePasswordSet}
+              disabled={newPw.length < 8 || newPw !== newPwConfirm || (needsPasswordSetup && !agreedTerms)}
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+            >
               {needsPasswordSetup ? 'Create password & continue' : 'Save password'}
             </Button>
           </DialogFooter>
