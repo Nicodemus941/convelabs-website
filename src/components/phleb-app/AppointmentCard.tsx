@@ -32,7 +32,7 @@ interface AppointmentCardProps {
   onStatusChange: () => void;
 }
 
-const STATUS_FLOW = ['scheduled', 'en_route', 'arrived', 'in_progress', 'specimens_delivered', 'completed'];
+const STATUS_FLOW = ['scheduled', 'en_route', 'arrived', 'in_progress', 'specimen_delivered', 'completed'];
 
 const LAB_DESTINATIONS = ['Quest Diagnostics', 'LabCorp', 'Hospital Lab', 'UPS', 'FedEx'];
 
@@ -53,7 +53,7 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
       setShowETADialog(true);
       return;
     }
-    if (nextStatus === 'specimens_delivered') {
+    if (nextStatus === 'specimen_delivered') {
       setShowDeliveryDialog(true);
       return;
     }
@@ -96,7 +96,7 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
     setIsUpdating(true);
     const success = await updateStatus({
       appointmentId: appointment.id,
-      status: 'specimens_delivered',
+      status: 'specimen_delivered',
       specimenLabName: labName,
       specimenTrackingId: trackingId.trim(),
       phlebotomistName,
@@ -137,7 +137,7 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
       en_route: { text: 'On My Way', icon: <Truck className="h-4 w-4" />, color: 'bg-orange-500 hover:bg-orange-600' },
       arrived: { text: 'Arrived', icon: <MapPin className="h-4 w-4" />, color: 'bg-green-500 hover:bg-green-600' },
       in_progress: { text: 'Begin Job', icon: <Play className="h-4 w-4" />, color: 'bg-purple-500 hover:bg-purple-600' },
-      specimens_delivered: { text: 'Specimens Delivered', icon: <Package className="h-4 w-4" />, color: 'bg-teal-500 hover:bg-teal-600' },
+      specimen_delivered: { text: 'Specimens Delivered', icon: <Package className="h-4 w-4" />, color: 'bg-teal-500 hover:bg-teal-600' },
       completed: { text: 'Job Complete', icon: <CheckCircle className="h-4 w-4" />, color: 'bg-gray-700 hover:bg-gray-800' },
     };
 

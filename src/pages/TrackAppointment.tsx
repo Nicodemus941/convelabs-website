@@ -11,7 +11,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
   en_route: { label: 'On the Way', color: 'bg-orange-100 text-orange-800', icon: <Truck className="h-4 w-4" /> },
   arrived: { label: 'Arrived', color: 'bg-green-100 text-green-800', icon: <MapPin className="h-4 w-4" /> },
   in_progress: { label: 'In Progress', color: 'bg-purple-100 text-purple-800', icon: <FlaskConical className="h-4 w-4" /> },
-  specimens_delivered: { label: 'Specimens Delivered', color: 'bg-teal-100 text-teal-800', icon: <CheckCircle className="h-4 w-4" /> },
+  specimen_delivered: { label: 'Specimens Delivered', color: 'bg-teal-100 text-teal-800', icon: <CheckCircle className="h-4 w-4" /> },
   completed: { label: 'Completed', color: 'bg-gray-100 text-gray-800', icon: <CheckCircle className="h-4 w-4" /> },
 };
 
@@ -130,9 +130,9 @@ const TrackAppointment: React.FC = () => {
             <CardContent className="py-4">
               <h3 className="font-medium mb-3 text-sm">Appointment Progress</h3>
               <div className="space-y-3">
-                {['scheduled', 'en_route', 'arrived', 'in_progress', 'specimens_delivered', 'completed'].map((status, index) => {
+                {['scheduled', 'en_route', 'arrived', 'in_progress', 'specimen_delivered', 'completed'].map((status, index) => {
                   const config = STATUS_CONFIG[status];
-                  const statusOrder = ['scheduled', 'en_route', 'arrived', 'in_progress', 'specimens_delivered', 'completed'];
+                  const statusOrder = ['scheduled', 'en_route', 'arrived', 'in_progress', 'specimen_delivered', 'completed'];
                   const currentIndex = statusOrder.indexOf(tracking.appointmentStatus);
                   const isActive = index <= currentIndex;
 

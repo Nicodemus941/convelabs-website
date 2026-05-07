@@ -23,7 +23,7 @@ export function useAppointmentStatus() {
     if (status === 'in_progress') {
       updateData.job_started_at = new Date().toISOString();
     }
-    if (status === 'specimens_delivered') {
+    if (status === 'specimen_delivered') {
       updateData.specimens_delivered_at = new Date().toISOString();
       if (specimenLabName) updateData.specimen_lab_name = specimenLabName;
       if (specimenTrackingId) updateData.specimen_tracking_id = specimenTrackingId;
