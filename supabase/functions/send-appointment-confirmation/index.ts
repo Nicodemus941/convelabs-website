@@ -19,6 +19,17 @@ Deno.serve(async (req) => {
     });
   }
 
+  // BUG FIX 2026-05-07: hoisted from inside an `if` block where `const`
+  // block-scoping made `supabase` undefined for the logOrgEmail() call
+  // further down. Whenever the appointment lookup branch didn't run (or
+  // when that block exited normally), the next reference threw
+  // "supabase is not defined." Hoist to handler scope so it's always
+  // available for downstream logging + secondary fetches.
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') || '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+  );
+
   try {
     const body = await req.json();
 
@@ -51,10 +62,6 @@ Deno.serve(async (req) => {
     let viewToken: string | null = null;
     let appointmentId: string | null = body.appointmentId || null;
     if (body.appointmentId && (!patientEmail || !appointmentDate)) {
-      const supabase = createClient(
-        Deno.env.get('SUPABASE_URL') || '',
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-      );
       const { data: appt } = await supabase
         .from('appointments')
         .select('*')
@@ -75,11 +82,7 @@ Deno.serve(async (req) => {
         billedToOrg = (appt as any).billed_to === 'org' && !!(appt as any).organization_id;
         if (billedToOrg) {
           // Pull org display name so the patient sees "Covered by [Org]"
-          const supabase2 = createClient(
-            Deno.env.get('SUPABASE_URL') || '',
-            Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-          );
-          const { data: orgRow } = await supabase2.from('organizations')
+          const { data: orgRow } = await supabase.from('organizations')
             .select('name')
             .eq('id', (appt as any).organization_id)
             .maybeSingle();
@@ -309,13 +312,20 @@ Deno.serve(async (req) => {
 
         // Audit log — surfaces on the org's Emails tab + powers Mailgun
         // webhook status updates (opened/clicked/bounced) via mailgun_id.
-        await logOrgEmail(supabase, {
-          appointmentId: body.appointmentId,
-          toEmail: patientEmail,
-          emailType: 'appointment_confirmation',
-          subject: `Appointment Confirmed - ${displayDate}`,
-          mailgunResponse: mgRes,
-        });
+        // Defense-in-depth: a logging failure must NEVER mask a successful
+        // send (Michael Percopo case 2026-05-07: prior version threw here
+        // because `supabase` was scoped inside a different if-block).
+        try {
+          await logOrgEmail(supabase, {
+            appointmentId: body.appointmentId,
+            toEmail: patientEmail,
+            emailType: 'appointment_confirmation',
+            subject: `Appointment Confirmed - ${displayDate}`,
+            mailgunResponse: mgRes,
+          });
+        } catch (logErr) {
+          console.warn('[send-appointment-confirmation] logOrgEmail failed (non-blocking):', logErr);
+        }
       }
     }
 
