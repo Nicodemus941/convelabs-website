@@ -50,10 +50,19 @@ Deno.serve(async (req) => {
     const user = userResp?.user;
     if (!user) return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    const role = user.user_metadata?.role;
-    const orgId = user.user_metadata?.org_id;
-    if (role !== 'provider' || !orgId) {
-      return new Response(JSON.stringify({ error: 'Not a provider account' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // Accept both 'provider' and 'office_manager' — same dashboard, same scope.
+    // (2026-05-07: Lara at Littleton was locked out of the org dashboard because
+    // her role is office_manager. Hormozi gap — receptionists/coordinators need
+    // the same view as the doctor to do their job.)
+    // Also accept either org_id or organization_id metadata shape (legacy users
+    // have one, fresh invite-org-manager users have the other).
+    const role = String(user.user_metadata?.role || '').toLowerCase();
+    const orgId = user.user_metadata?.org_id || user.user_metadata?.organization_id;
+    if (!['provider','office_manager'].includes(role) || !orgId) {
+      return new Response(JSON.stringify({
+        error: 'Not a provider account',
+        detail: `role=${role} org=${orgId ? 'set' : 'missing'}`,
+      }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // ── ORG ──────────────────────────────────────────────────────────────
@@ -227,7 +236,12 @@ Deno.serve(async (req) => {
       if (u.length < 1000) break;
     }
     const team = allUsers
-      .filter(u => u.user_metadata?.org_id === orgId)
+      .filter(u =>
+        // Match either metadata field name. New invite-org-manager users
+        // have organization_id; legacy users have org_id.
+        u.user_metadata?.org_id === orgId ||
+        u.user_metadata?.organization_id === orgId
+      )
       .map(u => ({
         id: u.id,
         email: u.email,

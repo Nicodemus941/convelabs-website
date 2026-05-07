@@ -102,7 +102,9 @@ const ProviderDashboard: React.FC = () => {
       try {
         const { data: { user: supaUser } } = await supabase.auth.getUser();
         const meta = supaUser?.user_metadata || {};
-        if (meta.role !== 'provider') return;
+        // Accept both provider and office_manager — same onboarding flow.
+        // (Lara at Littleton case 2026-05-07.)
+        if (!['provider','office_manager'].includes(String(meta.role || ''))) return;
         if (!meta.onboarded_at) setShowOnboarding(true);
         else if (!meta.password_set) setNeedsPasswordSetup(true);
       } catch { /* non-blocking */ }
@@ -317,10 +319,16 @@ const ProviderDashboard: React.FC = () => {
               className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-12 px-5 gap-2 text-[15px]">
               <FileHeart className="h-4 w-4" /> Request labs for a patient
             </Button>
-            <Button asChild variant="outline" className="h-12 px-5 gap-2 text-[15px]">
-              <Link to={`/book-now?orgId=${org.id}`}>
-                <Calendar className="h-4 w-4" /> Schedule a visit
-              </Link>
+            {/* "Schedule a visit" now opens the same CreateLabRequestModal
+                used by "Request labs for a patient". One unified flow:
+                provider/staff fills in patient + lab order + draw_by_date,
+                we send the patient the booking link with the order
+                attached. Different label, same modal — Hormozi: don't make
+                staff learn two flows for the same outcome.
+                (2026-05-07 Lara/Littleton UX gap.) */}
+            <Button onClick={() => setShowLabRequest(true)}
+              variant="outline" className="h-12 px-5 gap-2 text-[15px]">
+              <Calendar className="h-4 w-4" /> Schedule a visit
             </Button>
             <Button asChild variant="outline" className="h-12 px-5 gap-2 text-[15px]">
               <Link to="/for-providers" target="_blank">
