@@ -41,6 +41,10 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   const [patientName, setPatientName] = useState('');
   const [patientEmail, setPatientEmail] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
+  // DOB is required for the HIPAA gate on /lab-request. Without it the
+  // patient gets a "no DOB on file" error and is blocked from booking.
+  // (2026-05-07: Michael Percopo case.)
+  const [patientDob, setPatientDob] = useState('');
   const [drawByDate, setDrawByDate] = useState('');
   const [nextApptDate, setNextApptDate] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
@@ -218,6 +222,7 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
           patient_name: patientName.trim(),
           patient_email: patientEmail.trim() || null,
           patient_phone: patientPhone.trim() || null,
+          patient_dob: patientDob || null,
           lab_order_file_path: labOrderPath,
           draw_by_date: drawByDate,
           next_doctor_appt_date: nextApptDate || null,
@@ -343,6 +348,19 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                   inputMode="tel"
                 />
               </div>
+            </div>
+            <div>
+              <Label>Date of Birth <span className="text-red-600">*</span></Label>
+              <Input
+                type="date"
+                value={patientDob}
+                onChange={e => setPatientDob(e.target.value)}
+                max={new Date().toISOString().substring(0, 10)}
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Required — patient is asked to verify DOB to unlock their booking link (HIPAA).
+                Without it they'll be blocked from scheduling.
+              </p>
             </div>
             <p className="text-[11px] text-gray-500">At least one of email or phone required — that's how we reach them.</p>
           </div>

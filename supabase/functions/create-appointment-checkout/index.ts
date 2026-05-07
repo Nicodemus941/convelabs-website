@@ -819,6 +819,9 @@ Deno.serve(async (req) => {
       patient_last_name: patientDetails.lastName || '',
       patient_email: patientDetails.email || '',
       patient_phone: patientDetails.phone || '',
+      // DOB collected at booking — webhook writes to tenant_patients.
+      // Char-cap is loose because YYYY-MM-DD is always 10 chars. (2026-05-07)
+      patient_dob: patientDetails.dateOfBirth ? String(patientDetails.dateOfBirth).substring(0, 10) : '',
       // When account holder is booking for a saved family member; webhook
       // stamps appointments.family_member_id from this. Primary billing
       // still routes to the booker.

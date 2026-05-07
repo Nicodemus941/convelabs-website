@@ -630,6 +630,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           lastName: data.patientDetails.lastName,
           email: data.patientDetails.email,
           phone: data.patientDetails.phone,
+          // DOB collected at PatientInfoStep but historically never
+          // forwarded to the server — so tenant_patients.date_of_birth
+          // stayed null on every online booking. (2026-05-07: Michael
+          // Percopo blocked from scheduling because DOB gate had nothing
+          // to verify against.) Now the server stamps it on tenant_patients.
+          dateOfBirth: (data.patientDetails as any).dateOfBirth || null,
           // Family-member booking: when the account holder is booking a
           // visit for a saved family member, this id points at the
           // family_members row. Stored on appointments.family_member_id.

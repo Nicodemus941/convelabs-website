@@ -1234,13 +1234,18 @@ async function handleAppointmentPayment(session: any) {
       if (metadata.insurance_card_path) {
         patch.insurance_card_path = String(metadata.insurance_card_path).substring(0, 500);
       }
+      // DOB persistence — same merge-only-empty rule. Date string format
+      // YYYY-MM-DD; Postgres parses it into the date column.
+      if (metadata.patient_dob && /^\d{4}-\d{2}-\d{2}$/.test(metadata.patient_dob)) {
+        patch.date_of_birth = metadata.patient_dob;
+      }
       if (Object.keys(patch).length > 0 && metadata.patient_email) {
         // Find by email (case-insensitive). If multiple match (rare), update
         // the most recent. Don't create a new row here — patient lookup
         // earlier in this fn already created/found one.
         const { data: tps } = await supabaseClient
           .from('tenant_patients')
-          .select('id, insurance_provider, insurance_member_id, insurance_group_number, insurance_card_path')
+          .select('id, insurance_provider, insurance_member_id, insurance_group_number, insurance_card_path, date_of_birth')
           .ilike('email', metadata.patient_email.trim())
           .order('created_at', { ascending: false })
           .limit(1);

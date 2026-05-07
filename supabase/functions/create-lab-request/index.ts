@@ -170,7 +170,19 @@ Deno.serve(async (req) => {
       organization_id, patient_name, patient_email, patient_phone,
       lab_order_file_path, draw_by_date, next_doctor_appt_date,
       next_doctor_appt_notes, admin_notes, billed_to,
+      // Patient DOB — required for the HIPAA gate on the patient lab-request
+      // page. Without it, verify_lab_request_dob returns 'no_dob_on_file'
+      // and the patient is blocked from booking. (2026-05-07: Michael Percopo
+      // case.) Provider modal must collect this from their EMR.
+      patient_dob,
     } = body || {};
+    // Normalize: accept both 'YYYY-MM-DD' and ISO strings; reject anything
+    // else so a malformed value can't slip into the date column.
+    const dobClean: string | null = (() => {
+      if (!patient_dob) return null;
+      const m = String(patient_dob).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+    })();
 
     // Validate billed_to if provided
     const billedToClean: 'org' | 'patient' | null =
@@ -236,6 +248,7 @@ Deno.serve(async (req) => {
         admin_notes: admin_notes?.trim() || null,
         access_token: accessToken,
         billed_to: billedToClean,
+        patient_dob: dobClean,
       })
       .select('*')
       .single();
