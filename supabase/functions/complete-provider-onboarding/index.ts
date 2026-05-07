@@ -31,9 +31,13 @@ Deno.serve(async (req) => {
     const user = userResp?.user;
     if (!user) return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    // Only providers can hit this endpoint
-    if (user.user_metadata?.role !== 'provider') {
-      return new Response(JSON.stringify({ error: 'Not a provider account' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // Provider portal accounts: doctor self-signup (provider) AND
+    // invited partner-org staff (office_manager) both go through this
+    // endpoint to set/update password + stamp onboarded_at.
+    // (Lara/Littleton 2026-05-07 invited-staff password-creation flow.)
+    const role = String(user.user_metadata?.role || '').toLowerCase();
+    if (!['provider', 'office_manager'].includes(role)) {
+      return new Response(JSON.stringify({ error: 'Not a provider/staff account' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const body = await req.json();

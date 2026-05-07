@@ -143,14 +143,25 @@ const ProviderDashboard: React.FC = () => {
           !!(meta.organization_id || meta.org_id) &&
           !!(meta.full_name || (meta.firstName && meta.lastName));
 
-        if (!meta.onboarded_at && isInvitedStaff) {
-          // Silent stamp — no modal, no friction. They're invited staff,
-          // not a self-signup doctor.
-          try {
-            await supabase.auth.updateUser({
-              data: { onboarded_at: new Date().toISOString(), password_set: true },
-            });
-          } catch { /* non-blocking */ }
+        if (isInvitedStaff) {
+          // Silently stamp onboarded_at so the name-asking modal never
+          // appears for invited staff (we already know who they are).
+          if (!meta.onboarded_at) {
+            try {
+              await supabase.auth.updateUser({
+                data: { onboarded_at: new Date().toISOString() },
+              });
+            } catch { /* non-blocking */ }
+          }
+          // BUT — invited staff arrive via Supabase's invite magic link,
+          // which gives them a session WITHOUT a password. Force them to
+          // create one now as a blocking gate. The user requirement:
+          // "log in → create a password → access their dashboard."
+          // After save, handleInlinePasswordSet stamps password_set: true.
+          if (!meta.password_set) {
+            setShowPwPrompt(true);
+            setNeedsPasswordSetup(true);
+          }
           return;
         }
 
@@ -178,10 +189,12 @@ const ProviderDashboard: React.FC = () => {
       if (!resp.ok) throw new Error(j.error || 'Failed to save');
 
       await supabase.auth.refreshSession().catch(() => {});
-      toast.success('Password saved. You can now sign in with email + password.');
-      setShowPwPrompt(false);
+      toast.success('Password saved. Welcome to your dashboard.');
       setNeedsPasswordSetup(false);
+      setShowPwPrompt(false);
       setNewPw(''); setNewPwConfirm('');
+      // Reload dashboard data so the freshly-stamped metadata flows through.
+      try { loadData(); } catch { /* non-blocking */ }
     } catch (e: any) {
       toast.error(e?.message || 'Failed to save password');
     }
@@ -746,18 +759,39 @@ const ProviderDashboard: React.FC = () => {
         onSchedule={() => setShowLabRequest(true)}
       />
 
-      {/* INLINE "SET A PASSWORD" DIALOG (from the yellow status banner) */}
-      <Dialog open={showPwPrompt} onOpenChange={setShowPwPrompt}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><KeyRound className="h-5 w-5 text-[#B91C1C]" /> Set a password</DialogTitle></DialogHeader>
+      {/* SET A PASSWORD — blocking gate for invited staff who landed via
+          Supabase magic-link invite (they have a session but no password
+          yet). Once set, password_set: true is stamped and the modal
+          self-dismisses. Closing without setting a password is intentionally
+          impossible when needsPasswordSetup is true (first-login flow). */}
+      <Dialog open={showPwPrompt} onOpenChange={(v) => {
+        // Block close while password setup is required
+        if (!v && needsPasswordSetup) return;
+        setShowPwPrompt(v);
+      }}>
+        <DialogContent className="max-w-sm" hideCloseButton={needsPasswordSetup}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-[#B91C1C]" />
+              {needsPasswordSetup ? 'Create your password' : 'Set a password'}
+            </DialogTitle>
+          </DialogHeader>
           <div className="space-y-3 pt-2">
-            <p className="text-sm text-gray-600">Once set, you can sign in with email + password instead of waiting for an SMS code.</p>
+            <p className="text-sm text-gray-600">
+              {needsPasswordSetup
+                ? "Welcome! Set a password so you can sign back into your dashboard anytime."
+                : 'Once set, you can sign in with email + password instead of waiting for an SMS code.'}
+            </p>
             <div><Label>New password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} placeholder="At least 8 characters" minLength={8} autoFocus /></div>
             <div><Label>Confirm</Label><Input type="password" value={newPwConfirm} onChange={e => setNewPwConfirm(e.target.value)} placeholder="Type it again" minLength={8} /></div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowPwPrompt(false)}>Cancel</Button>
-            <Button onClick={handleInlinePasswordSet} disabled={newPw.length < 8 || newPw !== newPwConfirm} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">Save password</Button>
+            {!needsPasswordSetup && (
+              <Button variant="outline" onClick={() => setShowPwPrompt(false)}>Cancel</Button>
+            )}
+            <Button onClick={handleInlinePasswordSet} disabled={newPw.length < 8 || newPw !== newPwConfirm} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
+              {needsPasswordSetup ? 'Create password & continue' : 'Save password'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
