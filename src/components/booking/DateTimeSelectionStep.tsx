@@ -296,12 +296,14 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
         console.log('Fetching booked slots for:', dateStr);
 
+        // HIPAA: route through get_busy_slots RPC instead of querying
+        // appointments directly. RPC computes the buffer server-side
+        // and returns just appointment_time/duration/buffer/service_type/status —
+        // never patient_name/address/zipcode/family_group_id. (2026-05-07
+        // RLS lockdown closed the wide "Anyone can check availability"
+        // policy that the old query depended on.)
         const { data, error: fetchError } = await supabase
-          .from('appointments')
-          .select('appointment_date, appointment_time, service_type, duration_minutes, address, zipcode, family_group_id')
-          .gte('appointment_date', `${dateStr}T00:00:00`)
-          .lte('appointment_date', `${dateStr}T23:59:59`)
-          .in('status', ['scheduled', 'confirmed', 'en_route', 'in_progress']);
+          .rpc('get_busy_slots' as any, { p_date: dateStr });
 
         if (fetchError) {
           console.error('Slot fetch error:', fetchError);
@@ -364,12 +366,17 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           const apptStartMin = startHour * 60 + startMin;
 
           const duration = (appt.duration_minutes && appt.duration_minutes > 0) ? appt.duration_minutes : DEFAULT_DURATION_MIN;
-          const buffer = getBufferMinutes({
-            service_type: appt.service_type,
-            address: appt.address,
-            zipcode: appt.zipcode,
-            family_group_id: appt.family_group_id,
-          });
+          // RPC returns pre-computed buffer (server-side mirror of
+          // src/lib/bookingBuffer.ts). PHI fields like address /
+          // family_group_id never leave the database.
+          const buffer = (typeof appt.buffer_minutes === 'number' && appt.buffer_minutes >= 0)
+            ? appt.buffer_minutes
+            : getBufferMinutes({
+                service_type: appt.service_type,
+                address: (appt as any).address,
+                zipcode: (appt as any).zipcode,
+                family_group_id: (appt as any).family_group_id,
+              });
           const apptEndMin = apptStartMin + duration + buffer;
 
           // BACKWARD block — every 15-min slot where apptStart <= slot < apptEnd.
