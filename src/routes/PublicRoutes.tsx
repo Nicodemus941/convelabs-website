@@ -50,6 +50,7 @@ const LocationPage = lazy(() => import('../pages/LocationPage'));
 const NationwideMobilePhlebotomy = lazy(() => import('../pages/NationwideMobilePhlebotomy'));
 const RateAppointment = lazy(() => import('../pages/RateAppointment'));
 const TrackAppointment = lazy(() => import('../pages/TrackAppointment'));
+const InsuranceUpdatePage = lazy(() => import('../pages/InsuranceUpdatePage'));
 
 // Legacy redirect component
 const LocationRedirect: React.FC<{ slug: string }> = ({ slug }) => (
@@ -80,6 +81,7 @@ export const routes = [
   <Route key="login" path="/login" element={<Login />} />,
   <Route key="provider" path="/provider" element={<ProviderLogin />} />,
   <Route key="lab-request" path="/lab-request/:token" element={<PatientLabRequestPage />} />,
+  <Route key="insurance-update" path="/insurance/update/:token" element={<InsuranceUpdatePage />} />,
   // No-auth-wall lab order upload from an existing scheduled appointment.
   // Patient lands here from the "Request Lab Order" SMS/email an admin
   // fired off the appointment card.

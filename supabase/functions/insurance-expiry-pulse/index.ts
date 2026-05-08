@@ -91,7 +91,24 @@ Deno.serve(async (req) => {
       }
 
       const firstName = (tp as any).first_name || 'there';
-      const updateUrl = `${PUBLIC_SITE_URL}/account/insurance`;
+
+      // Mint a single-use 14-day token so the SMS/email link goes
+      // straight to a self-serve upload page (no login required).
+      // Without this, the link 404s / lands on the homepage.
+      let tokenUrl = `${PUBLIC_SITE_URL}/insurance/update`;
+      try {
+        const { data: tk } = await supabase
+          .from('insurance_upload_tokens')
+          .insert({
+            patient_id: (tp as any).id,
+            token: crypto.randomUUID() + '-' + crypto.randomUUID().split('-')[0],
+            source: 'expiry_pulse',
+          })
+          .select('token')
+          .single();
+        if (tk) tokenUrl = `${PUBLIC_SITE_URL}/insurance/update/${(tk as any).token}`;
+      } catch (e) { console.warn('[expiry-pulse] token mint failed (non-fatal):', e); }
+      const updateUrl = tokenUrl;
 
       if (dryRun) {
         sent.push({ insurance_id: (ins as any).id, would_send_to: { email: (tp as any).email, phone: (tp as any).phone } });
