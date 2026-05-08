@@ -205,16 +205,31 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           .eq('appointment_id', appointmentId)
           .is('deleted_at', null)
           .order('uploaded_at', { ascending: true });
+
+        // BUG FIX 2026-05-08 (Charles Cook): the prior rule was "if 2+
+        // appointment_lab_orders rows exist, treat each as a separate
+        // sibling delivery requiring its own specimen ID." That's wrong
+        // when the rows are MULTIPLE PAGES OF THE SAME ORDER for one
+        // patient (the common case — Charles uploaded 4 pages of one
+        // Quest req). It's only correct when each row is a different
+        // patient on a shared PDF. Distinguish by ocr_patient_name:
+        // multi-row mode only fires when rows have DISTINCT non-null
+        // patient names. Same-or-null = one delivery.
         if (lo && lo.length >= 2) {
-          labOrders = lo;
-          // Pull org names for any per-lab-order org assignments not in the
-          // sibling-derived map already
-          const extraOrgIds = Array.from(new Set(lo.map((l: any) => l.org_match_organization_id).filter(Boolean))) as string[];
-          const missing = extraOrgIds.filter(id => !orgNameMap.has(id));
-          if (missing.length > 0) {
-            const { data: orgs2 } = await supabase.from('organizations').select('id, name').in('id', missing);
-            for (const o of (orgs2 || [])) orgNameMap.set((o as any).id, (o as any).name);
+          const distinctNames = new Set(
+            lo.map((l: any) => String(l.ocr_patient_name || '').trim().toLowerCase())
+              .filter((n: string) => n.length > 0)
+          );
+          if (distinctNames.size >= 2) {
+            labOrders = lo;
+            const extraOrgIds = Array.from(new Set(lo.map((l: any) => l.org_match_organization_id).filter(Boolean))) as string[];
+            const missing = extraOrgIds.filter(id => !orgNameMap.has(id));
+            if (missing.length > 0) {
+              const { data: orgs2 } = await supabase.from('organizations').select('id, name').in('id', missing);
+              for (const o of (orgs2 || [])) orgNameMap.set((o as any).id, (o as any).name);
+            }
           }
+          // else: leave labOrders empty → fall through to single-row mode below
         }
       }
 
