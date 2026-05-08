@@ -209,48 +209,83 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     panels: string[];
   } | null>(null);
 
-  // Insurance dropzone + auto OCR
+  // Insurance dropzone — upload to storage + auto OCR.
+  //
+  // CRITICAL FIX 2026-05-08 (Charles Cook case): this handler used to do
+  // OCR on the in-memory file but NEVER uploaded the actual card to the
+  // insurance-cards storage bucket. Result: every patient who "uploaded"
+  // their insurance — the file was discarded the moment they left the
+  // page. The insurance-cards bucket has been empty since launch; out of
+  // 495+ patients only 1 had insurance_card_path on file.
+  //
+  // Mirror the lab-order upload pattern (line ~85 above): upload-on-drop,
+  // save the path to form state, run OCR off the stored file.
   const onDropInsurance = useCallback(async (acceptedFiles: File[]) => {
-    if (acceptedFiles.length > 0 && onInsuranceFileSelected) {
-      const file = acceptedFiles[0];
-      onInsuranceFileSelected(file);
-      setValue('labOrder.hasInsuranceFile', true);
+    if (acceptedFiles.length === 0 || !onInsuranceFileSelected) return;
+    const file = acceptedFiles[0];
+    onInsuranceFileSelected(file);
+    setValue('labOrder.hasInsuranceFile', true);
 
-      // Auto-trigger OCR if it's an image
-      if (file.type.startsWith('image/')) {
-        setOcrProcessing(true);
-        try {
-          // Convert file to base64
+    // Step 1: upload to insurance-cards storage so it's actually saved
+    // and so the webhook + phleb dashboard can render it.
+    let uploadedPath: string | null = null;
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const safeName = `booking_ins_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('insurance-cards')
+        .upload(safeName, file, {
+          contentType: file.type || 'image/jpeg',
+          upsert: false,
+        });
+      if (upErr) {
+        console.warn('[insurance-upload] storage upload failed (non-blocking):', upErr);
+      } else {
+        uploadedPath = safeName;
+        // Persist the path on form state so BookingFlow's checkout payload
+        // picks it up and forwards to the webhook → tenant_patients +
+        // appointments.insurance_card_path. Without this setValue call,
+        // the path is lost after this component unmounts.
+        setValue('insurance.uploadedPath' as any, uploadedPath);
+      }
+    } catch (uploadErr) {
+      console.warn('[insurance-upload] exception during upload (non-blocking):', uploadErr);
+    }
+
+    // Step 2: OCR (same as before). Image files only — PDFs need a
+    // different code path the OCR fn doesn't handle.
+    if (file.type.startsWith('image/')) {
+      setOcrProcessing(true);
+      try {
+        // Prefer OCR-by-storage-path if upload succeeded (avoids re-sending
+        // the bytes); fall back to base64 if upload failed.
+        let body: any;
+        if (uploadedPath) {
+          body = { filePath: uploadedPath };
+        } else {
           const reader = new FileReader();
           const base64 = await new Promise<string>((resolve) => {
             reader.onload = () => resolve((reader.result as string).split(',')[1]);
             reader.readAsDataURL(file);
           });
-
-          const { data, error } = await supabase.functions.invoke('extract-insurance-ocr', {
-            body: { imageBase64: base64 },
-          });
-
-          if (!error && data?.success && data?.data) {
-            setOcrResult(data.data);
-            // CRITICAL: persist OCR result to the form so BookingFlow picks
-            // it up and forwards to the checkout payload. Prior bug: the
-            // result was rendered to the screen only, never saved to the
-            // patient's chart. Out of 495 bookings in the last 30 days,
-            // only 1 had insurance_card_path on file. (2026-05-06.)
-            const ocr = data.data as any;
-            if (ocr.provider) setValue('insurance.provider' as any, ocr.provider);
-            if (ocr.memberId) setValue('insurance.memberId' as any, ocr.memberId);
-            if (ocr.groupNumber) setValue('insurance.groupNumber' as any, ocr.groupNumber);
-            if (ocr.planType) setValue('insurance.planType' as any, ocr.planType);
-            toast.success('Insurance info extracted from card!');
-          }
-        } catch (err) {
-          console.error('OCR error:', err);
-          // Non-blocking — OCR failure doesn't prevent booking
-        } finally {
-          setOcrProcessing(false);
+          body = { imageBase64: base64 };
         }
+
+        const { data, error } = await supabase.functions.invoke('extract-insurance-ocr', { body });
+
+        if (!error && data?.success && data?.data) {
+          setOcrResult(data.data);
+          const ocr = data.data as any;
+          if (ocr.provider) setValue('insurance.provider' as any, ocr.provider);
+          if (ocr.memberId) setValue('insurance.memberId' as any, ocr.memberId);
+          if (ocr.groupNumber) setValue('insurance.groupNumber' as any, ocr.groupNumber);
+          if (ocr.planType) setValue('insurance.planType' as any, ocr.planType);
+          toast.success('Insurance info extracted from card!');
+        }
+      } catch (err) {
+        console.error('OCR error:', err);
+      } finally {
+        setOcrProcessing(false);
       }
     }
   }, [onInsuranceFileSelected, setValue]);
@@ -282,9 +317,24 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     }
   };
 
-  const handleRemoveInsurance = () => {
+  const handleRemoveInsurance = async () => {
     if (onInsuranceFileSelected) onInsuranceFileSelected(null);
     setValue('labOrder.hasInsuranceFile', false);
+    // Clear the OCR'd fields + storage path so they don't propagate to the
+    // checkout payload. Best-effort: also delete the storage object so we
+    // don't leak orphaned uploads.
+    setOcrResult(null);
+    setValue('insurance.provider' as any, undefined);
+    setValue('insurance.memberId' as any, undefined);
+    setValue('insurance.groupNumber' as any, undefined);
+    setValue('insurance.planType' as any, undefined);
+    const path: string | null = (getValues('insurance.uploadedPath' as any) as any) || null;
+    if (path) {
+      try {
+        await supabase.storage.from('insurance-cards').remove([path]);
+      } catch (e) { console.warn('[insurance-upload] storage remove failed (non-blocking):', e); }
+      setValue('insurance.uploadedPath' as any, undefined);
+    }
   };
 
   const handleFaxMode = () => {
