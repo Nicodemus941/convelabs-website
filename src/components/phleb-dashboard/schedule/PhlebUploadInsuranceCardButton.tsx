@@ -68,43 +68,62 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
       // 2. Primary card: stamp legacy fields on appointment + tenant_patients
       // so existing surfaces keep working. Secondary skips the legacy stamps
       // (those columns only hold one insurance).
+      // Defense-in-depth (Charles Cook 2026-05-08): use .select() so a
+      // silent RLS no-op surfaces visibly. Without this, the Charles
+      // upload silently failed to mirror to legacy columns and the
+      // chart-old surfaces stayed empty until I manually backfilled.
       if (rank === 'primary') {
-        await supabase
+        const { data: apptRows, error: apptErr } = await supabase
           .from('appointments')
           .update({ insurance_card_path: safeName })
-          .eq('id', appointmentId);
+          .eq('id', appointmentId)
+          .select('id');
+        if (apptErr) console.warn('[insurance-upload] appointment legacy stamp failed:', apptErr);
+        else if (!apptRows || apptRows.length === 0) {
+          console.warn('[insurance-upload] appointment legacy stamp affected 0 rows (RLS?)');
+        }
         if (patientId) {
-          try {
-            await supabase
-              .from('tenant_patients')
-              .update({ insurance_card_path: safeName, updated_at: new Date().toISOString() })
-              .eq('id', patientId);
-          } catch (e) { console.warn('[insurance-upload] patient profile stamp failed:', e); }
+          const { data: tpRows, error: tpErr } = await supabase
+            .from('tenant_patients')
+            .update({ insurance_card_path: safeName, updated_at: new Date().toISOString() })
+            .eq('id', patientId)
+            .select('id');
+          if (tpErr) console.warn('[insurance-upload] tenant_patients legacy stamp failed:', tpErr);
+          else if (!tpRows || tpRows.length === 0) {
+            console.warn('[insurance-upload] tenant_patients legacy stamp affected 0 rows (RLS?)');
+          }
         }
       }
 
       // 3. NEW source of truth — patient_insurances row (one per rank).
       // Upsert via deactivate-old + insert-new so existing primary becomes
-      // historical and the fresh upload becomes the active row.
+      // historical and the fresh upload becomes the active row. The trigger
+      // mirror_patient_insurances_to_legacy auto-mirrors fields back to
+      // tenant_patients legacy columns on every insert/update.
       if (patientId) {
         try {
-          // Deactivate any prior active row at this rank
           await supabase
             .from('patient_insurances' as any)
             .update({ is_active: false })
             .eq('patient_id', patientId)
             .eq('rank', rank)
             .eq('is_active', true);
-          // Insert new active row
-          await supabase
+          const { data: insRow, error: insErr } = await supabase
             .from('patient_insurances' as any)
             .insert({
               patient_id: patientId,
               rank,
               card_front_path: safeName,
               is_active: true,
-            });
-        } catch (e) { console.warn('[insurance-upload] patient_insurances write failed:', e); }
+            })
+            .select('id');
+          if (insErr) {
+            console.warn('[insurance-upload] patient_insurances insert failed:', insErr);
+            toast.error('Card image saved but row write failed — admin may need to verify chart');
+          } else if (!insRow || insRow.length === 0) {
+            console.warn('[insurance-upload] patient_insurances insert affected 0 rows (RLS?)');
+          }
+        } catch (e) { console.warn('[insurance-upload] patient_insurances write exception:', e); }
       }
 
       // 4. Fire OCR — calls extract-insurance-ocr which writes parsed
