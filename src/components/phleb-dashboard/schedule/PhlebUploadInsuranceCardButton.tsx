@@ -30,18 +30,20 @@ interface Props {
   onUploaded?: (path: string) => void;
   variant?: 'primary' | 'subtle';
   label?: string;
-  /**
-   * Insurance rank — 'primary' (default) or 'secondary'. The patient's
-   * primary always goes on appointments.insurance_card_path AND
-   * tenant_patients.insurance_card_path for legacy compatibility.
-   * Secondary only writes to the new patient_insurances table.
-   * 2026-05-07 multi-insurance feature.
-   */
   rank?: 'primary' | 'secondary';
+  /**
+   * Which side of the card. 'front' (default) writes to card_front_path
+   * + drives the legacy mirror. 'back' writes to card_back_path only —
+   * holds the member-services phone that insurers require for claim
+   * verification. Hormozi: claims that can't be verified by phone get
+   * rejected at ~$50-150 each in re-billing cost; capturing the back
+   * eliminates that whole class of rejection.
+   */
+  side?: 'front' | 'back';
 }
 
 const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
-  appointmentId, patientId, onUploaded, variant = 'subtle', label, rank = 'primary',
+  appointmentId, patientId, onUploaded, variant = 'subtle', label, rank = 'primary', side = 'front',
 }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -52,7 +54,7 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
     try {
       const file = await resizeImageForUpload(rawFile);
       const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-      const safeName = `phleb_ins_${appointmentId.substring(0, 8)}_${Date.now()}.${ext}`;
+      const safeName = `phleb_ins_${side}_${appointmentId.substring(0, 8)}_${Date.now()}.${ext}`;
 
       const { error: upErr } = await supabase.storage
         .from('insurance-cards')
@@ -65,14 +67,12 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
         return;
       }
 
-      // 2. Primary card: stamp legacy fields on appointment + tenant_patients
-      // so existing surfaces keep working. Secondary skips the legacy stamps
-      // (those columns only hold one insurance).
+      // 2. Primary FRONT only: stamp legacy fields on appointment +
+      // tenant_patients so existing surfaces keep working. Back side
+      // skips legacy entirely (those columns only hold a front image).
       // Defense-in-depth (Charles Cook 2026-05-08): use .select() so a
-      // silent RLS no-op surfaces visibly. Without this, the Charles
-      // upload silently failed to mirror to legacy columns and the
-      // chart-old surfaces stayed empty until I manually backfilled.
-      if (rank === 'primary') {
+      // silent RLS no-op surfaces visibly.
+      if (rank === 'primary' && side === 'front') {
         const { data: apptRows, error: apptErr } = await supabase
           .from('appointments')
           .update({ insurance_card_path: safeName })
@@ -96,32 +96,66 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
       }
 
       // 3. NEW source of truth — patient_insurances row (one per rank).
-      // Upsert via deactivate-old + insert-new so existing primary becomes
-      // historical and the fresh upload becomes the active row. The trigger
-      // mirror_patient_insurances_to_legacy auto-mirrors fields back to
-      // tenant_patients legacy columns on every insert/update.
+      // Front uploads upsert (deactivate old + insert new active row).
+      // Back uploads UPDATE the existing active row's card_back_path
+      // instead of creating a new row — back is metadata on the existing
+      // primary, not a new insurance record.
       if (patientId) {
         try {
-          await supabase
-            .from('patient_insurances' as any)
-            .update({ is_active: false })
-            .eq('patient_id', patientId)
-            .eq('rank', rank)
-            .eq('is_active', true);
-          const { data: insRow, error: insErr } = await supabase
-            .from('patient_insurances' as any)
-            .insert({
-              patient_id: patientId,
-              rank,
-              card_front_path: safeName,
-              is_active: true,
-            })
-            .select('id');
-          if (insErr) {
-            console.warn('[insurance-upload] patient_insurances insert failed:', insErr);
-            toast.error('Card image saved but row write failed — admin may need to verify chart');
-          } else if (!insRow || insRow.length === 0) {
-            console.warn('[insurance-upload] patient_insurances insert affected 0 rows (RLS?)');
+          if (side === 'back') {
+            // Find active row at this rank and update its back path
+            const { data: existing } = await supabase
+              .from('patient_insurances' as any)
+              .select('id')
+              .eq('patient_id', patientId)
+              .eq('rank', rank)
+              .eq('is_active', true)
+              .order('updated_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (existing) {
+              const { data: updRow, error: updErr } = await supabase
+                .from('patient_insurances' as any)
+                .update({ card_back_path: safeName })
+                .eq('id', (existing as any).id)
+                .select('id');
+              if (updErr || !updRow || updRow.length === 0) {
+                console.warn('[insurance-upload] back-side update failed:', updErr);
+                toast.error('Back-side save failed — please retry');
+              }
+            } else {
+              // No front-side row yet — create one with only the back path so
+              // the back doesn't get orphaned. Phleb / admin can upload the
+              // front later; the OCR + mirror trigger handle propagation.
+              await supabase.from('patient_insurances' as any).insert({
+                patient_id: patientId,
+                rank,
+                card_back_path: safeName,
+                is_active: true,
+              });
+            }
+          } else {
+            await supabase
+              .from('patient_insurances' as any)
+              .update({ is_active: false })
+              .eq('patient_id', patientId)
+              .eq('rank', rank)
+              .eq('is_active', true);
+            const { data: insRow, error: insErr } = await supabase
+              .from('patient_insurances' as any)
+              .insert({
+                patient_id: patientId,
+                rank,
+                card_front_path: safeName,
+                is_active: true,
+              })
+              .select('id');
+            if (insErr) {
+              console.warn('[insurance-upload] patient_insurances insert failed:', insErr);
+              toast.error('Card image saved but row write failed — admin may need to verify chart');
+            } else if (!insRow || insRow.length === 0) {
+              console.warn('[insurance-upload] patient_insurances insert affected 0 rows (RLS?)');
+            }
           }
         } catch (e) { console.warn('[insurance-upload] patient_insurances write exception:', e); }
       }
@@ -135,11 +169,13 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
       // meant insurance text fields were never auto-populated.
       try {
         supabase.functions.invoke('extract-insurance-ocr', {
-          body: { filePath: safeName, appointmentId, patientId: patientId || null, rank },
+          body: { filePath: safeName, appointmentId, patientId: patientId || null, rank, side },
         }).catch(() => {});
       } catch (e) { console.warn('[insurance-upload] OCR invoke skipped:', e); }
 
-      toast.success(`${rank === 'secondary' ? 'Secondary' : 'Primary'} insurance saved ✓`);
+      const rankLabel = rank === 'secondary' ? 'Secondary' : 'Primary';
+      const sideLabel = side === 'back' ? 'back' : 'front';
+      toast.success(`${rankLabel} insurance ${sideLabel} saved ✓`);
       onUploaded?.(safeName);
     } catch (e: any) {
       toast.error(`Upload crashed: ${e?.message || String(e)}`);

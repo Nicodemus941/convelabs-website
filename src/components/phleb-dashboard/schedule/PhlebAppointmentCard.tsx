@@ -110,6 +110,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
     member_id: string | null;
     group_number: string | null;
     card_front_path: string | null;
+    card_back_path: string | null;
     verified_at: string | null;
   };
   const [patientInsurances, setPatientInsurances] = useState<InsRow[]>([]);
@@ -121,7 +122,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
       // 1) Try the new multi-row source
       const { data: rows } = await supabase
         .from('patient_insurances' as any)
-        .select('id, rank, provider, member_id, group_number, card_front_path, verified_at')
+        .select('id, rank, provider, member_id, group_number, card_front_path, card_back_path, verified_at')
         .eq('patient_id', pid)
         .eq('is_active', true)
         .order('rank', { ascending: true }); // primary < secondary alphabetically
@@ -145,6 +146,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
           member_id: (tp as any).insurance_member_id || null,
           group_number: (tp as any).insurance_group_number || null,
           card_front_path: (tp as any).insurance_card_path || null,
+          card_back_path: null,
           verified_at: null,
         }]);
       } else {
@@ -554,6 +556,30 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                             </>
                           ) : (
                             <p className="text-xs text-amber-700 italic">Card on file — fields not yet OCR'd</p>
+                          )}
+                          {/* Back-of-card status — Hormozi: claims rejected
+                              for "can't reach insurer" cost ~$50-150 each.
+                              The customer-service phone lives on the back.
+                              Capture it to eliminate that whole class of
+                              rejection. */}
+                          {(appointment as any).patient_id && ins.id !== 'legacy' && (
+                            <div className="mt-2 pt-2 border-t border-gray-200/60 flex items-center gap-2 flex-wrap">
+                              {ins.card_back_path ? (
+                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] gap-1 hover:bg-emerald-50">
+                                  <CheckCircle2 className="h-2.5 w-2.5" /> Back of card on file
+                                </Badge>
+                              ) : (
+                                <PhlebUploadInsuranceCardButton
+                                  appointmentId={appointment.id}
+                                  patientId={(appointment as any).patient_id}
+                                  onUploaded={() => setInsuranceJustUploaded(`back-${ins.rank}-${Date.now()}`)}
+                                  variant="subtle"
+                                  label="+ Add back of card"
+                                  rank={ins.rank}
+                                  side="back"
+                                />
+                              )}
+                            </div>
                           )}
                         </div>
                       );
