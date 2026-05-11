@@ -112,6 +112,17 @@ export function renderAppointmentConfirmation(p: CommonPatientParams & {
       </td></tr>
     </table>
 
+    <!-- Arrival window — Hormozi: set expectations BEFORE the no-show
+         excuse fires. Patients who know we may swing ±15 min don't bail
+         when the phleb pulls up 10 min early or runs a few minutes late. -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:18px 22px;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#1d4ed8;font-weight:bold;margin-bottom:8px;">⏰ Your 30-minute arrival window</div>
+        <p style="margin:0 0 8px;color:#1e3a8a;font-size:14px;line-height:1.6;">Your phlebotomist may arrive <strong>up to 15 minutes before or 15 minutes after</strong> your scheduled time.</p>
+        <p style="margin:0;color:#334155;font-size:13px;line-height:1.6;">Traffic, weather, and visit length between patients can shift us either way. Please be ready 15 minutes before — and if we're running a little behind, you'll get a heads-up text the moment we know.</p>
+      </td></tr>
+    </table>
+
     <!-- How to prepare -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf7f2;border-radius:12px;margin-bottom:28px;">
       <tr><td style="padding:20px 22px;">
@@ -160,7 +171,7 @@ export function renderAppointmentReminder(p: CommonPatientParams & {
   const phone = p.supportPhone || DEFAULT_SUPPORT_PHONE;
   const body = `
     <p style="margin:0 0 16px;color:#111827;font-size:17px;line-height:1.6;">Hi ${p.patientName},</p>
-    <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.7;">A friendly reminder that your ConveLabs appointment is <strong>tomorrow</strong>. Your licensed phlebotomist will arrive within the scheduled window.</p>
+    <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;">A friendly reminder that your ConveLabs appointment is <strong>tomorrow</strong>. Your licensed phlebotomist will arrive within a 30-minute window — up to 15 minutes before or after your scheduled time, depending on traffic, weather, and visit length between patients. Please be ready 15 minutes early.</p>
 
     <!-- Reminder card -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin-bottom:24px;">

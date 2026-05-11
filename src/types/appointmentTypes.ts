@@ -119,7 +119,12 @@ export const bookingFormSchema = z.object({
     lastName: z.string().min(1, "Last name is required"),
     email: z.string().email("Invalid email address"),
     phone: z.string().optional(),
-    dateOfBirth: z.date().optional(),
+    // DOB is REQUIRED — the phleb card + NIIMBOT tube label both depend on
+    // it for patient identification at the visit. Previously optional →
+    // dropped silently on bookings like Shaun Chambers (2026-05-11), forcing
+    // admin to backfill manually. Accept either a Date (legacy calendar
+    // picker) or YYYY-MM-DD string (current native input).
+    dateOfBirth: z.union([z.date(), z.string().min(1, 'Date of birth is required')]),
     familyMemberId: z.string().nullable().optional(),
   }),
   additionalPatients: z.array(z.object({

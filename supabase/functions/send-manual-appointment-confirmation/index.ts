@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     const first = String(a.patient_name || 'there').split(' ')[0];
     const apptStr = fmtAppt(String(a.appointment_date), a.appointment_time);
     const confirmUrl = a.view_token ? `${PUBLIC_SITE_URL}/appt/${a.view_token}/confirm` : null;
-    const body = `Hi ${first} — ConveLabs. You're booked for ${apptStr}. ${confirmUrl ? `Quick confirm or change: ${confirmUrl}` : 'Reply YES to confirm.'}`;
+    const body = `Hi ${first} — ConveLabs. You're booked for ${apptStr}.\n\nArrival window: your phlebotomist may arrive up to 15 min before or after due to traffic, weather, or distance between patients. Please be ready 15 min early.\n\n${confirmUrl ? `Quick confirm or change: ${confirmUrl}` : 'Reply YES to confirm.'}`;
 
     const fd = new URLSearchParams({ To: normPhone(String(a.patient_phone)), From: TWILIO_FROM, Body: body });
     const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {

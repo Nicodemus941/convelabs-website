@@ -1268,6 +1268,35 @@ async function handleAppointmentPayment(session: any) {
               console.log(`[insurance-persist] saved ${Object.keys(safeMerge).join(',')} on tenant_patients[${tp.id}] for ${metadata.patient_email}`);
             }
           }
+        } else {
+          // No tenant_patients row yet — first-time booker. CREATE one so
+          // the phleb card actually has DOB + insurance on visit day
+          // (Shaun Chambers case 2026-05-11: DOB dropped, admin had to
+          // backfill manually). Without this, the patient-side data only
+          // existed on the appointment row and the chart was empty.
+          const tenantId = (appointment as any)?.tenant_id || metadata.tenant_id || null;
+          const createPatch: any = { ...patch, email: metadata.patient_email.trim() };
+          if (metadata.patient_first_name) createPatch.first_name = metadata.patient_first_name;
+          if (metadata.patient_last_name)  createPatch.last_name  = metadata.patient_last_name;
+          if (metadata.patient_phone)      createPatch.phone      = metadata.patient_phone;
+          if (tenantId)                    createPatch.tenant_id  = tenantId;
+          const { data: newTp, error: insErr } = await supabaseClient
+            .from('tenant_patients')
+            .insert(createPatch)
+            .select('id')
+            .maybeSingle();
+          if (insErr) {
+            console.warn(`[insurance-persist] tenant_patients create failed for ${metadata.patient_email}: ${insErr.message}`);
+          } else if (newTp) {
+            console.log(`[insurance-persist] created tenant_patients[${(newTp as any).id}] with ${Object.keys(createPatch).join(',')} for ${metadata.patient_email}`);
+            // Link the just-created appointment to the new patient row.
+            try {
+              await supabaseClient
+                .from('appointments')
+                .update({ patient_id: (newTp as any).id })
+                .eq('id', appointment.id);
+            } catch { /* non-fatal */ }
+          }
         }
       }
     } catch (insErr: any) {

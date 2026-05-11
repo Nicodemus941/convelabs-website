@@ -343,7 +343,7 @@ Deno.serve(async (req) => {
         const amountLine = billedToOrg
           ? `Covered by ${orgNameForPatient || 'your provider'} — no payment due\n`
           : (!isWaived ? `Amount: $${Number(totalAmount).toFixed(2)}\n` : '');
-        const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${displayTime ? ` at ${displayTime}` : ''}\n${address && address !== 'TBD' ? `Location: ${address}\n` : ''}${amountLine}\nHave your lab order & insurance ready.\nQuestions? Call (941) 527-9169`;
+        const smsBody = `ConveLabs: Your appointment is confirmed!\n\n${serviceName}\n${displayDate}${displayTime ? ` at ${displayTime}` : ''}\n${address && address !== 'TBD' ? `Location: ${address}\n` : ''}${amountLine}\nArrival window: your phlebotomist may arrive up to 15 min before or after due to traffic, weather, or distance between patients. Please be ready 15 min early.\n\nHave your lab order & insurance ready.\nQuestions? Call (941) 527-9169`;
 
         const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
         const twilioBody = new URLSearchParams({
