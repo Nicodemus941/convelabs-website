@@ -47,51 +47,169 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
   const [allPatients, setAllPatients] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Build conversations from appointments + fetch all patients with phones
+  // Build conversations: real SMS history first (notification_logs +
+  // sms_messages + sms_notifications), patient roster as fallback.
+  // Each conversation's preview shows the actual last message body +
+  // timestamp, sorted newest-first. (Hormozi: phleb should see at-a-glance
+  // who last messaged them, not a fake "service_type - date" string.)
   useEffect(() => {
     const load = async () => {
-      const patientMap = new Map<string, Conversation>();
+      try {
+        const phoneToConv = new Map<string, Conversation>(); // key = last10 digits
+        const norm = (raw: string | null | undefined): string => (raw || '').replace(/\D/g, '').slice(-10);
 
-      // From appointments
-      appointments.forEach(appt => {
-        if (appt.patient_phone && appt.patient_id && !patientMap.has(appt.patient_id)) {
-          patientMap.set(appt.patient_id, {
-            id: appt.patient_id,
-            patient_id: appt.patient_id,
-            patient_phone: appt.patient_phone,
-            patient_name: appt.patient_name,
-            last_message: `${appt.service_type?.replace(/_/g, ' ')} - ${appt.appointment_date}`,
-            last_message_at: appt.appointment_date,
-            unread: false,
-          });
-        }
-      });
+        // 1) Pull recent SMS from the three log sources in parallel
+        const [logsRes, smsMsgRes, notifRes, patientsRes, conversationsRes] = await Promise.all([
+          supabase
+            .from('notification_logs' as any)
+            .select('id, notification_type, recipient_phone, message, sent_at, created_at')
+            .ilike('notification_type', '%sms%')
+            .order('created_at', { ascending: false })
+            .limit(2000),
+          supabase
+            .from('sms_messages' as any)
+            .select('id, conversation_id, direction, body, created_at')
+            .order('created_at', { ascending: false })
+            .limit(2000),
+          supabase
+            .from('sms_notifications' as any)
+            .select('id, phone_number, message_content, sent_at')
+            .order('sent_at', { ascending: false })
+            .limit(500),
+          supabase
+            .from('tenant_patients')
+            .select('id, first_name, last_name, phone, email')
+            .not('phone', 'is', null)
+            .order('first_name', { ascending: true }),
+          supabase
+            .from('sms_conversations' as any)
+            .select('id, patient_phone, patient_id'),
+        ]);
 
-      // Also fetch all patients with phone numbers from tenant_patients
-      const { data: patients } = await supabase
-        .from('tenant_patients')
-        .select('id, first_name, last_name, phone, email')
-        .not('phone', 'is', null)
-        .order('first_name', { ascending: true });
+        // Map sms_conversations.id -> patient_phone so we can attribute
+        // inbound sms_messages rows back to a phone for grouping.
+        const convoIdToPhone = new Map<string, string>();
+        const convoIdToPatientId = new Map<string, string>();
+        ((conversationsRes.data as any[]) || []).forEach((c: any) => {
+          if (c.id) {
+            if (c.patient_phone) convoIdToPhone.set(c.id, c.patient_phone);
+            if (c.patient_id) convoIdToPatientId.set(c.id, c.patient_id);
+          }
+        });
 
-      (patients || []).forEach((p: any) => {
-        if (p.phone && p.phone.trim() && !patientMap.has(p.id)) {
-          patientMap.set(p.id, {
+        // Helper — upsert a conversation entry, keeping the newest message
+        const upsert = (phone: string, name: string, body: string, when: string, patientId: string | null, direction: 'inbound' | 'outbound') => {
+          const key = norm(phone);
+          if (!key) return;
+          const existing = phoneToConv.get(key);
+          const ts = new Date(when || 0).getTime();
+          if (!existing || ts > new Date(existing.last_message_at || 0).getTime()) {
+            const prefix = direction === 'inbound' ? '↩ ' : '→ ';
+            phoneToConv.set(key, {
+              id: patientId || key,
+              patient_id: patientId || '',
+              patient_phone: phone,
+              patient_name: name || existing?.patient_name || 'Unknown',
+              last_message: prefix + (body || '').slice(0, 80),
+              last_message_at: when || new Date().toISOString(),
+              unread: direction === 'inbound' && !existing,
+            });
+          }
+        };
+
+        // Build a phone-keyed lookup from appointments + tenant_patients
+        // so we can show real names instead of bare phone numbers.
+        const phoneToName = new Map<string, { name: string; patient_id: string }>();
+        const phoneToPatient = new Map<string, string>();
+        appointments.forEach(appt => {
+          const k = norm(appt.patient_phone);
+          if (k && !phoneToName.has(k)) {
+            phoneToName.set(k, { name: appt.patient_name || 'Patient', patient_id: appt.patient_id || '' });
+            if (appt.patient_id) phoneToPatient.set(k, appt.patient_id);
+          }
+        });
+        ((patientsRes.data as any[]) || []).forEach((p: any) => {
+          const k = norm(p.phone);
+          if (!k) return;
+          const nm = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown';
+          if (!phoneToName.has(k)) phoneToName.set(k, { name: nm, patient_id: p.id });
+          if (!phoneToPatient.has(k) && p.id) phoneToPatient.set(k, p.id);
+        });
+
+        const resolveName = (phone: string): { name: string; patient_id: string } => {
+          const k = norm(phone);
+          return phoneToName.get(k) || { name: phone, patient_id: phoneToPatient.get(k) || '' };
+        };
+
+        // 2) Fold notification_logs (outbound system SMS) into the map
+        ((logsRes.data as any[]) || []).forEach((m: any) => {
+          if (!m.recipient_phone) return;
+          const meta = resolveName(m.recipient_phone);
+          upsert(m.recipient_phone, meta.name, m.message || '', m.sent_at || m.created_at, meta.patient_id || null, 'outbound');
+        });
+
+        // 3) Fold sms_messages (in + out, attributed via sms_conversations.patient_phone)
+        ((smsMsgRes.data as any[]) || []).forEach((m: any) => {
+          const phone = convoIdToPhone.get(m.conversation_id);
+          if (!phone) return;
+          const meta = resolveName(phone);
+          const pid = convoIdToPatientId.get(m.conversation_id) || meta.patient_id || null;
+          upsert(phone, meta.name, m.body || '', m.created_at, pid, (m.direction === 'inbound' ? 'inbound' : 'outbound'));
+        });
+
+        // 4) Fold sms_notifications (legacy outbound)
+        ((notifRes.data as any[]) || []).forEach((m: any) => {
+          if (!m.phone_number) return;
+          const meta = resolveName(m.phone_number);
+          upsert(m.phone_number, meta.name, m.message_content || '', m.sent_at, meta.patient_id || null, 'outbound');
+        });
+
+        // 5) Patients with no SMS history yet — appended so phleb can still
+        //    start a conversation from the same screen.
+        ((patientsRes.data as any[]) || []).forEach((p: any) => {
+          if (!p.phone || !p.phone.trim()) return;
+          const k = norm(p.phone);
+          if (phoneToConv.has(k)) return;
+          phoneToConv.set(k, {
             id: p.id,
             patient_id: p.id,
             patient_phone: p.phone,
             patient_name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unknown',
-            last_message: p.email || 'Patient',
-            last_message_at: new Date().toISOString(),
+            last_message: 'No messages yet',
+            last_message_at: '1970-01-01T00:00:00Z',
             unread: false,
           });
-        }
-      });
+        });
 
-      const all = Array.from(patientMap.values());
-      setConversations(all);
-      setAllPatients(all);
-      setIsLoading(false);
+        // 6) Appointments-only fallback for any phones we still don't know
+        appointments.forEach(appt => {
+          if (!appt.patient_phone) return;
+          const k = norm(appt.patient_phone);
+          if (!k || phoneToConv.has(k)) return;
+          phoneToConv.set(k, {
+            id: appt.patient_id || k,
+            patient_id: appt.patient_id || '',
+            patient_phone: appt.patient_phone,
+            patient_name: appt.patient_name || 'Patient',
+            last_message: 'No messages yet',
+            last_message_at: '1970-01-01T00:00:00Z',
+            unread: false,
+          });
+        });
+
+        // Sort newest-first; patients with no history sink to bottom.
+        const sorted = Array.from(phoneToConv.values()).sort(
+          (a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+        );
+        setConversations(sorted);
+        setAllPatients(sorted);
+      } catch (err) {
+        console.warn('[messages] conversation list load failed:', err);
+        setConversations([]);
+        setAllPatients([]);
+      } finally {
+        setIsLoading(false);
+      }
     };
     load();
   }, [appointments]);
@@ -114,13 +232,16 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         return raw.replace(/\D/g, '').endsWith(last10);
       };
 
-      // PRIMARY — notification_logs (every SMS the system sends)
+      // PRIMARY — notification_logs (every SMS the system sends).
+      // Filter server-side on the recipient_phone digits so we don't drag
+      // 2,000 rows over the wire for one patient.
       const { data: logs } = await supabase
         .from('notification_logs' as any)
         .select('id, notification_type, recipient_phone, message, sent_at, created_at, status')
         .ilike('notification_type', '%sms%')
+        .ilike('recipient_phone', `%${last10}%`)
         .order('created_at', { ascending: true })
-        .limit(2000);
+        .limit(500);
       if (logs) {
         (logs as any[]).forEach((m: any) => {
           if (!phoneMatches(m.recipient_phone)) return;
@@ -137,7 +258,9 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
       const { data: notifs } = await supabase
         .from('sms_notifications' as any)
         .select('id, phone_number, message_content, sent_at')
-        .order('sent_at', { ascending: true });
+        .ilike('phone_number', `%${last10}%`)
+        .order('sent_at', { ascending: true })
+        .limit(500);
       if (notifs) {
         (notifs as any[]).forEach((m: any) => {
           if (!phoneMatches(m.phone_number)) return;
@@ -150,31 +273,25 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         });
       }
 
-      // TERTIARY — sms_messages (conversation table, currently empty but
-      // ready for inbound replies via Twilio webhook)
-      const { data: convMsgs } = await supabase
-        .from('sms_messages' as any)
-        .select('id, conversation_id, direction, body, created_at')
-        .order('created_at', { ascending: true });
-      if (convMsgs) {
-        // Build a phone lookup by conversation_id
-        const convoIds = Array.from(new Set((convMsgs as any[]).map((m: any) => m.conversation_id).filter(Boolean)));
-        let phoneByConvoId = new Map<string, string>();
-        if (convoIds.length > 0) {
-          const { data: convos } = await supabase
-            .from('sms_conversations' as any)
-            .select('id, patient_phone')
-            .in('id', convoIds);
-          if (convos) {
-            (convos as any[]).forEach((c: any) => phoneByConvoId.set(c.id, c.patient_phone || ''));
-          }
-        }
-        (convMsgs as any[]).forEach((m: any) => {
-          const convoPhone = phoneByConvoId.get(m.conversation_id) || '';
-          if (!phoneMatches(convoPhone)) return;
+      // TERTIARY — sms_messages (two-way conversation, includes inbound
+      // patient replies). Resolve the conversation id(s) for this phone
+      // first so we don't pull the entire table.
+      const { data: convos } = await supabase
+        .from('sms_conversations' as any)
+        .select('id, patient_phone')
+        .ilike('patient_phone', `%${last10}%`);
+      const convoIds = ((convos as any[]) || []).map((c: any) => c.id).filter(Boolean);
+      if (convoIds.length > 0) {
+        const { data: convMsgs } = await supabase
+          .from('sms_messages' as any)
+          .select('id, conversation_id, direction, body, created_at')
+          .in('conversation_id', convoIds)
+          .order('created_at', { ascending: true })
+          .limit(500);
+        ((convMsgs as any[]) || []).forEach((m: any) => {
           allMsgs.push({
             id: m.id,
-            direction: m.direction || 'outbound',
+            direction: m.direction === 'inbound' ? 'inbound' : 'outbound',
             body: m.body || '',
             created_at: m.created_at,
           });
@@ -426,26 +543,34 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         </div>
       )}
 
-      {filteredConversations.map((conv) => (
-        <Card
-          key={conv.id}
-          className="shadow-sm cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => setActiveConversation(conv)}
-        >
-          <CardContent className="p-3 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-[#B91C1C]/10 flex items-center justify-center flex-shrink-0">
-              <User className="h-5 w-5 text-[#B91C1C]" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-semibold text-sm truncate">{conv.patient_name}</p>
-              <p className="text-xs text-muted-foreground truncate">{conv.last_message}</p>
-            </div>
-            <div className="text-right flex-shrink-0">
-              <p className="text-[10px] text-muted-foreground">{conv.patient_phone}</p>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      {filteredConversations.map((conv) => {
+        const hasHistory = conv.last_message_at && new Date(conv.last_message_at).getFullYear() > 2000;
+        const when = hasHistory ? new Date(conv.last_message_at) : null;
+        const now = new Date();
+        const sameDay = when && when.toDateString() === now.toDateString();
+        const ts = when ? (sameDay ? format(when, 'h:mm a') : format(when, 'MMM d')) : '';
+        return (
+          <Card
+            key={conv.id || conv.patient_phone}
+            className={`shadow-sm cursor-pointer hover:shadow-md transition-shadow ${conv.unread ? 'border-l-4 border-l-[#B91C1C]' : ''}`}
+            onClick={() => setActiveConversation(conv)}
+          >
+            <CardContent className="p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-[#B91C1C]/10 flex items-center justify-center flex-shrink-0">
+                <User className="h-5 w-5 text-[#B91C1C]" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className={`text-sm truncate ${conv.unread ? 'font-bold text-gray-900' : 'font-semibold'}`}>{conv.patient_name}</p>
+                  {ts && <p className="text-[10px] text-muted-foreground flex-shrink-0">{ts}</p>}
+                </div>
+                <p className={`text-xs truncate ${hasHistory ? 'text-gray-600' : 'text-gray-400 italic'}`}>{conv.last_message}</p>
+                <p className="text-[10px] text-muted-foreground">{conv.patient_phone}</p>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 };
