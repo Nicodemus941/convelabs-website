@@ -164,6 +164,25 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
     group_number: primaryInsurance.group_number,
   } : null;
   const hasInsuranceText = !!(patientInsurance?.provider || patientInsurance?.member_id);
+  // Treat ANY signal of insurance-on-file as "we have it" so the lower
+  // section doesn't say "No insurance card on file" while the upper
+  // Patient Details panel proudly shows Blue Anthem ID: YTN083... (the
+  // Nicholas Chaillan inconsistency, 2026-05-10). Includes the new
+  // multi-row patient_insurances table (card_front_path / card_back_path)
+  // and the legacy single-row mirror.
+  const hasAnyInsuranceOnFile =
+    patientInsurances.length > 0 ||
+    !!appointment.insurance_card_path ||
+    !!insuranceJustUploaded ||
+    hasInsuranceText;
+  // Preferred card path for the "View Insurance Card" button — prefer the
+  // multi-row primary, then secondary, then the legacy appointment field.
+  const viewableCardPath =
+    insuranceJustUploaded ||
+    primaryInsurance?.card_front_path ||
+    secondaryInsurance?.card_front_path ||
+    appointment.insurance_card_path ||
+    null;
 
   // Lab directory lookup for hours-aware routing. Picks the closest lab
   // matching the appointment's lab_destination brand (best-effort: by
@@ -863,7 +882,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               {/* Insurance — shows EITHER the card image OR the parsed
                   text fields (extracted from the lab order via ocr-lab-order),
                   whichever is available. Both can coexist. */}
-              {(appointment.insurance_card_path || insuranceJustUploaded || hasInsuranceText) ? (
+              {hasAnyInsuranceOnFile ? (
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-1.5">
                     <Shield className="h-3.5 w-3.5 text-gray-500" />
@@ -897,13 +916,13 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
 
                   {/* Card image actions */}
                   <div className="flex flex-wrap gap-2">
-                    {(appointment.insurance_card_path || insuranceJustUploaded) && (
+                    {viewableCardPath && (
                       <Button size="sm" variant="outline" className="gap-1.5 text-xs justify-start h-8"
                         onClick={(e) => {
                           e.stopPropagation();
                           setLabOrderViewer({
                             open: true,
-                            path: insuranceJustUploaded || appointment.insurance_card_path!,
+                            path: viewableCardPath,
                             name: 'Insurance Card',
                           });
                         }}>
@@ -914,7 +933,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <PhlebUploadInsuranceCardButton
                       appointmentId={appointment.id}
                       patientId={(appointment as any).patient_id || null}
-                      label={(appointment.insurance_card_path || insuranceJustUploaded) ? 'Replace / Add back' : 'Add card photo'}
+                      label={viewableCardPath ? 'Replace / Add back' : 'Add card photo'}
                       variant="subtle"
                       onUploaded={(p) => setInsuranceJustUploaded(p)}
                     />

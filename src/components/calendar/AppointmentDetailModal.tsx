@@ -257,6 +257,41 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const insuranceProvider = patientData?.insurance_provider || '';
   const insuranceMemberId = patientData?.insurance_member_id || '';
   const insuranceGroup = patientData?.insurance_group_number || '';
+  // Resolve the actual card image path from ANY of: the appointment row
+  // (legacy), the patient profile (tenant_patients legacy), or the new
+  // multi-row patient_insurances table. Without this, the modal said
+  // "No insurance card on file" while the Insurance panel above showed
+  // Blue Anthem ID: YTN083... (Nicholas Chaillan, 2026-05-10).
+  const [patientInsRows, setPatientInsRows] = useState<any[]>([]);
+  useEffect(() => {
+    if (!appt?.patient_id) { setPatientInsRows([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('patient_insurances' as any)
+        .select('id, rank, provider, member_id, card_front_path, card_back_path, verified_at')
+        .eq('patient_id', appt.patient_id)
+        .eq('is_active', true)
+        .order('rank', { ascending: true });
+      if (!cancelled) setPatientInsRows((data as any) || []);
+    })();
+    return () => { cancelled = true; };
+  }, [appt?.patient_id]);
+  const primaryInsRow = patientInsRows.find((r: any) => r.rank === 'primary') || null;
+  const secondaryInsRow = patientInsRows.find((r: any) => r.rank === 'secondary') || null;
+  const insuranceCardPath =
+    appt.insurance_card_path ||
+    primaryInsRow?.card_front_path ||
+    primaryInsRow?.card_back_path ||
+    secondaryInsRow?.card_front_path ||
+    patientData?.insurance_card_path ||
+    null;
+  const insuranceCardBucket = appt.insurance_card_path ? 'lab-orders' : 'insurance-cards';
+  const hasAnyInsuranceOnFile =
+    !!insuranceCardPath ||
+    !!insuranceProvider ||
+    !!insuranceMemberId ||
+    patientInsRows.length > 0;
 
   const serviceName = appt.service_name || appt.notes?.match(/Service:\s*([^|]+)/)?.[1]?.trim() || '';
   const dateStr = appt.appointment_date?.substring(0, 10) || '';
@@ -534,7 +569,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             <ReadinessItem ok={!!appt.address} label="Address" />
             <ReadinessItem ok={!!(labOrderCount && labOrderCount > 0) || !!appt.lab_order_file_path} label={labOrderCount ? `${labOrderCount} lab order${labOrderCount === 1 ? '' : 's'}` : 'Lab order'} />
             <ReadinessItem
-              ok={!!appt.insurance_card_path || !!patientData?.insurance_provider}
+              ok={hasAnyInsuranceOnFile}
               label="Insurance"
               partialOk={appt.service_type === 'in-office' || (appt.service_type || '').startsWith('partner-')}
             />
@@ -690,11 +725,33 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         </button>
         {showInsurance && (
           <div className="px-5 pb-4 text-sm">
-            {insuranceProvider ? (
-              <div className="space-y-1 pl-6">
-                <p><span className="text-gray-400">Provider:</span> {insuranceProvider}</p>
-                {insuranceMemberId && <p><span className="text-gray-400">Member ID:</span> {insuranceMemberId}</p>}
-                {insuranceGroup && <p><span className="text-gray-400">Group:</span> {insuranceGroup}</p>}
+            {(insuranceProvider || primaryInsRow || secondaryInsRow) ? (
+              <div className="space-y-2 pl-6">
+                {/* Prefer the new multi-row table; fall back to legacy single-row */}
+                {primaryInsRow ? (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Primary</p>
+                    <p><span className="text-gray-400">Provider:</span> {primaryInsRow.provider || insuranceProvider || '—'}</p>
+                    {(primaryInsRow.member_id || insuranceMemberId) && (
+                      <p><span className="text-gray-400">Member ID:</span> {primaryInsRow.member_id || insuranceMemberId}</p>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <p><span className="text-gray-400">Provider:</span> {insuranceProvider}</p>
+                    {insuranceMemberId && <p><span className="text-gray-400">Member ID:</span> {insuranceMemberId}</p>}
+                    {insuranceGroup && <p><span className="text-gray-400">Group:</span> {insuranceGroup}</p>}
+                  </div>
+                )}
+                {secondaryInsRow && (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500">Secondary</p>
+                    <p><span className="text-gray-400">Provider:</span> {secondaryInsRow.provider || '—'}</p>
+                    {secondaryInsRow.member_id && (
+                      <p><span className="text-gray-400">Member ID:</span> {secondaryInsRow.member_id}</p>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-gray-400 pl-6">No insurance on file — self-pay patient</p>
@@ -728,15 +785,28 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         {/* Insurance Card upload (admin can attach retroactively) */}
         <div className="px-5 py-4 space-y-3">
           <p className="text-sm font-bold text-gray-900">Insurance Card</p>
-          {appt.insurance_card_path ? (
+          {insuranceCardPath ? (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start h-8" onClick={async () => {
-              const { data } = await supabase.storage.from('lab-orders').createSignedUrl(appt.insurance_card_path, 3600);
-              if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-              else toast.error('Could not load file');
+              // Resolve bucket: legacy appointment.insurance_card_path lived in
+              // lab-orders; new multi-row + self-serve uploads live in
+              // insurance-cards. Try the right one first, fall back if missing.
+              const tryBuckets = insuranceCardBucket === 'insurance-cards'
+                ? ['insurance-cards', 'lab-orders']
+                : ['lab-orders', 'insurance-cards'];
+              for (const b of tryBuckets) {
+                const { data } = await supabase.storage.from(b).createSignedUrl(insuranceCardPath, 3600);
+                if (data?.signedUrl) { window.open(data.signedUrl, '_blank'); return; }
+              }
+              toast.error('Could not load file');
             }}>
               <Shield className="h-3.5 w-3.5" /> View Insurance Card
               <ExternalLink className="h-3 w-3 ml-auto" />
             </Button>
+          ) : hasAnyInsuranceOnFile ? (
+            <p className="text-xs text-emerald-700">
+              ✓ Insurance on file ({insuranceProvider || 'carrier on chart'}
+              {insuranceMemberId && ` · ID ${insuranceMemberId}`}) — no card image yet
+            </p>
           ) : (
             <p className="text-xs text-gray-400">No insurance card on file</p>
           )}
