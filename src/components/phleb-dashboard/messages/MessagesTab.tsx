@@ -47,6 +47,26 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
   const [allPatients, setAllPatients] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Coerce ANY cell value into a string so we never accidentally render
+  // an object as a React child (the {lat, lng, ...} crash 2026-05-10).
+  // Some legacy rows in notification_logs.message + sms_messages.body are
+  // jsonb payloads instead of plain text.
+  const asText = (v: any): string => {
+    if (v == null) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    try {
+      // Common shape: { message: "..." } or array of segments
+      if (typeof v === 'object') {
+        if (typeof (v as any).message === 'string') return (v as any).message;
+        if (typeof (v as any).body === 'string') return (v as any).body;
+        if (typeof (v as any).text === 'string') return (v as any).text;
+        return JSON.stringify(v);
+      }
+    } catch { /* noop */ }
+    return String(v);
+  };
+
   // Build conversations: real SMS history first (notification_logs +
   // sms_messages + sms_notifications), patient roster as fallback.
   // Each conversation's preview shows the actual last message body +
@@ -98,19 +118,20 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         });
 
         // Helper — upsert a conversation entry, keeping the newest message
-        const upsert = (phone: string, name: string, body: string, when: string, patientId: string | null, direction: 'inbound' | 'outbound') => {
+        const upsert = (phone: string, name: string, body: any, when: string, patientId: string | null, direction: 'inbound' | 'outbound') => {
           const key = norm(phone);
           if (!key) return;
           const existing = phoneToConv.get(key);
           const ts = new Date(when || 0).getTime();
           if (!existing || ts > new Date(existing.last_message_at || 0).getTime()) {
             const prefix = direction === 'inbound' ? '↩ ' : '→ ';
+            const bodyStr = asText(body);
             phoneToConv.set(key, {
               id: patientId || key,
               patient_id: patientId || '',
-              patient_phone: phone,
-              patient_name: name || existing?.patient_name || 'Unknown',
-              last_message: prefix + (body || '').slice(0, 80),
+              patient_phone: asText(phone),
+              patient_name: asText(name) || existing?.patient_name || 'Unknown',
+              last_message: prefix + bodyStr.slice(0, 80),
               last_message_at: when || new Date().toISOString(),
               unread: direction === 'inbound' && !existing,
             });
@@ -248,7 +269,7 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
           allMsgs.push({
             id: m.id,
             direction: 'outbound', // notification_logs is system → patient
-            body: m.message || '',
+            body: asText(m.message),
             created_at: m.sent_at || m.created_at,
           });
         });
@@ -267,7 +288,7 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
           allMsgs.push({
             id: m.id,
             direction: 'outbound',
-            body: m.message_content || '',
+            body: asText(m.message_content),
             created_at: m.sent_at,
           });
         });
@@ -292,7 +313,7 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
           allMsgs.push({
             id: m.id,
             direction: m.direction === 'inbound' ? 'inbound' : 'outbound',
-            body: m.body || '',
+            body: asText(m.body),
             created_at: m.created_at,
           });
         });
