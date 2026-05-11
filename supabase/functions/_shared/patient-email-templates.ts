@@ -223,6 +223,129 @@ export function renderAppointmentReminder(p: CommonPatientParams & {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// 4. MEMBERSHIP WELCOME — Hormozi: name the dream, list the promises,
+//    show the math, give the next step, close with the brand promise.
+// ──────────────────────────────────────────────────────────────────
+export function renderMembershipWelcome(p: CommonPatientParams & {
+  tier: 'member' | 'vip' | 'concierge';
+  annualPriceCents: number;       // what they just paid
+  nextRenewalDate?: string;       // e.g. "May 11, 2027"
+  foundingMemberNumber?: number | null;  // VIP Founding 50 seat #
+  dashboardUrl?: string;
+}): string {
+  const phone = p.supportPhone || DEFAULT_SUPPORT_PHONE;
+  const tierLabel = p.tier === 'concierge' ? 'Concierge' : p.tier === 'vip' ? 'VIP' : 'Member';
+  const annual = `$${(p.annualPriceCents / 100).toFixed(0)}/yr`;
+
+  // Tier-specific perks. Mirrors src/lib/memberBenefits.ts TIER_PRICING.
+  // We list ONLY what's true today — Hormozi: "make promises you can keep."
+  const perksByTier: Record<string, Array<{ icon: string; title: string; detail: string }>> = {
+    member: [
+      { icon: '🩸', title: 'Lower price on every visit',  detail: 'Mobile draw $130 (vs $150) · In-office $49 · Specialty kit $165' },
+      { icon: '💸', title: 'Cheaper family add-ons',     detail: 'Add a household member for $60 (vs $75)' },
+      { icon: '📞', title: 'Priority phone support',      detail: 'Member line answered within 1 business hour' },
+      { icon: '🔔', title: 'No same-day surcharge ever',  detail: 'Skip the $25 same-day fee on non-emergency requests' },
+    ],
+    vip: [
+      { icon: '🩸', title: 'VIP pricing on every visit',  detail: 'Mobile draw $115 (vs $150) · In-office $45 · Specialty kit $150' },
+      { icon: '👨‍👩‍👧', title: 'Family add-ons just $45',    detail: 'Bring a spouse, parent, or child for $45 per visit (vs $75)' },
+      { icon: '⚡', title: 'Priority scheduling',         detail: 'First pick on every slot before public booking opens the next day' },
+      { icon: '📞', title: 'White-glove support',          detail: '(941) 527-9169 answered within 1 hour, every business day' },
+      { icon: '🔒', title: 'Annual rate-lock',            detail: 'Today\'s price is your price next year — no annual hike' },
+    ],
+    concierge: [
+      { icon: '🩸', title: 'Concierge pricing on every visit', detail: 'Mobile draw $99 (vs $150) · In-office $39 · Specialty kit $135' },
+      { icon: '👨‍👩‍👧‍👦', title: 'Family add-ons FREE for up to 2 members', detail: 'Bring 2 household members per visit at no extra cost' },
+      { icon: '⚡', title: 'First-out scheduling',         detail: 'Always the first available slot — no waiting list, ever' },
+      { icon: '🚗', title: 'Extended-area visits included',detail: 'No distance surcharge inside the standard ConveLabs service area' },
+      { icon: '📞', title: 'Direct line to leadership',    detail: 'Concierge line — averages under 10 minutes to a real human' },
+      { icon: '🔒', title: 'Annual rate-lock',            detail: 'Your price never goes up while you\'re an active Concierge member' },
+    ],
+  };
+  const perks = perksByTier[p.tier] || perksByTier.member;
+  const perkRows = perks.map(perk => `
+    <tr><td style="padding:10px 0;border-bottom:1px solid #f3f4f6;vertical-align:top;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td width="36" style="vertical-align:top;font-size:20px;line-height:1;">${perk.icon}</td>
+        <td style="vertical-align:top;">
+          <div style="font-weight:700;font-size:14px;color:#111827;margin-bottom:2px;">${perk.title}</div>
+          <div style="font-size:13px;color:#4b5563;line-height:1.5;">${perk.detail}</div>
+        </td>
+      </tr></table>
+    </td></tr>`).join('');
+
+  const heroBadge = p.foundingMemberNumber
+    ? `<div style="display:inline-block;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;padding:4px 12px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">★ Founding Member #${p.foundingMemberNumber} of 50 · Rate locked for life</div>`
+    : '';
+
+  const body = `
+    <p style="margin:0 0 16px;color:#111827;font-size:18px;line-height:1.5;">Welcome, ${p.patientName}.</p>
+    <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.7;">You're now a <strong>ConveLabs ${tierLabel}</strong>. Here's exactly what that means for you — every visit from today forward.</p>
+
+    ${heroBadge}
+
+    <!-- The promise card — Hormozi: name the dream outcome up front -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #fbbf24;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:20px 22px;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#92400e;font-weight:bold;margin-bottom:8px;">Your ${tierLabel} promise</div>
+        <p style="margin:0;color:#78350f;font-size:15px;line-height:1.6;">
+          Lab work, the way it should be: a licensed phlebotomist at your door, your time, your terms — at the lowest price we offer.
+        </p>
+      </td></tr>
+    </table>
+
+    <!-- Perks list — every promise the membership delivers -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:8px 22px 12px;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#B91C1C;font-weight:bold;margin:14px 0 8px;">What you get</div>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">${perkRows}</table>
+      </td></tr>
+    </table>
+
+    <!-- How it works — answer the obvious questions before they ask -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#faf7f2;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:20px 22px;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#B91C1C;font-weight:bold;margin-bottom:12px;">How it works</div>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr><td style="padding:5px 0;color:#374151;font-size:13px;line-height:1.6;"><strong>1.</strong>&nbsp;&nbsp;Your ${tierLabel} pricing is applied automatically every time you book — no codes to remember.</td></tr>
+          <tr><td style="padding:5px 0;color:#374151;font-size:13px;line-height:1.6;"><strong>2.</strong>&nbsp;&nbsp;Membership is <strong>${annual}</strong>, charged once. Next renewal: ${p.nextRenewalDate || 'one year from today'} — we'll email you 14 days before.</td></tr>
+          <tr><td style="padding:5px 0;color:#374151;font-size:13px;line-height:1.6;"><strong>3.</strong>&nbsp;&nbsp;You can pause, change tier, or cancel anytime from your patient portal — no penalty, no phone tree.</td></tr>
+          <tr><td style="padding:5px 0;color:#374151;font-size:13px;line-height:1.6;"><strong>4.</strong>&nbsp;&nbsp;Questions? Just reply to this email or call <strong>${phone}</strong>. We answer within 1 business hour.</td></tr>
+        </table>
+      </td></tr>
+    </table>
+
+    ${p.dashboardUrl ? `
+    <!-- CTA -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+      <tr><td align="center">
+        <a href="${p.dashboardUrl}" style="display:inline-block;background:#B91C1C;color:#ffffff;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;box-shadow:0 4px 12px rgba(185,28,28,0.25);">Book your next visit</a>
+      </td></tr>
+    </table>
+    ` : ''}
+
+    <!-- The brand promise — Hormozi: close with the guarantee -->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-bottom:16px;">
+      <tr><td style="padding:18px 22px;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#166534;font-weight:bold;margin-bottom:8px;">Our guarantee to you</div>
+        <p style="margin:0 0 6px;color:#14532d;font-size:13px;line-height:1.6;">On-time arrival, licensed phlebotomist, specimen-delivery confirmation, and free re-draw if anything goes sideways. We mean it.</p>
+        <p style="margin:0;color:#15803d;font-size:12px;line-height:1.6;">If we ever fall short of the promise above, we make it right — first response on us.</p>
+      </td></tr>
+    </table>
+
+    <p style="margin:18px 0 4px;color:#6b7280;font-size:13px;line-height:1.7;text-align:center;">Thanks for trusting us with your health.</p>
+    <p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">— Nicodemme Jean-Baptiste, Founder &amp; CEO</p>
+  `;
+
+  return shell({
+    preheader: `Your ConveLabs ${tierLabel} membership is active. Here's everything you get.`,
+    heroTitle: `Welcome, ${tierLabel.toLowerCase() === 'concierge' ? 'Concierge member' : tierLabel === 'VIP' ? 'VIP member' : 'Member'}`,
+    heroEyebrow: 'Your benefits start the moment you book your next visit.',
+    bodyHtml: body,
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────
 // 3. SPECIMEN DELIVERED
 // ──────────────────────────────────────────────────────────────────
 export function renderSpecimenDelivered(p: CommonPatientParams & {

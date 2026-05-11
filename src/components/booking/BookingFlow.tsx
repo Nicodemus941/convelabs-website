@@ -611,12 +611,22 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         'fedex': 'FedEx',
       } as Record<string, string>)[rawDest] || rawDest || null;
 
+      // Patient credit IDs picked in CheckoutStep land here via sessionStorage.
+      // Server re-verifies ownership + unredeemed status before applying — the
+      // client value is suggestive only. (Aditya Patel goodwill credit 2026-05-11.)
+      let redeemReferralCreditIds: string[] = [];
+      try {
+        const rawCreds = typeof window !== 'undefined' ? sessionStorage.getItem('convelabs_redeem_credit_ids') : null;
+        if (rawCreds) redeemReferralCreditIds = JSON.parse(rawCreds) || [];
+      } catch { /* private-browsing safe */ }
+
       const result = await createAppointmentCheckoutSession({
         serviceType: visitType,
         serviceName: service?.name || 'Blood Draw Service',
         amount: Math.round(finalSubtotal * 100),
         tipAmount: Math.round(tipAmount * 100),
         promoCode: promoCode || null,
+        redeemReferralCreditIds,
         // Referral code from URL ?ref=CODE (set in BookNow.tsx → sessionStorage)
         // OR manually entered in CheckoutStep. Server re-validates against
         // referral_codes table and applies the discount before Stripe charge.

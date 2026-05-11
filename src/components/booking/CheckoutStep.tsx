@@ -91,6 +91,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   } | null>(null);
   const [memberLabel, setMemberLabel] = useState('');
   const [bundleEnabled, setBundleEnabled] = useState(false);
+  // Patient credits (referral_credits + goodwill) — auto-detected from the
+  // logged-in patient's email. Stored as cents for precise math. Applied
+  // by default; patient can uncheck to save for later. IDs are persisted
+  // to sessionStorage so BookingFlow picks them up at submission time
+  // without changing the onCheckout callback signature.
+  const [availableCreditCents, setAvailableCreditCents] = useState(0);
+  const [availableCreditIds, setAvailableCreditIds] = useState<string[]>([]);
+  const [applyCredits, setApplyCredits] = useState(true);
   // Family members live INSIDE the additionalPatients form array (single
   // source of truth for companions on this booking). Tagged with
   // _source='family_member' so we can filter for display + remove. Older
@@ -144,6 +152,47 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         if (detectedTier !== 'none') onMemberTierDetected?.(detectedTier);
       });
   }, []);
+
+  // Auto-detect unredeemed patient credits by email — referral wins,
+  // goodwill, apology credits all live in the same table. Patient never
+  // has to remember a code; the system finds and applies them.
+  React.useEffect(() => {
+    const email = (getValues('patientDetails.email') || '').trim();
+    if (!email) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: tp } = await supabase
+          .from('tenant_patients').select('user_id').ilike('email', email).maybeSingle();
+        if (!tp?.user_id || cancelled) return;
+        const { data: rows } = await supabase
+          .from('referral_credits' as any)
+          .select('id, amount')
+          .eq('user_id', tp.user_id)
+          .eq('redeemed', false);
+        if (cancelled) return;
+        const list = (rows || []) as any[];
+        const ids = list.map(r => r.id);
+        const cents = list.reduce((s, r) => s + Math.round(Number(r.amount || 0) * 100), 0);
+        setAvailableCreditCents(cents);
+        setAvailableCreditIds(ids);
+      } catch { /* non-blocking */ }
+    })();
+    return () => { cancelled = true; };
+  }, [getValues('patientDetails.email')]);
+
+  // Persist chosen credit IDs to sessionStorage so BookingFlow can pull
+  // them at submission and forward to create-appointment-checkout. Clearing
+  // applyCredits zeros it out instantly.
+  React.useEffect(() => {
+    try {
+      if (applyCredits && availableCreditIds.length > 0) {
+        sessionStorage.setItem('convelabs_redeem_credit_ids', JSON.stringify(availableCreditIds));
+      } else {
+        sessionStorage.removeItem('convelabs_redeem_credit_ids');
+      }
+    } catch { /* private-browsing safe */ }
+  }, [applyCredits, availableCreditIds]);
 
   // Fetch add-ons for this service type
   React.useEffect(() => {
@@ -383,6 +432,34 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2">
             <span className="text-emerald-700 text-sm font-medium">🎉 {memberLabel} pricing applied!</span>
             <span className="text-xs text-emerald-600">Your membership discount has been automatically applied.</span>
+          </div>
+        )}
+
+        {/* Patient credit available — auto-detected from referral_credits.
+            Includes referrals, goodwill, and apology credits. Default ON so
+            the patient gets the discount automatically; can opt out to save
+            it for a future visit. (Aditya Patel 2026-05-11 + future flows.) */}
+        {availableCreditCents > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <Gift className="h-4 w-4 text-amber-700 mt-0.5 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-900">
+                    ${(availableCreditCents / 100).toFixed(2)} credit on your account
+                  </p>
+                  <p className="text-xs text-amber-800">
+                    {applyCredits
+                      ? `We'll apply it to today's booking — you save $${(Math.min(availableCreditCents, Math.round((breakdown.total || 0) * 100)) / 100).toFixed(2)}.`
+                      : 'Saved for a future visit. Toggle on to apply now.'}
+                  </p>
+                </div>
+              </div>
+              <label className="flex items-center gap-1.5 text-xs font-medium text-amber-900 cursor-pointer flex-shrink-0">
+                <Checkbox checked={applyCredits} onCheckedChange={(v) => setApplyCredits(v === true)} />
+                Apply now
+              </label>
+            </div>
           </div>
         )}
 

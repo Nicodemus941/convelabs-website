@@ -658,11 +658,51 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     if (isFoundingMember) {
       console.log(`User ${userId} registered as Founding Member with next billing on ${nextBillingOverride?.toISOString()}`);
     }
-    
+
     if (isSupernovaMember) {
       console.log(`User ${userId} registered as Supernova Member with ${bonusCredits} bonus credits`);
     }
-    
+
+    // ── HORMOZI WELCOME EMAIL ────────────────────────────────────
+    // Fire the Hormozi-structured welcome email immediately. Names
+    // the promise, lists every perk by tier with the actual dollar
+    // values, shows the renewal date, gives the next-step CTA.
+    // Non-blocking: a failure here must NEVER undo the membership.
+    try {
+      const planNameLower = String(planData?.name || '').toLowerCase();
+      let welcomeTier: 'member' | 'vip' | 'concierge' = 'member';
+      if (planNameLower.includes('concierge')) welcomeTier = 'concierge';
+      else if (planNameLower.includes('vip'))  welcomeTier = 'vip';
+
+      // Pull the freshly-stamped founding seat number (if any) off the row
+      let foundingMemberNumber: number | null = null;
+      try {
+        const { data: m2 } = await supabaseClient
+          .from('user_memberships')
+          .select('founding_member_number')
+          .eq('id', (membershipData as any).id)
+          .maybeSingle();
+        foundingMemberNumber = (m2 as any)?.founding_member_number || null;
+      } catch { /* non-fatal */ }
+
+      const annualPriceCents = Number(planData?.annual_price_cents || 0)
+        || (welcomeTier === 'concierge' ? 39900 : welcomeTier === 'vip' ? 19900 : 9900);
+
+      await supabaseClient.functions.invoke('send-membership-welcome', {
+        body: {
+          userId,
+          email: customerEmail,
+          tier: welcomeTier,
+          annualPriceCents,
+          nextRenewalDate: nextRenewal.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+          foundingMemberNumber,
+        },
+      });
+      console.log(`[membership-welcome] dispatched ${welcomeTier} welcome to ${customerEmail}`);
+    } catch (welcomeErr: any) {
+      console.warn('[membership-welcome] non-fatal dispatch error:', welcomeErr?.message || welcomeErr);
+    }
+
     return membershipData;
   } catch (error) {
     console.error('Error processing membership signup:', error);
