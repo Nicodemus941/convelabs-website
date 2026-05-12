@@ -32,8 +32,16 @@ import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
 // Lazy-load the Lab Orders tab — large component (drawer + grouped view +
 // auto-fulfill UI). Most admin sessions never open this tab, so deferring
 // it speeds up first paint for every other admin route.
-const LabOrdersTab = React.lazy(() => import("@/components/dashboards/admin/LabOrdersTab"));
-const NewUpdatesTab = React.lazy(() => import("@/components/dashboards/admin/NewUpdatesTab"));
+//
+// Wrapped in lazyWithRetry so stale-bundle deploys never strand an admin
+// on a blank tab (Naquala hit this 2026-05-12 — old index.html referenced
+// LabOrdersTab-DCdZ9xfX.js after a new deploy replaced the chunk hash).
+// First failure triggers a one-time hard reload; second failure surfaces
+// to ErrorBoundary so the admin gets an actionable error instead of a
+// silent blank page.
+import { lazyWithRetry } from "@/lib/lazyWithRetry";
+const LabOrdersTab = lazyWithRetry(() => import("@/components/dashboards/admin/LabOrdersTab"), 'LabOrdersTab');
+const NewUpdatesTab = lazyWithRetry(() => import("@/components/dashboards/admin/NewUpdatesTab"), 'NewUpdatesTab');
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
