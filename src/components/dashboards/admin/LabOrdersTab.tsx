@@ -59,7 +59,10 @@ interface LabOrderRow {
   id: string;
   organization_id: string | null;
   organization_name?: string | null;
-  patient_id?: string | null;
+  // patient_lab_requests doesn't have a direct patient_id FK; the resolved
+  // tenant_patients.id is looked up downstream by email when we need it
+  // (e.g. to open Send Booking Link with the right patient context).
+  resolved_patient_id?: string | null;
   patient_name: string;
   patient_email: string | null;
   patient_phone: string | null;
@@ -154,7 +157,7 @@ const LabOrdersTab: React.FC = () => {
     try {
       const { data: lr, error: queryErr } = await supabase
         .from('patient_lab_requests' as any)
-        .select('id, organization_id, patient_id, patient_name, patient_email, patient_phone, patient_dob, lab_order_file_path, lab_order_panels, fasting_required, urine_required, draw_by_date, status, appointment_id, access_token, patient_viewed_at, patient_scheduled_at, admin_viewed_at, created_at')
+        .select('id, organization_id, patient_name, patient_email, patient_phone, patient_dob, lab_order_file_path, lab_order_panels, fasting_required, urine_required, draw_by_date, status, appointment_id, access_token, patient_viewed_at, patient_scheduled_at, admin_viewed_at, created_at')
         .order('created_at', { ascending: false })
         .limit(500);
       if (queryErr) {
@@ -172,7 +175,27 @@ const LabOrdersTab: React.FC = () => {
         ((orgs as any[]) || []).forEach(o => oMap.set(o.id, o.name));
       }
       setOrgMap(oMap);
-      setRows(list.map(r => ({ ...r, organization_name: r.organization_id ? oMap.get(r.organization_id) || null : null })));
+
+      // Resolve tenant_patients.id by email for each row so the Send
+      // Booking Link modal opens with the right patient context. Single
+      // round-trip via .in() on emails (much faster than per-row).
+      const emails = Array.from(new Set(list.map(r => (r.patient_email || '').toLowerCase().trim()).filter(Boolean)));
+      const emailToPatientId = new Map<string, string>();
+      if (emails.length > 0) {
+        const { data: tps } = await supabase
+          .from('tenant_patients')
+          .select('id, email')
+          .in('email', emails);
+        ((tps as any[]) || []).forEach(tp => {
+          if (tp.email) emailToPatientId.set(String(tp.email).toLowerCase().trim(), tp.id);
+        });
+      }
+
+      setRows(list.map(r => ({
+        ...r,
+        organization_name: r.organization_id ? oMap.get(r.organization_id) || null : null,
+        resolved_patient_id: r.patient_email ? emailToPatientId.get(r.patient_email.toLowerCase().trim()) || null : null,
+      })));
     } catch (err: any) {
       console.error('[LabOrdersTab] load crashed:', err);
       setLastError(err?.message || String(err));
@@ -264,7 +287,7 @@ const LabOrdersTab: React.FC = () => {
   const handleSendBookingLink = (row: LabOrderRow) => {
     const [first, ...rest] = (row.patient_name || '').split(/\s+/);
     setSendLinkPatient({
-      id: row.patient_id || null,
+      id: row.resolved_patient_id || null,
       firstName: first || row.patient_name || 'patient',
       lastName: rest.join(' '),
       email: row.patient_email,
@@ -584,7 +607,7 @@ const LabOrderDetailDrawer: React.FC<{
                   <span className="text-gray-500">Email:</span><span>{row.patient_email || '—'}</span>
                   <span className="text-gray-500">Phone:</span><span>{row.patient_phone || '—'}</span>
                   <span className="text-gray-500">DOB:</span><span>{row.patient_dob || '—'}</span>
-                  <span className="text-gray-500">Patient ID:</span><span className="font-mono text-[10px]">{row.patient_id || '—'}</span>
+                  <span className="text-gray-500">Patient ID:</span><span className="font-mono text-[10px]">{row.resolved_patient_id || '—'}</span>
                 </div>
               </div>
 

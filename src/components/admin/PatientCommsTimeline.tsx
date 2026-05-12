@@ -98,12 +98,14 @@ const PatientCommsTimeline: React.FC<Props> = ({ patientId, patientEmail, patien
           .order('created_at', { ascending: false })
           .limit(50);
 
-        // 5) patient_lab_requests
-        const labReqQuery = supabase.from('patient_lab_requests' as any)
-          .select('id, access_token, patient_name, status, created_at, sent_at, last_opened_at, scheduled_at, draw_by_date, organization_id')
-          .or(`patient_id.eq.${patientId}${emailLower ? `,patient_email.ilike.${emailLower}` : ''}`)
-          .order('created_at', { ascending: false })
-          .limit(50);
+        // 5) patient_lab_requests — table has no patient_id FK; identify by email
+        const labReqQuery = emailLower
+          ? supabase.from('patient_lab_requests' as any)
+              .select('id, access_token, patient_name, status, created_at, patient_notified_at, patient_viewed_at, patient_scheduled_at, draw_by_date, organization_id')
+              .ilike('patient_email', emailLower)
+              .order('created_at', { ascending: false })
+              .limit(50)
+          : Promise.resolve({ data: [] as any[] });
 
         const [logsRes, convoRes, emailRes, tokenRes, labReqRes] = await Promise.all([
           logsQuery, convoQuery, emailQuery, tokenQuery, labReqQuery,
@@ -207,11 +209,11 @@ const PatientCommsTimeline: React.FC<Props> = ({ patientId, patientEmail, patien
           else if (status === 'cancelled' || status === 'expired') kind = 'warn';
           all.push({
             id: `lr-${r.id}`,
-            at: r.sent_at || r.created_at,
+            at: r.patient_notified_at || r.created_at,
             channel: 'lab_request',
             direction: 'outbound',
             title: `Lab request${r.draw_by_date ? ` (deadline ${r.draw_by_date.slice(0, 10)})` : ''}`,
-            detail: r.last_opened_at ? `Last opened ${formatDistanceToNow(new Date(r.last_opened_at), { addSuffix: true })}` : 'Not opened yet',
+            detail: r.patient_viewed_at ? `Patient last opened ${formatDistanceToNow(new Date(r.patient_viewed_at), { addSuffix: true })}` : 'Patient hasn\'t opened yet',
             status,
             statusKind: kind,
             url,
