@@ -299,7 +299,13 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   // pricingService.calculateTotal() so what the UI shows == what charges.
   const baseFamilyMemberPrice = FAMILY_MEMBER_PRICE_BY_TIER[memberTier] ?? 75;
   const familyMemberPrice = baseFamilyMemberPrice; // per-additional-member rate (unchanged)
-  const foundingFamilyFreeSlots = isFoundingMember && memberTier === 'vip' ? 1 : 0;
+  // Free family-slot rules (must mirror pricingService.calculateTotal):
+  //   • Concierge ($399/yr): 2 free family members per visit
+  //   • Founding-50 VIP: 1 free family member per visit
+  //   • Everyone else: 0 free
+  const foundingFamilyFreeSlots = memberTier === 'concierge'
+    ? 2
+    : (isFoundingMember && memberTier === 'vip' ? 1 : 0);
   const billableFamilyCount = Math.max(0, familyMembers.length - foundingFamilyFreeSlots);
   const familyMemberTotal = billableFamilyCount * familyMemberPrice;
 

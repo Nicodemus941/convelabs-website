@@ -265,15 +265,33 @@ export function calculateTotal(
 
   if (additionalPatientCount > 0) {
     const perPatient = getAdditionalPatientPrice(serviceId, tier);
-    const foundingVipFamilyFreeSlot = isFoundingMember && tier === 'vip' ? 1 : 0;
-    const billablePatients = Math.max(0, additionalPatientCount - foundingVipFamilyFreeSlot);
+    // Free family-slot rules per public pricing card promises:
+    //   • Founding-50 VIP: 1 free family member per visit
+    //   • Concierge ($399/yr): 2 free family members per visit (per
+    //     pricing card: "Family add-on (same visit): FREE for 2 family
+    //     members")
+    // Both stack the same way: free slots reduce the billable count to
+    // zero first; remaining additional patients bill at the tier rate.
+    let freeSlots = 0;
+    let freeSlotsLabel = '';
+    if (tier === 'concierge') {
+      freeSlots = 2;
+      freeSlotsLabel = 'Family members — free (Concierge perk, up to 2)';
+    } else if (isFoundingMember && tier === 'vip') {
+      freeSlots = 1;
+      freeSlotsLabel = 'Family member — free (Founding VIP perk)';
+    }
+    const freeApplied = Math.min(additionalPatientCount, freeSlots);
+    const billablePatients = additionalPatientCount - freeApplied;
 
-    if (foundingVipFamilyFreeSlot > 0) {
+    if (freeApplied > 0) {
       // Render the comp as a visible $0 line so the patient SEES the
       // value being delivered, not just an invisible discount. Hormozi:
       // "The discount only works if the customer can see it."
       surcharges.push({
-        label: 'Family member — free (Founding VIP perk)',
+        label: freeSlots === 2
+          ? `${freeSlotsLabel} · ${freeApplied} of 2 used`
+          : freeSlotsLabel,
         amount: 0,
       });
     }

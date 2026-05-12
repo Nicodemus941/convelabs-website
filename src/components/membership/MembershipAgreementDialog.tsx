@@ -34,7 +34,15 @@ interface Props {
 // Current agreement version — bump this string whenever the terms change.
 // The membership_agreements table stores the version per signature so we
 // always know exactly what the patient accepted.
-const AGREEMENT_VERSION = '2026-04-30-v3';
+// v4 (2026-05-12): Hormozi-grade revision shipped with the patient
+// benefits panel. Five contractual upgrades:
+//   - 4.5 Same-Visit Family Rule (codifies the operational rule)
+//   - 4.6 Annual Rate Increase Cap (greater of 5% / CPI)
+//   - 5.3 Disputed Charges — Contact First (chargeback protection)
+//   - 6   Founding-50 ceiling + 90-day grace + permanent benefits clause
+//   - All wrong contact info corrected (hello@ → info@, full mailing
+//     address, fax number added)
+const AGREEMENT_VERSION = '2026-05-12-v4';
 
 const buildAgreementText = (tier: Props['tier']): string => `
 ConveLabs Membership Agreement
@@ -125,6 +133,23 @@ or "our"), and the individual identified at checkout ("Member," "you," or
        transferable, assignable, or saleable to any third party.
        Family add-on benefits are limited to immediate household
        members residing at the same address.
+   4.5 SAME-VISIT FAMILY RULE. All family add-on benefits — including
+       any "free family member" perks made available to Founding-tier
+       members or Concierge-tier members — apply ONLY when the
+       additional household member is drawn at the SAME appointment
+       as the primary Member (same address, same time slot, same
+       phlebotomist visit). Family members drawn at separate visits
+       are billed at standard non-member or member-tier rates as
+       applicable. This same-visit rule is a material term of the
+       family-add benefit and a condition of any $0 / discounted
+       additional-patient pricing.
+   4.6 ANNUAL RATE INCREASE CAP. For non-Founding members, ConveLabs
+       agrees that any increase to the published annual rate of your
+       tier between Renewal Terms shall not exceed the GREATER of
+       five percent (5%) per year or the U.S. Consumer Price Index
+       (CPI-U, All Urban Consumers, U.S. City Average) percentage
+       change over the prior twelve months. Founding Members are
+       protected by the rate-lock in Section 6.
 
 5. CANCELLATION
    5.1 How to Cancel. You may cancel at any time via your patient
@@ -136,14 +161,40 @@ or "our"), and the individual identified at checkout ("Member," "you," or
        then-current Initial Term or Renewal Term. We will not initiate
        further auto-renewal charges following a properly submitted
        cancellation.
+   5.3 DISPUTED CHARGES — CONTACT FIRST. Before initiating a chargeback
+       with your card issuer or bank for any membership charge, you
+       agree to contact ConveLabs in good faith at info@convelabs.com
+       within FOURTEEN (14) DAYS of the disputed charge and allow
+       ConveLabs a reasonable opportunity (not less than 7 business
+       days) to investigate and resolve the dispute. This
+       contact-first requirement does not waive any rights you may
+       have under the Fair Credit Billing Act or other applicable
+       consumer protection law.
 
-6. RIGHT OF FIRST RENEWAL (FOUNDING MEMBERS)
-   If you are a Founding Member (as designated by ConveLabs at the time
-   of enrollment), your annual rate is locked at the rate disclosed at
-   the time of your initial enrollment for the duration of your
-   continuous membership, even as standard rates increase. This
-   rate-lock terminates upon any lapse in membership exceeding sixty
-   (60) days.
+6. FOUNDING MEMBER PROGRAM AND RATE-LOCK
+   6.1 Founding Member Designation. ConveLabs offers Founding Member
+       status to the FIRST FIFTY (50) VIP-tier enrollees, after which
+       the Founding Member program closes. Founding Members receive
+       a unique founding-member number (#1 through #50) recorded in
+       their account.
+   6.2 Rate-Lock for Life. Your annual rate is locked at the rate
+       disclosed at the time of your initial enrollment ($199 for the
+       initial Founding-50 cohort) for the duration of your continuous
+       membership, EVEN AS STANDARD RATES INCREASE for non-Founding
+       members. ConveLabs covenants in good faith that future
+       enforcement of this rate-lock is automatic and does not require
+       Member intervention.
+   6.3 Lapse and Reinstatement. The rate-lock terminates upon any lapse
+       in continuous membership exceeding NINETY (90) days. Members who
+       reinstate within the 90-day grace window retain their founding
+       number and locked rate. Reinstatement after 90 days requires
+       enrollment at the then-current published rate.
+   6.4 Permanent Founding Benefits. The free family add-on slot,
+       priority same-day booking (no $100 STAT surcharge), Saturday
+       access (no $75 weekend surcharge), and Founding badge described
+       on the Founding-50 marketing card are CONTRACTUALLY BINDING
+       benefits of Founding Member status and shall be honored for the
+       duration of continuous membership.
 
 7. CONCIERGE PROMISE (Concierge Tier Only)
    If, during your Concierge membership term, any visit fails to meet

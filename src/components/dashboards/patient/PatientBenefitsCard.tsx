@@ -143,13 +143,20 @@ const PatientBenefitsCard: React.FC = () => {
   }, [user?.id]);
 
   const isVip = membership?.tier === 'vip' || membership?.tier === 'concierge';
+  const isConcierge = membership?.tier === 'concierge';
   const isFoundingVip = isVip && Boolean(membership?.founding_member);
 
-  // Family slot — only Founding-50 VIPs get the FREE first family slot.
-  // Regular VIPs still pay $45 (40% off) for family adds.
-  const foundingFamilyFreeSlotsTotal = isFoundingVip ? 1 : 0;
-  const foundingFamilyFreeSlotsUsed = isFoundingVip ? Math.min(familyAddedThisYear, 1) : 0;
-  const foundingFamilyFreeSlotsLeft = Math.max(0, foundingFamilyFreeSlotsTotal - foundingFamilyFreeSlotsUsed);
+  // Free family-slot tracker. Two tiers earn comps:
+  //   • Concierge: 2 free family members per visit (perk on pricing card)
+  //   • Founding-50 VIP: 1 free family member per visit
+  // Tracker shows lifetime-used vs total per-visit allowance (the user
+  // mostly wants to know "I have slots available" not "I have N left this
+  // year") — so we display total = per-visit allowance, used = 0 unless
+  // an in-progress booking has consumed it. Year-to-date count is just
+  // for context. Regular VIPs see no free-slot card (they pay $45).
+  const foundingFamilyFreeSlotsTotal = isConcierge ? 2 : (isFoundingVip ? 1 : 0);
+  const foundingFamilyFreeSlotsUsed = 0; // per-visit perk, always renews
+  const foundingFamilyFreeSlotsLeft = foundingFamilyFreeSlotsTotal - foundingFamilyFreeSlotsUsed;
 
   const renewalDateLabel = useMemo(() => {
     if (!membership?.next_renewal) return null;
@@ -213,8 +220,8 @@ const PatientBenefitsCard: React.FC = () => {
           </div>
         )}
 
-        {/* Family slot tracker — founding VIPs only */}
-        {isFoundingVip && (
+        {/* Family slot tracker — Concierge (2 slots) + Founding VIP (1 slot) */}
+        {foundingFamilyFreeSlotsTotal > 0 && (
           <div className="bg-white border-2 border-amber-300 rounded-lg p-4 mb-4">
             <div className="flex items-start gap-3">
               <div className="h-9 w-9 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
@@ -222,14 +229,17 @@ const PatientBenefitsCard: React.FC = () => {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <p className="text-sm font-bold text-gray-900">Free family add-on</p>
-                  <Badge className={foundingFamilyFreeSlotsLeft > 0 ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'}>
-                    {foundingFamilyFreeSlotsLeft} of {foundingFamilyFreeSlotsTotal} unused
+                  <p className="text-sm font-bold text-gray-900">Free family add-on{foundingFamilyFreeSlotsTotal > 1 ? 's' : ''}</p>
+                  <Badge className="bg-emerald-600 text-white">
+                    {foundingFamilyFreeSlotsTotal} free per visit
                   </Badge>
                 </div>
                 <p className="text-[12px] text-gray-700 leading-snug">
-                  As a Founding VIP, your first household member is drawn for <strong>$0</strong> on the same visit as you.
-                  After that, additional members are $45 each (40% off standard).
+                  {isConcierge ? (
+                    <>As a Concierge member, you can bring <strong>up to 2 household members</strong> to any visit at <strong>$0 each</strong>. Additional members beyond 2 are $35 (Concierge tier rate).</>
+                  ) : (
+                    <>As a Founding VIP, your first household member is drawn for <strong>$0</strong> on the same visit as you. After that, additional members are $45 each (40% off standard).</>
+                  )}
                 </p>
                 <div className="mt-2 bg-blue-50 border border-blue-200 rounded px-3 py-2 flex items-start gap-2">
                   <Info className="h-3.5 w-3.5 text-blue-700 flex-shrink-0 mt-0.5" />
@@ -238,13 +248,12 @@ const PatientBenefitsCard: React.FC = () => {
                     not a separate one. Add them at checkout under "Add Family Member."
                   </p>
                 </div>
-                {foundingFamilyFreeSlotsLeft > 0 && (
-                  <Button asChild size="sm" className="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-xs">
-                    <Link to="/book-now?addFamily=1">
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Book visit + add family member
-                    </Link>
-                  </Button>
-                )}
+                <Button asChild size="sm" className="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-xs">
+                  <Link to="/book-now?addFamily=1">
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    {isConcierge ? 'Book visit + add up to 2 family members' : 'Book visit + add family member'}
+                  </Link>
+                </Button>
               </div>
             </div>
           </div>

@@ -13,7 +13,7 @@ const TermsOfService = () => {
           <div className="text-center mb-12">
             <h1 className="text-4xl font-bold mb-3">Terms and Conditions of Service</h1>
             <p className="text-muted-foreground">ConveLabs, LLC</p>
-            <p className="text-sm text-muted-foreground">Effective Date: April 13, 2026 | Version 2.0</p>
+            <p className="text-sm text-muted-foreground">Effective Date: May 12, 2026 | Version 3.0</p>
             <p className="text-sm text-muted-foreground">1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>
           </div>
 
@@ -193,13 +193,19 @@ const TermsOfService = () => {
                 8.2. <strong>Invoiced Appointments.</strong> For appointments created with invoice billing, payment must be received within twelve (12) hours of invoice issuance. Failure to remit payment within this period may result in a payment reminder. If payment is not received within thirty (30) minutes of the reminder, the appointment may be cancelled at ConveLabs' sole discretion, and the appointment slot released to other patients.
               </p>
               <p>
-                8.3. <strong>Cancellation by Patient.</strong> Patients may cancel an appointment free of charge with at least twenty-four (24) hours' notice prior to the scheduled appointment time. Late cancellations (less than 24 hours' notice) or no-shows may result in: (a) forfeiture of one (1) service from the monthly allocation for membership patients; (b) a cancellation fee for non-member patients; or (c) deduction of the visit from prepaid service packages.
+                8.3. <strong>Cancellation by Patient.</strong> Patients may cancel an appointment free of charge with at least twenty-four (24) hours' notice prior to the scheduled appointment time. Late cancellations (less than 24 hours' notice) incur a <strong>$25.00 late-cancellation fee</strong>. No-shows (patient is not present and reachable within fifteen (15) minutes of the scheduled arrival window) result in <strong>forfeiture of the full visit charge</strong>. Membership patients additionally forfeit one (1) service credit from their monthly allocation. Repeated no-shows (three or more in any rolling 90-day period) may result in suspension of booking privileges.
               </p>
               <p>
                 8.4. <strong>Refund Policy.</strong> Service fees are generally non-refundable once the phlebotomist has arrived at the Patient's location and attempted specimen collection. Refunds for services not rendered due to ConveLabs' inability to perform (e.g., missing lab order not attributable to Patient, phlebotomist unavailability) will be processed within 5-10 business days.
               </p>
               <p>
-                8.5. <strong>Additional Fees.</strong> The following additional fees may apply: extended area surcharge ($75.00 for locations outside the standard service area); same-day appointment surcharge ($50.00); weekend surcharge ($75.00); results access assistance ($25.00 per request); results forwarding to other providers ($35.00 per request); and additional patient at same location (pricing varies by service type).
+                8.5. <strong>Additional Fees.</strong> The following additional fees may apply: extended area surcharge ($75.00 for locations outside the standard service area); same-day / STAT urgent-appointment surcharge ($100.00); weekend surcharge ($75.00); results access assistance ($25.00 per request); results forwarding to other providers ($35.00 per request); and additional patient at same location (pricing varies by service type and membership tier). Tier-specific waivers apply: Concierge and Founding-50 VIP members are exempt from the same-day surcharge; all VIP and Concierge members are exempt from the weekend surcharge.
+              </p>
+              <p>
+                8.6. <strong>Slot-Conflict Apology Credit.</strong> In the rare event that a slot you have selected becomes unavailable between selection and successful payment (e.g., an administrator manually books a conflicting appointment in the same window), ConveLabs will offer at least three (3) alternative time slots AND apply a <strong>$25.00 apology credit</strong> to your next visit at no cost to you. The booking is not finalized until both a confirmed slot and successful payment are completed.
+              </p>
+              <p>
+                8.7. <strong>Same-Visit Additional Patients Rule.</strong> Additional household members or family members may be added to a visit at the prices and tier-specific waivers listed on the pricing page. <strong>All additional patients must be drawn at the SAME appointment</strong> as the primary patient (same address, same time slot, same phlebotomist visit); any additional patient requesting a separate date or location constitutes a separate billable visit. Discounted or $0 family-add benefits offered to Founding-50 VIPs and Concierge members apply only under this same-visit rule.
               </p>
             </section>
 
@@ -248,9 +254,48 @@ const TermsOfService = () => {
               </p>
             </section>
 
-            {/* Section 12 */}
+            {/* Section 12 — Recollection Guarantee */}
             <section>
-              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 12: Contact Information</h2>
+              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 12: Recollection Guarantee</h2>
+              <p className="mt-3">
+                12.1. <strong>Free Recollection.</strong> If a specimen collected during a ConveLabs visit is rejected by the Performing Laboratory due to a specimen-integrity issue attributable to ConveLabs (including but not limited to insufficient volume, hemolysis caused by collection technique, mislabeling, temperature excursion during transport, or chain-of-custody failure on ConveLabs' side), ConveLabs will recollect the specimen at the Patient's preferred ConveLabs service location <strong>at no additional cost</strong>, scheduled at the next mutually available time slot.
+              </p>
+              <p>
+                12.2. <strong>Scope.</strong> The Recollection Guarantee does NOT cover (a) rejections caused by patient non-compliance (e.g., not fasting when fasting was required, refusal to complete a prep step); (b) rejections caused by the Performing Laboratory's own handling errors after ConveLabs has delivered the specimen; (c) test results the patient or provider believes to be clinically inaccurate (such disputes are between the patient and the Performing Lab under Section 13); or (d) re-orders requested by the ordering provider for clinical reasons (e.g., follow-up testing).
+              </p>
+              <p>
+                12.3. <strong>How to Invoke.</strong> The Patient or their ordering provider may invoke this Guarantee by emailing info@convelabs.com within fourteen (14) days of receiving notice of the rejected specimen. ConveLabs will respond within one (1) business day to schedule the recollection.
+              </p>
+            </section>
+
+            {/* Section 13 — Chain of Custody and Result Ownership */}
+            <section>
+              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 13: Chain of Custody and Result Ownership</h2>
+              <p className="mt-3">
+                13.1. ConveLabs collects, packages, and transports specimens from the point of collection to a clinical laboratory designated on the requisition (the "Performing Lab"). <strong>At the moment a specimen is accepted by the Performing Lab</strong>, custody and control of the specimen and all associated test results transfer to that Performing Lab.
+              </p>
+              <p>
+                13.2. The Performing Lab — not ConveLabs — is the data controller and result-of-record issuer under CLIA, HIPAA, and applicable state law. ConveLabs does NOT generate, certify, alter, withhold, or amend any test result. Disputes regarding test accuracy, the Performing Lab's billing, or insurance reimbursement must be addressed directly with the Performing Lab.
+              </p>
+              <p>
+                13.3. Specimen-integrity events occurring during ConveLabs custody are remediated under the Recollection Guarantee in Section 12.
+              </p>
+            </section>
+
+            {/* Section 14 — Gratuities */}
+            <section>
+              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 14: Gratuities</h2>
+              <p className="mt-3">
+                14.1. Tips and gratuities offered to ConveLabs phlebotomists are <strong>entirely optional</strong> and are not part of the service price. ConveLabs does not assess any mandatory service charge.
+              </p>
+              <p>
+                14.2. <strong>100% Pass-Through.</strong> All gratuities — whether tipped in cash, via in-app prompt, or added to the Stripe transaction — are passed through in full to the phlebotomist who performed the visit. ConveLabs retains zero portion of any gratuity. Gratuity income is reported by each phlebotomist for their own tax purposes.
+              </p>
+            </section>
+
+            {/* Section 15 — Contact Information */}
+            <section>
+              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 15: Contact Information</h2>
               <p className="mt-3">
                 For questions, concerns, or complaints regarding these Terms, please contact:
               </p>
@@ -274,7 +319,7 @@ const TermsOfService = () => {
             </div>
 
             <p className="text-center text-xs text-muted-foreground mt-8">
-              Version 2.0 | Effective April 13, 2026 | ConveLabs, LLC. All rights reserved.
+              Version 3.0 | Effective May 12, 2026 | ConveLabs, LLC. All rights reserved.
             </p>
           </div>
         </div>
