@@ -7,8 +7,9 @@ import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
   CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
-  Crown, GraduationCap, Inbox,
+  Crown, GraduationCap, Inbox, Bell,
 } from 'lucide-react';
+import { getUnreadReleaseCount } from '@/data/releaseNotes';
 
 // `ownerOnly` gates surfaces that show whole-business financials / valuation
 // data the platform owner sees but their super_admin staff (e.g. Naquala)
@@ -23,6 +24,7 @@ type SidebarItem = {
   taskBadge?: boolean;   // numeric red badge driven by my_open_task_count
   inboxBadge?: boolean;  // numeric badge for OCR-pipeline items needing human touch
   labOrderBadge?: boolean; // numeric badge: unviewed provider-uploaded orders
+  releaseBadge?: boolean;  // numeric badge: unread release notes
   ownerOnly?: boolean;
 };
 type SidebarSection = { label: string; items: SidebarItem[] };
@@ -34,6 +36,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
     {
       label: 'MAIN',
       items: [
+        { name: 'What\'s New', icon: Sparkles, path: `${basePath}/new-updates`, releaseBadge: true },
         { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
         { name: 'Hormozi Dashboard', icon: TrendingUp, path: `${basePath}/hormozi`, ownerOnly: true },
         { name: 'Upgrades & ROI', icon: Crown, path: `${basePath}/upgrades`, ownerOnly: true },
@@ -95,6 +98,12 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const [myOpenTaskCount, setMyOpenTaskCount] = useState<number>(0);
   const [inboxCount, setInboxCount] = useState<number>(0);
   const [labOrderCount, setLabOrderCount] = useState<number>(0);
+  const [releaseUnreadCount, setReleaseUnreadCount] = useState<number>(() => getUnreadReleaseCount());
+  // Re-poll the localStorage-derived unread count whenever the URL changes
+  // (so visiting the page + marking-read clears the badge instantly).
+  useEffect(() => {
+    setReleaseUnreadCount(getUnreadReleaseCount());
+  }, [location.pathname]);
 
   // ── OPEN TASKS BADGE ──────────────────────────────────────────────
   // Drives the numeric "Notes & Tasks (N)" pill in the sidebar so
@@ -294,6 +303,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                       {item.labOrderBadge && labOrderCount > 0 && !active && (
                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                       )}
+                      {item.releaseBadge && releaseUnreadCount > 0 && !active && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
+                      )}
                     </div>
                     {item.name}
                     {item.badge && hasNewMessages && !active && (
@@ -324,6 +336,15 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                           : 'bg-emerald-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(16,185,129,0.5)]'
                       }`}>
                         {labOrderCount > 99 ? '99+' : labOrderCount}
+                      </span>
+                    )}
+                    {item.releaseBadge && releaseUnreadCount > 0 && (
+                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
+                        active
+                          ? 'bg-white text-purple-700'
+                          : 'bg-purple-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(168,85,247,0.5)]'
+                      }`}>
+                        {releaseUnreadCount > 99 ? '99+' : releaseUnreadCount}
                       </span>
                     )}
                   </Link>

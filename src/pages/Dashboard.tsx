@@ -33,6 +33,7 @@ import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
 // auto-fulfill UI). Most admin sessions never open this tab, so deferring
 // it speeds up first paint for every other admin route.
 const LabOrdersTab = React.lazy(() => import("@/components/dashboards/admin/LabOrdersTab"));
+const NewUpdatesTab = React.lazy(() => import("@/components/dashboards/admin/NewUpdatesTab"));
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
@@ -190,6 +191,11 @@ const Dashboard = () => {
               <LabOrdersTab />
             </React.Suspense>
           )}
+          {adminTab === "new-updates" && (
+            <React.Suspense fallback={<div className="p-8 text-center text-sm text-gray-500">Loading what's new…</div>}>
+              <NewUpdatesTab />
+            </React.Suspense>
+          )}
           {adminTab === "organizations" && <OrganizationsTab />}
           {adminTab === "operations" && <OperationsPanel />}
           {adminTab === "ai-assistant" && <AIOpsAssistant />}
@@ -199,7 +205,7 @@ const Dashboard = () => {
           {adminTab === "chatbot" && <ChatbotTab />}
           {adminTab === "provider-acquisition" && <ProviderAcquisitionTab />}
           {adminTab === "scripts" && <ScriptsTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "new-updates", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>
