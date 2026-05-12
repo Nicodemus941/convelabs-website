@@ -246,23 +246,14 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
     }
   };
 
-  if (!appt) return null;
-
-  const patientName = appt.patient_name
-    || (patientData ? `${patientData.first_name || ''} ${patientData.last_name || ''}`.trim() : '')
-    || appt.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim()
-    || 'Unknown Patient';
-
-  const patientEmail = appt.patient_email || patientData?.email || '';
-  const patientPhone = appt.patient_phone || patientData?.phone || '';
-  const insuranceProvider = patientData?.insurance_provider || '';
-  const insuranceMemberId = patientData?.insurance_member_id || '';
-  const insuranceGroup = patientData?.insurance_group_number || '';
-  // Resolve the actual card image path from ANY of: the appointment row
-  // (legacy), the patient profile (tenant_patients legacy), or the new
-  // multi-row patient_insurances table. Without this, the modal said
-  // "No insurance card on file" while the Insurance panel above showed
-  // Blue Anthem ID: YTN083... (Nicholas Chaillan, 2026-05-10).
+  // ─── INSURANCE FETCH ──────────────────────────────────────────
+  // MUST stay ABOVE the early-return below. React's Rules of Hooks
+  // require hook calls in the SAME order every render. When appt is
+  // null on first render, the early return short-circuits before any
+  // hook below it runs. When appt becomes non-null on the next render,
+  // those hooks DO run — different count vs prior render → React #310
+  // → entire modal crashes blank. This was the actual root cause of
+  // Naquala's blank screen, found 2026-05-12 via the error boundary.
   const [patientInsRows, setPatientInsRows] = useState<any[]>([]);
   useEffect(() => {
     if (!appt?.patient_id) { setPatientInsRows([]); return; }
@@ -278,6 +269,19 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
     })();
     return () => { cancelled = true; };
   }, [appt?.patient_id]);
+
+  if (!appt) return null;
+
+  const patientName = appt.patient_name
+    || (patientData ? `${patientData.first_name || ''} ${patientData.last_name || ''}`.trim() : '')
+    || appt.notes?.match(/Patient:\s*([^|]+)/)?.[1]?.trim()
+    || 'Unknown Patient';
+
+  const patientEmail = appt.patient_email || patientData?.email || '';
+  const patientPhone = appt.patient_phone || patientData?.phone || '';
+  const insuranceProvider = patientData?.insurance_provider || '';
+  const insuranceMemberId = patientData?.insurance_member_id || '';
+  const insuranceGroup = patientData?.insurance_group_number || '';
   const primaryInsRow = patientInsRows.find((r: any) => r.rank === 'primary') || null;
   const secondaryInsRow = patientInsRows.find((r: any) => r.rank === 'secondary') || null;
   const insuranceCardPath =
