@@ -859,11 +859,12 @@ const AutoFulfillToggle: React.FC<{
   onChange: (enabled: boolean) => void;
 }> = ({ orgId, enabled, onChange }) => {
   const [saving, setSaving] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
   const handleToggle = async () => {
     if (saving) return;
     const next = !enabled;
     setSaving(true);
-    // Optimistic update
     onChange(next);
     try {
       const { error } = await supabase
@@ -872,11 +873,11 @@ const AutoFulfillToggle: React.FC<{
         .eq('id', orgId);
       if (error) throw error;
       toast.success(next
-        ? 'Auto-fulfill ON — new orders will auto-send booking link'
-        : 'Auto-fulfill OFF — manual review required'
+        ? 'Auto-fulfill ON — patients now get the booking link the moment this provider submits an order'
+        : 'Auto-fulfill OFF — you\'ll review every new order before the patient is texted'
       );
     } catch (e: any) {
-      onChange(!next); // revert
+      onChange(!next);
       toast.error(`Couldn't update: ${e?.message || e}`);
     } finally {
       setSaving(false);
@@ -884,22 +885,59 @@ const AutoFulfillToggle: React.FC<{
   };
 
   return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); handleToggle(); }}
-      disabled={saving}
-      className={`inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[10px] font-semibold border transition ${
-        enabled
-          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
-          : 'bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-100'
-      } ${saving ? 'opacity-60' : ''}`}
-      title={enabled
-        ? 'Auto-fulfill is ON. New orders from this office will auto-send the booking link.'
-        : 'Auto-fulfill is OFF. New orders require admin to click Send Booking Link.'}
-    >
-      <span className={`w-2 h-2 rounded-full ${enabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
-      {enabled ? '⚡ Auto-fulfill ON' : 'Auto-fulfill OFF'}
-    </button>
+    <div className="relative inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); handleToggle(); }}
+        disabled={saving}
+        className={`inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[10px] font-semibold border transition ${
+          enabled
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+            : 'bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-100'
+        } ${saving ? 'opacity-60' : ''}`}
+        title={enabled
+          ? 'Auto-fulfill is ON. Click to turn OFF.'
+          : 'Auto-fulfill is OFF. Click to turn ON.'}
+      >
+        <span className={`w-2 h-2 rounded-full ${enabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+        {enabled ? '⚡ Auto-fulfill ON' : 'Auto-fulfill OFF'}
+      </button>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setShowHelp(s => !s); }}
+        className="w-5 h-5 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 flex items-center justify-center text-[10px] font-bold"
+        title="What does auto-fulfill mean?"
+      >
+        ?
+      </button>
+      {showHelp && (
+        <div
+          className="absolute right-0 top-8 z-20 w-72 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-[11px] text-gray-700 leading-relaxed"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p className="font-semibold text-gray-900 mb-1.5">What is auto-fulfill?</p>
+          <p className="mb-2">
+            When <strong className="text-emerald-700">ON</strong>: the moment this provider uploads a lab order, the system
+            automatically sends the patient a HIPAA-safe booking link by SMS + email — you don't need to click anything.
+            The order appears in this tab as "Awaiting patient" (already reviewed).
+          </p>
+          <p className="mb-2">
+            When <strong className="text-gray-700">OFF</strong>: new orders land as "New" — you (or Naquala) must click
+            ⚡ Send Booking Link before the patient is contacted.
+          </p>
+          <p className="text-[10px] text-gray-500 italic">
+            Recommended ON for trusted partners with high volume. OFF for new providers until you've reviewed their order quality.
+          </p>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); setShowHelp(false); }}
+            className="mt-2 text-[10px] text-[#B91C1C] font-medium hover:underline"
+          >
+            Got it
+          </button>
+        </div>
+      )}
+    </div>
   );
 };
 
