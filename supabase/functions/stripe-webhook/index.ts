@@ -1380,8 +1380,7 @@ async function handleAppointmentPayment(session: any) {
               .insert({
                 appointment_id: appointment.id,
                 file_path: labPath,
-                source: 'provider_prefill',
-                uploaded_by_user_id: null,
+                uploaded_by: null,
               });
             console.log(`[prefill-token] auto-attached lab order ${labPath} to appointment ${appointment.id}`);
           } catch (laErr: any) {

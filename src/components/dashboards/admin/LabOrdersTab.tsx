@@ -25,8 +25,30 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   FlaskConical, Loader2, RefreshCw, Search, Filter, Mail, Phone,
   Calendar, CheckCircle2, Clock, AlertTriangle, ExternalLink, Send,
-  FileText, Building2, User, ChevronRight, Eye, EyeOff, Zap,
+  FileText, Building2, User, ChevronRight, Eye, EyeOff, Zap, Download,
 } from 'lucide-react';
+
+// Download helper — fetches the signed URL then triggers a browser download
+// with a sensible filename. Works for PDF + image lab orders.
+async function downloadLabOrder(path: string, filename: string) {
+  try {
+    const { data, error } = await supabase.storage.from('lab-orders').createSignedUrl(path, 600);
+    if (error || !data?.signedUrl) throw error || new Error('no_url');
+    // Fetch + blob trick so the browser downloads instead of navigating.
+    const res = await fetch(data.signedUrl);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e: any) {
+    toast.error(`Couldn't download: ${e?.message || e}`);
+  }
+}
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
 import { toast } from 'sonner';
 import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
@@ -433,6 +455,22 @@ const LabOrderRow: React.FC<{
             )}
           </div>
         </div>
+        {row.lab_order_file_path && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            title="Download lab order"
+            onClick={(e) => {
+              e.stopPropagation();
+              const ext = row.lab_order_file_path!.split('.').pop() || 'pdf';
+              const safe = (row.patient_name || 'patient').replace(/[^A-Za-z0-9_-]/g, '_');
+              downloadLabOrder(row.lab_order_file_path!, `lab-order_${safe}.${ext}`);
+            }}
+          >
+            <Download className="h-3 w-3" />
+          </Button>
+        )}
         {primaryAction}
         <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
       </CardContent>
@@ -497,6 +535,20 @@ const LabOrderDetailDrawer: React.FC<{
                   <a href={`/dashboard/super_admin/calendar?appointment=${row.appointment_id}`} target="_blank" rel="noopener">
                     <Calendar className="h-3.5 w-3.5" /> View appointment
                   </a>
+                </Button>
+              )}
+              {row.lab_order_file_path && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 text-xs gap-1.5"
+                  onClick={() => {
+                    const ext = row.lab_order_file_path!.split('.').pop() || 'pdf';
+                    const safe = (row.patient_name || 'patient').replace(/[^A-Za-z0-9_-]/g, '_');
+                    downloadLabOrder(row.lab_order_file_path!, `lab-order_${safe}.${ext}`);
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" /> Download
                 </Button>
               )}
             </div>

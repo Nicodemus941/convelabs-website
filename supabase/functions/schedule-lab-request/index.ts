@@ -158,6 +158,29 @@ Deno.serve(async (req) => {
       patient_scheduled_at: needsPayment ? null : new Date().toISOString(),
     }).eq('id', request.id);
 
+    // ─── NORMALIZED LAB-ORDER ROW ─────────────────────────────────
+    // The phleb appointment card (PhlebAppointmentCard + AppointmentLabOrdersPanel)
+    // reads from BOTH appointments.lab_order_file_path (legacy) AND
+    // appointment_lab_orders (normalized). The legacy column is already
+    // stamped above; mirror to the normalized table so any future read
+    // path also sees the order without bespoke joins.
+    if (request.lab_order_file_path) {
+      try {
+        await admin.from('appointment_lab_orders').insert({
+          appointment_id: appt.id,
+          file_path: request.lab_order_file_path,
+          uploaded_by: null,
+          ocr_detected_panels: request.lab_order_panels || null,
+          ocr_full_text: request.lab_order_full_text || null,
+          ocr_fasting_required: request.fasting_required || false,
+          ocr_status: 'complete',
+          ocr_completed_at: new Date().toISOString(),
+        });
+      } catch (laErr: any) {
+        console.warn('[schedule-lab-request] appointment_lab_orders mirror failed (non-blocking):', laErr?.message || laErr);
+      }
+    }
+
     // ─── COMPANION LAB REQUESTS (couples / households at same address) ───
     // The booker pasted additional access-tokens (e.g. Amy booking Robert
     // too at the same address, both ordered by Elite Medical Concierge).
