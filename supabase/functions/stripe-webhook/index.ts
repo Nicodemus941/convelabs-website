@@ -1811,21 +1811,54 @@ async function handleAppointmentPayment(session: any) {
         const referralCode = referralMatch[1];
         console.log(`Processing referral code: ${referralCode}`);
 
-        // Find the referral code
+        // Find the referral code — pull tier-specific columns so we can
+        // route the correct credit amount based on the REFERRER's tier.
         const { data: codeData } = await supabaseClient
           .from('referral_codes')
-          .select('id, user_id, discount_amount, referrer_credit, uses')
+          .select('id, user_id, discount_amount, referrer_credit, uses, member_discount_amount, vip_discount_amount, concierge_discount_amount, referred_patient_discount_pct')
           .eq('code', referralCode)
           .eq('active', true)
           .maybeSingle();
 
         if (codeData) {
+          // ── TIER-AWARE REFERRAL PAYOUT ──────────────────────────────
+          // Promise on the public pricing cards:
+          //   • Member:    $10 credit + friend gets 10% off
+          //   • VIP:       $25 credit + friend gets 15% off
+          //   • Concierge: $50 credit + friend gets 20% off  ← new tier
+          // Look up the referrer's tier from tenant_patients.membership_tier
+          // and pick the matching column. Defaults handle pre-tier rows.
+          let referrerTier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+          if (codeData.user_id) {
+            const { data: ref } = await supabaseClient
+              .from('tenant_patients')
+              .select('membership_tier')
+              .eq('id', codeData.user_id)
+              .maybeSingle();
+            const t = String((ref as any)?.membership_tier || '').toLowerCase();
+            if (t === 'member' || t === 'vip' || t === 'concierge') referrerTier = t;
+          }
+
+          const tierCredit = referrerTier === 'concierge'
+            ? (codeData.concierge_discount_amount ?? 50)
+            : referrerTier === 'vip'
+            ? (codeData.vip_discount_amount ?? 25)
+            : referrerTier === 'member'
+            ? (codeData.member_discount_amount ?? 10)
+            : (codeData.referrer_credit ?? 25);
+
+          // Friend's percent-off — Concierge upgrades to 20%, others use
+          // the column default (15% per the column default in DDL).
+          const friendDiscountPct = referrerTier === 'concierge'
+            ? 20
+            : (codeData.referred_patient_discount_pct ?? 15);
+
           // Record the redemption
           await supabaseClient.from('referral_redemptions').insert({
             referral_code_id: codeData.id,
             referred_email: metadata.patient_email,
             appointment_id: appointment.id,
-            discount_applied: codeData.discount_amount || 25,
+            discount_applied: friendDiscountPct,  // stored as percent
             referrer_credited: true,
           });
 
@@ -1834,17 +1867,19 @@ async function handleAppointmentPayment(session: any) {
             .update({ uses: (codeData.uses || 0) + 1 })
             .eq('id', codeData.id);
 
-          // Add $25 credit to referrer's balance
+          // Add tier-appropriate credit to referrer's balance — applied
+          // automatically against their NEXT booking via the patient-credits
+          // auto-apply pipeline (see create-appointment-checkout).
           await supabaseClient.from('referral_credits').insert({
             user_id: codeData.user_id,
-            amount: codeData.referrer_credit || 25,
+            amount: tierCredit,
             type: 'referral_earned',
             referral_code_id: codeData.id,
             appointment_id: appointment.id,
-            description: `Referral from ${metadata.patient_first_name || 'a friend'} (code: ${referralCode})`,
+            description: `Referral from ${metadata.patient_first_name || 'a friend'} (code: ${referralCode}) — ${referrerTier === 'none' ? 'standard' : referrerTier + ' tier'} payout`,
           });
 
-          console.log(`Referral ${referralCode}: redemption + $${codeData.referrer_credit || 25} credit, uses=${(codeData.uses || 0) + 1}`);
+          console.log(`Referral ${referralCode}: tier=${referrerTier} redemption +$${tierCredit} credit (friend got ${friendDiscountPct}% off), uses=${(codeData.uses || 0) + 1}`);
 
           // Notify the referrer that their friend booked
           if (codeData.user_id) {
@@ -1863,8 +1898,9 @@ async function handleAppointmentPayment(session: any) {
                 const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
                 const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get('TWILIO_MESSAGING_SERVICE_SID');
                 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-                  const credit = codeData.referrer_credit || 25;
-                  const smsBody = `ConveLabs: Great news ${referrer.first_name || ''}! Your referral code ${referralCode} was just used. You earned a $${credit} credit toward your next visit. Thank you for spreading the word!`;
+                  // Use the tier-aware credit computed above so the SMS
+                  // matches what's actually in their referral_credits row.
+                  const smsBody = `ConveLabs: Great news ${referrer.first_name || ''}! Your referral code ${referralCode} was just used. You earned a $${tierCredit} credit — automatically applied to your next visit. Thank you for spreading the word!`;
                   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
                   await fetch(twilioUrl, {
                     method: 'POST',

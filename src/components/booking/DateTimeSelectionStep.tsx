@@ -577,7 +577,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const dutyConstrainedAfterHours = phlebOnDuty
     ? afterHoursWindows.filter(w => timeToMinutes(w.time) <= phlebDutyMinutes)
     : [];
-  const includeAfterHours = !isWeekend && (showAfterHours || (isSameDay && phlebOnDuty));
+  // Concierge tier ($399/yr) gets unconditional after-hours access (6am–8pm
+  // anytime) per the public pricing-card promise: "Fasting booking window:
+  // Anytime 6am–8pm". Other tiers only see after-hours via the explicit
+  // toggle or the same-day-with-phleb-on-duty fallback.
+  const isConciergeTier = patientTier === 'concierge';
+  const includeAfterHours = !isWeekend && (isConciergeTier || showAfterHours || (isSameDay && phlebOnDuty));
   const activeWindows = includeAfterHours
     ? [...baseWindows, ...(phlebOnDuty ? dutyConstrainedAfterHours : afterHoursWindows)]
     : baseWindows;
@@ -690,7 +695,13 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         }}
                         disabled={(date) => {
                           const isPast = date < new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                          const isTooFar = date > new Date(today.getFullYear(), today.getMonth() + 2, 0);
+                          // Advance booking window per pricing-card promise:
+                          //   • Concierge: 60 days
+                          //   • All others: end of next month (~30-60 days)
+                          const advanceLimitDate = patientTier === 'concierge'
+                            ? (() => { const d = new Date(today); d.setDate(d.getDate() + 60); return d; })()
+                            : new Date(today.getFullYear(), today.getMonth() + 2, 0);
+                          const isTooFar = date > advanceLimitDate;
                           const isTodayPastCutoff = date.getFullYear() === today.getFullYear()
                             && date.getMonth() === today.getMonth()
                             && date.getDate() === today.getDate()
@@ -712,7 +723,10 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                           if (field.value) {
                             let next = addDays(field.value, 1);
                             while (isHoliday(next) || next.getDay() === 0 || isBlockedByAdmin(next, blockedDates)) next = addDays(next, 1);
-                            const maxDate = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+                            // Mirror the advance-booking cap from disabled() above
+                            const maxDate = patientTier === 'concierge'
+                              ? (() => { const d = new Date(today); d.setDate(d.getDate() + 60); return d; })()
+                              : new Date(today.getFullYear(), today.getMonth() + 2, 0);
                             if (next <= maxDate) field.onChange(next);
                           }
                         }}
