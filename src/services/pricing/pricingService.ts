@@ -170,32 +170,48 @@ export function calculateBasePrice(serviceId: string): number {
 }
 
 /**
- * VIP / Concierge same-day STAT surcharge waiver.
+ * Tier + founding-status surcharge waivers — each one corresponds to a
+ * specific named promise on the public pricing surfaces. Hormozi rule:
+ * "Every promise you make is a contract. If you don't deliver, you don't
+ * have a brand — you have a refund pipeline."
  *
- * Promise on BonusStackCard.tsx (the Founding-50 value-ladder shown at
- * checkout):
- *   "Priority same-day booking — Skip the +$100 STAT surcharge on urgent draws"
+ * Source of truth for what's promised:
+ *   • Public VIP card (Pricing.tsx / MembershipPlans.tsx)
+ *   • Founding-50 BonusStackCard.tsx (only shown to Founding-50 seats)
  *
- * Before this fix `SURCHARGES.sameDay` was applied universally — a VIP
- * paying for the membership was still getting hit with the $100 STAT fee
- * on urgent visits. That's a broken promise and a refund pipeline.
+ * Promises by perk:
  *
- * Tier rule (Hormozi: name the perk, then deliver it):
- *   • none / member  → pays $100 STAT surcharge (no waiver)
- *   • vip            → waived
- *   • concierge      → waived
+ *   Same-day STAT ($100 surcharge):
+ *     • Regular VIP card lists "Same-day booking" as ✗ → still pays
+ *     • Founding-50 stack: "Priority same-day booking — Skip the +$100
+ *       STAT surcharge on urgent draws" → WAIVED for founding VIP
+ *     • Concierge tier: always waived (top-shelf perk)
+ *
+ *   Weekend service ($75 surcharge):
+ *     • Regular VIP card: "Saturday access: 6am–11am" → WAIVED
+ *     • Concierge: also waived
+ *     • Member tier: still pays (not promised at member tier)
  */
-function isSameDayWaived(tier: MembershipTier): boolean {
+function isSameDayWaived(tier: MembershipTier, isFoundingMember: boolean): boolean {
+  if (tier === 'concierge') return true;
+  if (tier === 'vip' && isFoundingMember) return true;
+  return false;
+}
+
+function isWeekendWaived(tier: MembershipTier): boolean {
+  // Saturday access is a STANDARD VIP perk per the public pricing card —
+  // not just a Founding-50 bonus. Every VIP gets Saturday at no surcharge.
   return tier === 'vip' || tier === 'concierge';
 }
 
 export function calculateSurcharges(
   options: SurchargeOptions,
   tier: MembershipTier = 'none',
+  isFoundingMember: boolean = false,
 ): { label: string; amount: number }[] {
   const items: { label: string; amount: number }[] = [];
-  if (options.sameDay && !isSameDayWaived(tier)) items.push(SURCHARGES.sameDay);
-  if (options.weekend) items.push(SURCHARGES.weekend);
+  if (options.sameDay && !isSameDayWaived(tier, isFoundingMember)) items.push(SURCHARGES.sameDay);
+  if (options.weekend && !isWeekendWaived(tier)) items.push(SURCHARGES.weekend);
   if (options.extendedHours) items.push(SURCHARGES.extendedHours);
   if (options.extendedArea) items.push(SURCHARGES.extendedArea);
 
@@ -245,7 +261,7 @@ export function calculateTotal(
   }
 
   const servicePrice = getServicePrice(serviceId, tier);
-  const surcharges = calculateSurcharges(options, tier);
+  const surcharges = calculateSurcharges(options, tier, isFoundingMember);
 
   if (additionalPatientCount > 0) {
     const perPatient = getAdditionalPatientPrice(serviceId, tier);
