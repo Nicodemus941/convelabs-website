@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
+import AdminErrorBoundary from '@/components/admin/AdminErrorBoundary';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -347,6 +348,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent className="w-full sm:max-w-[420px] p-0 overflow-y-auto" side="right">
         <VisuallyHidden><SheetTitle>Appointment Details</SheetTitle></VisuallyHidden>
+        <AdminErrorBoundary surface="Appointment details" onRetry={onUpdate}>
         {/* Top bar — actions */}
         <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between">
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-md transition">
@@ -913,6 +915,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             </div>
           )}
         </div>
+        </AdminErrorBoundary>
       </SheetContent>
     </Sheet>
 

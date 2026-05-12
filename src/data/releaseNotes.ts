@@ -31,6 +31,27 @@ export interface ReleaseNote {
 // NEWEST FIRST. When you ship something, add to the top — never bury.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    id: '2026-05-12-error-boundary-blank-screen',
+    date: '2026-05-12',
+    category: 'safety',
+    area: 'Calendar',
+    title: 'No more blank screens when clicking an appointment',
+    oneLine: 'AdminErrorBoundary catches render crashes and shows a clear error + Try Again button instead of a white page.',
+    whatChanged: [
+      'New AdminErrorBoundary component wraps the AppointmentDetailModal contents.',
+      'If anything inside the modal throws (insurance fetch failure, malformed appointment row, unexpected null, etc.), the boundary catches it and renders an error card with: human-readable message, collapsible stack trace, Try Again button, and Copy Error button (clipboards the full diagnostic).',
+      'Without this, a single throw unmounted the whole admin React tree → blank white page → no recovery short of full browser refresh.',
+    ],
+    howToUse: [
+      'Click any appointment on the calendar as usual.',
+      'If something goes wrong, you\'ll see a red error card with details instead of a blank screen.',
+      'Click "Copy Error" and paste it back to me — I\'ll fix the underlying bug in minutes.',
+    ],
+    whereToFind: { label: 'Calendar', path: '/dashboard/super_admin/calendar' },
+    before: 'Naquala 2026-05-12 reported clicking appointments → blank screen.',
+    after: 'Modal still tries to render; if it crashes, you see a recoverable error UI with diagnostics.',
+  },
+  {
     id: '2026-05-12-pricing-guard-auto-link-preview',
     date: '2026-05-12',
     category: 'safety',
