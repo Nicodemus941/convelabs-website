@@ -202,6 +202,21 @@ const TermsAndConditions = () => {
               </ul>
             </section>
 
+            <section className="mb-8">
+              <h2 className="text-2xl font-bold mb-4">14. Contact</h2>
+              <p className="mb-3">
+                For questions, complaints, legal notices, or written requests related to these Terms, please contact us at:
+              </p>
+              <div className="bg-gray-50 rounded-xl p-6">
+                <p className="font-semibold">ConveLabs, LLC</p>
+                <p>1800 Pembrook Drive, Suite 300</p>
+                <p>Orlando, FL 32810</p>
+                <p className="mt-2">Phone: (941) 527-9169</p>
+                <p>Fax: (941) 251-8467</p>
+                <p>Email: info@convelabs.com</p>
+              </div>
+            </section>
+
             <p className="text-sm text-gray-600 mt-12">
               Last updated: {effectiveDate}
             </p>

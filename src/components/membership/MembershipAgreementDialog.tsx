@@ -152,7 +152,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
    Annual Fee, and (b) provide your next three (3) lab-draw visits at
    no charge. This Promise is a binding limited service guarantee. To
    invoke it, you must submit a written complaint to
-   hello@convelabs.com within fourteen (14) days of the visit at issue.
+   info@convelabs.com within fourteen (14) days of the visit at issue.
 
 8. HIPAA, PRIVACY, AND DATA HANDLING
    8.1 PHI. ConveLabs is a HIPAA-covered entity. Your protected
@@ -207,7 +207,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
 
 13. DISPUTE RESOLUTION; BINDING ARBITRATION; CLASS-ACTION WAIVER
     13.1 Informal Resolution. Before initiating any formal proceeding,
-         you agree to contact ConveLabs at hello@convelabs.com and
+         you agree to contact ConveLabs at info@convelabs.com and
          allow thirty (30) days for good-faith resolution.
     13.2 Binding Arbitration. ANY DISPUTE NOT RESOLVED INFORMALLY
          SHALL BE FINALLY RESOLVED BY BINDING INDIVIDUAL ARBITRATION
@@ -220,7 +220,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
          REPRESENTATIVE ACTION. Disputes shall be resolved
          individually.
     13.4 Opt-Out. You may opt out of Sections 13.2 and 13.3 by sending
-         written notice to hello@convelabs.com within thirty (30) days
+         written notice to info@convelabs.com within thirty (30) days
          of the Effective Date, in which case those sections shall not
          apply to you. Opting out does not affect the validity of the
          remainder of this Agreement.
@@ -269,9 +269,11 @@ or "our"), and the individual identified at checkout ("Member," "you," or
 
 19. CONTACT
     ConveLabs, LLC
-    Orlando, Florida
-    Email: hello@convelabs.com
+    1800 Pembrook Drive, Suite 300
+    Orlando, FL 32810
     Phone: (941) 527-9169
+    Fax: (941) 251-8467
+    Email: info@convelabs.com
 
 20. TELEHEALTH LIMITATIONS; PRIMARY CARE RELATIONSHIP
     20.1 ConveLabs is not a telehealth provider, urgent-care service,
@@ -330,7 +332,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
          record was created or (b) the date of the last activity on
          your account, consistent with 45 CFR § 164.530(j)(2) (HIPAA)
          and applicable Florida medical-records statutes.
-    23.2 Upon written request to hello@convelabs.com, ConveLabs will
+    23.2 Upon written request to info@convelabs.com, ConveLabs will
          provide a copy of records pertaining to you within thirty
          (30) days, subject to identity verification. Reasonable
          per-page or per-record fees may apply for high-volume
@@ -382,7 +384,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
          excerpt (without distortion), and reference that review or
          testimonial in ConveLabs marketing materials, on its
          websites, and in social media. You may revoke this license
-         prospectively by emailing hello@convelabs.com; revocation
+         prospectively by emailing info@convelabs.com; revocation
          does not require ConveLabs to remove materials already
          disseminated in print or paid-media campaigns scheduled
          before revocation.
@@ -427,7 +429,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
     recorded as evidence of your electronic signature.
 
 DO NOT ACCEPT IF YOU DO NOT FULLY UNDERSTAND ANY TERM ABOVE. Call
-(941) 527-9169 or email hello@convelabs.com with questions before
+(941) 527-9169 or email info@convelabs.com with questions before
 proceeding.
 `.trim();
 

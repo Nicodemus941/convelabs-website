@@ -259,6 +259,7 @@ const TermsOfService = () => {
                 <p>1800 Pembrook Drive, Suite 300</p>
                 <p>Orlando, FL 32810</p>
                 <p className="mt-2">Phone: (941) 527-9169</p>
+                <p>Fax: (941) 251-8467</p>
                 <p>Email: info@convelabs.com</p>
                 <p className="mt-2">HIPAA Privacy Officer: info@convelabs.com</p>
               </div>
