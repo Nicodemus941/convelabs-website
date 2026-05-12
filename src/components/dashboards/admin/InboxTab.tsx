@@ -23,11 +23,27 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Inbox, RefreshCw, ShieldCheck, Building2, Mail, Phone, Loader2,
-  CheckCircle2, Send, AlertTriangle, ArrowRight,
+  CheckCircle2, Send, AlertTriangle, ArrowRight, Search, X,
+  Clock, Flame, MoreVertical,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, differenceInDays } from 'date-fns';
+
+// Hormozi: aging signal lets stale fires surface BEFORE they become a
+// complaint. Mirror of LabOrdersTab semantics.
+type AgingTier = 'fresh' | 'aging' | 'stale';
+function ageTier(iso: string): AgingTier {
+  const d = differenceInDays(new Date(), new Date(iso));
+  if (d >= 5) return 'stale';
+  if (d >= 3) return 'aging';
+  return 'fresh';
+}
+const AGING_BORDER: Record<AgingTier, string> = {
+  fresh: '',
+  aging: 'border-l-4 border-l-orange-500',
+  stale: 'border-l-4 border-l-red-500',
+};
 
 interface PendingChange {
   id: string;
@@ -78,6 +94,14 @@ const InboxTab: React.FC = () => {
 
   // Inline edit state per org row
   const [orgEdit, setOrgEdit] = useState<Record<string, { manager_email: string; contact_email: string; contact_phone: string }>>({});
+
+  // Search per section + confirm/reason-picker UI state
+  const [insSearch, setInsSearch] = useState('');
+  const [orgSearch, setOrgSearch] = useState('');
+  const [confirmAcceptId, setConfirmAcceptId] = useState<string | null>(null);
+  const [unreachableOrgId, setUnreachableOrgId] = useState<string | null>(null);
+  const [unreachableReason, setUnreachableReason] = useState<string>('Refused to share email');
+  const [unreachableNote, setUnreachableNote] = useState<string>('');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -181,6 +205,14 @@ const InboxTab: React.FC = () => {
   /* ─── Insurance actions ───────────────────────────────────────── */
 
   const adminResolveInsurance = async (row: PendingChange, action: 'accepted_new' | 'kept_existing' | 'dismissed') => {
+    // Confirm-gate the destructive action. The accept flips the patient
+    // chart's insurance — a one-click miss could write a wrong carrier
+    // onto an active patient. Two-step now.
+    if (action === 'accepted_new' && confirmAcceptId !== row.id) {
+      setConfirmAcceptId(row.id);
+      return;
+    }
+    setConfirmAcceptId(null);
     setBusy(row.id);
     try {
       // For accepted_new, also UPDATE tenant_patients
@@ -319,25 +351,25 @@ const InboxTab: React.FC = () => {
   };
 
   // Hormozi: admin tried to reach the org, they refused or unavailable.
-  // Mark unreachable with a notation; org stays in Organizations tab
-  // (with the badge) but disappears from the inbox.
-  const markUnreachable = async (org: DiscoveredOrg) => {
-    const note = window.prompt(
-      `Mark ${org.name} as unreachable?\n\nAdd a note (optional but recommended):\n• "Refused to share email"\n• "No response after 3 calls"\n• "Front desk said send fax instead"`,
-      'Refused to share email'
-    );
-    if (note === null) return; // cancelled
-    setBusy(org.id);
+  // Opens inline reason picker (no jarring window.prompt). On confirm,
+  // marks unreachable; org stays in Organizations tab with a note but
+  // disappears from the inbox.
+  const confirmUnreachable = async (orgId: string) => {
+    const reason = (unreachableNote.trim() || unreachableReason).trim();
+    setBusy(orgId);
     try {
       const { data, error } = await supabase.functions.invoke('org-outreach-action', {
         body: {
-          organizationId: org.id,
+          organizationId: orgId,
           action: 'mark_unreachable',
-          note: note || 'Marked unreachable from inbox',
+          note: reason || 'Marked unreachable from inbox',
         },
       });
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'mark failed');
-      toast.success(`${org.name} marked unreachable — moved to Organizations tab`);
+      toast.success(`Marked unreachable — moved to Organizations tab`);
+      setUnreachableOrgId(null);
+      setUnreachableNote('');
+      setUnreachableReason('Refused to share email');
       refresh();
     } catch (e: any) {
       toast.error(e?.message || 'Mark failed');
@@ -348,38 +380,102 @@ const InboxTab: React.FC = () => {
 
   const totalOpen = insuranceQ.length + orgsQ.length;
 
+  // KPI counts — aging tiers across both queues
+  const staleCount = useMemo(() => {
+    let n = 0;
+    for (const r of insuranceQ) if (ageTier(r.created_at) === 'stale') n++;
+    for (const o of orgsQ) if (o.first_discovered_at && ageTier(o.first_discovered_at) === 'stale') n++;
+    return n;
+  }, [insuranceQ, orgsQ]);
+
+  // Filtered slices (search applied per section)
+  const filteredInsurance = useMemo(() => {
+    const q = insSearch.trim().toLowerCase();
+    if (!q) return insuranceQ;
+    return insuranceQ.filter(r =>
+      (r.patient_name || '').toLowerCase().includes(q) ||
+      (r.patient_email || '').toLowerCase().includes(q) ||
+      (r.proposed_provider || '').toLowerCase().includes(q) ||
+      (r.current_provider || '').toLowerCase().includes(q)
+    );
+  }, [insuranceQ, insSearch]);
+  const filteredOrgs = useMemo(() => {
+    const q = orgSearch.trim().toLowerCase();
+    if (!q) return orgsQ;
+    return orgsQ.filter(o =>
+      (o.name || '').toLowerCase().includes(q) ||
+      (o.ordering_physician || '').toLowerCase().includes(q) ||
+      (o.last_patient_name || '').toLowerCase().includes(q) ||
+      (o.address_city || '').toLowerCase().includes(q)
+    );
+  }, [orgsQ, orgSearch]);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Inbox className="h-6 w-6 text-[#B91C1C]" /> Inbox
-            {totalOpen > 0 && (
-              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                {totalOpen} open
-              </Badge>
-            )}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            OCR-pipeline items waiting on a human touch — patient confirmations &amp; new-practice metadata.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={refresh} className="gap-1">
-          <RefreshCw className="h-4 w-4" /> Refresh
-        </Button>
-      </div>
+    <div className="space-y-4 sm:space-y-6">
+      {/* HORMOZI HERO — dream outcome + KPI strip at the top */}
+      <Card className="border-2 border-[#B91C1C]/20 bg-gradient-to-br from-red-50/40 to-white shadow-sm">
+        <CardContent className="p-3 sm:p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-xl font-bold flex items-center gap-2 text-gray-900">
+                <Inbox className="h-5 w-5 sm:h-6 sm:w-6 text-[#B91C1C]" />
+                Action Items
+              </h1>
+              <p className="hidden sm:block text-sm text-gray-600 mt-0.5">
+                Patient confirmations + new-practice metadata waiting on a human touch.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5 text-xs h-9 sm:h-8 min-w-9" disabled={loading} title="Refresh">
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
+          </div>
+
+          {/* KPI strip — counters Hormozi style: name the fire */}
+          <div className="-mx-3 sm:mx-0 px-3 sm:px-0 mt-3 sm:mt-4 overflow-x-auto sm:overflow-visible scroll-smooth snap-x snap-mandatory">
+            <div className="grid grid-flow-col auto-cols-[42%] sm:auto-cols-auto sm:grid-cols-3 sm:grid-flow-row gap-2 pb-1 sm:pb-0">
+              <div className="text-left rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 snap-start">
+                <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70 text-amber-800 flex items-center gap-1">
+                  <ShieldCheck className="h-3 w-3" /> Awaiting patient
+                </p>
+                <p className="text-3xl sm:text-2xl font-bold leading-tight mt-0.5 text-amber-900">{insuranceQ.length}</p>
+              </div>
+              <div className="text-left rounded-lg border border-blue-200 bg-blue-50/60 px-3 py-2 snap-start">
+                <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70 text-blue-800 flex items-center gap-1">
+                  <Phone className="h-3 w-3" /> Orgs to call
+                </p>
+                <p className="text-3xl sm:text-2xl font-bold leading-tight mt-0.5 text-blue-900">{orgsQ.length}</p>
+              </div>
+              <div className={`text-left rounded-lg border px-3 py-2 snap-start ${staleCount > 0 ? 'border-red-300 bg-red-50/60' : 'border-gray-200 bg-gray-50'}`}>
+                <p className={`text-[10px] uppercase tracking-wider font-semibold opacity-70 flex items-center gap-1 ${staleCount > 0 ? 'text-red-800' : 'text-gray-700'}`}>
+                  <Flame className="h-3 w-3" /> Stale (5+ days)
+                </p>
+                <p className={`text-3xl sm:text-2xl font-bold leading-tight mt-0.5 ${staleCount > 0 ? 'text-red-900' : 'text-gray-700'}`}>{staleCount}</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* ─── Pending Insurance Changes ─── */}
       <section>
-        <h2 className="text-sm font-semibold flex items-center gap-2 mb-3">
-          <ShieldCheck className="h-4 w-4 text-[#B91C1C]" />
-          Pending insurance confirmations
-          {insuranceQ.length > 0 && (
-            <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
-              {insuranceQ.length}
-            </Badge>
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-[#B91C1C]" />
+            Pending insurance confirmations
+            {insuranceQ.length > 0 && (
+              <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+                {insuranceQ.length}
+              </Badge>
+            )}
+          </h2>
+          {insuranceQ.length > 2 && (
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+              <Input value={insSearch} onChange={e => setInsSearch(e.target.value)} placeholder="Search patient, carrier…" className="h-8 text-xs pl-8 w-56" />
+            </div>
           )}
-        </h2>
+        </div>
 
         {loading ? (
           <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">
@@ -393,15 +489,25 @@ const InboxTab: React.FC = () => {
           </CardContent></Card>
         ) : (
           <div className="space-y-3">
-            {insuranceQ.map(row => (
-              <Card key={row.id} className="border-amber-200">
+            {filteredInsurance.map(row => {
+              const tier = ageTier(row.created_at);
+              const days = differenceInDays(new Date(), new Date(row.created_at));
+              const isConfirming = confirmAcceptId === row.id;
+              return (
+              <Card key={row.id} className={`border-amber-200 ${AGING_BORDER[tier]}`}>
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm font-semibold">{row.patient_name}</p>
                       <p className="text-[11px] text-gray-500">{row.patient_email || 'no email'} · queued {formatDistanceToNow(new Date(row.created_at), { addSuffix: true })}</p>
                     </div>
-                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px]">awaiting patient</Badge>
+                    {tier === 'stale' ? (
+                      <Badge className="bg-red-100 text-red-700 text-[10px] animate-pulse">🚨 Stale {days}d</Badge>
+                    ) : tier === 'aging' ? (
+                      <Badge className="bg-orange-100 text-orange-800 text-[10px]">⏰ Aging {days}d</Badge>
+                    ) : (
+                      <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px]">awaiting patient</Badge>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -419,39 +525,77 @@ const InboxTab: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap gap-2 justify-end pt-1">
-                    <Button size="sm" variant="outline" className="text-xs h-8 gap-1"
-                      onClick={() => nudgePatient(row)} disabled={busy === row.id || !row.patient_email}>
-                      <Send className="h-3 w-3" /> Email reminder
-                    </Button>
-                    <Button size="sm" variant="outline" className="text-xs h-8"
-                      onClick={() => adminResolveInsurance(row, 'kept_existing')} disabled={busy === row.id}>
-                      Keep existing
-                    </Button>
-                    <Button size="sm" className="text-xs h-8 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1"
-                      onClick={() => adminResolveInsurance(row, 'accepted_new')} disabled={busy === row.id}>
-                      {busy === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
-                      Force-update chart
-                    </Button>
-                  </div>
+                  {isConfirming ? (
+                    <div className="rounded-md border-2 border-red-300 bg-red-50 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-red-900">
+                        ⚠ This will overwrite {row.patient_name}'s insurance on file:
+                      </p>
+                      <p className="text-[11px] text-red-800">
+                        <strong>{row.current_provider || '—'}</strong> ({row.current_member_id || '—'}) → <strong>{row.proposed_provider || '—'}</strong> ({row.proposed_member_id || '—'})
+                      </p>
+                      <div className="flex gap-2 justify-end">
+                        <Button size="sm" variant="outline" className="h-8 text-xs"
+                          onClick={() => setConfirmAcceptId(null)} disabled={busy === row.id}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white gap-1"
+                          onClick={() => adminResolveInsurance(row, 'accepted_new')} disabled={busy === row.id}>
+                          {busy === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+                          Yes, overwrite chart
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2 justify-end pt-1">
+                      <Button size="sm" variant="ghost" className="text-xs h-8 text-gray-500"
+                        onClick={() => adminResolveInsurance(row, 'kept_existing')} disabled={busy === row.id}>
+                        Keep existing
+                      </Button>
+                      <Button size="sm" variant="outline" className="text-xs h-8 gap-1"
+                        onClick={() => nudgePatient(row)} disabled={busy === row.id || !row.patient_email}>
+                        <Send className="h-3 w-3" /> Email reminder
+                      </Button>
+                      <Button size="sm" className="text-xs h-8 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1"
+                        onClick={() => adminResolveInsurance(row, 'accepted_new')} disabled={busy === row.id}>
+                        <CheckCircle2 className="h-3 w-3" />
+                        Update chart
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
+            {filteredInsurance.length === 0 && insuranceQ.length > 0 && (
+              <Card className="border-dashed">
+                <CardContent className="p-4 text-center text-xs text-gray-500">
+                  No matches for "{insSearch}". <button onClick={() => setInsSearch('')} className="text-[#B91C1C] hover:underline">Clear search</button>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </section>
 
       {/* ─── Auto-discovered orgs missing comms ─── */}
       <section>
-        <h2 className="text-sm font-semibold flex items-center gap-2 mb-3">
-          <Building2 className="h-4 w-4 text-[#B91C1C]" />
-          New practices — fill comms to enable notifications
-          {orgsQ.length > 0 && (
-            <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
-              {orgsQ.length}
-            </Badge>
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <Building2 className="h-4 w-4 text-[#B91C1C]" />
+            New practices — fill comms to enable notifications
+            {orgsQ.length > 0 && (
+              <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">
+                {orgsQ.length}
+              </Badge>
+            )}
+          </h2>
+          {orgsQ.length > 2 && (
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+              <Input value={orgSearch} onChange={e => setOrgSearch(e.target.value)} placeholder="Search org, doctor, city…" className="h-8 text-xs pl-8 w-56" />
+            </div>
           )}
-        </h2>
+        </div>
 
         {loading ? null : orgsQ.length === 0 ? (
           <Card><CardContent className="p-6 text-center">
@@ -461,14 +605,22 @@ const InboxTab: React.FC = () => {
           </CardContent></Card>
         ) : (
           <div className="space-y-3">
-            {orgsQ.map(org => {
+            {filteredOrgs.map(org => {
               const edit = orgEdit[org.id] || { manager_email: '', contact_email: '', contact_phone: '' };
               const refsMissing: string[] = [];
               if (!org.manager_email) refsMissing.push('manager_email');
               if (!org.contact_email) refsMissing.push('contact_email');
+              const tier = org.first_discovered_at ? ageTier(org.first_discovered_at) : 'fresh';
+              const days = org.first_discovered_at ? differenceInDays(new Date(), new Date(org.first_discovered_at)) : 0;
+              const showUnreachableForm = unreachableOrgId === org.id;
               return (
-                <Card key={org.id} className="border-blue-200">
+                <Card key={org.id} className={`border-blue-200 ${AGING_BORDER[tier]}`}>
                   <CardContent className="p-4 space-y-3">
+                    {tier !== 'fresh' && (
+                      <div className={`text-[10px] font-semibold flex items-center gap-1 ${tier === 'stale' ? 'text-red-700' : 'text-orange-700'}`}>
+                        {tier === 'stale' ? '🚨' : '⏰'} {tier === 'stale' ? `Stale ${days}d — call this office today` : `Aging ${days}d`}
+                      </div>
+                    )}
                     <div className="flex items-start justify-between flex-wrap gap-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold text-gray-900 truncate">
@@ -534,26 +686,72 @@ const InboxTab: React.FC = () => {
                       <strong>No email on file yet.</strong> Call the office to retrieve it, then save below.
                       If they refuse to provide one, click <em>Mark unreachable</em> — they'll move to the Organizations tab with a note.
                     </p>
-                    <div className="flex flex-wrap gap-2 justify-end pt-1">
-                      <Button size="sm" variant="outline" className="text-xs h-8 border-red-200 text-red-700 hover:bg-red-50"
-                        onClick={() => markUnreachable(org)} disabled={busy === org.id}>
-                        <AlertTriangle className="h-3 w-3 mr-1" /> Mark unreachable
-                      </Button>
-                      <Button size="sm" variant="outline" className="text-xs h-8"
-                        onClick={() => saveOrgComms(org)} disabled={busy === org.id}>
-                        Save (no email yet)
-                      </Button>
-                      <Button size="sm" className="text-xs h-8 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1"
-                        onClick={() => saveEmailAndWelcome(org)}
-                        disabled={busy === org.id || !((edit.contact_email || edit.manager_email || '').trim().includes('@'))}>
-                        {busy === org.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
-                        Save email + send welcome
-                      </Button>
-                    </div>
+
+                    {showUnreachableForm ? (
+                      <div className="rounded-md border-2 border-red-200 bg-red-50 p-3 space-y-2">
+                        <p className="text-xs font-semibold text-red-900">Why is {org.name} unreachable?</p>
+                        <select
+                          value={unreachableReason}
+                          onChange={(e) => setUnreachableReason(e.target.value)}
+                          className="w-full h-9 text-xs border border-gray-200 rounded-md px-2 bg-white"
+                        >
+                          <option>Refused to share email</option>
+                          <option>No response after 3 calls</option>
+                          <option>Front desk said send fax instead</option>
+                          <option>Number disconnected / wrong</option>
+                          <option>Practice closed / merged</option>
+                          <option>Other</option>
+                        </select>
+                        <Input
+                          placeholder="Additional note (optional)"
+                          value={unreachableNote}
+                          onChange={(e) => setUnreachableNote(e.target.value)}
+                          className="h-9 text-xs"
+                        />
+                        <div className="flex justify-end gap-2">
+                          <Button size="sm" variant="outline" className="h-8 text-xs"
+                            onClick={() => { setUnreachableOrgId(null); setUnreachableNote(''); }}
+                            disabled={busy === org.id}>
+                            Cancel
+                          </Button>
+                          <Button size="sm" className="h-8 text-xs bg-red-600 hover:bg-red-700 text-white gap-1"
+                            onClick={() => confirmUnreachable(org.id)}
+                            disabled={busy === org.id}>
+                            {busy === org.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />}
+                            Confirm unreachable
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 justify-end pt-1">
+                        <Button size="sm" variant="ghost" className="text-xs h-8 text-gray-500 hover:text-red-700"
+                          onClick={() => { setUnreachableOrgId(org.id); setUnreachableReason('Refused to share email'); setUnreachableNote(''); }}
+                          disabled={busy === org.id}>
+                          Mark unreachable
+                        </Button>
+                        <Button size="sm" variant="outline" className="text-xs h-8"
+                          onClick={() => saveOrgComms(org)} disabled={busy === org.id}>
+                          Save (no email yet)
+                        </Button>
+                        <Button size="sm" className="text-xs h-8 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1"
+                          onClick={() => saveEmailAndWelcome(org)}
+                          disabled={busy === org.id || !((edit.contact_email || edit.manager_email || '').trim().includes('@'))}>
+                          {busy === org.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                          Save email + send welcome
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
             })}
+            {filteredOrgs.length === 0 && orgsQ.length > 0 && (
+              <Card className="border-dashed">
+                <CardContent className="p-4 text-center text-xs text-gray-500">
+                  No matches for "{orgSearch}". <button onClick={() => setOrgSearch('')} className="text-[#B91C1C] hover:underline">Clear search</button>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </section>

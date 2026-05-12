@@ -53,7 +53,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Organizations', icon: Building2, path: `${basePath}/organizations` },
         { name: 'Specimens', icon: FlaskConical, path: `${basePath}/specimens` },
         { name: 'Notes & Tasks', icon: ClipboardList, path: `${basePath}/notes`, taskBadge: true },
-        { name: 'Inbox', icon: Inbox, path: `${basePath}/inbox`, inboxBadge: true },
+        { name: 'Action Items', icon: Inbox, path: `${basePath}/inbox`, inboxBadge: true },
         { name: 'Operations', icon: Wrench, path: `${basePath}/operations` },
         { name: 'AI Assistant', icon: Sparkles, path: `${basePath}/ai-assistant` },
         { name: 'Training', icon: GraduationCap, path: `${basePath}/training` },
