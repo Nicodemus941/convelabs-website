@@ -37,6 +37,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   patient: PatientPrefill | null;
+  // Optional pre-fills. When opened from the Lab Orders tab, we already
+  // know the org + the lab order PDF + the likely service type. Pre-fill
+  // those so the user doesn't have to re-select. (Kandace Bennett case
+  // 2026-05-12 — admin had to manually pick Elite Medical even though
+  // the order already came from Elite.)
+  presetOrganizationId?: string | null;
+  presetOrganizationName?: string | null;
+  presetLabOrderPath?: string | null;
+  presetServiceType?: string | null; // e.g. 'partner-elite-medical-concierge'
 }
 
 interface ServiceOption {
@@ -60,7 +69,10 @@ const SERVICES: ServiceOption[] = [
 
 interface OrgOption { id: string; name: string }
 
-const SendBookingLinkModal: React.FC<Props> = ({ open, onClose, patient }) => {
+const SendBookingLinkModal: React.FC<Props> = ({
+  open, onClose, patient,
+  presetOrganizationId, presetOrganizationName, presetLabOrderPath, presetServiceType,
+}) => {
   const [busy, setBusy] = useState(false);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
@@ -95,6 +107,16 @@ const SendBookingLinkModal: React.FC<Props> = ({ open, onClose, patient }) => {
     })();
     return () => { cancelled = true; };
   }, [open]);
+
+  // Pre-fill org + lab-order path when launched from a context that already
+  // has them (e.g. Lab Orders tab clicking "Send Booking Link" on a row).
+  // Re-runs whenever the modal opens for a different patient/order.
+  useEffect(() => {
+    if (!open) return;
+    if (presetOrganizationId) setSelectedOrgId(presetOrganizationId);
+    else if (presetOrganizationName) setManualOrgName(presetOrganizationName);
+    if (presetLabOrderPath) setUploadedPath(presetLabOrderPath);
+  }, [open, presetOrganizationId, presetOrganizationName, presetLabOrderPath]);
 
   const handleClose = () => {
     if (busy) return;
@@ -244,9 +266,32 @@ const SendBookingLinkModal: React.FC<Props> = ({ open, onClose, patient }) => {
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-xs text-gray-600">
-              Pick the provider's office (optional), attach the lab order (optional), then choose the service. We handle the rest.
-            </p>
+            {(presetOrganizationName || presetLabOrderPath) ? (
+              <div className="rounded-lg border-2 border-emerald-200 bg-emerald-50 p-3 space-y-1.5">
+                <p className="text-xs font-semibold text-emerald-900 flex items-center gap-1.5">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Context pre-filled from this lab order
+                </p>
+                {presetOrganizationName && (
+                  <p className="text-[11px] text-emerald-800 flex items-center gap-1.5">
+                    <Building2 className="h-3 w-3" /> Provider: <strong>{presetOrganizationName}</strong>
+                  </p>
+                )}
+                {presetLabOrderPath && (
+                  <p className="text-[11px] text-emerald-800 flex items-center gap-1.5">
+                    <FileText className="h-3 w-3" /> Lab order PDF already attached — will auto-link to the appointment after payment
+                  </p>
+                )}
+                <p className="text-[10px] text-emerald-700 italic mt-1">
+                  {presetServiceType
+                    ? `Just tap "${SERVICES.find(s => s.value === presetServiceType)?.label || 'the matching service'}" below to send.`
+                    : 'Pick the service to send.'}
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-600">
+                Pick the provider's office (optional), attach the lab order (optional), then choose the service. We handle the rest.
+              </p>
+            )}
 
             {/* Step 1 — Provider's office */}
             <div className="border border-gray-200 rounded-lg p-3 space-y-2">
@@ -276,7 +321,8 @@ const SendBookingLinkModal: React.FC<Props> = ({ open, onClose, patient }) => {
               )}
             </div>
 
-            {/* Step 2 — Lab order upload */}
+            {/* Step 2 — Lab order upload (hidden when already attached via preset) */}
+            {!presetLabOrderPath && (
             <div className="border border-gray-200 rounded-lg p-3 space-y-2">
               <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1.5">
                 <FileText className="h-3 w-3" /> Lab order <span className="text-gray-400 normal-case">(optional · auto-attaches to appointment)</span>
@@ -308,11 +354,12 @@ const SendBookingLinkModal: React.FC<Props> = ({ open, onClose, patient }) => {
                 <p className="text-[10px] text-gray-500 flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Uploading…</p>
               )}
             </div>
+            )}
 
-            {/* Step 3 — Service */}
-            <ServiceGroup title="Common" services={grouped.common} onPick={handleSend} disabled={busy || labOrderUploading} />
-            <ServiceGroup title="Specialty" services={grouped.specialty} onPick={handleSend} disabled={busy || labOrderUploading} />
-            <ServiceGroup title="Partner" services={grouped.partner} onPick={handleSend} disabled={busy || labOrderUploading} />
+            {/* Step 3 — Service. Recommended service (if any) gets a glow ring. */}
+            <ServiceGroup title="Common" services={grouped.common} onPick={handleSend} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
+            <ServiceGroup title="Specialty" services={grouped.specialty} onPick={handleSend} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
+            <ServiceGroup title="Partner" services={grouped.partner} onPick={handleSend} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
 
             {busy && (
               <div className="flex items-center justify-center gap-2 text-xs text-gray-500 py-2">
@@ -340,25 +387,36 @@ const ServiceGroup: React.FC<{
   services: ServiceOption[];
   onPick: (s: ServiceOption) => void;
   disabled?: boolean;
-}> = ({ title, services, onPick, disabled }) => (
+  recommendedValue?: string | null;
+}> = ({ title, services, onPick, disabled, recommendedValue }) => (
   <div>
     <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">{title}</p>
     <div className="grid grid-cols-1 gap-1.5">
-      {services.map(s => (
-        <button
-          key={s.value}
-          type="button"
-          disabled={disabled}
-          onClick={() => onPick(s)}
-          className="flex items-center justify-between gap-2 border border-gray-200 hover:border-[#B91C1C] hover:bg-red-50/40 transition rounded-lg px-3 py-2 text-left disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <span className="text-sm font-medium text-gray-900 truncate">{s.label}</span>
-          <span className="flex items-center gap-2 flex-shrink-0">
-            <span className="text-xs font-semibold text-gray-700">{s.priceLabel}</span>
-            <Send className="h-3.5 w-3.5 text-gray-400" />
-          </span>
-        </button>
-      ))}
+      {services.map(s => {
+        const isRecommended = recommendedValue === s.value;
+        return (
+          <button
+            key={s.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(s)}
+            className={`flex items-center justify-between gap-2 border transition rounded-lg px-3 py-2 text-left disabled:opacity-50 disabled:cursor-not-allowed ${
+              isRecommended
+                ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-200 hover:bg-emerald-100'
+                : 'border-gray-200 hover:border-[#B91C1C] hover:bg-red-50/40'
+            }`}
+          >
+            <span className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
+              {isRecommended && <span className="text-emerald-600 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 px-1.5 py-0.5 rounded">Tap to send</span>}
+              {s.label}
+            </span>
+            <span className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-xs font-semibold text-gray-700">{s.priceLabel}</span>
+              <Send className={`h-3.5 w-3.5 ${isRecommended ? 'text-emerald-600' : 'text-gray-400'}`} />
+            </span>
+          </button>
+        );
+      })}
     </div>
   </div>
 );

@@ -159,6 +159,14 @@ const LabOrdersTab: React.FC = () => {
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [sendLinkPatient, setSendLinkPatient] = useState<any>(null);
+  // Lab-order-row context for the Send Booking Link modal — pre-fills the
+  // provider's office, lab-order PDF, and recommended service type.
+  const [sendLinkContext, setSendLinkContext] = useState<{
+    organizationId: string | null;
+    organizationName: string | null;
+    labOrderPath: string | null;
+    serviceType: string | null;
+  }>({ organizationId: null, organizationName: null, labOrderPath: null, serviceType: null });
 
   const [lastError, setLastError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
@@ -305,6 +313,23 @@ const LabOrdersTab: React.FC = () => {
       lastName: rest.join(' '),
       email: row.patient_email,
       phone: row.patient_phone,
+    });
+    // Map well-known partner orgs to their canonical service_type so the
+    // user can one-tap send without picking a service. Falls back to
+    // 'mobile' (the most common case) for non-partner orgs.
+    const orgNameLower = (row.organization_name || '').toLowerCase();
+    const inferredServiceType =
+      orgNameLower.includes('elite medical') ? 'partner-elite-medical-concierge' :
+      orgNameLower.includes('nd wellness') ? 'partner-nd-wellness' :
+      orgNameLower.includes('naturamed') ? 'partner-naturamed' :
+      orgNameLower.includes('restoration place') ? 'partner-restoration-place' :
+      orgNameLower.includes('aristotle') ? 'partner-aristotle-education' :
+      'mobile';
+    setSendLinkContext({
+      organizationId: row.organization_id,
+      organizationName: row.organization_name || null,
+      labOrderPath: row.lab_order_file_path,
+      serviceType: inferredServiceType,
     });
     setSendLinkOpen(true);
   };
@@ -513,8 +538,16 @@ const LabOrdersTab: React.FC = () => {
 
       <SendBookingLinkModal
         open={sendLinkOpen}
-        onClose={() => { setSendLinkOpen(false); setSendLinkPatient(null); }}
+        onClose={() => {
+          setSendLinkOpen(false);
+          setSendLinkPatient(null);
+          setSendLinkContext({ organizationId: null, organizationName: null, labOrderPath: null, serviceType: null });
+        }}
         patient={sendLinkPatient}
+        presetOrganizationId={sendLinkContext.organizationId}
+        presetOrganizationName={sendLinkContext.organizationName}
+        presetLabOrderPath={sendLinkContext.labOrderPath}
+        presetServiceType={sendLinkContext.serviceType}
       />
     </div>
   );
