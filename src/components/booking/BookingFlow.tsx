@@ -97,6 +97,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // Prior bug: memberTier was local to CheckoutStep only, so the Stripe
   // amount was charged at full price even though the UI showed discounted.
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  // Founding-50 VIP flag. Drives the FREE family-add-on perk in
+  // calculateTotal(): the first additional household member is comped to $0
+  // when isFoundingMember && tier==='vip'. Promised on BonusStackCard.tsx.
+  const [isFoundingMember, setIsFoundingMember] = useState<boolean>(false);
   // Bundled membership subscription (if patient picked "Add VIP" at checkout).
   // When present, BookingFlow forwards it to create-appointment-checkout so
   // Stripe creates a subscription session that combines the visit + annual fee.
@@ -460,7 +464,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         weekend: data.serviceDetails.weekend,
         extendedArea: isExtendedArea(locationCity),
         ...(specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
-      }, tipAmount, isSpecialtyKit ? 0 : additionalPatientCount, memberTier);
+      }, tipAmount, isSpecialtyKit ? 0 : additionalPatientCount, memberTier, isFoundingMember);
 
       // Lab orders + insurance — trust the upload-on-drop in
       // LabOrderUploadStep / InsuranceUploadStep entirely. Re-uploading
@@ -1027,6 +1031,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   onCheckout={handleCheckout}
                   isProcessing={isProcessing}
                   onMemberTierDetected={setMemberTier}
+                  onFoundingMemberDetected={setIsFoundingMember}
                   onBundledSubscription={setBundledSubscription}
                 />
               )}

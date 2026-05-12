@@ -169,9 +169,32 @@ export function calculateBasePrice(serviceId: string): number {
   return getServicePrice(serviceId, 'none');
 }
 
-export function calculateSurcharges(options: SurchargeOptions): { label: string; amount: number }[] {
+/**
+ * VIP / Concierge same-day STAT surcharge waiver.
+ *
+ * Promise on BonusStackCard.tsx (the Founding-50 value-ladder shown at
+ * checkout):
+ *   "Priority same-day booking — Skip the +$100 STAT surcharge on urgent draws"
+ *
+ * Before this fix `SURCHARGES.sameDay` was applied universally — a VIP
+ * paying for the membership was still getting hit with the $100 STAT fee
+ * on urgent visits. That's a broken promise and a refund pipeline.
+ *
+ * Tier rule (Hormozi: name the perk, then deliver it):
+ *   • none / member  → pays $100 STAT surcharge (no waiver)
+ *   • vip            → waived
+ *   • concierge      → waived
+ */
+function isSameDayWaived(tier: MembershipTier): boolean {
+  return tier === 'vip' || tier === 'concierge';
+}
+
+export function calculateSurcharges(
+  options: SurchargeOptions,
+  tier: MembershipTier = 'none',
+): { label: string; amount: number }[] {
   const items: { label: string; amount: number }[] = [];
-  if (options.sameDay) items.push(SURCHARGES.sameDay);
+  if (options.sameDay && !isSameDayWaived(tier)) items.push(SURCHARGES.sameDay);
   if (options.weekend) items.push(SURCHARGES.weekend);
   if (options.extendedHours) items.push(SURCHARGES.extendedHours);
   if (options.extendedArea) items.push(SURCHARGES.extendedArea);
@@ -196,7 +219,23 @@ export function calculateTotal(
   options: SurchargeOptions,
   tipAmount: number = 0,
   additionalPatientCount: number = 0,
-  tier: MembershipTier = 'none'
+  tier: MembershipTier = 'none',
+  /**
+   * Founding-50 VIP flag. When true AND tier === 'vip', the FIRST additional
+   * household member's surcharge is waived as a permanent perk.
+   *
+   * Promise on BonusStackCard.tsx (the Founding-50 value ladder):
+   *   "Free family add-on — 1 extra household member at no extra cost · +$75"
+   *
+   * Before this fix, founding VIPs were billed the standard additional-patient
+   * surcharge ($45 at VIP tier) on every family draw — silently breaking the
+   * Founding-50 contract. With this flag the first additional patient is FREE
+   * for life; the 2nd, 3rd, etc. still bill at the VIP tier rate.
+   *
+   * The `isFoundingMember` flag MUST be read server-side from
+   * `user_memberships.founding_member = true`. Never trust a client-set value.
+   */
+  isFoundingMember: boolean = false,
 ): PriceBreakdown {
   // Specialty-kit bundle override — short-circuits the ad-hoc per-kit + per-
   // patient stacking when a structured bundle is supplied. Lets the booking
@@ -206,14 +245,29 @@ export function calculateTotal(
   }
 
   const servicePrice = getServicePrice(serviceId, tier);
-  const surcharges = calculateSurcharges(options);
+  const surcharges = calculateSurcharges(options, tier);
 
   if (additionalPatientCount > 0) {
     const perPatient = getAdditionalPatientPrice(serviceId, tier);
-    surcharges.push({
-      label: `Additional Patient${additionalPatientCount > 1 ? 's' : ''} (${additionalPatientCount} × $${perPatient})`,
-      amount: additionalPatientCount * perPatient,
-    });
+    const foundingVipFamilyFreeSlot = isFoundingMember && tier === 'vip' ? 1 : 0;
+    const billablePatients = Math.max(0, additionalPatientCount - foundingVipFamilyFreeSlot);
+
+    if (foundingVipFamilyFreeSlot > 0) {
+      // Render the comp as a visible $0 line so the patient SEES the
+      // value being delivered, not just an invisible discount. Hormozi:
+      // "The discount only works if the customer can see it."
+      surcharges.push({
+        label: 'Family member — free (Founding VIP perk)',
+        amount: 0,
+      });
+    }
+
+    if (billablePatients > 0) {
+      surcharges.push({
+        label: `Additional Patient${billablePatients > 1 ? 's' : ''} (${billablePatients} × $${perPatient})`,
+        amount: billablePatients * perPatient,
+      });
+    }
   }
 
   const surchargeTotal = surcharges.reduce((sum, s) => sum + s.amount, 0);

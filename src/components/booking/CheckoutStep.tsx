@@ -49,6 +49,13 @@ interface CheckoutStepProps {
    */
   onMemberTierDetected?: (tier: 'none' | 'member' | 'vip' | 'concierge') => void;
   /**
+   * Fires when we detect the patient is one of the Founding 50 VIPs.
+   * BookingFlow stores this on its own state + passes through to
+   * `calculateTotal(... , isFoundingMember=true)` so the FIRST additional
+   * household member is comped to $0 (Founding-50 free family add-on).
+   */
+  onFoundingMemberDetected?: (isFounding: boolean) => void;
+  /**
    * Called when the patient subscribes to a membership inline at checkout.
    * Parent (BookingFlow) forwards this to create-appointment-checkout's
    * subscribeToMembership param so Stripe bundles the membership + visit
@@ -62,7 +69,7 @@ interface CheckoutStepProps {
   } | null) => void;
 }
 
-const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected, onBundledSubscription }) => {
+const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected, onFoundingMemberDetected, onBundledSubscription }) => {
   const { user } = useAuth();
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
@@ -83,6 +90,10 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [addOns, setAddOns] = useState<any[]>([]);
   const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  // Founding-50 VIP: unlocks the FREE family add-on (1st additional patient
+  // comped to $0). Detected by the membership lookup below — see the
+  // onFoundingMemberDetected callback for context.
+  const [isFoundingMember, setIsFoundingMember] = useState<boolean>(false);
   const [bundledSubscription, setBundledSubscription] = useState<{
     planName: 'Regular' | 'VIP' | 'Concierge';
     annualPriceCents: number;
@@ -150,6 +161,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         else if (plan) { detectedTier = 'member'; setMemberTier('member'); setMemberLabel('Member'); }
         // CRITICAL: notify parent so the Stripe amount uses the right price
         if (detectedTier !== 'none') onMemberTierDetected?.(detectedTier);
+        // Founding-50 detection — surfaces the free family add-on perk.
+        // Trust the DB row, NOT the plan name (founding is a separate
+        // column claimed atomically by stripe-webhook on signup).
+        const isFounding = Boolean((res.data as any).founding_member);
+        setIsFoundingMember(isFounding);
+        onFoundingMemberDetected?.(isFounding);
       });
   }, []);
 
@@ -253,11 +270,18 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     weekend: serviceDetails?.weekend,
     extendedArea,
     ...(isSpecialtyKit && specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
-  }, tipAmount, isSpecialtyKit ? 0 : additionalPatients.length, memberTier);
+  }, tipAmount, isSpecialtyKit ? 0 : additionalPatients.length, memberTier, isFoundingMember);
 
   const effectiveReferralDiscount = referralApplied ? referralDiscount : 0;
-  const familyMemberPrice = FAMILY_MEMBER_PRICE_BY_TIER[memberTier] ?? 75;
-  const familyMemberTotal = familyMembers.length * familyMemberPrice;
+  // Founding VIPs get their FIRST family member free — the perk promised
+  // in BonusStackCard.tsx ("Free family add-on · +$75 value"). The 2nd, 3rd,
+  // etc. still bill at the VIP tier rate. Matches the comp logic inside
+  // pricingService.calculateTotal() so what the UI shows == what charges.
+  const baseFamilyMemberPrice = FAMILY_MEMBER_PRICE_BY_TIER[memberTier] ?? 75;
+  const familyMemberPrice = baseFamilyMemberPrice; // per-additional-member rate (unchanged)
+  const foundingFamilyFreeSlots = isFoundingMember && memberTier === 'vip' ? 1 : 0;
+  const billableFamilyCount = Math.max(0, familyMembers.length - foundingFamilyFreeSlots);
+  const familyMemberTotal = billableFamilyCount * familyMemberPrice;
 
   const handleAddFamilyMember = () => {
     if (!familyForm.name.trim()) { toast.error('Please enter the family member\'s name'); return; }

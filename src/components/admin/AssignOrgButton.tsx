@@ -72,7 +72,15 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
     }
   };
 
-  useEffect(() => { if (open) load(); }, [open, appointmentId, patientEmail]);
+  // Load on mount AND whenever the appointment/email changes — not just on
+  // dialog open. Before this, the button label always read "Link org" until
+  // someone opened the dialog at least once, even when the appointment had
+  // an org already linked. Diane Holm (2026-05-12) hit this: Exclusive Health
+  // Retreats was the primary org on her appt, but the button still showed
+  // "Link org" — admin clicked, opened the dialog, saw the link, and was
+  // confused. Now the label reflects DB state on first paint.
+  useEffect(() => { load(); }, [appointmentId, patientEmail]);
+  useEffect(() => { if (open) load(); }, [open]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
