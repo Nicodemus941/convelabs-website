@@ -114,7 +114,11 @@ const LabOrdersTab: React.FC = () => {
   const [rows, setRows] = useState<LabOrderRow[]>([]);
   const [orgMap, setOrgMap] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<FilterKey>('new');
+  // Default to 'all' so an admin landing here for the first time sees
+  // every order in the system — not just the small "new" subset. Hormozi:
+  // never let the customer stare at an empty screen and conclude "this
+  // doesn't work." The filter pills above make narrowing one click away.
+  const [filter, setFilter] = useState<FilterKey>('all');
   const [search, setSearch] = useState('');
   const [selectedRow, setSelectedRow] = useState<LabOrderRow | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
@@ -314,6 +318,16 @@ const LabOrdersTab: React.FC = () => {
             <FlaskConical className="h-10 w-10 text-gray-300 mx-auto mb-2" />
             <p className="text-sm font-semibold text-gray-700">No orders in this view.</p>
             <p className="text-xs text-gray-500 mt-1">{FILTER_DEFINITIONS.find(f => f.key === filter)!.desc}</p>
+            {rows.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 text-xs"
+                onClick={() => setFilter('all')}
+              >
+                Show all {rows.length} orders →
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
