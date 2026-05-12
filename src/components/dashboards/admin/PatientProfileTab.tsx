@@ -23,6 +23,7 @@ import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 import RecurringGapsCard from './RecurringGapsCard';
 import ScheduleAppointmentModal from '@/components/calendar/ScheduleAppointmentModal';
 import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
+import PatientCommsTimeline from '@/components/admin/PatientCommsTimeline';
 import { Zap } from 'lucide-react';
 
 const PatientProfileTab: React.FC = () => {
@@ -407,6 +408,15 @@ const PatientProfileTab: React.FC = () => {
 
         {/* Recurring-series gap detector — only renders if gaps exist. */}
         <RecurringGapsCard patientId={p.id} onGapsFilled={() => loadPatientData(p)} />
+
+        {/* Unified comms timeline — every SMS/email/tokenized link sent to
+            (or received from) this patient. Hormozi: relationship visibility
+            so "did Susan get the link?" is answered in one click. */}
+        <PatientCommsTimeline
+          patientId={p.id}
+          patientEmail={p.email || null}
+          patientPhone={p.phone || null}
+        />
 
         {/* Patient Info Card */}
         <Card className="shadow-sm">
