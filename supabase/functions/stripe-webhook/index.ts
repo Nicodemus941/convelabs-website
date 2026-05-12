@@ -1345,14 +1345,64 @@ async function handleAppointmentPayment(session: any) {
       console.warn(`[insurance-persist] non-fatal error: ${insErr?.message || insErr}`);
     }
 
-    // ─── PREFILL TOKEN: mark consumed so the funnel report flips to "booked"
+    // ─── PREFILL TOKEN: mark consumed + auto-attach lab order to the
+    // new appointment so the phleb card shows the provider's PDF without
+    // admin touching anything. The prefill token carries the lab_order_path
+    // that was uploaded when the admin sent the booking link from the
+    // patient profile (Hormozi: zero-friction handoff from provider →
+    // patient → phleb).
     if (metadata.prefill_token_id) {
       try {
+        const { data: tok } = await supabaseClient
+          .from('booking_prefill_tokens')
+          .select('lab_order_path, organization_id, billed_to')
+          .eq('id', metadata.prefill_token_id)
+          .maybeSingle();
+
         await supabaseClient.from('booking_prefill_tokens').update({
           consumed_at: new Date().toISOString(),
           appointment_id: appointment.id,
           payment_total_cents: parseInt(String(metadata.service_price || '0'), 10) || null,
         }).eq('id', metadata.prefill_token_id);
+
+        const labPath = (tok as any)?.lab_order_path || null;
+        if (labPath) {
+          // Stamp the legacy single-path column AND insert a row in the
+          // normalized appointment_lab_orders table — both surfaces (admin
+          // calendar modal + phleb card) read the file that way.
+          try {
+            await supabaseClient
+              .from('appointments')
+              .update({ lab_order_file_path: labPath })
+              .eq('id', appointment.id);
+            await supabaseClient
+              .from('appointment_lab_orders')
+              .insert({
+                appointment_id: appointment.id,
+                file_path: labPath,
+                source: 'provider_prefill',
+                uploaded_by_user_id: null,
+              });
+            console.log(`[prefill-token] auto-attached lab order ${labPath} to appointment ${appointment.id}`);
+          } catch (laErr: any) {
+            console.warn('[prefill-token] lab-order auto-attach failed (non-blocking):', laErr?.message || laErr);
+          }
+        }
+        // If the prefill carried an org context, stamp it on the appointment
+        // too — the partner-billed/no-pay logic upstream already wrote org_id
+        // when the patient's metadata.organization_id arrived, but the
+        // prefill is the authoritative source when admin selected the office.
+        if ((tok as any)?.organization_id) {
+          try {
+            await supabaseClient
+              .from('appointments')
+              .update({
+                organization_id: (tok as any).organization_id,
+                billed_to: (tok as any).billed_to || 'patient',
+              })
+              .eq('id', appointment.id);
+          } catch { /* non-fatal */ }
+        }
       } catch (e: any) {
         console.warn('[prefill-token] consume failed (non-blocking):', e?.message || e);
       }

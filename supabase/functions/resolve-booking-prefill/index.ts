@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
 
     const { data: row } = await admin
       .from('booking_prefill_tokens')
-      .select('id, token, patient_id, patient_first_name, patient_last_name, patient_email, patient_phone, service_type, service_name, service_price_cents, organization_id, billed_to, expires_at, consumed_at, open_count')
+      .select('id, token, patient_id, patient_first_name, patient_last_name, patient_email, patient_phone, service_type, service_name, service_price_cents, organization_id, organization_name, provider_office_label, lab_order_path, billed_to, expires_at, consumed_at, open_count')
       .eq('token', token)
       .maybeSingle();
 
@@ -114,6 +114,9 @@ Deno.serve(async (req) => {
         service_name: (row as any).service_name,
         service_price_cents: (row as any).service_price_cents,
         organization_id: (row as any).organization_id,
+        organization_name: (row as any).organization_name || null,
+        provider_office_label: (row as any).provider_office_label || null,
+        lab_order_path: (row as any).lab_order_path || null,
         billed_to: (row as any).billed_to,
         // Hormozi "make it simple" — patient's last-known address +
         // insurance so the booking flow can skip those steps when data

@@ -99,7 +99,10 @@ Deno.serve(async (req) => {
       serviceType,
       serviceName: serviceNameIn,
       organizationId,
+      organizationName: organizationNameIn,
       billedTo = 'patient',
+      labOrderPath: labOrderPathIn,
+      providerOfficeLabel: providerOfficeLabelIn,
     } = body || {};
 
     if (!serviceType) {
@@ -141,6 +144,19 @@ Deno.serve(async (req) => {
     const serviceName = serviceNameIn || hint.name;
     const servicePriceCents = Math.round(hint.price * 100);
 
+    // Resolve provider/org display name — used in the HIPAA-minimum-necessary
+    // SMS copy. We never expose patient name in SMS when an org context exists
+    // (the patient already knows their own provider's office; "we received your
+    // lab order from {org}" is the trust signal).
+    let organizationName: string | null = organizationNameIn || null;
+    if (!organizationName && organizationId) {
+      const { data: org } = await admin
+        .from('organizations').select('name').eq('id', organizationId).maybeSingle();
+      organizationName = (org as any)?.name || null;
+    }
+    const providerOfficeLabel = providerOfficeLabelIn || organizationName || null;
+    const labOrderPath: string | null = labOrderPathIn ? String(labOrderPathIn) : null;
+
     // Insert token
     const token = makeToken();
     const { data: row, error: insErr } = await admin
@@ -156,7 +172,11 @@ Deno.serve(async (req) => {
         service_name: serviceName,
         service_price_cents: servicePriceCents,
         organization_id: organizationId || null,
+        organization_name: organizationName,
+        provider_office_label: providerOfficeLabel,
+        lab_order_path: labOrderPath,
         billed_to: billedTo,
+        hipaa_minimum_necessary: !!providerOfficeLabel,
         created_by: requester.id,
       })
       .select('id, token, expires_at')
@@ -173,10 +193,21 @@ Deno.serve(async (req) => {
     let emailSent = false;
     const sendErrors: string[] = [];
 
-    // SMS — Hormozi loss-aversion + low-friction copy
+    // SMS — HIPAA minimum-necessary when a provider's office sent the order:
+    // mention the office name (the trust signal the patient needs), NEVER
+    // mention the patient name or specific tests in the SMS body. Patient ID
+    // and lab-order details are gated behind the tokenized link.
     if (phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
       try {
-        const smsBody = `ConveLabs: Hi ${greetingName} —${priceLine} Tap to pick a time + book in 90 sec: ${url}`;
+        let smsBody: string;
+        if (providerOfficeLabel) {
+          // HIPAA-safe: provider office named, no patient name, no test names.
+          // Hormozi: state who sent it + the action + the time-to-complete.
+          smsBody = `ConveLabs: We received a lab order from ${providerOfficeLabel} for you. Tap to schedule your in-home visit in 90 sec: ${url}\n\nReply STOP to opt out.`;
+        } else {
+          // Direct admin/owner send (no provider context) — original copy.
+          smsBody = `ConveLabs: Hi ${greetingName} —${priceLine} Tap to pick a time + book in 90 sec: ${url}\n\nReply STOP to opt out.`;
+        }
         const fd = new URLSearchParams({ To: normPhone(phone), From: TWILIO_FROM, Body: smsBody });
         const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
           method: 'POST',
@@ -194,17 +225,22 @@ Deno.serve(async (req) => {
     // Email — same content, prettier
     if (email && MAILGUN_API_KEY) {
       try {
+        const intro = providerOfficeLabel
+          ? `We received your lab order from <strong>${providerOfficeLabel}</strong> and we're ready to come to you. Tap below to pick a time — your name, address, and order are already on file. You'll be done in under 90 seconds.`
+          : `Tap the button below — your service + info are pre-loaded. Pick a time, pay, and you're done in under 90 seconds.`;
+        const subjectHero = providerOfficeLabel ? `Your ${providerOfficeLabel} lab order is ready to schedule` : 'Your booking link is ready';
         const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:540px;margin:0 auto;background:#fff;">
   <div style="background:linear-gradient(135deg,#B91C1C,#7F1D1D);color:#fff;padding:22px 24px;text-align:center;border-radius:12px 12px 0 0;">
-    <h2 style="margin:0;font-size:20px;font-weight:700;">Your booking link is ready</h2>
+    <h2 style="margin:0;font-size:20px;font-weight:700;">${subjectHero}</h2>
     <p style="margin:6px 0 0;font-size:13px;opacity:0.95;">${serviceName}${servicePriceCents > 0 ? ` · $${(servicePriceCents / 100).toFixed(2)}` : ' · covered'}</p>
   </div>
   <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.55;color:#111827;">
     <p style="margin:0 0 14px;">Hi ${greetingName},</p>
-    <p style="margin:0 0 14px;">Tap the button below — your service + info are pre-loaded. Pick a time, pay, and you're done in under 90 seconds.</p>
+    <p style="margin:0 0 14px;">${intro}</p>
     <div style="text-align:center;margin:22px 0;">
       <a href="${url}" style="display:inline-block;background:#B91C1C;color:#fff;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">Book my draw →</a>
     </div>
+    ${labOrderPath ? `<p style="margin:0 0 8px;font-size:12px;color:#374151;">📄 Your lab order is on file — no need to upload it yourself.</p>` : ''}
     <p style="margin:14px 0 0;font-size:11px;color:#6b7280;border-top:1px solid #e5e7eb;padding-top:12px;">
       Link expires in 7 days. Reply or call (941) 527-9169 if anything looks off.
     </p>
@@ -213,7 +249,9 @@ Deno.serve(async (req) => {
         const fd = new FormData();
         fd.append('from', FROM_EMAIL);
         fd.append('to', email);
-        fd.append('subject', `Your ConveLabs booking link${servicePriceCents > 0 ? ` · $${(servicePriceCents / 100).toFixed(0)}` : ''}`);
+        fd.append('subject', providerOfficeLabel
+          ? `Your ${providerOfficeLabel} lab order is ready to schedule${servicePriceCents > 0 ? ` · $${(servicePriceCents / 100).toFixed(0)}` : ''}`
+          : `Your ConveLabs booking link${servicePriceCents > 0 ? ` · $${(servicePriceCents / 100).toFixed(0)}` : ''}`);
         fd.append('html', html);
         fd.append('o:tracking-clicks', 'no');
         const r = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
