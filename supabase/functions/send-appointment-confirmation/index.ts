@@ -207,6 +207,87 @@ Deno.serve(async (req) => {
         const everything = [...panels.map(p => String(p).toLowerCase()), ocrText.toLowerCase()].join(' ');
         const fastingRequired = /\bfasting\b|\bfasted\b|\bnpo\b|lipid|cholesterol|\bcmp\b|comprehensive\s*metabolic|\bbmp\b|basic\s*metabolic|\bglucose\b(?!\s*tolerance)|fasting\s*insulin|iron\s*panel|ferritin|\bhepatic\b/.test(everything);
 
+        // ── PER-VISIT + YTD SAVINGS + FOUNDING SCARCITY ────────────────
+        // Hormozi: "Every receipt should remind the customer of the
+        // dollars they JUST got." Look up the patient's membership tier,
+        // compute the per-visit savings vs the non-member price, sum YTD
+        // savings across completed visits this year, and pass the
+        // founding-50 remaining count to the email shell (scarcity).
+        let savingsCents = 0;
+        let ytdSavingsCents = 0;
+        let memberTierLabel: string | undefined;
+        let foundingSeatsRemaining: number | undefined;
+        try {
+          // Mirror of TIER_PRICING in src/services/pricing/pricingService.ts
+          // (keep keys in sync if pricing changes — small + low-churn).
+          const TIER_PRICING_DOLLARS: Record<string, Record<'none'|'member'|'vip'|'concierge', number>> = {
+            'mobile':                          { none: 150, member: 130, vip: 115, concierge: 99  },
+            'in-office':                       { none: 55,  member: 49,  vip: 45,  concierge: 39  },
+            'senior':                          { none: 100, member: 85,  vip: 75,  concierge: 65  },
+            'specialty-kit':                   { none: 185, member: 165, vip: 150, concierge: 135 },
+            'specialty-kit-genova':            { none: 200, member: 180, vip: 165, concierge: 150 },
+            'therapeutic':                     { none: 200, member: 180, vip: 165, concierge: 150 },
+            'partner-restoration-place':       { none: 125, member: 115, vip: 99,  concierge: 85  },
+            'partner-naturamed':               { none: 85,  member: 80,  vip: 75,  concierge: 65  },
+            'partner-nd-wellness':             { none: 85,  member: 80,  vip: 75,  concierge: 65  },
+          };
+
+          let tier: 'none'|'member'|'vip'|'concierge' = 'none';
+          if (patientEmail) {
+            const { data: tp } = await supabase
+              .from('tenant_patients')
+              .select('user_id, membership_tier')
+              .ilike('email', patientEmail)
+              .maybeSingle();
+            const t = String((tp as any)?.membership_tier || '').toLowerCase();
+            if (t === 'vip' || t === 'concierge' || t === 'member') tier = t;
+            memberTierLabel = t === 'vip' ? 'VIP' : t === 'concierge' ? 'Concierge' : t === 'member' ? 'Member' : undefined;
+          }
+
+          // Per-visit savings — only when service_type matches our matrix
+          if (tier !== 'none' && appointmentId) {
+            const { data: apptRow } = await supabase
+              .from('appointments')
+              .select('service_type, patient_id')
+              .eq('id', appointmentId)
+              .maybeSingle();
+            const svc = String((apptRow as any)?.service_type || '');
+            const matrix = TIER_PRICING_DOLLARS[svc];
+            if (matrix) {
+              const delta = (matrix.none - matrix[tier]) * 100;
+              if (delta > 0) savingsCents = delta;
+            }
+
+            // YTD savings — sum across completed visits this calendar year
+            const pid = (apptRow as any)?.patient_id;
+            if (pid) {
+              const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
+              const { data: ytdAppts } = await supabase
+                .from('appointments')
+                .select('service_type, status, appointment_date')
+                .eq('patient_id', pid)
+                .gte('appointment_date', yearStart);
+              for (const a of (ytdAppts || []) as any[]) {
+                if (a.status !== 'completed') continue;
+                const m = TIER_PRICING_DOLLARS[String(a.service_type || '')];
+                if (m) {
+                  const d = (m.none - m[tier]) * 100;
+                  if (d > 0) ytdSavingsCents += d;
+                }
+              }
+            }
+          }
+
+          // Founding-50 seats remaining (scarcity in footer)
+          const { data: seats } = await supabase.rpc('get_founding_seats_status' as any, { p_tier: 'vip' });
+          if (seats && typeof (seats as any).remaining === 'number') {
+            foundingSeatsRemaining = (seats as any).remaining;
+          }
+        } catch (e) {
+          // Non-blocking — savings/scarcity are nice-to-haves, not gating
+          console.warn('[savings+scarcity] non-blocking error:', e);
+        }
+
         let emailHtml = renderAppointmentConfirmation({
           patientName: firstName || patientName || 'there',
           appointmentDate: displayDate || undefined,
@@ -215,6 +296,10 @@ Deno.serve(async (req) => {
           address: (address && address !== 'TBD') ? address : undefined,
           manageUrl: visitUrl,
           fastingRequired,
+          savingsCents: savingsCents || undefined,
+          ytdSavingsCents: ytdSavingsCents || undefined,
+          memberTierLabel,
+          foundingSeatsRemaining,
         });
 
         // Append any extra special-prep cards the OCR logic detected (24h urine,

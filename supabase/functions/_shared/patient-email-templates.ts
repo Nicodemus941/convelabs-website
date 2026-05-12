@@ -34,7 +34,21 @@ function shell(params: {
   heroTitle: string;
   heroEyebrow?: string;
   bodyHtml: string;
+  /**
+   * Optional Founding-50 scarcity line shown in the footer of every
+   * patient email. Hormozi: scarcity doesn't sell when mentioned once;
+   * it sells when it shows up everywhere the customer looks.
+   * Pass an integer 1..50; rendered only when > 0 AND < cap so we don't
+   * advertise scarcity that doesn't exist.
+   */
+  foundingSeatsRemaining?: number;
 }): string {
+  const seatsLine = (params.foundingSeatsRemaining && params.foundingSeatsRemaining > 0 && params.foundingSeatsRemaining < 50)
+    ? `<p style="margin:0 0 6px;color:#92400E;font-size:11px;line-height:1.5;font-weight:600;">
+        ✦ Only ${params.foundingSeatsRemaining} Founding VIP ${params.foundingSeatsRemaining === 1 ? 'seat' : 'seats'} left ·
+        <a href="https://www.convelabs.com/pricing" style="color:#B91C1C;text-decoration:underline;">$199 locked for life →</a>
+       </p>`
+    : '';
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -63,6 +77,7 @@ function shell(params: {
 
       <!-- Footer -->
       <tr><td style="background:#faf7f2;padding:20px 32px;text-align:center;border-top:1px solid #f3f4f6;">
+        ${seatsLine}
         <p style="margin:0 0 6px;color:#9ca3af;font-size:11px;line-height:1.6;">
           ConveLabs, Inc. · 1800 Pembrook Dr, Suite 300, Orlando FL 32810<br>
           Licensed mobile phlebotomy · HIPAA compliant
@@ -93,11 +108,45 @@ function detailRow(label: string, value: string): string {
 export function renderAppointmentConfirmation(p: CommonPatientParams & {
   manageUrl?: string;          // link to patient dashboard / reschedule page
   fastingRequired?: boolean;
+  /**
+   * Member-savings line — only renders when > 0. Hormozi: every receipt
+   * should remind the customer of the dollars they JUST got, not just
+   * the dollars they spent. Pass the per-visit delta in cents (e.g. 3500
+   * for "$35 saved at VIP rate vs $150 non-member").
+   */
+  savingsCents?: number;
+  /** YTD savings across all visits this calendar year, in cents. */
+  ytdSavingsCents?: number;
+  /** Member tier label rendered on the savings chip ("VIP", "Concierge"). */
+  memberTierLabel?: string;
+  /** Founding seats remaining — forwarded to the global footer line. */
+  foundingSeatsRemaining?: number;
 }): string {
   const phone = p.supportPhone || DEFAULT_SUPPORT_PHONE;
+  // Member savings chip — shown ABOVE the success card so the customer
+  // sees the perk delivered before they scroll to the visit details.
+  const savingsBlock = (p.savingsCents && p.savingsCents > 0) ? `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ECFDF5;border:1px solid #A7F3D0;border-radius:12px;margin-bottom:20px;">
+      <tr><td style="padding:14px 18px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="vertical-align:middle;">
+              <div style="font-family:Georgia,'Times New Roman',serif;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#047857;font-weight:bold;margin-bottom:2px;">
+                ${p.memberTierLabel ? `${p.memberTierLabel} Member savings` : 'Member savings'}
+              </div>
+              <div style="color:#065F46;font-size:18px;font-weight:bold;">You saved $${(p.savingsCents / 100).toFixed(0)} on this visit</div>
+              ${p.ytdSavingsCents && p.ytdSavingsCents > 0 ? `<div style="color:#047857;font-size:12px;margin-top:2px;">$${(p.ytdSavingsCents / 100).toFixed(0)} saved year-to-date</div>` : ''}
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  ` : '';
   const body = `
     <p style="margin:0 0 16px;color:#111827;font-size:17px;line-height:1.6;">Hi ${p.patientName},</p>
     <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.7;">Your appointment with ConveLabs is <strong>confirmed</strong>. A licensed phlebotomist will come to you — no waiting room, no phone tag.</p>
+
+    ${savingsBlock}
 
     <!-- Success card -->
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;margin-bottom:24px;">
@@ -156,6 +205,7 @@ export function renderAppointmentConfirmation(p: CommonPatientParams & {
     heroTitle: 'Your appointment is confirmed',
     heroEyebrow: 'See you soon — we come to you.',
     bodyHtml: body,
+    foundingSeatsRemaining: p.foundingSeatsRemaining,
   });
 }
 

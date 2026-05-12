@@ -3,6 +3,7 @@ import React from "react";
 import { Check, ArrowRight, Calendar, Percent, Crown, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { withSource, ENROLLMENT_URL } from '@/lib/constants/urls';
+import FoundingSeatsCounter from '@/components/membership/FoundingSeatsCounter';
 
 const TIERS = [
   {
@@ -69,6 +70,11 @@ const MembershipSection = () => {
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
             Members save on every service and unlock weekend appointments. No credits, no confusion — just a straight discount on whatever you book.
           </p>
+          {/* Founding-50 scarcity pill — Hormozi: caps feel honest, repeat them
+              everywhere the customer looks. Server-counted, never fake. */}
+          <div className="mt-5 flex justify-center">
+            <FoundingSeatsCounter variant="pill" />
+          </div>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
