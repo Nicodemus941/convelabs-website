@@ -31,6 +31,22 @@ export interface ReleaseNote {
 // NEWEST FIRST. When you ship something, add to the top — never bury.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    id: '2026-05-12-mirror-legacy-lab-order',
+    date: '2026-05-12',
+    category: 'fix',
+    area: 'Lab Orders',
+    title: 'Lab orders uploaded only to the legacy column now mirror to the normalized table',
+    oneLine: 'Diane Holm: Exclusive Health Retreats uploaded her lab order but it wasn\'t showing on the appointment card. Fixed for her + 12 other historical appointments + going forward.',
+    whatChanged: [
+      'Backfill ran live: 13 appointments had lab_order_file_path set but NO matching row in appointment_lab_orders. All mirrored.',
+      'New BEFORE/AFTER triggers: when an appointment is created OR its lab_order_file_path column is updated, the file path(s) auto-mirror into appointment_lab_orders. Splits on commas or newlines for legacy multi-file format. Idempotent — never duplicates.',
+      'Phleb card + admin calendar lab-orders panel both read from the normalized table, so the order now surfaces everywhere instead of vanishing into the legacy column.',
+    ],
+    whereToFind: { label: 'Phleb card + Calendar appointment modal', path: '/dashboard/super_admin/calendar' },
+    before: 'Provider upload via portal sometimes wrote only to appointments.lab_order_file_path. Phleb saw "no lab order" even though the file existed.',
+    after: 'Every write to lab_order_file_path automatically mirrors. Both UI surfaces always agree.',
+  },
+  {
     id: '2026-05-12-error-boundary-blank-screen',
     date: '2026-05-12',
     category: 'safety',
