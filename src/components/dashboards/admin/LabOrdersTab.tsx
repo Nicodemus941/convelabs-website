@@ -147,15 +147,22 @@ const LabOrdersTab: React.FC = () => {
   const [sendLinkOpen, setSendLinkOpen] = useState(false);
   const [sendLinkPatient, setSendLinkPatient] = useState<any>(null);
 
+  const [lastError, setLastError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLastError(null);
     try {
-      const { data: lr } = await supabase
+      const { data: lr, error: queryErr } = await supabase
         .from('patient_lab_requests' as any)
         .select('id, organization_id, patient_id, patient_name, patient_email, patient_phone, patient_dob, lab_order_file_path, lab_order_panels, fasting_required, urine_required, draw_by_date, status, appointment_id, access_token, patient_viewed_at, patient_scheduled_at, admin_viewed_at, created_at')
         .order('created_at', { ascending: false })
         .limit(500);
+      if (queryErr) {
+        console.error('[LabOrdersTab] query error:', queryErr);
+        setLastError(queryErr.message || String(queryErr));
+      }
       const list = ((lr as any[]) || []) as LabOrderRow[];
+      console.log(`[LabOrdersTab] fetched ${list.length} lab orders`);
 
       const orgIds = Array.from(new Set(list.map(r => r.organization_id).filter(Boolean) as string[]));
       const oMap = new Map<string, string>();
@@ -166,8 +173,9 @@ const LabOrdersTab: React.FC = () => {
       }
       setOrgMap(oMap);
       setRows(list.map(r => ({ ...r, organization_name: r.organization_id ? oMap.get(r.organization_id) || null : null })));
-    } catch (err) {
-      console.warn('[LabOrdersTab] load failed:', err);
+    } catch (err: any) {
+      console.error('[LabOrdersTab] load crashed:', err);
+      setLastError(err?.message || String(err));
       setRows([]);
     } finally {
       setLoading(false);
@@ -178,14 +186,14 @@ const LabOrdersTab: React.FC = () => {
 
   // Real-time: toast + auto-refresh on new lab_request row (provider-uploaded).
   // Updates also trigger refresh so status transitions reflect instantly.
+  // Deps deliberately empty — orgMap is read via ref-pattern at toast time to
+  // avoid re-subscribing on every refresh (caused channel churn + missed events).
   useEffect(() => {
-    const ch = supabase.channel('admin-lab-orders-feed')
+    const channelName = `admin-lab-orders-feed-${Math.random().toString(36).slice(2, 8)}`;
+    const ch = supabase.channel(channelName)
       .on('postgres_changes' as any, { event: 'INSERT', schema: 'public', table: 'patient_lab_requests' }, (payload: any) => {
         const row = payload?.new || {};
-        toast.success(
-          `New lab order: ${row.patient_name || 'a patient'}${row.organization_id && orgMap.get(row.organization_id) ? ` from ${orgMap.get(row.organization_id)}` : ''}`,
-          { duration: 6000 }
-        );
+        toast.success(`New lab order: ${row.patient_name || 'a patient'}`, { duration: 6000 });
         refresh();
       })
       .on('postgres_changes' as any, { event: 'UPDATE', schema: 'public', table: 'patient_lab_requests' }, () => {
@@ -193,7 +201,7 @@ const LabOrdersTab: React.FC = () => {
       })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [refresh, orgMap]);
+  }, [refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Counts for the KPI strip + filter pill badges
   const counts = useMemo(() => {
@@ -313,6 +321,21 @@ const LabOrdersTab: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Error banner — surfaces RLS / network errors so the user isn't
+          staring at a blank page wondering what broke */}
+      {lastError && (
+        <Card className="border-red-300 bg-red-50">
+          <CardContent className="p-3 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="text-xs flex-1">
+              <p className="font-semibold text-red-800">Couldn't load lab orders</p>
+              <p className="text-red-700 mt-0.5 font-mono break-all">{lastError}</p>
+              <p className="text-red-600 mt-1">If this says "JWT" or "401/403", log out + back in to refresh your session.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Search + filter chip */}
       <div className="flex items-center gap-2">
