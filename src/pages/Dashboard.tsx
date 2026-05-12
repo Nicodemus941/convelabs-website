@@ -29,7 +29,10 @@ import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingT
 import NotesTab from "@/components/dashboards/admin/NotesTab";
 import InboxTab from "@/components/dashboards/admin/InboxTab";
 import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
-import LabOrdersTab from "@/components/dashboards/admin/LabOrdersTab";
+// Lazy-load the Lab Orders tab — large component (drawer + grouped view +
+// auto-fulfill UI). Most admin sessions never open this tab, so deferring
+// it speeds up first paint for every other admin route.
+const LabOrdersTab = React.lazy(() => import("@/components/dashboards/admin/LabOrdersTab"));
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
@@ -182,7 +185,11 @@ const Dashboard = () => {
           {adminTab === "notes" && <NotesTab />}
           {adminTab === "inbox" && <InboxTab />}
           {adminTab === "patients" && <PatientProfileTab />}
-          {adminTab === "lab-orders" && <LabOrdersTab />}
+          {adminTab === "lab-orders" && (
+            <React.Suspense fallback={<div className="p-8 text-center text-sm text-gray-500">Loading lab orders…</div>}>
+              <LabOrdersTab />
+            </React.Suspense>
+          )}
           {adminTab === "organizations" && <OrganizationsTab />}
           {adminTab === "operations" && <OperationsPanel />}
           {adminTab === "ai-assistant" && <AIOpsAssistant />}

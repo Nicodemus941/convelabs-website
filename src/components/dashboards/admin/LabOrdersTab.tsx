@@ -311,16 +311,18 @@ const LabOrdersTab: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* HERO — Hormozi: dream outcome stated up top, with the metric that matters */}
+      {/* HERO — Hormozi: dream outcome stated up top, with the metric that matters.
+          MOBILE: compact title, hidden subtitle, KPI strip switches to horizontal-scroll
+          so the user sees an actual row above the fold on a phone. */}
       <Card className="border-2 border-[#B91C1C]/20 bg-gradient-to-br from-red-50/40 to-white shadow-sm">
-        <CardContent className="p-5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+        <CardContent className="p-3 sm:p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-xl font-bold text-gray-900 flex items-center gap-2">
                 <FlaskConical className="h-5 w-5 text-[#B91C1C]" />
                 Lab Orders
               </h2>
-              <p className="text-sm text-gray-600 mt-0.5">
+              <p className="hidden sm:block text-sm text-gray-600 mt-0.5">
                 Every order a provider's office has placed for a patient — newest first, real-time.
               </p>
             </div>
@@ -330,7 +332,7 @@ const LabOrdersTab: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setViewMode('list')}
-                  className={`px-2.5 h-8 text-xs font-medium ${viewMode === 'list' ? 'bg-[#B91C1C] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                  className={`px-3 h-9 sm:h-8 text-xs font-medium ${viewMode === 'list' ? 'bg-[#B91C1C] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
                   title="Flat list, newest first"
                 >
                   List
@@ -338,25 +340,31 @@ const LabOrdersTab: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setViewMode('by_org')}
-                  className={`px-2.5 h-8 text-xs font-medium border-l border-gray-200 ${viewMode === 'by_org' ? 'bg-[#B91C1C] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                  className={`px-3 h-9 sm:h-8 text-xs font-medium border-l border-gray-200 ${viewMode === 'by_org' ? 'bg-[#B91C1C] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
                   title="Grouped by provider's office"
                 >
                   By provider
                 </button>
               </div>
-              <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5 text-xs h-8" disabled={loading}>
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+              <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5 text-xs h-9 sm:h-8 min-w-9" disabled={loading} title="Refresh">
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
               </Button>
               {counts.new > 0 && (
-                <Button size="sm" onClick={markAllAsViewed} className="gap-1.5 text-xs h-8 bg-emerald-600 hover:bg-emerald-700 text-white">
-                  <Eye className="h-3.5 w-3.5" /> Mark all reviewed
+                <Button size="sm" onClick={markAllAsViewed} className="gap-1.5 text-xs h-9 sm:h-8 bg-emerald-600 hover:bg-emerald-700 text-white">
+                  <Eye className="h-4 w-4" />
+                  <span className="hidden sm:inline">Mark all reviewed</span>
+                  <span className="sm:hidden">Mark · {counts.new}</span>
                 </Button>
               )}
             </div>
           </div>
 
-          {/* KPI strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-4">
+          {/* KPI strip — horizontal-scroll on phones (snap-x), 5-col grid on ≥sm.
+              Phones see all 5 buckets in a thumb-flick instead of a 3-row 2-col grid
+              that eats 240px of first-screen real estate. */}
+          <div className="-mx-3 sm:mx-0 px-3 sm:px-0 mt-3 sm:mt-4 overflow-x-auto sm:overflow-visible scroll-smooth snap-x snap-mandatory">
+            <div className="grid grid-flow-col auto-cols-[42%] sm:auto-cols-auto sm:grid-cols-5 sm:grid-flow-row gap-2 pb-1 sm:pb-0">
             {(['new', 'awaiting_patient', 'scheduled', 'overdue', 'completed'] as FilterKey[]).map(k => {
               const def = FILTER_DEFINITIONS.find(f => f.key === k)!;
               const isActive = filter === k;
@@ -365,14 +373,15 @@ const LabOrdersTab: React.FC = () => {
                   key={k}
                   type="button"
                   onClick={() => setFilter(k)}
-                  className={`text-left rounded-lg border px-3 py-2 transition ${isActive ? 'ring-2 ring-[#B91C1C]/30 ' + def.colorClass : 'bg-white border-gray-200 hover:border-[#B91C1C]/40'}`}
+                  className={`text-left rounded-lg border px-3 py-2 transition snap-start ${isActive ? 'ring-2 ring-[#B91C1C]/30 ' + def.colorClass : 'bg-white border-gray-200 hover:border-[#B91C1C]/40'}`}
                   title={def.desc}
                 >
                   <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70">{def.label}</p>
-                  <p className="text-2xl font-bold leading-tight mt-0.5">{counts[k]}</p>
+                  <p className="text-3xl sm:text-2xl font-bold leading-tight mt-0.5">{counts[k]}</p>
                 </button>
               );
             })}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -411,7 +420,25 @@ const LabOrdersTab: React.FC = () => {
 
       {/* Rows */}
       {loading ? (
-        <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-[#B91C1C]" /></div>
+        // Skeleton rows — page feels alive in 100ms instead of a spinner
+        // spinning for 1.5s on flaky LTE. Hormozi: perceived speed > actual speed.
+        <div className="space-y-1.5">
+          {[1, 2, 3, 4, 5].map(i => (
+            <Card key={i} className="shadow-sm">
+              <CardContent className="p-3 flex items-center gap-3 animate-pulse">
+                <div className="w-9 h-9 rounded-full bg-gray-200 flex-shrink-0" />
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="h-3.5 bg-gray-200 rounded w-32" />
+                    <div className="h-3 bg-gray-100 rounded w-16" />
+                  </div>
+                  <div className="h-2.5 bg-gray-100 rounded w-48" />
+                </div>
+                <div className="h-7 w-20 bg-gray-100 rounded flex-shrink-0 hidden sm:block" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       ) : filteredRows.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="p-8 text-center">
@@ -502,18 +529,21 @@ const LabOrderRow: React.FC<{
   else if (isStale3) statusBadge = <Badge className="bg-orange-100 text-orange-800 text-[10px]">⏰ Aging {ageDays}d</Badge>;
   else statusBadge = <Badge className="bg-amber-100 text-amber-700 text-[10px]">⏳ Awaiting patient</Badge>;
 
-  // Context-aware primary action
+  // Context-aware primary action — hidden on phones (the row tap opens
+  // the drawer which has the same buttons bigger + easier to hit). Mobile
+  // users gain ~130px of horizontal real estate for the patient name +
+  // org pill which are the trust signals that should never truncate.
   let primaryAction: React.ReactNode;
   if (row.status === 'pending_schedule') {
     primaryAction = (
-      <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-7 text-xs gap-1" onClick={(e) => { e.stopPropagation(); onSendLink(row); }}>
-        <Zap className="h-3 w-3" /> Send Booking Link
+      <Button size="sm" className="hidden sm:inline-flex bg-[#B91C1C] hover:bg-[#991B1B] text-white h-9 text-xs gap-1.5" onClick={(e) => { e.stopPropagation(); onSendLink(row); }}>
+        <Zap className="h-3.5 w-3.5" /> Send Booking Link
       </Button>
     );
   } else if (row.status === 'scheduled' && row.appointment_id) {
     primaryAction = (
-      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/super_admin/calendar?appointment=${row.appointment_id}`, '_blank'); }}>
-        <Calendar className="h-3 w-3" /> View Appointment
+      <Button size="sm" variant="outline" className="hidden sm:inline-flex h-9 text-xs gap-1.5" onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/super_admin/calendar?appointment=${row.appointment_id}`, '_blank'); }}>
+        <Calendar className="h-3.5 w-3.5" /> View Appointment
       </Button>
     );
   } else {
@@ -571,7 +601,7 @@ const LabOrderRow: React.FC<{
           <Button
             size="sm"
             variant="outline"
-            className="h-7 px-2 text-xs"
+            className="h-9 w-9 p-0 flex-shrink-0"
             title="Download lab order"
             onClick={(e) => {
               e.stopPropagation();
@@ -580,11 +610,11 @@ const LabOrderRow: React.FC<{
               downloadLabOrder(row.lab_order_file_path!, `lab-order_${safe}.${ext}`);
             }}
           >
-            <Download className="h-3 w-3" />
+            <Download className="h-4 w-4" />
           </Button>
         )}
         {primaryAction}
-        <ChevronRight className="h-4 w-4 text-gray-400 flex-shrink-0" />
+        <ChevronRight className="h-5 w-5 text-gray-400 flex-shrink-0" />
       </CardContent>
     </Card>
   );
@@ -601,49 +631,65 @@ const LabOrderDetailDrawer: React.FC<{
   onSendLink: () => void;
 }> = ({ row, orgName, filePreviewUrl, onClose, onSendLink }) => {
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
-      <Card className="max-w-4xl w-full max-h-[92vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+    // Centered modal on ≥sm, bottom-sheet on phones. The bottom-sheet
+    // pattern is what phone users expect for "open detail" — slides up
+    // from the thumb zone, swipes/taps backdrop to close, doesn't fight
+    // the soft keyboard. Hormozi: "the UX has to feel like the app the
+    // user already uses."
+    <div className="fixed inset-0 z-50 bg-black/50 flex sm:items-center sm:justify-center sm:p-4" onClick={onClose}>
+      <Card
+        className="w-full sm:max-w-4xl mt-auto sm:mt-0 sm:max-h-[92vh] max-h-[90vh] overflow-y-auto shadow-2xl rounded-b-none sm:rounded-lg rounded-t-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <CardContent className="p-0">
-          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white p-5">
+          {/* Drag handle on mobile — visual cue this is a bottom sheet */}
+          <div className="sm:hidden flex justify-center pt-2 pb-1">
+            <div className="w-10 h-1 bg-gray-300 rounded-full" />
+          </div>
+
+          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white p-4 sm:p-5 sticky top-0 z-10">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-[11px] uppercase tracking-wider opacity-90">Lab Order</p>
-                <h2 className="text-xl font-bold mt-0.5">{row.patient_name}</h2>
+                <h2 className="text-lg sm:text-xl font-bold mt-0.5 truncate">{row.patient_name}</h2>
                 {orgName && (
                   <p className="text-sm opacity-95 mt-1 flex items-center gap-1.5">
-                    <Building2 className="h-3.5 w-3.5" /> From {orgName}
+                    <Building2 className="h-3.5 w-3.5 flex-shrink-0" /> <span className="truncate">From {orgName}</span>
                   </p>
                 )}
               </div>
-              <Button size="sm" variant="ghost" onClick={onClose} className="text-white hover:bg-white/10">Close</Button>
+              <Button size="sm" variant="ghost" onClick={onClose} className="text-white hover:bg-white/10 h-9 w-9 p-0 flex-shrink-0" title="Close">
+                <span className="text-lg">✕</span>
+              </Button>
             </div>
           </div>
 
-          <div className="p-5 space-y-4">
-            {/* Quick actions */}
-            <div className="flex flex-wrap gap-2">
+          <div className="p-4 sm:p-5 space-y-4">
+            {/* Quick actions — horizontal scroll on mobile so chips never wrap
+                to 3 ugly rows. Single row, swipe to access. */}
+            <div className="flex sm:flex-wrap gap-2 overflow-x-auto sm:overflow-visible -mx-4 sm:mx-0 px-4 sm:px-0 pb-1 sm:pb-0">
               {row.status === 'pending_schedule' && (
-                <Button onClick={onSendLink} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 h-9 text-xs">
+                <Button onClick={onSendLink} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 h-9 text-xs flex-shrink-0">
                   <Zap className="h-3.5 w-3.5" /> Send Booking Link
                 </Button>
               )}
               {row.patient_phone && (
-                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" asChild>
+                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 flex-shrink-0" asChild>
                   <a href={`tel:${row.patient_phone}`}><Phone className="h-3.5 w-3.5" /> Call</a>
                 </Button>
               )}
               {row.patient_email && (
-                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" asChild>
+                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 flex-shrink-0" asChild>
                   <a href={`mailto:${row.patient_email}`}><Mail className="h-3.5 w-3.5" /> Email</a>
                 </Button>
               )}
-              <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" asChild>
+              <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 flex-shrink-0" asChild>
                 <a href={`/lab-request/${row.access_token}`} target="_blank" rel="noopener">
                   <ExternalLink className="h-3.5 w-3.5" /> Patient view
                 </a>
               </Button>
               {row.appointment_id && (
-                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5" asChild>
+                <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 flex-shrink-0" asChild>
                   <a href={`/dashboard/super_admin/calendar?appointment=${row.appointment_id}`} target="_blank" rel="noopener">
                     <Calendar className="h-3.5 w-3.5" /> View appointment
                   </a>
@@ -653,7 +699,7 @@ const LabOrderDetailDrawer: React.FC<{
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-9 text-xs gap-1.5"
+                  className="h-9 text-xs gap-1.5 flex-shrink-0"
                   onClick={() => {
                     const ext = row.lab_order_file_path!.split('.').pop() || 'pdf';
                     const safe = (row.patient_name || 'patient').replace(/[^A-Za-z0-9_-]/g, '_');
@@ -716,7 +762,7 @@ const LabOrderDetailDrawer: React.FC<{
                   )}
                 </p>
                 {filePreviewUrl ? (
-                  <iframe src={filePreviewUrl} className="w-full h-[500px] border border-gray-200 rounded-md" title="Lab order PDF" />
+                  <iframe src={filePreviewUrl} className="w-full h-[55vh] sm:h-[500px] min-h-[300px] border border-gray-200 rounded-md" title="Lab order PDF" />
                 ) : (
                   <p className="text-xs text-gray-500">Generating preview…</p>
                 )}
@@ -765,28 +811,31 @@ const GroupedByOrgView: React.FC<{
         const meta = g.orgId ? orgMap.get(g.orgId) : null;
         return (
           <Card key={g.orgId || g.name} className="shadow-sm overflow-hidden">
-            {/* Org header — Hormozi: name, count breakdown, auto-fulfill toggle */}
-            <div className="bg-gradient-to-r from-purple-50 to-white border-b border-purple-100 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+            {/* Org header — stacks on mobile (3 rows: title, badges, toggle).
+                On desktop everything sits on one row. */}
+            <div className="bg-gradient-to-r from-purple-50 to-white border-b border-purple-100 px-3 sm:px-4 py-3 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <Building2 className="h-4 w-4 text-purple-700 flex-shrink-0" />
                 <h3 className="font-bold text-sm text-gray-900 truncate">{g.name}</h3>
-                <span className="text-xs text-gray-500">· {g.rows.length} order{g.rows.length === 1 ? '' : 's'}</span>
+                <span className="text-xs text-gray-500 flex-shrink-0">· {g.rows.length} order{g.rows.length === 1 ? '' : 's'}</span>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                {newCnt > 0 && <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">{newCnt} new</Badge>}
-                {awaiting > 0 && <Badge className="bg-amber-100 text-amber-700 text-[10px]">{awaiting} awaiting</Badge>}
-                {scheduled > 0 && <Badge className="bg-blue-100 text-blue-700 text-[10px]">{scheduled} scheduled</Badge>}
-                {completed > 0 && <Badge className="bg-gray-100 text-gray-600 text-[10px]">{completed} done</Badge>}
+              <div className="flex items-center gap-2 overflow-x-auto sm:overflow-visible sm:flex-wrap pb-1 sm:pb-0">
+                {newCnt > 0 && <Badge className="bg-emerald-100 text-emerald-700 text-[10px] flex-shrink-0">{newCnt} new</Badge>}
+                {awaiting > 0 && <Badge className="bg-amber-100 text-amber-700 text-[10px] flex-shrink-0">{awaiting} awaiting</Badge>}
+                {scheduled > 0 && <Badge className="bg-blue-100 text-blue-700 text-[10px] flex-shrink-0">{scheduled} scheduled</Badge>}
+                {completed > 0 && <Badge className="bg-gray-100 text-gray-600 text-[10px] flex-shrink-0">{completed} done</Badge>}
                 {g.orgId && (
-                  <AutoFulfillToggle
-                    orgId={g.orgId}
-                    enabled={meta?.auto_fulfill_lab_orders ?? false}
-                    onChange={(en) => onAutoFulfillChange(g.orgId!, en)}
-                  />
+                  <div className="flex-shrink-0 ml-auto sm:ml-0">
+                    <AutoFulfillToggle
+                      orgId={g.orgId}
+                      enabled={meta?.auto_fulfill_lab_orders ?? false}
+                      onChange={(en) => onAutoFulfillChange(g.orgId!, en)}
+                    />
+                  </div>
                 )}
               </div>
             </div>
-            <div className="p-3 space-y-1.5 bg-white">
+            <div className="p-2 sm:p-3 space-y-1.5 bg-white">
               {g.rows.map(row => (
                 <LabOrderRow key={row.id} row={row} onOpen={onOpen} onSendLink={onSendLink} />
               ))}
