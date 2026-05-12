@@ -386,6 +386,26 @@ const LabOrdersTab: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Global auto-fulfill state banner — Hormozi: explain the rule
+          loudly so the admin trusts the system. Auto-fulfill is now ON
+          by default for every provider. Individual orgs can be opted
+          out from the "By provider" view. */}
+      <Card className="border-emerald-200 bg-emerald-50/50">
+        <CardContent className="p-3 flex items-start gap-2">
+          <span className="text-base flex-shrink-0">⚡</span>
+          <div className="text-xs flex-1">
+            <p className="font-semibold text-emerald-900">
+              Auto-fulfill is ON for every provider by default
+            </p>
+            <p className="text-emerald-800 mt-0.5 leading-relaxed">
+              The moment a provider uploads a lab order, the system automatically sends the patient a HIPAA-safe booking link by SMS + email — no clicks required.
+              {' '}You'll still see every order land here in real-time. Need to gate a specific office for review?
+              {' '}Switch to <strong>By provider</strong> and toggle Auto-fulfill OFF on that org's section.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Error banner — surfaces RLS / network errors so the user isn't
           staring at a blank page wondering what broke */}
       {lastError && (
@@ -916,17 +936,17 @@ const AutoFulfillToggle: React.FC<{
           onClick={(e) => e.stopPropagation()}
         >
           <p className="font-semibold text-gray-900 mb-1.5">What is auto-fulfill?</p>
-          <p className="mb-2">
-            When <strong className="text-emerald-700">ON</strong>: the moment this provider uploads a lab order, the system
-            automatically sends the patient a HIPAA-safe booking link by SMS + email — you don't need to click anything.
-            The order appears in this tab as "Awaiting patient" (already reviewed).
+          <p className="mb-2 text-emerald-800 bg-emerald-50 rounded px-2 py-1 border border-emerald-100">
+            <strong>System default: ON for every provider.</strong> You only need to toggle this off for orgs you want to gate.
           </p>
           <p className="mb-2">
-            When <strong className="text-gray-700">OFF</strong>: new orders land as "New" — you (or Naquala) must click
-            ⚡ Send Booking Link before the patient is contacted.
+            <strong className="text-emerald-700">ON</strong> → patient gets the booking link SMS + email the moment this office uploads a lab order. Order lands here as "Awaiting patient" (already reviewed).
+          </p>
+          <p className="mb-2">
+            <strong className="text-gray-700">OFF</strong> → new orders from this office land as "New" → you click ⚡ Send Booking Link manually before the patient is contacted.
           </p>
           <p className="text-[10px] text-gray-500 italic">
-            Recommended ON for trusted partners with high volume. OFF for new providers until you've reviewed their order quality.
+            Turn OFF only when an office's order quality needs review (e.g. they consistently fax incomplete forms).
           </p>
           <button
             type="button"
