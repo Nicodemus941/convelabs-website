@@ -31,6 +31,23 @@ export interface ReleaseNote {
 // NEWEST FIRST. When you ship something, add to the top — never bury.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    id: '2026-05-12-ocr-auto-enqueue',
+    date: '2026-05-12',
+    category: 'fix',
+    area: 'Lab Orders',
+    title: 'Lab orders auto-OCR when mirrored from legacy column — Diane Holm "0 tests detected" fix',
+    oneLine: 'The mirror trigger was creating rows with status=complete but never running OCR. Now it enqueues OCR via pg_net + a retry cron picks up stuck pendings.',
+    whatChanged: [
+      'Mirror trigger updated: instead of marking new appointment_lab_orders rows as ocr_status="complete" with empty panels, it now inserts as ocr_status="pending" AND enqueues a background pg_net HTTP POST to the ocr-lab-order edge function with the service-role key. OCR actually runs.',
+      'Backfill: 28 rows that had ocr_status=complete with no panels reset to pending + queued for OCR.',
+      'New cron `ocr-lab-order-retry-pending` runs every 5 min. Picks up any row pending for >2 min, max 10 per run (rate-limit-safe). Catches enqueue failures, transient edge-fn errors, Anthropic Vision rate limits.',
+      'Result: Diane Holm + 27 other appointments will now show detected test panels on their lab orders within ~60 sec of clicking Refresh.',
+    ],
+    whereToFind: { label: 'Calendar → appointment → Lab Orders', path: '/dashboard/super_admin/calendar' },
+    before: '"1 order attached · 0 pages · 0 tests detected" even when the PDF clearly had tests.',
+    after: 'Page count + panel chips populate automatically; fasting flag detected from PDF text.',
+  },
+  {
     id: '2026-05-12-mirror-legacy-lab-order',
     date: '2026-05-12',
     category: 'fix',
