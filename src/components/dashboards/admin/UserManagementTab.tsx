@@ -8,9 +8,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
 import {
   Users, Search, RefreshCw, Download, Phone, Mail, User,
-  Calendar, Shield, ChevronDown, ChevronUp,
+  Calendar, Shield, ChevronDown, ChevronUp, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
+import SendBookingLinkModal from "@/components/admin/SendBookingLinkModal";
+import PatientCommsTimeline from "@/components/admin/PatientCommsTimeline";
 
 interface PatientRecord {
   id: string;
@@ -32,6 +34,7 @@ const UserManagementTab = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPatient, setSelectedPatient] = useState<PatientRecord | null>(null);
   const [filterType, setFilterType] = useState<'all' | 'with_phone' | 'with_email' | 'with_insurance'>('all');
+  const [sendLinkOpen, setSendLinkOpen] = useState(false);
 
   const fetchPatients = useCallback(async () => {
     setLoading(true);
@@ -279,25 +282,60 @@ const UserManagementTab = () => {
 
           {/* Expanded patient detail */}
           {selectedPatient && (
-            <div className="mt-4 p-4 bg-muted/30 rounded-lg border space-y-2">
-              <div className="flex justify-between items-center">
-                <h4 className="font-semibold text-sm">Patient Details</h4>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>Close</Button>
+            <div className="mt-4 space-y-3">
+              <div className="p-4 bg-muted/30 rounded-lg border space-y-3">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-semibold text-sm">Patient Details</h4>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1 h-8 text-xs"
+                      onClick={() => setSendLinkOpen(true)}
+                    >
+                      <Zap className="h-3.5 w-3.5" /> Send Booking Link
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>Close</Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div><span className="text-muted-foreground">Name:</span><p className="font-medium">{selectedPatient.first_name} {selectedPatient.last_name}</p></div>
+                  <div><span className="text-muted-foreground">Email:</span><p>{selectedPatient.email || '—'}</p></div>
+                  <div><span className="text-muted-foreground">Phone:</span><p>{selectedPatient.phone || '—'}</p></div>
+                  <div><span className="text-muted-foreground">DOB:</span><p>{selectedPatient.date_of_birth || '—'}</p></div>
+                  <div><span className="text-muted-foreground">Insurance:</span><p>{selectedPatient.insurance_provider || 'Self-pay'}</p></div>
+                  <div><span className="text-muted-foreground">Member ID:</span><p>{selectedPatient.insurance_member_id || '—'}</p></div>
+                  <div><span className="text-muted-foreground">Appointments:</span><p className="font-medium">{selectedPatient.appointment_count}</p></div>
+                  <div><span className="text-muted-foreground">Patient ID:</span><p className="font-mono text-[10px]">{selectedPatient.id}</p></div>
+                </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                <div><span className="text-muted-foreground">Name:</span><p className="font-medium">{selectedPatient.first_name} {selectedPatient.last_name}</p></div>
-                <div><span className="text-muted-foreground">Email:</span><p>{selectedPatient.email || '—'}</p></div>
-                <div><span className="text-muted-foreground">Phone:</span><p>{selectedPatient.phone || '—'}</p></div>
-                <div><span className="text-muted-foreground">DOB:</span><p>{selectedPatient.date_of_birth || '—'}</p></div>
-                <div><span className="text-muted-foreground">Insurance:</span><p>{selectedPatient.insurance_provider || 'Self-pay'}</p></div>
-                <div><span className="text-muted-foreground">Member ID:</span><p>{selectedPatient.insurance_member_id || '—'}</p></div>
-                <div><span className="text-muted-foreground">Appointments:</span><p className="font-medium">{selectedPatient.appointment_count}</p></div>
-                <div><span className="text-muted-foreground">Patient ID:</span><p className="font-mono text-[10px]">{selectedPatient.id}</p></div>
-              </div>
+
+              {/* Unified comms timeline — every SMS/email/tokenized link for
+                  this patient with status. Same component used on the full
+                  patient profile, surfaced here so admin doesn't have to
+                  navigate away to answer "did Susan get the link?". */}
+              <PatientCommsTimeline
+                patientId={selectedPatient.id}
+                patientEmail={selectedPatient.email || null}
+                patientPhone={selectedPatient.phone || null}
+              />
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Send Booking Link modal — provider's office picker, lab-order
+          upload, HIPAA-safe SMS, full prefill on patient side. */}
+      <SendBookingLinkModal
+        open={sendLinkOpen}
+        onClose={() => setSendLinkOpen(false)}
+        patient={selectedPatient ? {
+          id: selectedPatient.id,
+          firstName: selectedPatient.first_name || '',
+          lastName: selectedPatient.last_name || '',
+          email: selectedPatient.email,
+          phone: selectedPatient.phone,
+        } : null}
+      />
     </div>
   );
 };
