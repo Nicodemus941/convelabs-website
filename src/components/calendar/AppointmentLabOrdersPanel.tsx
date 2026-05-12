@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Upload, FileText, Loader2, CheckCircle2, AlertTriangle, Trash2, ExternalLink, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -255,9 +255,32 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
   };
 
   const openSignedUrl = async (path: string) => {
-    const { data } = await supabase.storage.from('lab-orders').createSignedUrl(path, 3600);
-    if (data?.signedUrl) window.open(data.signedUrl, '_blank');
-    else toast.error('Could not load file');
+    if (!path) { toast.error('No file path'); return; }
+    // lab-orders bucket is PUBLIC — use the direct public URL with proper
+    // path-segment encoding. Chrome opens it in a new tab with its native
+    // PDF viewer (vs the signed-URL with ?token=... that caused blank
+    // renders on some desktop browsers, Naquala 2026-05-12).
+    const publicUrl = publicStorageUrl('lab-orders', path);
+    const win = window.open(publicUrl, '_blank', 'noopener,noreferrer');
+    if (!win) {
+      // Popup blocked — fall back to a link click + log
+      toast.error('Browser blocked the popup. Copying URL to clipboard.');
+      try { await navigator.clipboard.writeText(publicUrl); } catch { /* noop */ }
+      return;
+    }
+    // Tab opened — verify the file actually exists. If not, surface a clear
+    // error after a brief delay so we don't leave Naquala staring at blank.
+    setTimeout(async () => {
+      try {
+        const r = await fetch(publicUrl, { method: 'HEAD' });
+        if (!r.ok) {
+          console.error('[lab-order open] HEAD returned', r.status, 'for', path);
+          toast.error(`File not found in storage (HTTP ${r.status}). Path: ${path.slice(-40)}`);
+        }
+      } catch (e: any) {
+        console.warn('[lab-order open] verify failed (non-fatal):', e?.message || e);
+      }
+    }, 500);
   };
 
   const toggleExpand = (id: string) => {

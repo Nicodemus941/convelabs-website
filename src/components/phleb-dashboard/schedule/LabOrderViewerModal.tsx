@@ -117,11 +117,21 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
                 <img src={signedUrl} alt={display} className="w-full h-auto" />
               )}
               {isPdf && (
-                <iframe
-                  src={signedUrl}
-                  title={display}
-                  className="w-full h-full border-0 bg-white"
-                />
+                // <object> renders PDFs more reliably across browsers
+                // (Safari + Edge) than <iframe>. The nested content shows
+                // when neither can render — gives the user an obvious
+                // "open in new tab" recovery instead of staring at blank.
+                <object data={signedUrl} type="application/pdf" className="w-full h-full bg-white">
+                  <iframe src={signedUrl} title={display} className="w-full h-full border-0 bg-white">
+                    <div className="p-6 text-center">
+                      <FileText className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                      <p className="text-sm font-medium text-gray-700">Your browser can't preview this PDF inline.</p>
+                      <Button onClick={() => window.open(signedUrl, '_blank', 'noopener,noreferrer')} className="mt-3 bg-[#B91C1C] hover:bg-[#991B1B] text-white">
+                        Open PDF in new tab
+                      </Button>
+                    </div>
+                  </iframe>
+                </object>
               )}
               {isHeic && (
                 <div className="p-8 text-center">

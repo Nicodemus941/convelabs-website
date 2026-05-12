@@ -31,6 +31,23 @@ export interface ReleaseNote {
 // NEWEST FIRST. When you ship something, add to the top — never bury.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    id: '2026-05-12-pdf-viewer-fix',
+    date: '2026-05-12',
+    category: 'fix',
+    area: 'Lab Orders',
+    title: 'Lab order PDFs no longer render blank on desktop',
+    oneLine: 'Naquala reported blank lab order viewers on desktop — fixed with public URLs + object/iframe fallback.',
+    whatChanged: [
+      'Lab-orders bucket is public, so the viewers now use direct public URLs (encoded per path-segment) instead of signed URLs with ?token=... that some desktop browsers fail to render inline.',
+      '<object> tag renders the PDF first, <iframe> is the fallback, and an obvious "Open PDF in new tab" recovery button shows if both fail.',
+      'AppointmentLabOrdersPanel "Open" button now uses publicStorageUrl + verifies the file exists with a HEAD check — surfaces a clear error if the file path is bad.',
+      'Same fix applied to the phleb-side LabOrderViewerModal.',
+    ],
+    whereToFind: { label: 'Lab Orders detail drawer + calendar', path: '/dashboard/super_admin/lab-orders' },
+    before: 'Naquala clicked the PDF and got a blank rectangle / blank tab. Looked like the system was broken.',
+    after: 'PDF renders inline; if the browser truly can\'t preview, a "Open PDF in new tab" button appears.',
+  },
+  {
     id: '2026-05-12-auto-link-manual-bookings',
     date: '2026-05-12',
     category: 'fix',

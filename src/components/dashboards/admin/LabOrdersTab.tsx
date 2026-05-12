@@ -20,7 +20,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   FlaskConical, Loader2, RefreshCw, Search, Filter, Mail, Phone,
@@ -283,12 +283,12 @@ const LabOrdersTab: React.FC = () => {
         setRows(prev => prev.map(r => r.id === row.id ? { ...r, admin_viewed_at: new Date().toISOString() } : r));
       } catch { /* non-fatal */ }
     }
-    // Pull a signed URL for the lab-order PDF
+    // Use the public URL directly (lab-orders bucket is public). The
+    // signed-URL with ?token=... was rendering blank in some desktop
+    // browsers' embedded PDF viewer (Naquala 2026-05-12). Public URL
+    // hits Cloudflare/CDN cache + is what Chrome expects for inline render.
     if (row.lab_order_file_path) {
-      try {
-        const { data } = await supabase.storage.from('lab-orders').createSignedUrl(row.lab_order_file_path, 3600);
-        if (data?.signedUrl) setFilePreviewUrl(data.signedUrl);
-      } catch { /* non-fatal */ }
+      setFilePreviewUrl(publicStorageUrl('lab-orders', row.lab_order_file_path));
     }
   }, [user?.id]);
 
@@ -806,16 +806,40 @@ const LabOrderDetailDrawer: React.FC<{
             {/* PDF preview */}
             {row.lab_order_file_path && (
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-2 flex items-center gap-2">
-                  Lab order document
+                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                  <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+                    Lab order document
+                  </p>
                   {filePreviewUrl && (
-                    <a href={filePreviewUrl} target="_blank" rel="noopener" className="text-[#B91C1C] hover:underline inline-flex items-center gap-1 normal-case font-normal">
-                      <ExternalLink className="h-3 w-3" /> Open in new tab
-                    </a>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs gap-1.5"
+                        onClick={() => window.open(filePreviewUrl, '_blank', 'noopener,noreferrer')}
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" /> Open in new tab
+                      </Button>
+                    </div>
                   )}
-                </p>
+                </div>
                 {filePreviewUrl ? (
-                  <iframe src={filePreviewUrl} className="w-full h-[55vh] sm:h-[500px] min-h-[300px] border border-gray-200 rounded-md" title="Lab order PDF" />
+                  // <object> + <iframe> fallback. <object> renders PDFs more
+                  // reliably across browsers (Safari, Edge) than <iframe>.
+                  // The nested content shows when neither can render — gives
+                  // Naquala an obvious "open in new tab" button instead of
+                  // the silent blank rectangle we had before.
+                  <object data={filePreviewUrl} type="application/pdf" className="w-full h-[55vh] sm:h-[500px] min-h-[300px] border border-gray-200 rounded-md">
+                    <iframe src={filePreviewUrl} className="w-full h-full border-0" title="Lab order PDF">
+                      <div className="p-6 text-center bg-gray-50">
+                        <FileText className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                        <p className="text-sm font-medium text-gray-700">Your browser can't preview this PDF inline.</p>
+                        <Button onClick={() => window.open(filePreviewUrl, '_blank', 'noopener,noreferrer')} className="mt-3 bg-[#B91C1C] hover:bg-[#991B1B] text-white">
+                          Open PDF in new tab
+                        </Button>
+                      </div>
+                    </iframe>
+                  </object>
                 ) : (
                   <p className="text-xs text-gray-500">Generating preview…</p>
                 )}
