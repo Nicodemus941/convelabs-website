@@ -1612,6 +1612,42 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <p className="text-xs text-emerald-600 text-center">Fee waived — no invoice will be sent.</p>
             ) : null}
 
+            {/* PRICING SANITY GUARD — Hormozi: when admin's custom price is
+                lower than the calculated total, surface a loud warning so
+                we don't silently lose $100+ on a typo. Kandace Bennett
+                2026-05-12: admin typed $100 over a calculated $200,
+                missing the same-day surcharge. Showed up in Stripe as
+                undercharge until manually fixed. */}
+            {discountType === 'custom' && (() => {
+              const calculatedTotal = previewBasePrice + previewSurcharges.reduce((s, x) => s + x.amount, 0);
+              const customVal = parseFloat(discountValue || '0');
+              if (customVal >= calculatedTotal) return null;
+              const gap = calculatedTotal - customVal;
+              return (
+                <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-3 text-sm">
+                  <p className="font-bold text-amber-900 flex items-center gap-1.5">
+                    ⚠ Custom price is ${gap.toFixed(2)} LESS than calculated
+                  </p>
+                  <p className="text-xs text-amber-800 mt-1">
+                    Charging <strong>${customVal.toFixed(2)}</strong> instead of the calculated <strong>${calculatedTotal.toFixed(2)}</strong>:
+                  </p>
+                  <ul className="text-[11px] text-amber-800 mt-1 ml-4 list-disc">
+                    <li>Base ({SERVICE_TYPES.find(s => s.value === serviceType)?.label}): ${previewBasePrice.toFixed(2)}</li>
+                    {previewSurcharges.map((sc, i) => <li key={i}>{sc.label}: +${sc.amount.toFixed(2)}</li>)}
+                  </ul>
+                  <p className="text-[11px] text-amber-900 mt-1.5 font-medium">
+                    Sure this is right? If yes, click Schedule below. Otherwise go back and clear the Custom Price.
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* AUTO-LINK PREVIEW — if a pending lab request exists for this
+                patient from a provider's office, the DB trigger will
+                auto-link it on submit. Show that here so admin sees the
+                expected attribution before clicking Schedule. */}
+            <AutoLinkPreview patientEmail={patientEmail} patientPhone={patientPhone} patientName={patientName} />
+
             {submitError && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
                 <p className="font-medium">Error:</p>
@@ -1679,6 +1715,72 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       </DialogContent>
     </Dialog>
     </>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────
+// AutoLinkPreview — on Step 3 of the modal, queries patient_lab_requests
+// for any pending order matching the patient. If found, shows a green
+// banner so the admin sees the linkage that the DB trigger will make on
+// submit. Prevents the Kandace Bennett gap (manual booking → no link →
+// false "no lab order" alert).
+// ──────────────────────────────────────────────────────────────────
+const AutoLinkPreview: React.FC<{
+  patientEmail: string;
+  patientPhone: string;
+  patientName: string;
+}> = ({ patientEmail, patientPhone, patientName }) => {
+  const [match, setMatch] = React.useState<{ orgName: string; createdAt: string; hasFile: boolean } | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const phoneDigits = (patientPhone || '').replace(/\D/g, '');
+      const last10 = phoneDigits.slice(-10);
+      if (!patientEmail && !last10 && !patientName) return;
+      try {
+        const filters: string[] = [];
+        if (patientEmail) filters.push(`patient_email.ilike.${patientEmail}`);
+        if (last10) filters.push(`patient_phone.ilike.%${last10}`);
+        if (patientName) filters.push(`patient_name.ilike.${patientName}`);
+        if (filters.length === 0) return;
+        const { data } = await supabase
+          .from('patient_lab_requests' as any)
+          .select('id, organization_id, lab_order_file_path, created_at, patient_email, patient_phone, patient_name, status, organizations(name)')
+          .or(filters.join(','))
+          .in('status', ['pending_schedule', 'expired'] as any)
+          .is('appointment_id', null)
+          .gt('created_at', new Date(Date.now() - 90 * 86400000).toISOString())
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (cancelled) return;
+        const row = (data as any[])?.[0];
+        if (row) {
+          setMatch({
+            orgName: row.organizations?.name || 'a provider\'s office',
+            createdAt: row.created_at,
+            hasFile: !!row.lab_order_file_path,
+          });
+        }
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [patientEmail, patientPhone, patientName]);
+
+  if (!match) return null;
+  const created = new Date(match.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return (
+    <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-sm">
+      <p className="font-bold text-emerald-900 flex items-center gap-1.5">
+        ✨ Will auto-link to {match.orgName}'s lab order
+      </p>
+      <p className="text-xs text-emerald-800 mt-1">
+        {match.orgName} submitted a lab order for this patient on {created}.
+        {match.hasFile ? ' The PDF will auto-attach to this appointment.' : ' No PDF on file yet — admin will need to attach one separately.'}
+      </p>
+      <p className="text-[11px] text-emerald-700 mt-1 italic">
+        No action required — the system links it the moment you click Schedule.
+      </p>
+    </div>
   );
 };
 

@@ -31,6 +31,27 @@ export interface ReleaseNote {
 // NEWEST FIRST. When you ship something, add to the top — never bury.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    id: '2026-05-12-pricing-guard-auto-link-preview',
+    date: '2026-05-12',
+    category: 'safety',
+    area: 'Manual booking',
+    title: 'Pricing-undercharge guard + auto-link preview on the manual booking modal',
+    oneLine: 'Stops you from accidentally charging less than the calculated total and shows when an appointment will auto-link to a provider lab order.',
+    whatChanged: [
+      'Step 3 of ScheduleAppointmentModal now shows a loud amber warning when "Custom Price" is LOWER than the calculated total (base + surcharges). Lists each surcharge so you see what would be lost.',
+      'Step 3 also shows a green "Will auto-link to {Org}\'s lab order" banner when a pending lab request exists for this patient. Confirms the DB trigger will fire on submit.',
+      'Kandace Bennett 2026-05-12: admin typed $100 custom, calculated total was $200 (senior + same-day). The warning would have caught it.',
+    ],
+    howToUse: [
+      'Open admin Calendar → Schedule Appointment → fill in patient details → set Custom Price if needed.',
+      'On Step 3 Review, look for the amber "Custom price is $X less than calculated" warning OR the green "Will auto-link to {Org}" banner.',
+      'If the warning fires unintentionally, clear the Custom Price and click Schedule.',
+    ],
+    whereToFind: { label: 'Calendar → Schedule', path: '/dashboard/super_admin/calendar' },
+    before: 'Admin could accidentally undercharge by typing a custom price below the calculated total; auto-link to a lab request happened invisibly.',
+    after: 'Both surfaces explicit before the admin clicks Schedule.',
+  },
+  {
     id: '2026-05-12-pdf-viewer-fix',
     date: '2026-05-12',
     category: 'fix',
