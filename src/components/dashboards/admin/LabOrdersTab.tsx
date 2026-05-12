@@ -134,16 +134,26 @@ const FILTER_DEFINITIONS: Array<{
   },
 ];
 
+interface OrgMeta {
+  name: string;
+  auto_fulfill_lab_orders: boolean;
+}
+
 const LabOrdersTab: React.FC = () => {
   const { user } = useAuth();
   const [rows, setRows] = useState<LabOrderRow[]>([]);
-  const [orgMap, setOrgMap] = useState<Map<string, string>>(new Map());
+  const [orgMap, setOrgMap] = useState<Map<string, OrgMeta>>(new Map());
   const [loading, setLoading] = useState(true);
-  // Default to 'all' so an admin landing here for the first time sees
-  // every order in the system — not just the small "new" subset. Hormozi:
-  // never let the customer stare at an empty screen and conclude "this
-  // doesn't work." The filter pills above make narrowing one click away.
   const [filter, setFilter] = useState<FilterKey>('all');
+  // View mode: flat list (default) OR grouped by provider's office.
+  // The grouped view is Hormozi's "per-org rollup" — Naquala uses it to
+  // call partners and read off "you sent us N, we delivered M" without
+  // counting manually. Persisted to localStorage so the choice sticks.
+  const [viewMode, setViewMode] = useState<'list' | 'by_org'>(() => {
+    try { return (localStorage.getItem('convelabs_lab_orders_view') as any) || 'list'; }
+    catch { return 'list'; }
+  });
+  useEffect(() => { try { localStorage.setItem('convelabs_lab_orders_view', viewMode); } catch {} }, [viewMode]);
   const [search, setSearch] = useState('');
   const [selectedRow, setSelectedRow] = useState<LabOrderRow | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
@@ -168,11 +178,14 @@ const LabOrdersTab: React.FC = () => {
       console.log(`[LabOrdersTab] fetched ${list.length} lab orders`);
 
       const orgIds = Array.from(new Set(list.map(r => r.organization_id).filter(Boolean) as string[]));
-      const oMap = new Map<string, string>();
+      const oMap = new Map<string, OrgMeta>();
       if (orgIds.length > 0) {
         const { data: orgs } = await supabase
-          .from('organizations').select('id, name').in('id', orgIds);
-        ((orgs as any[]) || []).forEach(o => oMap.set(o.id, o.name));
+          .from('organizations').select('id, name, auto_fulfill_lab_orders').in('id', orgIds);
+        ((orgs as any[]) || []).forEach(o => oMap.set(o.id, {
+          name: o.name,
+          auto_fulfill_lab_orders: !!o.auto_fulfill_lab_orders,
+        }));
       }
       setOrgMap(oMap);
 
@@ -193,7 +206,7 @@ const LabOrdersTab: React.FC = () => {
 
       setRows(list.map(r => ({
         ...r,
-        organization_name: r.organization_id ? oMap.get(r.organization_id) || null : null,
+        organization_name: r.organization_id ? oMap.get(r.organization_id)?.name || null : null,
         resolved_patient_id: r.patient_email ? emailToPatientId.get(r.patient_email.toLowerCase().trim()) || null : null,
       })));
     } catch (err: any) {
@@ -311,7 +324,26 @@ const LabOrdersTab: React.FC = () => {
                 Every order a provider's office has placed for a patient — newest first, real-time.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* View-mode toggle — list vs per-org rollup */}
+              <div className="inline-flex rounded-md border border-gray-200 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`px-2.5 h-8 text-xs font-medium ${viewMode === 'list' ? 'bg-[#B91C1C] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                  title="Flat list, newest first"
+                >
+                  List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('by_org')}
+                  className={`px-2.5 h-8 text-xs font-medium border-l border-gray-200 ${viewMode === 'by_org' ? 'bg-[#B91C1C] text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
+                  title="Grouped by provider's office"
+                >
+                  By provider
+                </button>
+              </div>
               <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5 text-xs h-8" disabled={loading}>
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
               </Button>
@@ -398,6 +430,23 @@ const LabOrdersTab: React.FC = () => {
             )}
           </CardContent>
         </Card>
+      ) : viewMode === 'by_org' ? (
+        <GroupedByOrgView
+          rows={filteredRows}
+          orgMap={orgMap}
+          onOpen={openRow}
+          onSendLink={handleSendBookingLink}
+          onAutoFulfillChange={(orgId, enabled) => {
+            // Optimistic UI update — flip the orgMap entry so the toggle
+            // moves immediately; server-side persist runs in the toggle component.
+            setOrgMap(prev => {
+              const next = new Map(prev);
+              const cur = next.get(orgId);
+              if (cur) next.set(orgId, { ...cur, auto_fulfill_lab_orders: enabled });
+              return next;
+            });
+          }}
+        />
       ) : (
         <div className="space-y-1.5">
           {filteredRows.map(row => <LabOrderRow key={row.id} row={row} onOpen={openRow} onSendLink={handleSendBookingLink} />)}
@@ -434,14 +483,23 @@ const LabOrderRow: React.FC<{
 }> = ({ row, onOpen, onSendLink }) => {
   const isNew = !row.admin_viewed_at && row.status === 'pending_schedule';
   const isOverdue = row.status === 'pending_schedule' && !!row.draw_by_date && new Date(row.draw_by_date).getTime() < Date.now();
+  const isAwaiting = row.status === 'pending_schedule' && !!row.admin_viewed_at && !isOverdue;
   const panels: string[] = Array.isArray(row.lab_order_panels) ? row.lab_order_panels.slice(0, 4) : [];
   const ageDays = differenceInDays(new Date(), new Date(row.created_at));
+
+  // HORMOZI #1 — aging colors. An awaiting-patient row sitting 7 days
+  // looks identical to one sent today. Decay visually so drift surfaces
+  // BEFORE the provider calls asking what happened.
+  const isStale3 = isAwaiting && ageDays >= 3 && ageDays < 5;
+  const isStale5 = isAwaiting && ageDays >= 5;
 
   let statusBadge: React.ReactNode;
   if (row.status === 'completed') statusBadge = <Badge className="bg-gray-100 text-gray-700 text-[10px]">✓ Completed</Badge>;
   else if (row.status === 'scheduled') statusBadge = <Badge className="bg-blue-100 text-blue-700 text-[10px]">📅 Scheduled</Badge>;
   else if (isOverdue) statusBadge = <Badge className="bg-red-100 text-red-700 text-[10px]">⚠ Overdue</Badge>;
   else if (isNew) statusBadge = <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">● New</Badge>;
+  else if (isStale5) statusBadge = <Badge className="bg-red-100 text-red-700 text-[10px] animate-pulse">🚨 Stale {ageDays}d</Badge>;
+  else if (isStale3) statusBadge = <Badge className="bg-orange-100 text-orange-800 text-[10px]">⏰ Aging {ageDays}d</Badge>;
   else statusBadge = <Badge className="bg-amber-100 text-amber-700 text-[10px]">⏳ Awaiting patient</Badge>;
 
   // Context-aware primary action
@@ -462,9 +520,17 @@ const LabOrderRow: React.FC<{
     primaryAction = <span />;
   }
 
+  const borderClass = isOverdue || isStale5
+    ? 'border-l-4 border-l-red-500'
+    : isStale3
+      ? 'border-l-4 border-l-orange-500'
+      : isNew
+        ? 'border-l-4 border-l-emerald-500'
+        : '';
+
   return (
     <Card
-      className={`shadow-sm cursor-pointer hover:shadow-md transition ${isNew ? 'border-l-4 border-l-emerald-500' : ''} ${isOverdue ? 'border-l-4 border-l-red-500' : ''}`}
+      className={`shadow-sm cursor-pointer hover:shadow-md transition ${borderClass}`}
       onClick={() => onOpen(row)}
     >
       <CardContent className="p-3 flex items-center gap-3">
@@ -660,6 +726,131 @@ const LabOrderDetailDrawer: React.FC<{
         </CardContent>
       </Card>
     </div>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────
+// HORMOZI #2 — Per-org rollup view
+// Groups rows by organization with status breakdown in the header.
+// Each org section has its own auto-fulfill toggle (Hormozi #4).
+// ──────────────────────────────────────────────────────────────────
+const GroupedByOrgView: React.FC<{
+  rows: LabOrderRow[];
+  orgMap: Map<string, OrgMeta>;
+  onOpen: (r: LabOrderRow) => void;
+  onSendLink: (r: LabOrderRow) => void;
+  onAutoFulfillChange: (orgId: string, enabled: boolean) => void;
+}> = ({ rows, orgMap, onOpen, onSendLink, onAutoFulfillChange }) => {
+  // Group rows by org id. Rows with no org get bucketed under "Unattributed".
+  const groups = useMemo(() => {
+    const m = new Map<string, { orgId: string | null; name: string; rows: LabOrderRow[] }>();
+    for (const r of rows) {
+      const key = r.organization_id || '__unattributed__';
+      const name = r.organization_id
+        ? (orgMap.get(r.organization_id)?.name || 'Unknown org')
+        : 'Unattributed (no provider linked)';
+      if (!m.has(key)) m.set(key, { orgId: r.organization_id, name, rows: [] });
+      m.get(key)!.rows.push(r);
+    }
+    return Array.from(m.values()).sort((a, b) => b.rows.length - a.rows.length);
+  }, [rows, orgMap]);
+
+  return (
+    <div className="space-y-4">
+      {groups.map(g => {
+        const newCnt = g.rows.filter(r => !r.admin_viewed_at && r.status === 'pending_schedule').length;
+        const awaiting = g.rows.filter(r => r.status === 'pending_schedule' && !!r.admin_viewed_at).length;
+        const scheduled = g.rows.filter(r => r.status === 'scheduled').length;
+        const completed = g.rows.filter(r => r.status === 'completed').length;
+        const meta = g.orgId ? orgMap.get(g.orgId) : null;
+        return (
+          <Card key={g.orgId || g.name} className="shadow-sm overflow-hidden">
+            {/* Org header — Hormozi: name, count breakdown, auto-fulfill toggle */}
+            <div className="bg-gradient-to-r from-purple-50 to-white border-b border-purple-100 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <Building2 className="h-4 w-4 text-purple-700 flex-shrink-0" />
+                <h3 className="font-bold text-sm text-gray-900 truncate">{g.name}</h3>
+                <span className="text-xs text-gray-500">· {g.rows.length} order{g.rows.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {newCnt > 0 && <Badge className="bg-emerald-100 text-emerald-700 text-[10px]">{newCnt} new</Badge>}
+                {awaiting > 0 && <Badge className="bg-amber-100 text-amber-700 text-[10px]">{awaiting} awaiting</Badge>}
+                {scheduled > 0 && <Badge className="bg-blue-100 text-blue-700 text-[10px]">{scheduled} scheduled</Badge>}
+                {completed > 0 && <Badge className="bg-gray-100 text-gray-600 text-[10px]">{completed} done</Badge>}
+                {g.orgId && (
+                  <AutoFulfillToggle
+                    orgId={g.orgId}
+                    enabled={meta?.auto_fulfill_lab_orders ?? false}
+                    onChange={(en) => onAutoFulfillChange(g.orgId!, en)}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="p-3 space-y-1.5 bg-white">
+              {g.rows.map(row => (
+                <LabOrderRow key={row.id} row={row} onOpen={onOpen} onSendLink={onSendLink} />
+              ))}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────
+// HORMOZI #4 — Auto-fulfill toggle per provider
+// Persists organizations.auto_fulfill_lab_orders. When ON, new lab
+// orders from this org auto-fire the HIPAA-safe booking SMS + email
+// to the patient on receipt (logic lives in create-lab-request edge fn).
+// ──────────────────────────────────────────────────────────────────
+const AutoFulfillToggle: React.FC<{
+  orgId: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}> = ({ orgId, enabled, onChange }) => {
+  const [saving, setSaving] = useState(false);
+  const handleToggle = async () => {
+    if (saving) return;
+    const next = !enabled;
+    setSaving(true);
+    // Optimistic update
+    onChange(next);
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({ auto_fulfill_lab_orders: next })
+        .eq('id', orgId);
+      if (error) throw error;
+      toast.success(next
+        ? 'Auto-fulfill ON — new orders will auto-send booking link'
+        : 'Auto-fulfill OFF — manual review required'
+      );
+    } catch (e: any) {
+      onChange(!next); // revert
+      toast.error(`Couldn't update: ${e?.message || e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); handleToggle(); }}
+      disabled={saving}
+      className={`inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[10px] font-semibold border transition ${
+        enabled
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+          : 'bg-gray-50 text-gray-600 border-gray-300 hover:bg-gray-100'
+      } ${saving ? 'opacity-60' : ''}`}
+      title={enabled
+        ? 'Auto-fulfill is ON. New orders from this office will auto-send the booking link.'
+        : 'Auto-fulfill is OFF. New orders require admin to click Send Booking Link.'}
+    >
+      <span className={`w-2 h-2 rounded-full ${enabled ? 'bg-emerald-500 animate-pulse' : 'bg-gray-400'}`} />
+      {enabled ? '⚡ Auto-fulfill ON' : 'Auto-fulfill OFF'}
+    </button>
   );
 };
 

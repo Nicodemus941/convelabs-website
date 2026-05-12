@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: org } = await admin.from('organizations')
-      .select('id, name, contact_name, default_billed_to, member_stacking_rule, locked_price_cents, org_invoice_price_cents, show_patient_name_on_appointment')
+      .select('id, name, contact_name, default_billed_to, member_stacking_rule, locked_price_cents, org_invoice_price_cents, show_patient_name_on_appointment, auto_fulfill_lab_orders, auto_fulfill_service_type')
       .eq('id', organization_id).eq('is_active', true).maybeSingle();
     if (!org) return new Response(JSON.stringify({ error: 'Org not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
@@ -268,6 +268,62 @@ Deno.serve(async (req) => {
     if (insErr) {
       console.error('Insert failed:', insErr);
       return new Response(JSON.stringify({ error: insErr.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── HORMOZI #4: AUTO-FULFILL PATH ──────────────────────────────────
+    // When the org has auto_fulfill_lab_orders=true, mint a tokenized
+    // booking_prefill_token + fire SMS+email to the patient immediately.
+    // Admin still sees the order in the Lab Orders tab (as "Awaiting
+    // patient" since admin_viewed_at is auto-stamped). Frees up admin to
+    // touch only exceptions.
+    // Skipped when org pays (the existing org-pays branch handles its
+    // own Stripe flow + delayed patient notification on org payment).
+    if (org.auto_fulfill_lab_orders === true) {
+      try {
+        // Resolve tenant_patients.id by email so the prefill carries the
+        // address/insurance/DOB from the chart if it exists.
+        let tpId: string | null = null;
+        if (patient_email) {
+          const { data: tp } = await admin.from('tenant_patients')
+            .select('id').ilike('email', patient_email).maybeSingle();
+          tpId = (tp as any)?.id || null;
+        }
+
+        const serviceType = (org.auto_fulfill_service_type as string) || 'mobile';
+
+        // Call the same edge fn the admin UI uses for Send Booking Link.
+        // Pass through the lab_order_path so it auto-attaches on payment.
+        const { data: bplResp } = await admin.functions.invoke('create-booking-prefill-link', {
+          body: {
+            patientId: tpId,
+            firstName: patient_name.split(' ')[0],
+            lastName: patient_name.split(' ').slice(1).join(' '),
+            email: patient_email,
+            phone: patient_phone,
+            serviceType,
+            organizationId: organization_id,
+            organizationName: org.name,
+            providerOfficeLabel: org.name,
+            labOrderPath: lab_order_file_path || null,
+            billedTo: 'patient',
+          },
+        });
+
+        // Stamp the lab request as admin-reviewed (auto) and mark patient_notified
+        if (bplResp?.ok) {
+          await admin.from('patient_lab_requests').update({
+            admin_viewed_at: new Date().toISOString(),
+            patient_notified_at: new Date().toISOString(),
+          }).eq('id', (request as any).id);
+          console.log(`[auto-fulfill] sent booking link for ${patient_name} from ${org.name}`);
+        } else {
+          console.warn('[auto-fulfill] booking link send returned no ok:', bplResp);
+        }
+      } catch (autoErr: any) {
+        // Never block the create-lab-request response on this. Admin
+        // gets the order in the New bucket and can manually send.
+        console.warn('[auto-fulfill] non-blocking failure:', autoErr?.message || autoErr);
+      }
     }
 
     const patientUrl = `${PUBLIC_SITE_URL}/lab-request/${accessToken}`;
