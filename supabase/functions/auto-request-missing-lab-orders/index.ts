@@ -42,6 +42,8 @@ interface ApptRow {
   appointment_date: string;
   appointment_time: string | null;
   lab_order_file_path: string | null;
+  lab_request_id: string | null;
+  organization_id: string | null;
   status: string;
   service_type: string | null;
   family_group_id: string | null;
@@ -67,7 +69,7 @@ Deno.serve(async (req) => {
     // because hours-until calculation is timezone-aware.
     const { data: appts } = await admin
       .from('appointments')
-      .select('id, patient_name, patient_phone, patient_email, appointment_date, appointment_time, lab_order_file_path, status, service_type, family_group_id')
+      .select('id, patient_name, patient_phone, patient_email, appointment_date, appointment_time, lab_order_file_path, lab_request_id, organization_id, status, service_type, family_group_id')
       .gte('appointment_date', today)
       .lte('appointment_date', in3Days)
       .not('status', 'in', '(cancelled,completed,no_show)');
@@ -91,13 +93,79 @@ Deno.serve(async (req) => {
     }
     const labOrderApptSet = new Set<string>((labOrderRows || []).map((r: any) => r.appointment_id));
 
+    // FALSE-ALARM DEFENSE: also pre-load lab_request rows referenced from
+    // these appointments OR matching them by email/phone/org. Kandace case
+    // 2026-05-12 — appointment was created without lab_request_id link, so
+    // the cron false-alarmed even though Elite Medical had uploaded the PDF.
+    const labRequestRefIds = appts.map(a => a.lab_request_id).filter(Boolean) as string[];
+    const emails = Array.from(new Set(appts.map(a => (a.patient_email || '').toLowerCase().trim()).filter(Boolean)));
+    const phoneLast10s = Array.from(new Set(appts.map(a => {
+      const d = (a.patient_phone || '').replace(/\D/g, '');
+      return d.slice(-10);
+    }).filter(p => p.length === 10)));
+
+    const apptsWithLrLink = new Set<string>();
+    if (labRequestRefIds.length > 0) {
+      const { data: linkedLrs } = await admin
+        .from('patient_lab_requests')
+        .select('id, appointment_id, lab_order_file_path, patient_email, patient_phone, organization_id, patient_name')
+        .in('id', labRequestRefIds);
+      for (const lr of (linkedLrs as any[]) || []) {
+        if (lr.lab_order_file_path) {
+          // find appt(s) that reference this lr
+          for (const a of appts) {
+            if (a.lab_request_id === lr.id) apptsWithLrLink.add(a.id);
+          }
+        }
+      }
+    }
+    // ALSO: match by email or phone in case admin booked manually and
+    // didn't link (the new BEFORE-INSERT trigger now does this, but old
+    // rows + race conditions are covered here too).
+    if (emails.length > 0 || phoneLast10s.length > 0) {
+      const { data: looseLrs } = await admin
+        .from('patient_lab_requests')
+        .select('patient_email, patient_phone, patient_name, organization_id, lab_order_file_path')
+        .or([
+          emails.length ? `patient_email.in.(${emails.map(e => `"${e}"`).join(',')})` : null,
+        ].filter(Boolean).join(','))
+        .not('lab_order_file_path', 'is', null);
+      for (const lr of (looseLrs as any[]) || []) {
+        const lrEmail = (lr.patient_email || '').toLowerCase().trim();
+        const lrPhoneLast10 = (lr.patient_phone || '').replace(/\D/g, '').slice(-10);
+        for (const a of appts) {
+          if (apptsWithLrLink.has(a.id)) continue;
+          const aEmail = (a.patient_email || '').toLowerCase().trim();
+          const aPhoneLast10 = (a.patient_phone || '').replace(/\D/g, '').slice(-10);
+          const emailMatch = !!aEmail && lrEmail === aEmail;
+          const phoneMatch = !!aPhoneLast10 && lrPhoneLast10 === aPhoneLast10;
+          const nameMatch = lr.patient_name && a.patient_name &&
+            lr.patient_name.toLowerCase().trim() === a.patient_name.toLowerCase().trim();
+          if (emailMatch || phoneMatch || nameMatch) {
+            apptsWithLrLink.add(a.id);
+            // OPPORTUNISTIC RE-LINK — patch the appointment row so future
+            // surfaces (phleb card, admin modal) see the lab order too.
+            try {
+              await admin.from('appointments').update({
+                lab_order_file_path: lr.lab_order_file_path,
+                organization_id: lr.organization_id,
+              }).eq('id', a.id).is('lab_order_file_path', null);
+            } catch { /* non-fatal */ }
+          }
+        }
+      }
+    }
+
     let fired = 0;
     let escalated = 0;
     const skipped: any[] = [];
 
     for (const appt of appts as ApptRow[]) {
-      // Already has a lab order? Skip.
-      if (appt.lab_order_file_path || labOrderApptSet.has(appt.id)) {
+      // Already has a lab order? Skip. Now checks THREE sources:
+      // 1. appointments.lab_order_file_path
+      // 2. appointment_lab_orders normalized table
+      // 3. linked / fuzzy-matched patient_lab_requests with a PDF
+      if (appt.lab_order_file_path || labOrderApptSet.has(appt.id) || apptsWithLrLink.has(appt.id)) {
         skipped.push({ id: appt.id, reason: 'has_lab_order' });
         continue;
       }

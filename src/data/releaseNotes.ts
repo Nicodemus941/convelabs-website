@@ -31,6 +31,27 @@ export interface ReleaseNote {
 // NEWEST FIRST. When you ship something, add to the top — never bury.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    id: '2026-05-12-auto-link-manual-bookings',
+    date: '2026-05-12',
+    category: 'fix',
+    area: 'Lab Orders',
+    title: 'Manual bookings auto-link to provider lab orders + cron stops false-alarming',
+    oneLine: 'No more "we have no lab order" SMS when the provider already uploaded one.',
+    whatChanged: [
+      'New BEFORE-INSERT DB trigger: when an appointment is created, if there\'s a pending lab request from any provider for the same patient (matched by email, phone last-10, or fuzzy name, within 90 days), the appointment is automatically stamped with lab_request_id + lab_order_file_path + organization_id.',
+      'AFTER-INSERT companion trigger flips the linked lab request to "scheduled" + mirrors the order to appointment_lab_orders so the phleb card sees it.',
+      'auto-request-missing-lab-orders cron hardened with defense-in-depth: in addition to checking appointments.lab_order_file_path + appointment_lab_orders, it now also checks patient_lab_requests joined via lab_request_id OR fuzzy-matched by email/phone/name. If a match is found, the cron opportunistically re-links the appointment row so future runs are O(1).',
+      'Kandace Bennett\'s today-appointment was manually linked to her Elite Medical lab order live.',
+    ],
+    howToUse: [
+      'Nothing to do. Book a patient manually as usual.',
+      'If that patient has a pending lab order from a provider, it now auto-attaches.',
+    ],
+    whereToFind: { label: 'Lab Orders', path: '/dashboard/super_admin/lab-orders' },
+    before: 'Manual booking didn\'t know about pending lab orders. Owner got "no lab order in <4h" SMS even when one was on file.',
+    after: 'Manual + automated bookings both auto-link. Owner SMS only fires for truly missing orders.',
+  },
+  {
     id: '2026-05-12-send-link-prefill',
     date: '2026-05-12',
     category: 'feature',
