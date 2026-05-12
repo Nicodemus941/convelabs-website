@@ -4,9 +4,21 @@ import { toast } from 'sonner';
 import { Upload, FileText, Loader2, CheckCircle2, AlertTriangle, Trash2, ExternalLink, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { resizeImageForUpload } from '@/lib/imageResize';
+import AdminErrorBoundary from '@/components/admin/AdminErrorBoundary';
 
-// Wire up the pdfjs worker (needed for thumbnails)
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+// Wire up the pdfjs worker. If pdfjs.version comes back undefined under
+// some bundler tree-shake configs, fall back to a pinned version so we
+// never ship a /undefined/pdf.worker.min.js URL that 404s + crashes the
+// whole component. (Naquala 2026-05-12: blank screen + lab orders won't
+// upload — likely root cause was the bad worker URL on her Edge browser.)
+try {
+  const v = (pdfjs as any).version && (pdfjs as any).version !== 'undefined'
+    ? (pdfjs as any).version
+    : '3.11.174'; // safe fallback — matches react-pdf 7.x's bundled pdfjs
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${v}/pdf.worker.min.js`;
+} catch {
+  /* swallow — render path doesn't depend on pdfjs being ready */
+}
 
 /**
  * Hormozi-structured appointment lab-order panel.
@@ -417,7 +429,9 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
                 {expanded && (
                   <div className="border-t border-gray-100 bg-gray-50 p-3 space-y-2">
                     {r.mime_type === 'application/pdf' && (
-                      <PdfThumbnail filePath={r.file_path} pages={Math.min(r.page_count || 1, 4)} />
+                      <AdminErrorBoundary surface="PDF thumbnail">
+                        <PdfThumbnail filePath={r.file_path} pages={Math.min(r.page_count || 1, 4)} />
+                      </AdminErrorBoundary>
                     )}
                     {panels.length > 0 && (
                       <div>
