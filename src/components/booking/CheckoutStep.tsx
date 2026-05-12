@@ -170,6 +170,26 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
       });
   }, []);
 
+  // Deep-link from /dashboard/patient → /book-now?addFamily=1 — scroll to
+  // and visually pulse the family-member panel so the user sees the free
+  // slot CTA immediately. Wired for Mariela's "Book visit + add family"
+  // dashboard button.
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('addFamily') === '1') {
+      const t = setTimeout(() => {
+        const el = document.getElementById('family-member-panel');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-4', 'ring-amber-300', 'ring-offset-2');
+          setTimeout(() => el.classList.remove('ring-4', 'ring-amber-300', 'ring-offset-2'), 2500);
+        }
+      }, 600);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
   // Auto-detect unredeemed patient credits by email — referral wins,
   // goodwill, apology credits all live in the same table. Patient never
   // has to remember a code; the system finds and applies them.
@@ -624,17 +644,40 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         </div>
 
         {/* Family member upsell */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+        <div
+          id="family-member-panel"
+          className={`bg-blue-50 border ${foundingFamilyFreeSlots > 0 ? 'border-amber-300 bg-amber-50' : 'border-blue-200'} rounded-xl p-3 space-y-2`}
+        >
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-semibold text-sm text-blue-900">👨‍👩‍👧 Bringing a family member?</p>
-              <p className="text-xs text-blue-700">
-                Add them to this visit for just <span className="font-bold">${familyMemberPrice}</span> each — no separate appointment needed.
-                {memberTier !== 'none' && (
-                  <span className="block mt-0.5 text-emerald-700 font-medium">
-                    ✓ {memberLabel} rate applied — save ${75 - familyMemberPrice} per companion
+              <p className="font-semibold text-sm text-blue-900">
+                👨‍👩‍👧 Bringing a family member?
+                {foundingFamilyFreeSlots > 0 && familyMembers.length === 0 && (
+                  <span className="ml-2 inline-block bg-amber-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 align-middle">
+                    1st FREE · Founding VIP
                   </span>
                 )}
+              </p>
+              {/* Pricing line — shows $0 for the founding-50 free first slot */}
+              {foundingFamilyFreeSlots > 0 && familyMembers.length === 0 ? (
+                <p className="text-xs text-amber-900">
+                  Your first household member is <span className="font-bold">FREE</span> as a Founding VIP perk
+                  (then ${familyMemberPrice} each after).
+                </p>
+              ) : (
+                <p className="text-xs text-blue-700">
+                  Add them to this visit for just <span className="font-bold">${familyMemberPrice}</span> each.
+                  {memberTier !== 'none' && (
+                    <span className="block mt-0.5 text-emerald-700 font-medium">
+                      ✓ {memberLabel} rate applied — save ${75 - familyMemberPrice} per companion
+                    </span>
+                  )}
+                </p>
+              )}
+              {/* Operational rule: must be drawn at THIS appointment, not separate. */}
+              <p className="text-[11px] text-blue-900 mt-1.5 bg-white border border-blue-200 rounded px-2 py-1">
+                <span className="font-bold">Same-visit rule:</span> family members are drawn at this same appointment —
+                not a separate one. The phlebotomist sees everyone at the same address, same time slot.
               </p>
             </div>
           </div>

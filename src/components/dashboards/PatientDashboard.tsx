@@ -12,6 +12,7 @@ import AppointmentHistory from "@/components/appointments/AppointmentHistory";
 import ReferralCard from "@/components/patient/ReferralCard";
 import MyRecurringPlans from "@/components/patient/MyRecurringPlans";
 import MemberSavingsBanner from "@/components/patient/MemberSavingsBanner";
+import PatientBenefitsCard from "@/components/dashboards/patient/PatientBenefitsCard";
 
 const PLANS = [
   { name: 'Member', price: 99, color: 'border-blue-200', badge: '', mobile: '$130', save: '$20', features: ['Mobile visits: $130 (save $20)', 'Weekend appointments', 'Patient portal'] },
@@ -192,6 +193,9 @@ const PatientDashboard = () => {
           <Crown className="h-5 w-5 mr-2 text-amber-500" /> {stats.totalSpent > 0 ? `Save $${Math.round(stats.totalSpent * 0.13)}` : 'Upgrade & Save'}
         </Button>
       </div>
+
+      {/* ===== MEMBER BENEFITS — auto-hides for non-members ===== */}
+      <PatientBenefitsCard />
 
       {/* ===== REFERRAL CARD — Above the fold ===== */}
       <div className="mb-6">

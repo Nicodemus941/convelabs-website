@@ -727,7 +727,7 @@ async function handleSubscriptionUpdate(subscription: any) {
         updated_at: new Date().toISOString()
       })
       .eq('stripe_subscription_id', subscriptionId)
-      .select()
+      .select('id, user_id, stripe_customer_id, stripe_subscription_id, founding_member, founding_locked_rate_cents')
       .single();
 
     if (error) {
@@ -736,6 +736,80 @@ async function handleSubscriptionUpdate(subscription: any) {
     }
 
     console.log(`Updated subscription ${subscriptionId} status to ${status}`);
+
+    // ── FOUNDING-50 RATE-LOCK ENFORCEMENT ─────────────────────────
+    // Promise on BonusStackCard.tsx (the Founding-50 value ladder):
+    //   "Founding rate-lock for life — Your $199/yr never raises —
+    //    even when we do (+$50/yr value)"
+    //
+    // When we eventually raise public VIP from $199 → $249, Stripe's
+    // existing subscriptions for founding members WILL pick up the new
+    // price unless we pin them. This block reads the current unit
+    // amount off the subscription, compares to the locked rate stored
+    // on the membership row, and if Stripe is about to bill more than
+    // the locked cents, we patch the subscription with a fixed
+    // price-data unit amount equal to the locked rate.
+    //
+    // We do this in subscription.updated (not subscription.created) so
+    // (a) it fires every time a price/quantity change is pushed via
+    // Stripe Dashboard or our admin tools, and (b) it self-heals if a
+    // founding member's subscription gets reset by support.
+    //
+    // Hormozi: deliver the perk you sold, in code, automatically. The
+    // promise isn't kept by a column in the database — it's kept when
+    // the next charge actually matches what we said it would.
+    try {
+      const row = data as any;
+      if (row?.founding_member && row?.founding_locked_rate_cents && row.founding_locked_rate_cents > 0) {
+        const items = subscription?.items?.data || [];
+        const overcharged = items.find((it: any) => {
+          const unit = it?.price?.unit_amount ?? it?.plan?.amount ?? 0;
+          return unit > row.founding_locked_rate_cents;
+        });
+
+        if (overcharged) {
+          const STRIPE_KEY = Deno.env.get('STRIPE_SECRET_KEY') || '';
+          if (STRIPE_KEY) {
+            // Replace the price on the offending item with an inline
+            // price_data block locked to the founding rate. Stripe
+            // applies this on the next billing cycle (proration_behavior
+            // = none → no double-charge or credit).
+            const lockedCents = row.founding_locked_rate_cents;
+            const params = new URLSearchParams();
+            params.append(`items[0][id]`, overcharged.id);
+            params.append(`items[0][price_data][currency]`, 'usd');
+            params.append(`items[0][price_data][product]`, overcharged.price?.product || '');
+            params.append(`items[0][price_data][unit_amount]`, String(lockedCents));
+            params.append(`items[0][price_data][recurring][interval]`, overcharged.price?.recurring?.interval || 'year');
+            params.append('proration_behavior', 'none');
+            params.append('metadata[founding_locked_rate_applied]', 'true');
+            params.append('metadata[founding_locked_rate_cents]', String(lockedCents));
+
+            const resp = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${STRIPE_KEY}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+              },
+              body: params.toString(),
+            });
+
+            if (resp.ok) {
+              console.log(`[rate-lock] founding member ${row.user_id} sub ${subscriptionId} re-pinned to $${(lockedCents / 100).toFixed(2)}/${overcharged.price?.recurring?.interval || 'year'}`);
+            } else {
+              const errText = await resp.text();
+              console.error(`[rate-lock] failed to patch subscription ${subscriptionId}: ${errText}`);
+              // Non-blocking — don't fail the webhook over this. The
+              // daily reconciliation cron (or next webhook fire) will
+              // retry. But DO surface this so it's visible.
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[rate-lock] non-blocking exception:', e?.message || e);
+    }
+
     return data;
   } catch (error) {
     console.error('Error handling subscription update:', error);
