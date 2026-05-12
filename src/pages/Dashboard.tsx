@@ -29,6 +29,7 @@ import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingT
 import NotesTab from "@/components/dashboards/admin/NotesTab";
 import InboxTab from "@/components/dashboards/admin/InboxTab";
 import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
+import LabOrdersTab from "@/components/dashboards/admin/LabOrdersTab";
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
@@ -181,6 +182,7 @@ const Dashboard = () => {
           {adminTab === "notes" && <NotesTab />}
           {adminTab === "inbox" && <InboxTab />}
           {adminTab === "patients" && <PatientProfileTab />}
+          {adminTab === "lab-orders" && <LabOrdersTab />}
           {adminTab === "organizations" && <OrganizationsTab />}
           {adminTab === "operations" && <OperationsPanel />}
           {adminTab === "ai-assistant" && <AIOpsAssistant />}
@@ -190,7 +192,7 @@ const Dashboard = () => {
           {adminTab === "chatbot" && <ChatbotTab />}
           {adminTab === "provider-acquisition" && <ProviderAcquisitionTab />}
           {adminTab === "scripts" && <ScriptsTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>

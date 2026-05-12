@@ -22,6 +22,7 @@ type SidebarItem = {
   badge?: boolean;       // green pulse for inbound SMS
   taskBadge?: boolean;   // numeric red badge driven by my_open_task_count
   inboxBadge?: boolean;  // numeric badge for OCR-pipeline items needing human touch
+  labOrderBadge?: boolean; // numeric badge: unviewed provider-uploaded orders
   ownerOnly?: boolean;
 };
 type SidebarSection = { label: string; items: SidebarItem[] };
@@ -39,6 +40,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
         { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },
         { name: 'Patients', icon: Users, path: `${basePath}/patients` },
+        { name: 'Lab Orders', icon: FlaskConical, path: `${basePath}/lab-orders`, labOrderBadge: true },
       ],
     },
     {
@@ -92,6 +94,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const [myOpenTaskCount, setMyOpenTaskCount] = useState<number>(0);
   const [inboxCount, setInboxCount] = useState<number>(0);
+  const [labOrderCount, setLabOrderCount] = useState<number>(0);
 
   // ── OPEN TASKS BADGE ──────────────────────────────────────────────
   // Drives the numeric "Notes & Tasks (N)" pill in the sidebar so
@@ -154,6 +157,32 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
       .channel('admin-inbox-badge')
       .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'pending_insurance_changes' }, () => recount())
       .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'organizations' }, () => recount())
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(ch); };
+  }, [user?.id]);
+
+  // ── LAB ORDERS BADGE ──────────────────────────────────────────────
+  // Counts unviewed provider-uploaded lab orders (admin_viewed_at IS NULL
+  // AND status='pending_schedule'). Realtime: any INSERT/UPDATE on
+  // patient_lab_requests bumps the recount, so the badge ticks the moment
+  // a provider hits "submit" in their portal.
+  useEffect(() => {
+    if (!user?.id) return;
+    let mounted = true;
+    const recount = async () => {
+      try {
+        const { count } = await supabase
+          .from('patient_lab_requests' as any)
+          .select('id', { count: 'exact', head: true })
+          .is('admin_viewed_at', null)
+          .eq('status', 'pending_schedule');
+        if (mounted) setLabOrderCount(count || 0);
+      } catch { /* silent */ }
+    };
+    recount();
+    const ch = supabase
+      .channel('admin-lab-order-badge')
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'patient_lab_requests' }, () => recount())
       .subscribe();
     return () => { mounted = false; supabase.removeChannel(ch); };
   }, [user?.id]);
@@ -262,6 +291,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                       {item.inboxBadge && inboxCount > 0 && !active && (
                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
                       )}
+                      {item.labOrderBadge && labOrderCount > 0 && !active && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                      )}
                     </div>
                     {item.name}
                     {item.badge && hasNewMessages && !active && (
@@ -283,6 +315,15 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                           : 'bg-amber-500 text-white shadow-[0_0_6px_2px_rgba(245,158,11,0.45)]'
                       }`}>
                         {inboxCount > 99 ? '99+' : inboxCount}
+                      </span>
+                    )}
+                    {item.labOrderBadge && labOrderCount > 0 && (
+                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
+                        active
+                          ? 'bg-white text-emerald-700'
+                          : 'bg-emerald-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(16,185,129,0.5)]'
+                      }`}>
+                        {labOrderCount > 99 ? '99+' : labOrderCount}
                       </span>
                     )}
                   </Link>
