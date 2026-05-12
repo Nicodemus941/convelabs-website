@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import AdminErrorBoundary from '@/components/admin/AdminErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -944,6 +945,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto w-[95vw] sm:w-full p-4 sm:p-6">
+        <AdminErrorBoundary surface="Schedule appointment">
         <DialogHeader>
           <DialogTitle>Schedule New Appointment</DialogTitle>
         </DialogHeader>
@@ -1663,6 +1665,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             </div>
           </div>
         )}
+        </AdminErrorBoundary>
       </DialogContent>
     </Dialog>
 

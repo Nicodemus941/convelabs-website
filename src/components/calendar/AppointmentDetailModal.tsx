@@ -763,14 +763,19 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
         <Separator />
 
-        {/* Lab Orders — Hormozi-structured staged upload + OCR readback */}
+        {/* Lab Orders — Hormozi-structured staged upload + OCR readback.
+            Wrapped in its OWN error boundary so a crash here doesn't take
+            down the rest of the appointment details (address, time, etc.)
+            — Naquala still needs those to plan the next visit. */}
         <div className="px-5 py-4">
-          <AppointmentLabOrdersPanel
-            appointmentId={appt.id}
-            patientName={appt.patient_name}
-            canEdit={true}
-            onChanged={onUpdate}
-          />
+          <AdminErrorBoundary surface="Lab orders upload" onRetry={onUpdate}>
+            <AppointmentLabOrdersPanel
+              appointmentId={appt.id}
+              patientName={appt.patient_name}
+              canEdit={true}
+              onChanged={onUpdate}
+            />
+          </AdminErrorBoundary>
         </div>
 
         <Separator />
