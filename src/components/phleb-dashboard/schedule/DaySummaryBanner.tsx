@@ -9,6 +9,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, isToday, isTomorrow } from 'date-fns';
 import { Calendar, DollarSign } from 'lucide-react';
+import { extractSurchargeCents } from '@/lib/phlebSurchargeMap';
 
 interface Props {
   selectedDate: Date;
@@ -48,16 +49,37 @@ const DaySummaryBanner: React.FC<Props> = ({ selectedDate, appointments }) => {
       const groupCounts = new Map<string, number>();
       for (const a of dayAppts) if (a.family_group_id) groupCounts.set(a.family_group_id, (groupCounts.get(a.family_group_id) || 0) + 1);
 
+      // Batch-fetch pricing_breakdown + surcharge_amount for all the
+      // day's appointments so we can map each row's surcharges into the
+      // p_surcharges JSON. Single query — no N+1.
+      const apptIds = dayAppts.map(a => a.id).filter(Boolean);
+      const pbMap = new Map<string, { pricing_breakdown: any; surcharge_amount: number | null }>();
+      if (apptIds.length > 0) {
+        const { data: pbRows } = await supabase
+          .from('appointments')
+          .select('id, pricing_breakdown, surcharge_amount')
+          .in('id', apptIds);
+        for (const r of (pbRows || []) as any[]) {
+          pbMap.set(r.id, { pricing_breakdown: r.pricing_breakdown, surcharge_amount: r.surcharge_amount });
+        }
+      }
+
       let sum = 0;
       for (const a of dayAppts) {
         const tipCents = Math.round(((a.tip_amount || 0) as number) * 100);
         const hasCompanion = !!(a.family_group_id && (groupCounts.get(a.family_group_id) || 0) > 1);
+        // Surcharges from pricing_breakdown — same-day, weekend, after-hours,
+        // extended-area, admin-override. Before this fix the RPC was called
+        // without p_surcharges so every surcharge dollar bypassed the phleb.
+        const pb = pbMap.get(a.id);
+        const surcharges = extractSurchargeCents(pb?.pricing_breakdown, pb?.surcharge_amount);
         try {
           const { data } = await supabase.rpc('compute_phleb_take_cents' as any, {
             p_staff_id: staffId,
             p_service_type: a.service_type || 'mobile',
             p_tip_cents: tipCents,
             p_has_companion: hasCompanion,
+            p_surcharges: surcharges as any,
           });
           sum += parseInt(String(data || 0), 10);
         } catch { /* skip */ }

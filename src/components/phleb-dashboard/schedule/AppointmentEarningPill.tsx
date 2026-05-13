@@ -12,6 +12,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { extractSurchargeCents } from '@/lib/phlebSurchargeMap';
 
 interface Props {
   serviceType: string | null;
@@ -26,6 +27,12 @@ const AppointmentEarningPill: React.FC<Props> = ({
   const { user } = useAuth();
   const [staffId, setStaffId] = useState<string | null>(null);
   const [takeCents, setTakeCents] = useState<number | null>(null);
+  // Pricing breakdown lookup — needed so we can map surcharges (same-day,
+  // weekend, after-hours, extended-area) into the p_surcharges JSON the
+  // RPC accepts. Before 2026-05-13 every earning pill called the RPC
+  // WITHOUT p_surcharges, so every surcharge was silently absorbed by the
+  // org instead of paid to the phleb.
+  const [surcharges, setSurcharges] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (!user?.id) return;
@@ -39,6 +46,23 @@ const AppointmentEarningPill: React.FC<Props> = ({
     })();
   }, [user?.id]);
 
+  // Pull pricing_breakdown for this appointment so we can read its
+  // surcharge entries and pass them to the RPC.
+  useEffect(() => {
+    if (!appointmentId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('appointments')
+        .select('pricing_breakdown, surcharge_amount')
+        .eq('id', appointmentId)
+        .maybeSingle();
+      if (cancelled) return;
+      setSurcharges(extractSurchargeCents((data as any)?.pricing_breakdown, (data as any)?.surcharge_amount));
+    })();
+    return () => { cancelled = true; };
+  }, [appointmentId]);
+
   useEffect(() => {
     if (!staffId) return;
     (async () => {
@@ -49,18 +73,27 @@ const AppointmentEarningPill: React.FC<Props> = ({
           p_service_type: serviceType || 'mobile',
           p_tip_cents: tipCents,
           p_has_companion: !!hasCompanion,
+          p_surcharges: surcharges as any,
         });
         setTakeCents(parseInt(String(data || 0), 10));
       } catch { setTakeCents(0); }
     })();
-  }, [staffId, serviceType, tipAmount, hasCompanion, appointmentId]);
+  }, [staffId, serviceType, tipAmount, hasCompanion, appointmentId, surcharges]);
 
   if (!staffId || takeCents == null || takeCents === 0) return null;
 
   const tipDollars = Math.round((tipAmount || 0));
   const baseLabel = `+$${(takeCents / 100).toFixed(0)}`;
+  // Build a tasteful tooltip line that shows surcharge contributions.
+  const surchargeNotes: string[] = [];
+  if (surcharges.same_day_cents) surchargeNotes.push(`same-day $${(surcharges.same_day_cents / 100).toFixed(0)}`);
+  if (surcharges.weekend_cents) surchargeNotes.push(`weekend $${(surcharges.weekend_cents / 100).toFixed(0)}`);
+  if (surcharges.after_hours_cents) surchargeNotes.push(`after-hours $${(surcharges.after_hours_cents / 100).toFixed(0)}`);
+  if (surcharges.extended_area_cents) surchargeNotes.push(`distance $${(surcharges.extended_area_cents / 100).toFixed(0)}`);
+  if (surcharges.admin_override_cents) surchargeNotes.push(`admin $${(surcharges.admin_override_cents / 100).toFixed(0)}`);
   const breakdown = tipDollars > 0
     ? ` (incl. $${tipDollars} tip)`
+    : surchargeNotes.length > 0 ? ` (incl. ${surchargeNotes.join(' + ')})`
     : hasCompanion ? ' (couple)' : '';
 
   return (

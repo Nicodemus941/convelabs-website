@@ -19,6 +19,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card } from '@/components/ui/card';
 import { DollarSign, TrendingUp, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { extractSurchargeCents } from '@/lib/phlebSurchargeMap';
 
 interface DayBucket {
   base_cents: number;
@@ -109,7 +110,7 @@ const PhlebEarningsCard: React.FC = () => {
       // checkout tips already captured).
       const { data: appts } = await supabase
         .from('appointments')
-        .select('id, appointment_date, service_type, status, tip_amount, family_group_id, total_amount, phlebotomist_id')
+        .select('id, appointment_date, service_type, status, tip_amount, family_group_id, total_amount, phlebotomist_id, pricing_breakdown, surcharge_amount')
         .gte('appointment_date', `${monthStartISO}T00:00:00`)
         .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress', 'specimen_delivered', 'completed'])
         .order('appointment_date', { ascending: true });
@@ -137,13 +138,18 @@ const PhlebEarningsCard: React.FC = () => {
         let takeCents = 0;
         const alreadyBanked = a.id && payoutAppointmentIds.has(a.id);
         if (!alreadyBanked) {
-          // Use the canonical RPC so projection matches Stripe Connect split exactly
+          // Use the canonical RPC so projection matches Stripe Connect split
+          // exactly. Pass per-type surcharge cents from pricing_breakdown so
+          // distance / after-hours / same-day / weekend dollars flow to the
+          // phleb account (per phleb_pay_surcharge_rules).
+          const surcharges = extractSurchargeCents(a.pricing_breakdown, a.surcharge_amount);
           try {
             const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
               p_staff_id: staffId,
               p_service_type: a.service_type || 'mobile',
               p_tip_cents: tipCents,
               p_has_companion: hasCompanion,
+              p_surcharges: surcharges as any,
             });
             takeCents = Math.max(0, parseInt(String(takeRes || 0), 10));
           } catch { /* ignore — bucket gets 0 */ }
@@ -200,12 +206,15 @@ const PhlebEarningsCard: React.FC = () => {
         // Cheap projection — match the per-day buckets we computed above
         const tipCents = Math.round(((a.tip_amount || 0) as number) * 100);
         const hasCompanion = !!(a.family_group_id && (groupCounts.get(a.family_group_id) || 0) > 1);
+        // Sparkline must use the same surcharge math as the buckets
+        const surcharges = extractSurchargeCents(a.pricing_breakdown, a.surcharge_amount);
         try {
           const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
             p_staff_id: staffId,
             p_service_type: a.service_type || 'mobile',
             p_tip_cents: tipCents,
             p_has_companion: hasCompanion,
+            p_surcharges: surcharges as any,
           });
           const take = parseInt(String(takeRes || 0), 10);
           sparkMap.set(apptDateISO, (sparkMap.get(apptDateISO) || 0) + take);
@@ -234,11 +243,15 @@ const PhlebEarningsCard: React.FC = () => {
           if (becameCancelled && newRow.id && !seenCancellations.current.has(newRow.id)) {
             seenCancellations.current.add(newRow.id);
             const tipCents = Math.round(((newRow.tip_amount || 0) as number) * 100);
+            // Include surcharges in the "lost revenue" toast so cancel impact
+            // reflects what the phleb actually would have made (not just base).
+            const surcharges = extractSurchargeCents(newRow.pricing_breakdown, newRow.surcharge_amount);
             const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
               p_staff_id: staffId,
               p_service_type: newRow.service_type || 'mobile',
               p_tip_cents: tipCents,
               p_has_companion: !!newRow.family_group_id,
+              p_surcharges: surcharges as any,
             });
             const lost = parseInt(String(takeRes || 0), 10);
             if (lost > 0) {
