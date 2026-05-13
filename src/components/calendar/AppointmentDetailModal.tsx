@@ -149,12 +149,23 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   }, [appt?.id]);
 
   // Load family-group siblings + lab order count for the readiness header.
+  //
+  // Companions live in TWO places in our data model and we have to merge
+  // both or the phleb misses people:
+  //   (a) Sibling appointment rows with the same family_group_id —
+  //       admin-scheduled families typically split this way
+  //   (b) pricing_breakdown.additional_patients[] — the patient booking
+  //       flow STAMPS the companions here at checkout but does NOT
+  //       create a sibling appointment row, so (a) returns empty
+  //
+  // Lisa Marie Jusas (2026-05-13) hit (b): she paid $245 = $150 mobile +
+  // $75 additional patient + $20 tip and her companion Brian Jusas was
+  // captured in pricing_breakdown.additional_patients[0] but no sibling
+  // row exists. Phleb opens her card and sees only Lisa.
   useEffect(() => {
     if (!appt?.id) return;
     let cancelled = false;
     (async () => {
-      // Family group: every sibling under the same family_group_id (or
-      // anchor on this appt's id if it's a primary). Excludes cancelled.
       const groupId = appt.family_group_id || appt.id;
       const { data: sibs } = await supabase
         .from('appointments')
@@ -162,10 +173,45 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         .eq('family_group_id', groupId)
         .neq('status', 'cancelled')
         .order('appointment_time', { ascending: true });
-      if (!cancelled) setFamilyMembers((sibs || []).filter((s: any) => s.id !== appt.id));
 
-      // Live count of attached lab orders (the normalized table is the
-      // source of truth; legacy lab_order_file_path is now a mirror).
+      const siblingRows = (sibs || []).filter((s: any) => s.id !== appt.id);
+
+      // Surface companions from pricing_breakdown.additional_patients[]
+      // that are NOT already represented by a sibling appointment row.
+      // De-dupe by patient name to avoid double-listing the same companion.
+      const additionalFromPricing: any[] = [];
+      try {
+        const pb = (appt as any).pricing_breakdown;
+        const list = Array.isArray(pb?.additional_patients) ? pb.additional_patients : [];
+        const siblingNames = new Set(
+          siblingRows.map((s: any) => String(s.patient_name || '').trim().toLowerCase()).filter(Boolean)
+        );
+        for (const p of list) {
+          const first = String((p as any)?.firstName || '').trim();
+          const last = String((p as any)?.lastName || '').trim();
+          const fullName = [first, last].filter(Boolean).join(' ').trim();
+          if (!fullName) continue;
+          if (siblingNames.has(fullName.toLowerCase())) continue;
+          additionalFromPricing.push({
+            id: `pb-${fullName}-${additionalFromPricing.length}`,
+            patient_name: fullName,
+            appointment_time: appt.appointment_time,  // same time slot — drawn together
+            fasting_required: !!(p as any)?.fastingRequired,
+            lab_order_file_path: null,                 // unknown until phleb confirms
+            companion_role: 'companion',
+            patient_phone: (p as any)?.phone || null,
+            status: 'scheduled',
+            _source: 'pricing_breakdown',              // tag so UI can show provenance
+            _relationship: (p as any)?.relationship || null,
+          });
+        }
+      } catch (e) {
+        // Don't fail the modal load if pricing_breakdown is malformed.
+        console.warn('[appt-detail] failed to parse pricing_breakdown.additional_patients', e);
+      }
+
+      if (!cancelled) setFamilyMembers([...siblingRows, ...additionalFromPricing]);
+
       const { count } = await supabase
         .from('appointment_lab_orders')
         .select('id', { count: 'exact', head: true })
@@ -546,21 +592,34 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         {/* Family group siblings — inline so phleb sees the whole household */}
         {familyMembers.length > 0 && (
           <div className="mx-5 mb-3 rounded-lg border border-blue-200 bg-blue-50/40 p-2.5">
-            <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold mb-1.5">Also on this booking</p>
+            <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold mb-1.5">Also on this booking · drawn together at the same address</p>
             <div className="space-y-1.5">
               {familyMembers.map((m: any) => (
                 <div key={m.id} className="flex items-center justify-between text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-gray-900">{m.patient_name}</span>
-                    <span className="text-xs text-gray-500">@ {formatTimeAmPmSafe(m.appointment_time || '')}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-medium text-gray-900 truncate">{m.patient_name}</span>
+                    {m._relationship && (
+                      <span className="text-[10px] bg-white border border-blue-200 text-blue-700 rounded-full px-1.5 py-0.5 capitalize">{m._relationship}</span>
+                    )}
+                    <span className="text-xs text-gray-500 whitespace-nowrap">@ {formatTimeAmPmSafe(m.appointment_time || '')}</span>
                     {m.fasting_required && (
                       <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">fasting</span>
                     )}
+                    {m._source === 'pricing_breakdown' && (
+                      <span
+                        className="text-[10px] bg-amber-50 border border-amber-200 text-amber-800 rounded-full px-1.5 py-0.5"
+                        title="Captured at booking checkout but no separate appointment row exists yet — admin should create one if a separate sample is needed"
+                      >
+                        from booking
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className={m.lab_order_file_path ? 'text-emerald-700' : 'text-amber-700'}>
-                      {m.lab_order_file_path ? '✓ lab order' : '⚠ no lab order'}
-                    </span>
+                  <div className="flex items-center gap-2 text-xs flex-shrink-0">
+                    {m._source !== 'pricing_breakdown' && (
+                      <span className={m.lab_order_file_path ? 'text-emerald-700' : 'text-amber-700'}>
+                        {m.lab_order_file_path ? '✓ lab order' : '⚠ no lab order'}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}

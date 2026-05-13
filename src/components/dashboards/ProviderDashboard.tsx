@@ -524,13 +524,18 @@ const ProviderDashboard: React.FC = () => {
 
         {/* UPCOMING 7 DAYS */}
         <Card className="shadow-sm">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <div>
+          <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
               <CardTitle className="text-base">Upcoming · next 7 days</CardTitle>
               <CardDescription className="text-xs">{upcoming.length} {upcoming.length === 1 ? 'visit' : 'visits'} scheduled</CardDescription>
             </div>
-            <Button onClick={() => setShowLabRequest(true)} variant="outline" size="sm" className="gap-1">
-              <Plus className="h-3.5 w-3.5" /> Add
+            {/* Sprint 2 clarification: "Add" was overloaded — it always
+                created a NEW lab request, never attached to an existing
+                visit. Now there's only one button up here and its label
+                is explicit. The per-row "Upload order" handles the
+                already-scheduled case. */}
+            <Button onClick={() => setShowLabRequest(true)} size="sm" className="gap-1 bg-[#B91C1C] hover:bg-[#991B1B] text-white" title="Send a new lab request to a patient who has NOT yet booked a visit. To attach an order to an existing visit, use the 'Upload order' button on the row below.">
+              <Plus className="h-3.5 w-3.5" /> New patient + book
             </Button>
           </CardHeader>
           <CardContent className="p-0">

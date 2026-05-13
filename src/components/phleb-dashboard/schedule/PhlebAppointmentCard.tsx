@@ -74,19 +74,36 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   // — without merging them, the primary's card only shows the primary's order.
   // (Westphal/Rowland 2026-05-04.)
   const [siblingLabOrderPaths, setSiblingLabOrderPaths] = useState<string[]>([]);
+  // Companion names for the visit. Sourced from BOTH (a) family_group_id
+  // sibling appointment rows AND (b) pricing_breakdown.additional_patients[]
+  // captured at online-booking checkout. Without (b) the phleb misses any
+  // companion that wasn't given their own appointment row — Lisa Marie
+  // Jusas case 2026-05-13 (Brian Jusas was charged $75 + tipped + drawn,
+  // but his name never appeared on her phleb card).
+  const [companionNames, setCompanionNames] = useState<Array<{ name: string; relationship?: string | null; fasting?: boolean; source: 'sibling' | 'booking' }>>([]);
   useEffect(() => {
     let cancelled = false;
     const familyId = (appointment as any).family_group_id;
-    if (!familyId) { setSiblingLabOrderPaths([]); return; }
+    const pb = (appointment as any).pricing_breakdown;
+    const bookingAdds = Array.isArray(pb?.additional_patients) ? pb.additional_patients : [];
+
     (async () => {
-      const { data } = await supabase
-        .from('appointments')
-        .select('id, lab_order_file_path, patient_name')
-        .eq('family_group_id', familyId)
-        .neq('id', appointment.id);
+      let siblings: any[] = [];
+      if (familyId) {
+        const { data } = await supabase
+          .from('appointments')
+          .select('id, lab_order_file_path, patient_name, fasting_required, companion_role')
+          .eq('family_group_id', familyId)
+          .neq('id', appointment.id)
+          .neq('status', 'cancelled');
+        siblings = (data || []) as any[];
+      }
+
       if (cancelled) return;
+
+      // Merge sibling lab-order paths into one list (existing logic).
       const paths: string[] = [];
-      for (const row of (data || []) as any[]) {
+      for (const row of siblings) {
         const raw = String(row.lab_order_file_path || '');
         if (!raw) continue;
         const parts = raw.includes('\n') ? raw.split('\n') : raw.split(',');
@@ -96,6 +113,31 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         }
       }
       setSiblingLabOrderPaths(paths);
+
+      // Build the companion-names list — siblings first, then de-duped
+      // pricing_breakdown additional_patients.
+      const sibNames = new Set<string>();
+      const companions: Array<{ name: string; relationship?: string | null; fasting?: boolean; source: 'sibling' | 'booking' }> = [];
+      for (const s of siblings) {
+        const n = String(s.patient_name || '').trim();
+        if (!n) continue;
+        sibNames.add(n.toLowerCase());
+        companions.push({ name: n, fasting: !!s.fasting_required, source: 'sibling' });
+      }
+      for (const p of bookingAdds) {
+        const first = String((p as any)?.firstName || '').trim();
+        const last = String((p as any)?.lastName || '').trim();
+        const fullName = [first, last].filter(Boolean).join(' ').trim();
+        if (!fullName) continue;
+        if (sibNames.has(fullName.toLowerCase())) continue;
+        companions.push({
+          name: fullName,
+          relationship: (p as any)?.relationship || null,
+          fasting: !!(p as any)?.fastingRequired,
+          source: 'booking',
+        });
+      }
+      setCompanionNames(companions);
     })();
     return () => { cancelled = true; };
   }, [appointment.id, (appointment as any).family_group_id, labOrderRefreshKey]);
@@ -345,6 +387,19 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       onClick={(e) => { e.stopPropagation(); openPatientEdit(); }}
                       title="Click to edit patient details"
                     >{appointment.patient_name}</h3>
+                    {/* Companion / "+1" pill — phleb MUST see who else is
+                        being drawn on this visit. Driven by the merged
+                        list (family_group_id siblings + pricing_breakdown
+                        additional_patients). Lisa Marie Jusas 2026-05-13:
+                        Brian Jusas was previously invisible. */}
+                    {companionNames.length > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border bg-blue-50 text-blue-800 border-blue-200"
+                        title={companionNames.map(c => c.name + (c.relationship ? ` (${c.relationship})` : '')).join(' · ')}
+                      >
+                        👨‍👩‍👧 +{companionNames.length} drawn together
+                      </span>
+                    )}
                     {/* Membership status chip — distinguishes formal paid
                         VIP/Member/Concierge tier from informal "loyal
                         patient" tenure so phleb sees real status at a
