@@ -179,10 +179,26 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at
           `)
           .eq('family_group_id', (anchor as any).family_group_id)
-          .neq('status', 'cancelled')
-          // Anchor first, then companions
-          .order('companion_role', { ascending: true, nullsFirst: true });
-        if (group && group.length > 0) siblings = group;
+          .neq('status', 'cancelled');
+        if (group && group.length > 0) {
+          // BUG FIX 2026-05-13: the prior sort was
+          // .order('companion_role', { ascending: true })
+          // which puts 'companion' BEFORE 'primary' alphabetically
+          // (c < p), reversing the intended "anchor first then
+          // companions" order. Worse, when the modal was opened from
+          // Lisa Marie Jusas's appointment, the row that rendered as
+          // the "header" patient depended on alphabetical luck.
+          // Explicit JS sort: primary always first, anchor wins ties,
+          // then alphabetical by name.
+          siblings = (group as any[]).slice().sort((a, b) => {
+            const aPrimary = a.companion_role === 'primary' ? 0 : 1;
+            const bPrimary = b.companion_role === 'primary' ? 0 : 1;
+            if (aPrimary !== bPrimary) return aPrimary - bPrimary;
+            if (a.id === (anchor as any).id) return -1;
+            if (b.id === (anchor as any).id) return 1;
+            return String(a.patient_name || '').localeCompare(String(b.patient_name || ''));
+          });
+        }
       }
 
       // Fetch each org's name in one call
