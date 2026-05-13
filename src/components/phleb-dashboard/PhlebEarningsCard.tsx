@@ -52,6 +52,11 @@ const PhlebEarningsCard: React.FC = () => {
   const [tomorrow, setTomorrow] = useState<DayBucket>(ZERO);
   const [week, setWeek] = useState<DayBucket>(ZERO);
   const [mtd, setMtd] = useState<DayBucket>(ZERO);
+  // Last-month banked total — sourced directly from staff_payouts so it
+  // automatically reflects the post-2026-05-13 reconciliation row(s) plus
+  // any historical Stripe Connect transfers. Hormozi: "Last month banked"
+  // is the operator's "did I get paid for what I did?" mirror.
+  const [lastMonthCents, setLastMonthCents] = useState<number>(0);
   const [last7, setLast7] = useState<{ date: string; cents: number }[]>([]);
   const [loading, setLoading] = useState(true);
   // Track recent cancellations so we can ghost the lost $X (Hormozi
@@ -186,6 +191,24 @@ const PhlebEarningsCard: React.FC = () => {
       setWeek(buckets.week);
       setMtd(buckets.mtd);
 
+      // ── LAST MONTH BANKED ─────────────────────────────────────────
+      // Quick sum from staff_payouts for the calendar month BEFORE the
+      // current one. Includes manual_owed rows (reconciliation entries)
+      // so the post-2026-05-13 owner-takes-everything restructure shows
+      // up retroactively. Excludes reversed/failed.
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const { data: lmPayouts } = await supabase
+        .from('staff_payouts' as any)
+        .select('amount_cents, transferred_at, status')
+        .eq('staff_id', staffId)
+        .gte('transferred_at', lastMonthStart.toISOString())
+        .lt('transferred_at', thisMonthStart.toISOString());
+      const lmTotal = ((lmPayouts || []) as any[])
+        .filter(p => !['reversed', 'failed'].includes(String(p.status || '')))
+        .reduce((sum, p) => sum + (p.amount_cents || 0), 0);
+      setLastMonthCents(lmTotal);
+
       // Last-7-days mini sparkline. Sums per-day across both banked + projected
       // for visits scheduled in those days. Banked dominates for past days,
       // projected for today + future.
@@ -307,8 +330,12 @@ const PhlebEarningsCard: React.FC = () => {
           )}
         </div>
 
-        {/* Three-column subgrid: tomorrow, this week, MTD */}
-        <div className="grid grid-cols-3 divide-x divide-gray-100 text-center bg-white">
+        {/* Four-column subgrid: tomorrow · this week · MTD · last month.
+            Last month is sourced directly from staff_payouts (banked +
+            manual_owed reconciliation rows), so the post-2026-05-13
+            owner-takes-everything restructure is retroactively visible
+            here once the make-whole row is in the ledger. */}
+        <div className="grid grid-cols-4 divide-x divide-gray-100 text-center bg-white">
           <div className="px-2 py-3">
             <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Tomorrow</p>
             <p className="text-lg font-bold text-gray-900 mt-0.5">{fmt(tomorrow.projected_cents)}</p>
@@ -325,6 +352,14 @@ const PhlebEarningsCard: React.FC = () => {
             </p>
             <p className="text-lg font-bold text-emerald-900 mt-0.5">{fmt(mtd.banked_cents + mtd.projected_cents)}</p>
             <p className="text-[10px] text-emerald-700 mt-0.5">/ $5,040 goal</p>
+          </div>
+          <div className="px-2 py-3 bg-amber-50/40">
+            <p
+              className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold"
+              title="Banked + manual reconciliation rows in staff_payouts for the prior calendar month. Reflects the post-2026-05-13 owner-takes-everything comp restructure retroactively."
+            >Last month</p>
+            <p className="text-lg font-bold text-amber-900 mt-0.5">{fmt(lastMonthCents)}</p>
+            <p className="text-[10px] text-amber-700 mt-0.5">banked + owed</p>
           </div>
         </div>
 
