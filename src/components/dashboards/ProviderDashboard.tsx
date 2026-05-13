@@ -25,7 +25,8 @@ import ManageSubscriptionCard from '@/components/provider/ManageSubscriptionCard
 import BAASigningModal from '@/components/provider/BAASigningModal';
 import OrgStaffList from '@/components/admin/OrgStaffList';
 import ServicesPricingModal from '@/components/provider/ServicesPricingModal';
-import { Activity } from 'lucide-react';
+import OrgAttachLabOrderModal from '@/components/provider/OrgAttachLabOrderModal';
+import { Activity, Paperclip } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
 
 /**
@@ -68,6 +69,11 @@ const ProviderDashboard: React.FC = () => {
   const [showInvite, setShowInvite] = useState(false);
   const [showLabRequest, setShowLabRequest] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
+  // Sprint 1 (2026-05-13): per-row "Upload lab order" modal for the
+  // Upcoming list. Lets the org attach an order to an already-booked
+  // appointment without going through the full CreateLabRequestModal
+  // flow (which assumes the patient hasn't booked yet).
+  const [attachTarget, setAttachTarget] = useState<any | null>(null);
   // Raw Supabase metadata for the welcome header — useAuth().user strips
   // user_metadata in the mapping layer, so we have to fetch it directly.
   // Without this, Lara saw "larak" (email prefix fallback) instead of her
@@ -534,19 +540,52 @@ const ProviderDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="divide-y">
-                {upcoming.map((a: any) => (
-                  <div key={a.id} className="p-4 flex items-center justify-between gap-3 hover:bg-gray-50">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate">{prettyPatient(a)}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {fmtDateTime(a.appointment_date, a.appointment_time)}
-                        {a.service_name && <> · {a.service_name}</>}
-                        {a.lab_destination && <> · → {a.lab_destination}</>}
-                      </p>
+                {upcoming.map((a: any) => {
+                  const hasLabOrder = !!a.lab_order_file_path;
+                  // "Pending order" badge: appointment is < 24h away AND no
+                  // lab order on file. Hormozi nudge to upload before the
+                  // phleb shows up empty-handed.
+                  const apptMs = a.appointment_date ? new Date(a.appointment_date).getTime() : 0;
+                  const hoursAway = apptMs > 0 ? (apptMs - Date.now()) / (1000 * 60 * 60) : Infinity;
+                  const isImminent = hoursAway > 0 && hoursAway < 24 && !hasLabOrder;
+                  return (
+                    <div key={a.id} className="p-4 flex items-center justify-between gap-3 hover:bg-gray-50">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium truncate flex items-center gap-1.5">
+                          {prettyPatient(a)}
+                          {isImminent && (
+                            <Badge className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] uppercase tracking-wider animate-pulse">
+                              Needs order
+                            </Badge>
+                          )}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5 flex flex-wrap items-center gap-x-1">
+                          <span>{fmtDateTime(a.appointment_date, a.appointment_time)}</span>
+                          {a.service_name && <span>· {a.service_name}</span>}
+                          {a.lab_destination && <span>· → {a.lab_destination}</span>}
+                          {hasLabOrder && (
+                            <span className="inline-flex items-center gap-0.5 text-emerald-700 font-medium">
+                              · <CheckCircle2 className="h-3 w-3" /> Order on file
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <Button
+                          size="sm"
+                          variant={hasLabOrder ? 'ghost' : (isImminent ? 'default' : 'outline')}
+                          className={`gap-1 text-[11px] h-8 ${isImminent ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
+                          onClick={() => setAttachTarget(a)}
+                          title={hasLabOrder ? 'Add another lab order to this visit' : 'Upload a lab order for this visit'}
+                        >
+                          <Paperclip className="h-3.5 w-3.5" />
+                          {hasLabOrder ? 'Add' : 'Upload order'}
+                        </Button>
+                        <Badge variant="outline" className="text-[10px] capitalize">{a.status}</Badge>
+                      </div>
                     </div>
-                    <Badge variant="outline" className="text-[10px] capitalize">{a.status}</Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
@@ -799,6 +838,23 @@ const ProviderDashboard: React.FC = () => {
         onOpenChange={setShowPricing}
         organizationName={org.name}
         onSchedule={() => setShowLabRequest(true)}
+      />
+
+      {/* SPRINT 1: org-attaches-lab-order-to-existing-appointment.
+          Triggered from the Upcoming rows' "Upload order" / "Add" button. */}
+      <OrgAttachLabOrderModal
+        open={!!attachTarget}
+        onClose={() => setAttachTarget(null)}
+        appointment={attachTarget ? {
+          id: attachTarget.id,
+          patient_name: prettyPatient(attachTarget),
+          appointment_date: attachTarget.appointment_date,
+          appointment_time: attachTarget.appointment_time,
+          service_name: attachTarget.service_name,
+          service_type: attachTarget.service_type,
+          has_existing_lab_order: !!attachTarget.lab_order_file_path,
+        } : null}
+        onUploaded={loadData}
       />
 
       {/* SET A PASSWORD — blocking gate for invited staff who landed via

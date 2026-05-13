@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
         .neq('status', 'cancelled')
         .neq('status', 'completed'),
       admin.from('appointments')
-        .select('id, patient_name, patient_email, appointment_date, appointment_time, status, service_name, service_type, total_amount, lab_destination, org_reference_id, patient_name_masked')
+        .select('id, patient_name, patient_email, appointment_date, appointment_time, status, service_name, service_type, total_amount, lab_destination, org_reference_id, patient_name_masked, lab_order_file_path')
         .eq('organization_id', orgId)
         .gte('appointment_date', todayStart)
         .lte('appointment_date', in7Days)
