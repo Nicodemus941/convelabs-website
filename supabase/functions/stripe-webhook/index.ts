@@ -1575,8 +1575,20 @@ async function handleAppointmentPayment(session: any) {
               }
               return metadata.patient_name_masked === 'true';
             })()),
-            // Companions ride on the primary's checkout — no separate stripe row
-            stripe_checkout_session_id: checkoutSessionId,
+            // Companions ride on the primary's checkout — no separate stripe row.
+            //
+            // BUG FIX 2026-05-13 (Lisa Marie Jusas case): we previously
+            // copied the primary's stripe_checkout_session_id onto every
+            // companion row. That collides with the
+            // uniq_appointments_stripe_checkout_session_id UNIQUE
+            // constraint on the SECOND insert, throwing 23505 which the
+            // catch above logs as a warn and swallows. Net effect: every
+            // online-booked companion since the unique index landed was
+            // silently dropped, leaving the primary with companion_role='primary'
+            // and zero sibling rows. Set NULL on companions so they
+            // don't fight the constraint; downstream code that needs the
+            // session id can look it up from the primary via family_group_id.
+            stripe_checkout_session_id: null,
             // Total stays $0 on companion rows; fee is on primary's pricing_breakdown
             total_amount: 0,
             service_price: 0,
