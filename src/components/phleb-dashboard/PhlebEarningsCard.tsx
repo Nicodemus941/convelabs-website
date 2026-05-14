@@ -328,6 +328,54 @@ const PhlebEarningsCard: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staffId]);
 
+  // Drilldown modal: when user taps "Today's earnings" hero, show the
+  // exact visits + take per visit. Removes any "I don't trust this number"
+  // friction by showing the math.
+  const [drilldownOpen, setDrilldownOpen] = useState(false);
+  const [drilldownRows, setDrilldownRows] = useState<Array<{
+    id: string; time: string; patient_name: string; service_type: string;
+    total: number; take: number; status: string; rule: string;
+  }>>([]);
+  const openDrilldown = async () => {
+    if (!staffId) return;
+    setDrilldownOpen(true);
+    try {
+      const todayDate = localISO(new Date());
+      const { data: phlebRow } = await supabase
+        .from('staff_profiles').select('user_id').eq('id', staffId).maybeSingle();
+      const phlebUserId = (phlebRow as any)?.user_id;
+      if (!phlebUserId) { setDrilldownRows([]); return; }
+      const { data: appts } = await supabase
+        .from('appointments')
+        .select('id, appointment_time, patient_name, service_type, total_amount, status, payment_arrangement')
+        .eq('phlebotomist_id', phlebUserId)
+        .eq('appointment_date', todayDate)
+        .neq('status', 'cancelled')
+        .order('appointment_time', { ascending: true });
+      const list = (appts || []) as any[];
+      // Pull v2 take for each visit in parallel
+      const takes = await Promise.all(list.map(async (a) => {
+        const { data } = await supabase.rpc('compute_phleb_take_v2' as any, { p_appointment_id: a.id });
+        const r = Array.isArray(data) ? data[0] : data;
+        return { id: a.id, take: (r?.take_cents || 0) / 100, rule: r?.rule_used || '' };
+      }));
+      const takeMap = new Map(takes.map(t => [t.id, t]));
+      setDrilldownRows(list.map(a => ({
+        id: a.id,
+        time: a.appointment_time || '',
+        patient_name: a.patient_name || 'Patient',
+        service_type: a.service_type || 'mobile',
+        total: Number(a.total_amount || 0),
+        take: takeMap.get(a.id)?.take || 0,
+        status: a.status,
+        rule: takeMap.get(a.id)?.rule || '',
+      })));
+    } catch (e) {
+      console.error('[earnings drilldown]', e);
+      setDrilldownRows([]);
+    }
+  };
+
   if (!staffId) return null;
 
   // The headline = today's combined (banked + projected). If the day is
@@ -366,10 +414,16 @@ const PhlebEarningsCard: React.FC = () => {
   return (
     <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 -mt-4 mb-4">
       <Card className="overflow-hidden border-0 shadow-md">
-        <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 text-white px-5 py-4">
+        <button
+          type="button"
+          onClick={openDrilldown}
+          className="w-full text-left bg-gradient-to-br from-emerald-600 to-emerald-700 text-white px-5 py-4 hover:brightness-110 transition-all active:scale-[0.99]"
+          title="Tap to see today's visits + per-visit phleb take"
+        >
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs uppercase tracking-wider opacity-90 flex items-center gap-1.5">
               <DollarSign className="h-3.5 w-3.5" /> Today's earnings
+              <span className="text-[10px] opacity-70 ml-1">· tap to drill down</span>
             </p>
             {loading && <Loader2 className="h-3.5 w-3.5 animate-spin opacity-70" />}
           </div>
@@ -390,7 +444,7 @@ const PhlebEarningsCard: React.FC = () => {
               </p>
             </div>
           )}
-        </div>
+        </button>
 
         {/* Hormozi pace strip — single line of math the operator can act on */}
         <div className={`px-4 py-2 text-[11px] flex items-center justify-between gap-2 ${
@@ -531,6 +585,60 @@ const PhlebEarningsCard: React.FC = () => {
           );
         })()}
       </Card>
+
+      {/* Drilldown modal — Today's actual visits + per-visit phleb take.
+          Hormozi: every visible number deserves a "show me the math" gesture. */}
+      {drilldownOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center p-4"
+          onClick={() => setDrilldownOpen(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Today's earnings · drilldown</h2>
+                <p className="text-xs text-gray-500">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+              </div>
+              <button onClick={() => setDrilldownOpen(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+            {drilldownRows.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-8">No visits today.</p>
+            ) : (
+              <>
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-center">
+                  <p className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Total today</p>
+                  <p className="text-2xl font-bold text-emerald-900">
+                    ${drilldownRows.reduce((s, r) => s + r.take, 0).toFixed(0)}
+                  </p>
+                  <p className="text-[11px] text-emerald-700">{drilldownRows.length} visit{drilldownRows.length === 1 ? '' : 's'} (v2 take)</p>
+                </div>
+                <div className="divide-y border rounded-lg max-h-64 overflow-y-auto">
+                  {drilldownRows.map(r => (
+                    <div key={r.id} className="p-2.5 flex items-start justify-between gap-2 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-gray-900 truncate">{r.patient_name}</div>
+                        <div className="text-[10px] text-gray-500">
+                          {r.time} · {r.service_type} · patient $${r.total.toFixed(0)} · {r.status}
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-0.5">{r.rule}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-base font-bold text-emerald-700">+${r.take.toFixed(0)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-gray-400 text-center">
+                  All numbers use compute_phleb_take_v2 · bucketed by appointment_date
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

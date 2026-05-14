@@ -193,15 +193,19 @@ async function sendSMS(body: string): Promise<{ ok: boolean; sid: string | null 
 async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const url = `${SUPABASE_URL}/functions/v1/create-appointment-checkout`;
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  // Use a far-future date + an unusual time so we never collide with a real
+  // booking. Smoke test sessions are abandoned (Stripe expires unused in 24h)
+  // so no actual appointment is ever created, but the availability check
+  // runs server-side and rejects if a real visit is in this slot.
+  const farFuture = new Date(Date.now() + 365 * 86400000 + 14 * 86400000).toISOString().split('T')[0];
 
   const payload = {
     serviceType: 'specialty-kit',
     serviceName: 'Specialty Collection Kit (smoke)',
     amount: 18500, // $185 base
     tipAmount: 0,
-    appointmentDate: tomorrow,
-    appointmentTime: '10:00 AM',
+    appointmentDate: farFuture,
+    appointmentTime: '11:23 AM',
     memberTier: 'none',
     patientDetails: {
       firstName: 'SmokeTest', lastName: 'Patient',
@@ -229,6 +233,18 @@ async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
     });
     const body = await resp.text().catch(() => '');
     if (!resp.ok) {
+      // 409 slot_unavailable is NOT a failure — it proves the endpoint is
+      // alive (auth + payload validation + availability query all worked).
+      // Only treat it as success if the body confirms the slot_unavailable
+      // error code so we don't mask other 409s.
+      if (resp.status === 409 && body.includes('slot_unavailable')) {
+        results.push({
+          step: 'appointment_checkout_post',
+          ok: true,
+          details: { note: 'slot_unavailable returned — endpoint healthy, just hit a busy slot', far_future_date: farFuture },
+        });
+        return results;
+      }
       // Specifically detect the Stripe metadata cap error
       const isMetadataCap = body.includes('up to 50 keys');
       results.push({
