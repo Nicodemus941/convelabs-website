@@ -145,19 +145,41 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   // Companion-visit add-on — admin books a couple/family together in one flow.
   // Hormozi: every time a patient books, ask "anyone else at the same address?"
   // Tier-aware price mirrors TIER_PRICING['additional']: none=$75, member=$55,
-  // vip=$45, concierge=$35. Creates a second appointment row linked to the
-  // primary via `family_group_id` metadata so reporting stays clean.
-  const [addCompanion, setAddCompanion] = useState(false);
-  const [companionName, setCompanionName] = useState('');
-  const [companionDob, setCompanionDob] = useState('');
-  const [companionRelationship, setCompanionRelationship] = useState<'Spouse' | 'Child' | 'Parent' | 'Sibling' | 'Other'>('Spouse');
+  // vip=$45, concierge=$35. Each companion creates a separate appointment row
+  // linked to the primary via family_group_id; reporting stays clean.
+  // SUPPORTS MULTIPLE: a family of 4 = primary + 3 companions, all in one flow.
+  interface CompanionEntry {
+    id: string;            // stable client-side key
+    name: string;
+    dob: string;
+    relationship: 'Spouse' | 'Child' | 'Parent' | 'Sibling' | 'Other';
+    kitsCount: number;
+  }
+  const [companions, setCompanions] = useState<CompanionEntry[]>([]);
+  // Derived flag for the rest of the form math
+  const addCompanion = companions.length > 0;
 
   // Specialty-kit bundle: per-patient kit count for `specialty-kit*` services.
   // Active only when service is specialty-kit. Preview/submit math routes
   // through calculateTotal({ specialtyKitBundle }) to apply Hormozi volume
   // discount + couple/family bundle savings.
   const [primaryKitsCount, setPrimaryKitsCount] = useState(1);
+  // Legacy single-companion kit state, kept as fallback for one-companion flows
+  // that haven't migrated to the array yet. New code reads companions[i].kitsCount.
   const [companionKitsCount, setCompanionKitsCount] = useState(1);
+
+  const addCompanionRow = () => {
+    setCompanions(curr => [
+      ...curr,
+      { id: crypto.randomUUID(), name: '', dob: '', relationship: 'Spouse', kitsCount: 1 },
+    ]);
+  };
+  const updateCompanion = (id: string, patch: Partial<CompanionEntry>) => {
+    setCompanions(curr => curr.map(c => c.id === id ? { ...c, ...patch } : c));
+  };
+  const removeCompanion = (id: string) => {
+    setCompanions(curr => curr.filter(c => c.id !== id));
+  };
   const [invoiceMemo, setInvoiceMemo] = useState('');
   const [orgBilling, setOrgBilling] = useState(false);
 
@@ -519,7 +541,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     if (tier === 'member') return 55;
     return 75;
   })();
-  const companionAdd = addCompanion ? companionPrice : 0;
+  // Multi-companion total: each additional family member pays the same
+  // tier-aware companion price. Family of 4 (primary + 3 companions) = 3 × price.
+  const companionAdd = companions.length * companionPrice;
 
   // Hormozi specialty-kit bundle path. When the admin picks a `specialty-kit*`
   // service, the bundle pricing handles primary + companion + multi-kit math
@@ -531,7 +555,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         specialtyKitBundle: {
           patients: [
             { kits: Math.max(1, primaryKitsCount) },
-            ...(addCompanion ? [{ kits: Math.max(1, companionKitsCount) }] : []),
+            ...companions.map(c => ({ kits: Math.max(1, c.kitsCount) })),
           ],
           isGenova: serviceType === 'specialty-kit-genova',
         },
@@ -621,7 +645,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       // included it in the UI preview but not in finalPrice, so the primary
       // invoice went out at $150 instead of $225 and admin had to create a
       // manual make-up invoice for $75.
-      const companionFeeApplied = addCompanion ? companionPrice : 0;
+      // Multi-companion fee total — primary appt absorbs full family billing
+      const companionFeeApplied = companions.length * companionPrice;
       // Specialty-kit bundle override: replace base+companion math with the
       // bundle subtotal so the admin invoice matches what the patient-facing
       // bundle card would have produced.
@@ -632,7 +657,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       if (isSpecialtyKitService && specialtyBundleBreakdown?.bundleLabel) {
         discountNote += (discountNote ? ' | ' : '') + `${specialtyBundleBreakdown.bundleLabel}`;
       } else if (companionFeeApplied > 0) {
-        discountNote += (discountNote ? ' | ' : '') + `Companion visit +$${companionFeeApplied.toFixed(2)}${companionName ? ` (${companionName})` : ''}`;
+        const compNames = companions.filter(c => c.name.trim()).map(c => c.name.trim()).join(', ');
+        discountNote += (discountNote ? ' | ' : '') + `Family bundle: ${companions.length} additional patient${companions.length === 1 ? '' : 's'} +$${companionFeeApplied.toFixed(2)}${compNames ? ` (${compNames})` : ''}`;
       }
       if (memberSavings > 0) {
         discountNote += (discountNote ? ' | ' : '') + `${detectedTier.toUpperCase()} member — saved $${memberSavings.toFixed(2)}`;
@@ -763,49 +789,50 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       console.log('Appointment created:', newAppt.id);
 
-      // Companion visit — create a second appointment row linked to this one
-      // via family_group_id. Same address, same time, tier-aware price.
-      // Both appointments share the same phleb + time slot; phleb handles
-      // both in one visit window but each gets its own clinical chart.
-      if (addCompanion && companionName.trim()) {
+      // Companion visits — for each named companion in the array, create a
+      // separate appointment row linked to the primary via family_group_id.
+      // Same address, same time slot, tier-aware price. Phleb handles all in
+      // one visit window; each companion gets their own clinical chart.
+      const namedCompanions = companions.filter(c => c.name.trim());
+      if (namedCompanions.length > 0) {
         try {
-          const familyGroupId = newAppt.id; // use primary's id as the group id
+          const familyGroupId = newAppt.id;
           await supabase.from('appointments').update({ family_group_id: familyGroupId }).eq('id', newAppt.id);
-          const companionPayload: any = {
-            ...appointmentPayload,
-            patient_name: companionName.trim(),
-            patient_email: null, // companion shares billing; email/sms routes to primary
-            patient_phone: null,
-            patient_id: null, // will be back-filled if we find a tenant_patients row; otherwise standalone
-            total_amount: companionPrice,
-            service_price: companionPrice,
-            surcharge_amount: 0,
-            invoice_status: 'not_required', // billed on primary invoice, not duplicated
-            payment_status: 'completed',
-            family_group_id: familyGroupId,
-            companion_role: companionRelationship,
-            notes: `Companion of ${patientName}${companionDob ? ` · DOB ${companionDob}` : ''} · rel: ${companionRelationship} · billed on primary appt ${newAppt.id}`,
-          };
-          delete companionPayload.stripe_checkout_session_id;
-          const { error: compErr } = await supabase.from('appointments').insert([companionPayload]);
-          if (compErr) {
-            console.error('Companion appointment creation failed:', compErr);
-            toast.error(`Companion visit not created: ${compErr.message}`);
-          } else {
-            console.log('Companion appointment created for', companionName);
-            // Emit upgrade event for dashboard tracking
-            await supabase.from('upgrade_events' as any).insert({
-              event_type: 'companion_click',
-              status: 'converted',
-              patient_email: patientEmail?.toLowerCase() || null,
-              patient_name: patientName || null,
-              appointment_id: newAppt.id,
-              revenue_cents: Math.round(companionPrice * 100),
-              discount_cents: Math.round((75 - companionPrice) * 100),
-              metadata: { source: 'admin_manual', companion_name: companionName, companion_role: companionRelationship, tier: detectedTier },
-              converted_at: new Date().toISOString(),
-            }).catch(() => {});
+          for (const comp of namedCompanions) {
+            const compPayload: any = {
+              ...appointmentPayload,
+              patient_name: comp.name.trim(),
+              patient_email: null,
+              patient_phone: null,
+              patient_id: null,
+              total_amount: companionPrice,
+              service_price: companionPrice,
+              surcharge_amount: 0,
+              invoice_status: 'not_required',
+              payment_status: 'completed',
+              family_group_id: familyGroupId,
+              companion_role: comp.relationship,
+              notes: `Companion of ${patientName}${comp.dob ? ` · DOB ${comp.dob}` : ''} · rel: ${comp.relationship} · billed on primary appt ${newAppt.id}`,
+            };
+            delete compPayload.stripe_checkout_session_id;
+            const { error: compErr } = await supabase.from('appointments').insert([compPayload]);
+            if (compErr) {
+              console.error(`Companion appointment failed for ${comp.name}:`, compErr);
+              toast.error(`Couldn't add ${comp.name}: ${compErr.message}`);
+            } else {
+              await supabase.from('upgrade_events' as any).insert({
+                event_type: 'companion_click', status: 'converted',
+                patient_email: patientEmail?.toLowerCase() || null,
+                patient_name: patientName || null,
+                appointment_id: newAppt.id,
+                revenue_cents: Math.round(companionPrice * 100),
+                discount_cents: Math.round((75 - companionPrice) * 100),
+                metadata: { source: 'admin_manual', companion_name: comp.name, companion_role: comp.relationship, tier: detectedTier, family_size: namedCompanions.length + 1 },
+                converted_at: new Date().toISOString(),
+              }).catch(() => {});
+            }
           }
+          console.log(`Created ${namedCompanions.length} companion appointment(s) under family_group ${familyGroupId}`);
         } catch (e) {
           console.warn('Companion creation exception (non-blocking):', e);
         }
@@ -1269,44 +1296,94 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Special instructions, gate code, parking..." rows={2} />
             </div>
 
-            {/* Companion Visit add-on — couples/families booking together.
-                Tier-aware pricing so members get their rightful discount. */}
+            {/* Family / companion visits — add unlimited additional family members
+                at the same address + time slot. Each pays the tier-aware companion
+                price. UI scales from 0 → N companions inline (no modal jump). */}
             <div className={`border-2 rounded-lg p-3 ${addCompanion ? 'border-blue-400 bg-blue-50' : 'border-gray-200'}`}>
               <div className="flex items-start gap-3">
-                <Checkbox id="companion-visit" checked={addCompanion} onCheckedChange={(c) => setAddCompanion(c === true)} className="mt-1" />
+                <span className="text-lg mt-0.5">👨‍👩‍👧‍👦</span>
                 <div className="flex-1">
-                  <label htmlFor="companion-visit" className="text-sm font-semibold cursor-pointer block">
-                    👨‍👩‍👧 Add a companion visit (+${companionPrice})
-                  </label>
+                  <div className="text-sm font-semibold">
+                    Family at the same address
+                    {companions.length > 0 && (
+                      <span className="ml-2 text-[11px] font-normal text-blue-800">
+                        · {companions.length} added · +${(companions.length * companionPrice).toFixed(0)}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Same address, same time slot. {detectedTier !== 'none'
-                      ? <><strong>{detectedTier.toUpperCase()} rate</strong> — $75 for non-members, ${companionPrice} for this patient.</>
-                      : <>Available at member rate (${detectedTier === 'member' ? 55 : detectedTier === 'vip' ? 45 : detectedTier === 'concierge' ? 35 : 55}) if they join today.</>}
+                    Each additional family member: <strong>${companionPrice}</strong>
+                    {detectedTier !== 'none' && <span className="ml-1">({detectedTier.toUpperCase()} rate · saves ${75 - companionPrice} each vs non-member)</span>}
+                    {detectedTier === 'none' && <span className="ml-1">($75 non-member · members save up to $40 each)</span>}
                   </p>
                 </div>
               </div>
-              {addCompanion && (
+
+              {/* List of currently-added companions */}
+              {companions.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[11px]">Companion name *</Label>
-                      <Input value={companionName} onChange={e => setCompanionName(e.target.value)} placeholder="Jane Smith" className="h-9" />
+                  {companions.map((c, idx) => (
+                    <div key={c.id} className="bg-white border border-blue-200 rounded-lg p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-blue-900">
+                          Family member {idx + 2} {/* +2 because primary is #1 */}
+                          <span className="ml-2 text-[10px] font-normal text-gray-500">+${companionPrice}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeCompanion(c.id)}
+                          className="text-[11px] text-red-600 hover:text-red-700 hover:bg-red-50 rounded px-2 py-0.5"
+                          aria-label="Remove this family member"
+                        >Remove</button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-[10px]">Name *</Label>
+                          <Input
+                            value={c.name}
+                            onChange={e => updateCompanion(c.id, { name: e.target.value })}
+                            placeholder="Jane Smith"
+                            className="h-9"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-[10px]">Relationship</Label>
+                          <select
+                            value={c.relationship}
+                            onChange={e => updateCompanion(c.id, { relationship: e.target.value as any })}
+                            className="w-full h-9 border rounded-md px-2 text-sm bg-white"
+                          >
+                            <option>Spouse</option><option>Child</option><option>Parent</option><option>Sibling</option><option>Other</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-[10px]">DOB (optional)</Label>
+                        <Input
+                          type="date"
+                          value={c.dob}
+                          onChange={e => updateCompanion(c.id, { dob: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <Label className="text-[11px]">Relationship</Label>
-                      <select value={companionRelationship} onChange={e => setCompanionRelationship(e.target.value as any)} className="w-full h-9 border rounded-md px-2 text-sm bg-white">
-                        <option>Spouse</option><option>Child</option><option>Parent</option><option>Sibling</option><option>Other</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <Label className="text-[11px]">Companion DOB</Label>
-                    <Input type="date" value={companionDob} onChange={e => setCompanionDob(e.target.value)} className="h-9" />
-                  </div>
-                  <p className="text-[11px] text-blue-800 bg-white/60 rounded p-1.5">
-                    Creates a second appointment row linked to {patientName || 'the primary'} via family_group_id. Tubes + supplies scale; one invoice covers both.
-                  </p>
+                  ))}
                 </div>
+              )}
+
+              {/* Add-another button */}
+              <button
+                type="button"
+                onClick={addCompanionRow}
+                className="mt-3 w-full text-center text-[12px] font-semibold py-2 rounded-lg border-2 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 hover:border-blue-400 transition"
+              >
+                + Add {companions.length === 0 ? 'a family member' : 'another family member'} (+${companionPrice} each)
+              </button>
+
+              {companions.length > 0 && (
+                <p className="text-[11px] text-blue-800 bg-white/60 rounded p-1.5 mt-2">
+                  {companions.length} extra appointment{companions.length === 1 ? '' : 's'} will be created at the same address + time, linked to {patientName || 'the primary'} via family_group_id. One invoice covers everyone. Tubes + supplies scale per person.
+                </p>
               )}
             </div>
 
@@ -1333,18 +1410,19 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                         className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={primaryKitsCount >= 6}>+</button>
                     </div>
                   </div>
-                  {addCompanion && (
-                    <div>
-                      <Label className="text-[11px]">Companion kits</Label>
+                  {/* Per-companion kit count for multi-family bundles */}
+                  {companions.map((c, idx) => (
+                    <div key={c.id}>
+                      <Label className="text-[11px]">{c.name || `Family member ${idx + 2}`} kits</Label>
                       <div className="flex items-center gap-2 mt-1">
-                        <button type="button" onClick={() => setCompanionKitsCount(Math.max(1, companionKitsCount - 1))}
-                          className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={companionKitsCount <= 1}>−</button>
-                        <span className="w-8 text-center font-mono font-bold">{companionKitsCount}</span>
-                        <button type="button" onClick={() => setCompanionKitsCount(Math.min(6, companionKitsCount + 1))}
-                          className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={companionKitsCount >= 6}>+</button>
+                        <button type="button" onClick={() => updateCompanion(c.id, { kitsCount: Math.max(1, c.kitsCount - 1) })}
+                          className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={c.kitsCount <= 1}>−</button>
+                        <span className="w-8 text-center font-mono font-bold">{c.kitsCount}</span>
+                        <button type="button" onClick={() => updateCompanion(c.id, { kitsCount: Math.min(6, c.kitsCount + 1) })}
+                          className="h-8 w-8 rounded-md border border-gray-300 bg-white flex items-center justify-center hover:bg-gray-50 disabled:opacity-30" disabled={c.kitsCount >= 6}>+</button>
                       </div>
                     </div>
-                  )}
+                  ))}
                 </div>
                 {specialtyBundleBreakdown?.bundleSavings ? (
                   <p className="text-[11px] text-emerald-700 mt-2">
