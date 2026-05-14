@@ -65,11 +65,26 @@ const PhlebEarningsLedger: React.FC = () => {
   const [sweeping, setSweeping] = useState(false);
   const [rows, setRows] = useState<Array<ApptRow & { take: Take; paid_cents: number; owed_cents: number }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Multi-gate sweep summary — separates "cleared" (patient paid via Stripe
+  // or org invoice paid) from "pending" (patient hasn't paid yet, so
+  // sweeping would overdraft the business).
+  const [sweepSummary, setSweepSummary] = useState<{
+    cleared_count: number; cleared_cents: number;
+    pending_count: number; pending_cents: number;
+  } | null>(null);
 
   const handleSweep = async () => {
     if (sweeping) return;
-    const totalOwedDollars = (totals.owed / 100).toFixed(2);
-    if (!confirm(`Transfer $${totalOwedDollars} to your Stripe Connect account now? This fires a real Stripe transfer and marks the matching payout rows as succeeded.`)) return;
+    const clearedDollars = ((sweepSummary?.cleared_cents || 0) / 100).toFixed(2);
+    if (!sweepSummary || sweepSummary.cleared_count === 0) {
+      toast.info('Nothing cleared to sweep yet. Patient payments must clear first.');
+      return;
+    }
+    if (!confirm(
+      `Transfer $${clearedDollars} to your Stripe Connect account now?\n\n` +
+      `This sweeps ONLY the ${sweepSummary.cleared_count} visit${sweepSummary.cleared_count === 1 ? '' : 's'} where patients have already paid. ` +
+      `${sweepSummary.pending_count} pending-payment visit${sweepSummary.pending_count === 1 ? '' : 's'} will stay on hold until cleared.`
+    )) return;
     setSweeping(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -83,13 +98,17 @@ const PhlebEarningsLedger: React.FC = () => {
       });
       const j = await resp.json();
       if (!resp.ok) {
+        // Surface insufficient balance, eligibility errors with full context
         toast.error(j.message || j.error || 'Sweep failed');
         return;
       }
       if (j.swept_count === 0) {
-        toast.info('Nothing owed right now.');
+        toast.info(j.message || 'Nothing cleared yet.');
       } else {
-        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} to your Stripe — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}.`);
+        const after = j.platform_balance_after_cents != null
+          ? ` · Platform balance after: $${(j.platform_balance_after_cents / 100).toFixed(0)}`
+          : '';
+        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} to your Stripe — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}.${after}`);
       }
       setRefreshKey((k) => k + 1);
     } catch (e: any) {
@@ -159,6 +178,25 @@ const PhlebEarningsLedger: React.FC = () => {
         }));
 
         setRows(decorated);
+
+        // Pull the sweep eligibility summary (cleared vs pending)
+        const { data: spData } = await supabase
+          .from('staff_profiles').select('id').eq('user_id', user.id).maybeSingle();
+        const myStaffId = (spData as any)?.id;
+        if (myStaffId) {
+          const { data: sweepSum } = await supabase.rpc('get_sweep_summary_for_staff' as any, {
+            p_staff_id: myStaffId,
+          });
+          const s = Array.isArray(sweepSum) ? sweepSum[0] : sweepSum;
+          if (s) {
+            setSweepSummary({
+              cleared_count: Number(s.cleared_count || 0),
+              cleared_cents: Number(s.cleared_cents || 0),
+              pending_count: Number(s.pending_count || 0),
+              pending_cents: Number(s.pending_cents || 0),
+            });
+          }
+        }
       } catch (e: any) {
         toast.error(e?.message || 'Failed to load earnings');
       } finally {
@@ -217,26 +255,30 @@ const PhlebEarningsLedger: React.FC = () => {
             <div className="text-xl font-bold text-purple-900">${(totals.ytd / 100).toFixed(0)}</div>
           </CardContent>
         </Card>
-        <Card className={`border-2 ${totals.owed > 0 ? 'bg-gradient-to-br from-amber-50 to-white border-amber-300' : 'bg-gray-50 border-gray-200'}`}>
+        <Card className={`border-2 ${(sweepSummary?.cleared_cents || 0) > 0 ? 'bg-gradient-to-br from-emerald-50 to-white border-emerald-300' : 'bg-gray-50 border-gray-200'}`}>
           <CardContent className="p-3">
-            <div className={`text-[10px] uppercase tracking-wider font-semibold ${totals.owed > 0 ? 'text-amber-800' : 'text-gray-600'}`}>
-              Owed to me
+            <div className={`text-[10px] uppercase tracking-wider font-semibold ${(sweepSummary?.cleared_cents || 0) > 0 ? 'text-emerald-800' : 'text-gray-600'}`}>
+              Cleared / Pending
             </div>
-            <div className={`text-xl font-bold ${totals.owed > 0 ? 'text-amber-900' : 'text-gray-700'}`}>
-              ${(totals.owed / 100).toFixed(0)}
+            <div className={`text-xl font-bold ${(sweepSummary?.cleared_cents || 0) > 0 ? 'text-emerald-900' : 'text-gray-700'}`}>
+              ${((sweepSummary?.cleared_cents || 0) / 100).toFixed(0)}
+              <span className="text-sm text-gray-500 font-normal"> / ${((sweepSummary?.pending_cents || 0) / 100).toFixed(0)}</span>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Sweep CTA — only shown when there's something to sweep */}
-      {totals.owed > 0 && (
+      {/* Cleared (safe-to-sweep) CTA — only shows when patient revenue has cleared */}
+      {sweepSummary && sweepSummary.cleared_cents > 0 && (
         <Card className="bg-gradient-to-r from-emerald-500 to-emerald-600 border-emerald-700 text-white">
           <CardContent className="p-4 flex items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold">Get paid now — ${(totals.owed / 100).toFixed(0)} ready to sweep</div>
+              <div className="text-sm font-bold">
+                ${(sweepSummary.cleared_cents / 100).toFixed(0)} cleared — safe to sweep
+              </div>
               <div className="text-[11px] text-emerald-100 mt-0.5">
-                One transfer, all owed visits → your Stripe Connect account. Arrives in your bank per your normal payout schedule.
+                {sweepSummary.cleared_count} visit{sweepSummary.cleared_count === 1 ? '' : 's'} where the patient has already paid.
+                One Stripe transfer, no risk of overdraft.
               </div>
             </div>
             <Button
@@ -246,8 +288,22 @@ const PhlebEarningsLedger: React.FC = () => {
               className="bg-white text-emerald-700 hover:bg-emerald-50 font-semibold gap-1.5 flex-shrink-0"
             >
               {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-              {sweeping ? 'Transferring…' : 'Sweep now'}
+              {sweeping ? 'Transferring…' : 'Sweep cleared'}
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Pending advisory — visits owed but patient hasn't paid yet (HELD) */}
+      {sweepSummary && sweepSummary.pending_cents > 0 && (
+        <Card className="bg-amber-50 border-amber-300">
+          <CardContent className="p-3 flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-900">
+              <strong>${(sweepSummary.pending_cents / 100).toFixed(0)} on hold</strong> — {sweepSummary.pending_count} visit{sweepSummary.pending_count === 1 ? '' : 's'} where the
+              patient or partner org hasn't paid yet. These automatically become sweepable as
+              soon as their payment clears in Stripe (or their org invoice is marked paid). No action needed from you.
+            </div>
           </CardContent>
         </Card>
       )}
