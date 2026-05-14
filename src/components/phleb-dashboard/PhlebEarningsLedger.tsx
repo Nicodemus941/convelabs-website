@@ -52,12 +52,24 @@ interface Payout {
   notes: string | null;
 }
 
-const RULE_LABEL: Record<string, { label: string; color: string }> = {
-  business_floor_87: { label: '$87 floor', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  base_rate_floor_protected: { label: 'base rate', color: 'bg-gray-50 text-gray-700 border-gray-200' },
-  exception_base_rate: { label: 'partner rate', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  no_phleb_assigned: { label: 'unassigned', color: 'bg-amber-50 text-amber-700 border-amber-200' },
-  no_staff_profile: { label: 'no profile', color: 'bg-amber-50 text-amber-700 border-amber-200' },
+const RULE_LABEL: Record<string, { label: string; color: string; explainer: string }> = {
+  business_floor_87: {
+    label: '$87 → biz · rest → you',
+    color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    explainer: 'Standard rule: business keeps $87, you take the rest (plus 100% of tip + companion + surcharges baked into total).',
+  },
+  base_rate_floor_protected: {
+    label: 'base rate',
+    color: 'bg-gray-50 text-gray-700 border-gray-200',
+    explainer: 'Patient charge is too low for the $87-floor math to favor you. Per-service base rate applies instead, so you never make less.',
+  },
+  exception_base_rate: {
+    label: 'base + 100% surcharge',
+    color: 'bg-blue-50 text-blue-700 border-blue-200',
+    explainer: 'Partner-org or senior visit: per-service base rate + 100% of any extended-area / after-hours / same-day surcharge passes through to you.',
+  },
+  no_phleb_assigned: { label: 'unassigned', color: 'bg-amber-50 text-amber-700 border-amber-200', explainer: 'No phleb on this appointment yet.' },
+  no_staff_profile: { label: 'no profile', color: 'bg-amber-50 text-amber-700 border-amber-200', explainer: 'Phleb has no staff_profiles row.' },
 };
 
 const PhlebEarningsLedger: React.FC = () => {
@@ -444,9 +456,9 @@ const PhlebEarningsLedger: React.FC = () => {
         <CardContent className="p-3 flex items-start gap-2 text-xs text-gray-700">
           <Info className="h-3.5 w-3.5 text-gray-500 flex-shrink-0 mt-0.5" />
           <div>
-            <strong>Your comp rule (v2):</strong> Business keeps $87 on standard mobile / therapeutic / specialty visits — you take the rest.
-            Partner-org visits (Elite Medical, NaturaMed, ND Wellness, etc.) and the $100 senior service stay at their per-service rates.
-            Tips & companion add-ons always 100% to you.
+            <strong>Your comp rule:</strong> Business keeps $87 on standard mobile / therapeutic / specialty visits — you take the rest.
+            Partner-org visits (Elite Medical, NaturaMed, ND Wellness, etc.) and the $100 senior service use the per-service base rate (e.g. $42 for senior, $35 for partner-elite).
+            <strong> Tips, companion add-ons, extended-area, after-hours, and same-day surcharges always pass 100% to you</strong> — on EVERY rule.
           </div>
         </CardContent>
       </Card>
@@ -466,7 +478,7 @@ const PhlebEarningsLedger: React.FC = () => {
           ) : (
             <div className="divide-y">
               {rows.map((r) => {
-                const ruleInfo = RULE_LABEL[r.take.rule_used] || { label: r.take.rule_used, color: 'bg-gray-50 text-gray-700 border-gray-200' };
+                const ruleInfo = RULE_LABEL[r.take.rule_used] || { label: r.take.rule_used, color: 'bg-gray-50 text-gray-700 border-gray-200', explainer: '' };
                 const fullyPaid = r.paid_cents >= r.take.take_cents && r.owed_cents === 0;
                 const hasOwed = r.owed_cents > 0;
                 return (
@@ -479,7 +491,7 @@ const PhlebEarningsLedger: React.FC = () => {
                         {' · '}{r.service_type || 'mobile'}
                       </div>
                       <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                        <Badge variant="outline" className={`text-[9px] ${ruleInfo.color}`}>{ruleInfo.label}</Badge>
+                        <Badge variant="outline" className={`text-[9px] ${ruleInfo.color}`} title={ruleInfo.explainer}>{ruleInfo.label}</Badge>
                         <span className="text-[10px] text-gray-500">
                           Patient ${(r.take.total_charged_cents / 100).toFixed(0)} · Business ${(r.take.business_keep_cents / 100).toFixed(0)} · You ${(r.take.take_cents / 100).toFixed(0)}
                         </span>
