@@ -63,12 +63,13 @@ const RULE_LABEL: Record<string, { label: string; color: string }> = {
 const PhlebEarningsLedger: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [sweeping, setSweeping] = useState(false);
+  // Track which button is spinning ('week' | 'all' | null) so they don't both spin.
+  const [sweeping, setSweeping] = useState<'week' | 'all' | null>(null);
   const [rows, setRows] = useState<Array<ApptRow & { take: Take; paid_cents: number; owed_cents: number }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
-  // Multi-gate sweep summary — separates "cleared" (patient paid via Stripe
-  // or org invoice paid) from "pending" (patient hasn't paid yet, so
-  // sweeping would overdraft the business).
+  // Inline error/result banner so the user always sees what happened —
+  // toasts disappear before the user can read them, especially on mobile.
+  const [sweepResult, setSweepResult] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [sweepSummary, setSweepSummary] = useState<{
     cleared_count: number; cleared_cents: number;
     pending_count: number; pending_cents: number;
@@ -84,9 +85,8 @@ const PhlebEarningsLedger: React.FC = () => {
     let sinceDate: string | null = null;
     let scopeLabel = 'all cleared';
     if (scope === 'week') {
-      // Monday of this week (server-side will also clamp)
       const today = new Date();
-      const day = today.getDay(); // 0=Sun, 1=Mon, ...
+      const day = today.getDay();
       const diffToMon = (day === 0 ? -6 : 1 - day);
       const mon = new Date(today);
       mon.setDate(today.getDate() + diffToMon);
@@ -95,58 +95,84 @@ const PhlebEarningsLedger: React.FC = () => {
       scopeLabel = `this week (since ${sinceDate})`;
     }
 
-    // Pre-flight dry-run so the confirm dialog shows the actual scoped numbers
-    setSweeping(true);
+    setSweeping(scope);
+    setSweepResult(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setSweepResult({ kind: 'error', text: 'Not signed in. Refresh the page and try again.' });
+        return;
+      }
+
+      // Dry-run preview (v4 always returns 200 with the numbers + warnings)
       const dryResp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ dry_run: true, since_date: sinceDate }),
       });
       const dryJ = await dryResp.json();
-      if (!dryResp.ok) {
-        toast.error(dryJ.message || dryJ.error || 'Pre-flight check failed');
+
+      if (dryJ?.error) {
+        setSweepResult({ kind: 'error', text: dryJ.message || dryJ.error });
         return;
       }
       const wouldCount = Number(dryJ.would_sweep_count || 0);
       const wouldCents = Number(dryJ.would_sweep_cents || 0);
+      const platformAvail = Number(dryJ.platform_available_cents || 0);
+
       if (wouldCount === 0) {
-        toast.info(dryJ.message || 'Nothing cleared to sweep in this window.');
+        setSweepResult({ kind: 'info', text: dryJ.message || `Nothing cleared to sweep in ${scopeLabel}.` });
         return;
       }
-      const ok = confirm(
+
+      // If balance insufficient, surface inline (NOT a blocking dialog)
+      if (dryJ.sufficient_balance === false) {
+        setSweepResult({
+          kind: 'error',
+          text: dryJ.message || `Stripe platform balance $${(platformAvail / 100).toFixed(2)} is below the $${((wouldCents + 10000) / 100).toFixed(2)} needed (sweep + $100 safety buffer). ${scope === 'all' ? 'Try "Sweep this week" instead, or wait for Stripe\'s rolling 2-day settlement to refill.' : 'Wait for Stripe\'s rolling 2-day settlement to refill.'}`,
+        });
+        return;
+      }
+
+      // Confirm dialog
+      const ok = window.confirm(
         `Transfer $${(wouldCents / 100).toFixed(2)} (${scopeLabel}) to your Stripe Connect account?\n\n` +
         `• Visits being swept: ${wouldCount}\n` +
         `• Pending (held for patient payment): ${Number(dryJ.pending_count || 0)} = $${(Number(dryJ.pending_cents || 0) / 100).toFixed(2)}\n` +
-        `• Platform balance after: $${((Number(dryJ.platform_available_cents) - wouldCents) / 100).toFixed(0)} (safety buffer $100 enforced)`
+        `• Platform balance: $${(platformAvail / 100).toFixed(2)} → $${((platformAvail - wouldCents) / 100).toFixed(2)} after sweep ($100 safety buffer enforced)`
       );
-      if (!ok) return;
+      if (!ok) {
+        setSweepResult({ kind: 'info', text: 'Sweep cancelled.' });
+        return;
+      }
 
-      // Live sweep
       const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ since_date: sinceDate }),
       });
       const j = await resp.json();
-      if (!resp.ok) {
-        toast.error(j.message || j.error || 'Sweep failed');
+      if (j?.error || j?.ok === false) {
+        setSweepResult({ kind: 'error', text: j.message || j.error || 'Sweep failed' });
         return;
       }
       if (j.swept_count === 0) {
-        toast.info(j.message || 'Nothing cleared yet.');
+        setSweepResult({ kind: 'info', text: j.message || 'Nothing cleared yet.' });
       } else {
         const after = j.platform_balance_after_cents != null
-          ? ` · Platform balance after: $${(j.platform_balance_after_cents / 100).toFixed(0)}`
+          ? ` Platform balance after: $${(j.platform_balance_after_cents / 100).toFixed(2)}.`
           : '';
-        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} (${scopeLabel}) — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}.${after}`);
+        setSweepResult({
+          kind: 'success',
+          text: `Swept $${(j.total_cents / 100).toFixed(2)} (${scopeLabel}) — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}. Stripe transfer ID: ${j.stripe_transfer_id}.${after}`,
+        });
+        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} to your Stripe`);
       }
       setRefreshKey((k) => k + 1);
     } catch (e: any) {
-      toast.error(e?.message || 'Sweep failed');
+      setSweepResult({ kind: 'error', text: e?.message || 'Sweep failed (network error). Check connection and retry.' });
     } finally {
-      setSweeping(false);
+      setSweeping(null);
     }
   };
 
@@ -324,24 +350,46 @@ const PhlebEarningsLedger: React.FC = () => {
             <div className="flex gap-2">
               <Button
                 onClick={() => handleSweep('week')}
-                disabled={sweeping}
+                disabled={!!sweeping}
                 size="sm"
                 className="flex-1 bg-white text-emerald-700 hover:bg-emerald-50 font-semibold gap-1.5"
               >
-                {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-                Sweep this week
+                {sweeping === 'week' ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                {sweeping === 'week' ? 'Working…' : 'Sweep this week'}
               </Button>
               <Button
                 onClick={() => handleSweep('all')}
-                disabled={sweeping}
+                disabled={!!sweeping}
                 size="sm"
                 variant="outline"
                 className="flex-1 bg-emerald-700/30 border-emerald-200 text-white hover:bg-emerald-700/50 font-semibold gap-1.5"
               >
-                {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-                Sweep all cleared
+                {sweeping === 'all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                {sweeping === 'all' ? 'Working…' : 'Sweep all cleared'}
               </Button>
             </div>
+
+            {/* Inline result banner — persistent until next action */}
+            {sweepResult && (
+              <div
+                className={`mt-2 rounded-lg p-3 text-xs flex items-start gap-2 ${
+                  sweepResult.kind === 'success' ? 'bg-emerald-900/40 border border-emerald-300 text-white' :
+                  sweepResult.kind === 'error' ? 'bg-amber-50 border border-amber-300 text-amber-900' :
+                  'bg-blue-50 border border-blue-200 text-blue-900'
+                }`}
+              >
+                {sweepResult.kind === 'success' ? <CheckCircle2 className="h-4 w-4 flex-shrink-0 mt-0.5" /> :
+                 sweepResult.kind === 'error' ? <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" /> :
+                 <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />}
+                <div className="flex-1 leading-relaxed">{sweepResult.text}</div>
+                <button
+                  type="button"
+                  onClick={() => setSweepResult(null)}
+                  className="opacity-60 hover:opacity-100 flex-shrink-0"
+                  aria-label="Dismiss"
+                >×</button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
