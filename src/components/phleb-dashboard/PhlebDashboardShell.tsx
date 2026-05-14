@@ -143,29 +143,40 @@ const PhlebDashboardShell: React.FC = () => {
             time subscribed to appointments + staff_payouts. */}
         {activeTab === 'schedule' && <PhlebEarningsCard />}
 
-        {/* Quick Stats - only on schedule tab */}
-        {activeTab === 'schedule' && (
-          <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mb-4">
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-white rounded-xl shadow-md p-3 text-center">
-                <p className="text-2xl font-bold text-[#B91C1C]">
-                  {appointments.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length}
-                </p>
-                <p className="text-xs text-muted-foreground">Remaining</p>
+        {/* Quick Stats — THIS MONTH scoped (previously showed 5-month
+            rolling window from the data hook, which made the numbers
+            inflated and confusing). Now reflects the current calendar
+            month so "31 remaining / 95 completed" is real for May 2026. */}
+        {activeTab === 'schedule' && (() => {
+          const now = new Date();
+          const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          const monthAppts = appointments.filter(a => (a.appointment_date || '').startsWith(monthPrefix));
+          const monthRemaining = monthAppts.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
+          const monthCompleted = monthAppts.filter(a => a.status === 'completed').length;
+          const monthLabel = now.toLocaleString('en-US', { month: 'short' });
+          return (
+            <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mb-4">
+              <div className="flex items-baseline justify-between mb-1.5 px-1">
+                <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{monthLabel} {now.getFullYear()}</p>
+                <p className="text-[10px] text-gray-400">Current month only</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-3 text-center">
-                <p className="text-2xl font-bold text-emerald-600">
-                  {appointments.filter(a => a.status === 'completed').length}
-                </p>
-                <p className="text-xs text-muted-foreground">Completed</p>
-              </div>
-              <div className="bg-white rounded-xl shadow-md p-3 text-center">
-                <p className="text-2xl font-bold text-gray-800">{appointments.length}</p>
-                <p className="text-xs text-muted-foreground">Total</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-white rounded-xl shadow-md p-3 text-center">
+                  <p className="text-2xl font-bold text-[#B91C1C]">{monthRemaining}</p>
+                  <p className="text-xs text-muted-foreground">Remaining</p>
+                </div>
+                <div className="bg-white rounded-xl shadow-md p-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-600">{monthCompleted}</p>
+                  <p className="text-xs text-muted-foreground">Completed</p>
+                </div>
+                <div className="bg-white rounded-xl shadow-md p-3 text-center">
+                  <p className="text-2xl font-bold text-gray-800">{monthAppts.length}</p>
+                  <p className="text-xs text-muted-foreground">This month</p>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Tab Content */}
         <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mt-4">

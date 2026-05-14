@@ -52,6 +52,7 @@ const PhlebEarningsCard: React.FC = () => {
   const [tomorrow, setTomorrow] = useState<DayBucket>(ZERO);
   const [week, setWeek] = useState<DayBucket>(ZERO);
   const [mtd, setMtd] = useState<DayBucket>(ZERO);
+  const [ytd, setYtd] = useState<DayBucket>(ZERO);
   // Last-month banked total — sourced directly from staff_payouts so it
   // automatically reflects the post-2026-05-13 reconciliation row(s) plus
   // any historical Stripe Connect transfers. Hormozi: "Last month banked"
@@ -209,6 +210,21 @@ const PhlebEarningsCard: React.FC = () => {
         .reduce((sum, p) => sum + (p.amount_cents || 0), 0);
       setLastMonthCents(lmTotal);
 
+      // ── YTD BANKED + OWED ─────────────────────────────────────────
+      // Pull every staff_payouts row created since Jan 1 of this calendar
+      // year. Combines succeeded (already paid out) + manual_owed (delta
+      // rows that will sweep when balance refills). Excludes reversed/failed.
+      const yearStart = new Date(now.getFullYear(), 0, 1);
+      const { data: ytdPayouts } = await supabase
+        .from('staff_payouts' as any)
+        .select('amount_cents, status')
+        .eq('staff_id', staffId)
+        .gte('created_at', yearStart.toISOString());
+      const ytdTotal = ((ytdPayouts || []) as any[])
+        .filter(p => !['reversed', 'failed'].includes(String(p.status || '')))
+        .reduce((sum, p) => sum + (p.amount_cents || 0), 0);
+      setYtd({ ...ZERO, banked_cents: ytdTotal });
+
       // Last-7-days mini sparkline. Sums per-day across both banked + projected
       // for visits scheduled in those days. Banked dominates for past days,
       // projected for today + future.
@@ -330,34 +346,30 @@ const PhlebEarningsCard: React.FC = () => {
           )}
         </div>
 
-        {/* Four-column subgrid: tomorrow · this week · MTD · last month.
-            Last month is sourced directly from staff_payouts (banked +
-            manual_owed reconciliation rows), so the post-2026-05-13
-            owner-takes-everything restructure is retroactively visible
-            here once the make-whole row is in the ledger. */}
+        {/* Phleb-earnings subgrid — all numbers are YOUR take per the v2
+            comp rule (NOT gross patient revenue). WTD · MTD · YTD · Last mo
+            give the operator visibility into "what am I making right now"
+            at every relevant time horizon. */}
         <div className="grid grid-cols-4 divide-x divide-gray-100 text-center bg-white">
-          <div className="px-2 py-3">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Tomorrow</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">{fmt(tomorrow.projected_cents)}</p>
-            <p className="text-[10px] text-gray-500 mt-0.5">{tomorrow.visit_count} visit{tomorrow.visit_count === 1 ? '' : 's'}</p>
-          </div>
-          <div className="px-2 py-3">
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">This week</p>
+          <div className="px-2 py-3" title="Your phleb earnings this calendar week (Sun→today): banked transfers + projected from scheduled visits.">
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">WTD</p>
             <p className="text-lg font-bold text-gray-900 mt-0.5">{fmt(week.banked_cents + week.projected_cents)}</p>
             <p className="text-[10px] text-gray-500 mt-0.5">{week.visit_count} visit{week.visit_count === 1 ? '' : 's'}</p>
           </div>
-          <div className="px-2 py-3 bg-emerald-50/30">
+          <div className="px-2 py-3 bg-emerald-50/30" title="Your phleb earnings this calendar month: banked + projected. Target: $5,040 (Hormozi-pace).">
             <p className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold flex items-center justify-center gap-1">
               <TrendingUp className="h-2.5 w-2.5" /> MTD
             </p>
             <p className="text-lg font-bold text-emerald-900 mt-0.5">{fmt(mtd.banked_cents + mtd.projected_cents)}</p>
             <p className="text-[10px] text-emerald-700 mt-0.5">/ $5,040 goal</p>
           </div>
-          <div className="px-2 py-3 bg-amber-50/40">
-            <p
-              className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold"
-              title="Banked + manual reconciliation rows in staff_payouts for the prior calendar month. Reflects the post-2026-05-13 owner-takes-everything comp restructure retroactively."
-            >Last month</p>
+          <div className="px-2 py-3 bg-blue-50/30" title="Your phleb earnings year-to-date: every staff_payouts row (banked + manual_owed) created since Jan 1.">
+            <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">YTD</p>
+            <p className="text-lg font-bold text-blue-900 mt-0.5">{fmt(ytd.banked_cents)}</p>
+            <p className="text-[10px] text-blue-700 mt-0.5">banked + owed</p>
+          </div>
+          <div className="px-2 py-3 bg-amber-50/40" title="Banked + reconciliation rows for the prior calendar month.">
+            <p className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">Last mo</p>
             <p className="text-lg font-bold text-amber-900 mt-0.5">{fmt(lastMonthCents)}</p>
             <p className="text-[10px] text-amber-700 mt-0.5">banked + owed</p>
           </div>
