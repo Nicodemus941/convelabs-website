@@ -19,6 +19,30 @@ interface ScheduleAppointmentModalProps {
   onClose: () => void;
   onCreated: () => void;
   defaultDate?: string;
+  /**
+   * When opened from a specific patient's chart (PatientProfileTab),
+   * pass the patient here to skip the search step. The modal hydrates
+   * patientName / email / phone / address / DOB into the form and jumps
+   * straight to the service-picker step.
+   *
+   * Hormozi: every click that doesn't serve the patient is waste —
+   * admin-booking-from-a-chart should NOT make the admin retype the
+   * patient they're already looking at. (Owner caught this 2026-05-13.)
+   */
+  prefilledPatient?: {
+    id?: string;
+    firstName?: string;
+    lastName?: string;
+    email?: string | null;
+    phone?: string | null;
+    address?: string;
+    city?: string;
+    state?: string;
+    zipCode?: string;
+    gateCode?: string;
+    insuranceProvider?: string;
+    insuranceMemberId?: string;
+  } | null;
 }
 
 const SERVICE_TYPES = [
@@ -67,7 +91,7 @@ interface PatientResult {
 }
 
 const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
-  open, onClose, onCreated, defaultDate,
+  open, onClose, onCreated, defaultDate, prefilledPatient,
 }) => {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -284,6 +308,50 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   };
 
   const handleClose = () => { resetForm(); onClose(); };
+
+  // Hydrate from prefilledPatient (or legacy sessionStorage stash) when
+  // the modal opens. Removes the dead-step "search for the patient you're
+  // already looking at" UX bug. After hydrate, jump straight to step 2
+  // (service + schedule) — patient identity is already known.
+  //
+  // Legacy fallback: PatientProfileTab used to write to sessionStorage
+  // under 'convelabs_admin_prefill_patient' BEFORE we added the prop.
+  // We honor that key once and clear it so it doesn't leak across visits.
+  useEffect(() => {
+    if (!open) return;
+    let p: any = prefilledPatient || null;
+    if (!p) {
+      try {
+        const raw = sessionStorage.getItem('convelabs_admin_prefill_patient');
+        if (raw) {
+          p = JSON.parse(raw);
+          sessionStorage.removeItem('convelabs_admin_prefill_patient');
+        }
+      } catch { /* ignore */ }
+    }
+    if (!p) return;
+
+    const fullName = `${p.firstName || ''} ${p.lastName || ''}`.trim();
+    setPatientName(fullName);
+    setPatientEmail(String(p.email || ''));
+    setPatientPhone(String(p.phone || ''));
+    setAddress(String(p.address || ''));
+    setCity(String(p.city || ''));
+    setZipcode(String(p.zipCode || p.zipcode || ''));
+    setGateCode(String(p.gateCode || ''));
+    if (p.id) {
+      setSelectedPatient({
+        id: p.id,
+        first_name: p.firstName || '',
+        last_name: p.lastName || '',
+        email: p.email || null,
+        phone: p.phone || null,
+      });
+    }
+    // Skip the patient-search step — admin is booking for THIS patient.
+    setStep(2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefilledPatient]);
 
   // Search patients as user types
   useEffect(() => {

@@ -382,13 +382,29 @@ const PatientProfileTab: React.FC = () => {
           onSuccess={() => loadPatientData(p)}
         />
 
-        {/* Admin schedule modal — opens with admin override powers. Stash
-            patient prefill in sessionStorage so the modal's internal form
-            picks it up on mount (matches the convention BookingFlow uses). */}
+        {/* Admin schedule modal — opens with admin override powers.
+            Pass the chart's patient directly so the modal hydrates the
+            form + skips the dead "search for the patient you're already
+            looking at" step. (Owner bug 2026-05-13 — John Struck chart →
+            Schedule button opened an empty search modal.) */}
         <ScheduleAppointmentModal
           open={scheduleModalOpen}
           onClose={() => setScheduleModalOpen(false)}
           onCreated={() => { setScheduleModalOpen(false); loadPatientData(p); }}
+          prefilledPatient={{
+            id: p.id,
+            firstName: p.first_name || '',
+            lastName: p.last_name || '',
+            email: p.email || null,
+            phone: p.phone || null,
+            address: p.address || '',
+            city: p.city || '',
+            state: p.state || 'FL',
+            zipCode: p.zipcode || '',
+            gateCode: p.gate_code || '',
+            insuranceProvider: p.insurance_provider || '',
+            insuranceMemberId: p.insurance_member_id || '',
+          }}
         />
 
         {/* "Send booking link" — Hormozi 4-second loop: click ⚡, pick
