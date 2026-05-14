@@ -62,8 +62,42 @@ const RULE_LABEL: Record<string, { label: string; color: string }> = {
 const PhlebEarningsLedger: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [sweeping, setSweeping] = useState(false);
   const [rows, setRows] = useState<Array<ApptRow & { take: Take; paid_cents: number; owed_cents: number }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  const handleSweep = async () => {
+    if (sweeping) return;
+    const totalOwedDollars = (totals.owed / 100).toFixed(2);
+    if (!confirm(`Transfer $${totalOwedDollars} to your Stripe Connect account now? This fires a real Stripe transfer and marks the matching payout rows as succeeded.`)) return;
+    setSweeping(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token || ''}`,
+        },
+        body: JSON.stringify({}),
+      });
+      const j = await resp.json();
+      if (!resp.ok) {
+        toast.error(j.message || j.error || 'Sweep failed');
+        return;
+      }
+      if (j.swept_count === 0) {
+        toast.info('Nothing owed right now.');
+      } else {
+        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} to your Stripe — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}.`);
+      }
+      setRefreshKey((k) => k + 1);
+    } catch (e: any) {
+      toast.error(e?.message || 'Sweep failed');
+    } finally {
+      setSweeping(false);
+    }
+  };
 
   useEffect(() => {
     if (!user?.id) return;
@@ -194,6 +228,29 @@ const PhlebEarningsLedger: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Sweep CTA — only shown when there's something to sweep */}
+      {totals.owed > 0 && (
+        <Card className="bg-gradient-to-r from-emerald-500 to-emerald-600 border-emerald-700 text-white">
+          <CardContent className="p-4 flex items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-bold">Get paid now — ${(totals.owed / 100).toFixed(0)} ready to sweep</div>
+              <div className="text-[11px] text-emerald-100 mt-0.5">
+                One transfer, all owed visits → your Stripe Connect account. Arrives in your bank per your normal payout schedule.
+              </div>
+            </div>
+            <Button
+              onClick={handleSweep}
+              disabled={sweeping}
+              size="sm"
+              className="bg-white text-emerald-700 hover:bg-emerald-50 font-semibold gap-1.5 flex-shrink-0"
+            >
+              {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+              {sweeping ? 'Transferring…' : 'Sweep now'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Rule explainer */}
       <Card className="bg-gray-50 border-gray-200">
