@@ -64,21 +64,21 @@ const AppointmentEarningPill: React.FC<Props> = ({
   }, [appointmentId]);
 
   useEffect(() => {
-    if (!staffId) return;
+    if (!staffId || !appointmentId) return;
     (async () => {
-      const tipCents = Math.round(((tipAmount || 0) as number) * 100);
       try {
-        const { data } = await supabase.rpc('compute_phleb_take_cents' as any, {
-          p_staff_id: staffId,
-          p_service_type: serviceType || 'mobile',
-          p_tip_cents: tipCents,
-          p_has_companion: !!hasCompanion,
-          p_surcharges: surcharges as any,
+        // v2 rule: business floor $87 for default services; per-service
+        // base for partner-* / senior / in-office. Includes companion +
+        // tip on top. The RPC reads appointment.total_amount directly,
+        // so surcharges baked into the patient charge flow through to us
+        // automatically — no manual surcharge map needed.
+        const { data } = await supabase.rpc('phleb_take_for_appointment_cents' as any, {
+          p_appointment_id: appointmentId,
         });
         setTakeCents(parseInt(String(data || 0), 10));
       } catch { setTakeCents(0); }
     })();
-  }, [staffId, serviceType, tipAmount, hasCompanion, appointmentId, surcharges]);
+  }, [staffId, appointmentId]);
 
   if (!staffId || takeCents == null || takeCents === 0) return null;
 

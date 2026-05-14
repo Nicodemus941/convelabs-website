@@ -16,13 +16,15 @@ import MessagesTab from './messages/MessagesTab';
 import SettingsTab from './settings/SettingsTab';
 import DirectoryTab from './directory/DirectoryTab';
 import DeliveriesTab from './deliveries/DeliveriesTab';
-import { FolderOpen, Truck } from 'lucide-react';
+import PhlebEarningsLedger from './PhlebEarningsLedger';
+import { FolderOpen, Truck, DollarSign } from 'lucide-react';
 
 const DESKTOP_TABS: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
   { id: 'schedule', label: 'Schedule', icon: Calendar },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
   { id: 'directory', label: 'Directory', icon: FolderOpen },
   { id: 'deliveries', label: 'Deliveries', icon: Truck },
+  { id: 'earnings', label: 'Earnings', icon: DollarSign },
   { id: 'completed', label: 'Completed', icon: CheckCircle2 },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -189,6 +191,11 @@ const PhlebDashboardShell: React.FC = () => {
           )}
           {activeTab === 'deliveries' && (
             <DeliveriesTab />
+          )}
+          {activeTab === 'earnings' && (
+            <div className="max-w-lg md:max-w-3xl mx-auto px-4 md:px-6 pb-24">
+              <PhlebEarningsLedger />
+            </div>
           )}
           {activeTab === 'settings' && (
             <SettingsTab />

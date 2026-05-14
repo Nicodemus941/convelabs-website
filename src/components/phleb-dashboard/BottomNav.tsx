@@ -1,7 +1,7 @@
 import React from 'react';
-import { Calendar, MessageSquare, CheckCircle2, Settings, FolderOpen, Truck } from 'lucide-react';
+import { Calendar, MessageSquare, CheckCircle2, Settings, FolderOpen, Truck, DollarSign } from 'lucide-react';
 
-export type PhlebTab = 'schedule' | 'messages' | 'directory' | 'completed' | 'deliveries' | 'settings';
+export type PhlebTab = 'schedule' | 'messages' | 'directory' | 'completed' | 'deliveries' | 'earnings' | 'settings';
 
 interface BottomNavProps {
   activeTab: PhlebTab;
@@ -14,6 +14,7 @@ const tabs: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
   { id: 'messages', label: 'Messages', icon: MessageSquare },
   { id: 'directory', label: 'Directory', icon: FolderOpen },
   { id: 'deliveries', label: 'Deliveries', icon: Truck },
+  { id: 'earnings', label: 'Earnings', icon: DollarSign },
   { id: 'completed', label: 'Done', icon: CheckCircle2 },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
