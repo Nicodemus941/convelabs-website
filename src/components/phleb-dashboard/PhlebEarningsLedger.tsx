@@ -265,7 +265,10 @@ const PhlebEarningsLedger: React.FC = () => {
           .select('id, appointment_date, appointment_time, patient_name, service_type, total_amount, status, payment_arrangement')
           .eq('phlebotomist_id', user.id)
           .gte('appointment_date', since)
-          .in('status', ['completed', 'confirmed', 'scheduled'])
+          // Include EVERY status a phleb earns from. 'in_progress', 'en_route',
+          // 'arrived', 'specimen_delivered' were silently excluded before, hiding
+          // visits like Natasha Morgan 5/14 (status=in_progress, $163 earned).
+          .in('status', ['completed', 'confirmed', 'scheduled', 'in_progress', 'en_route', 'arrived', 'specimen_delivered'])
           .order('appointment_date', { ascending: false })
           .limit(200);
 
