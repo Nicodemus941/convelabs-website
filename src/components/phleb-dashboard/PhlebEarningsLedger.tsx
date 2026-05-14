@@ -73,32 +73,63 @@ const PhlebEarningsLedger: React.FC = () => {
     pending_count: number; pending_cents: number;
   } | null>(null);
 
-  const handleSweep = async () => {
+  /**
+   * Sweep cleared payouts. Optional `scope` filters by appointment date:
+   *   'week'  → only this calendar week (Mon 00:00 onward)
+   *   'all'   → every cleared payout regardless of date
+   */
+  const handleSweep = async (scope: 'week' | 'all' = 'all') => {
     if (sweeping) return;
-    const clearedDollars = ((sweepSummary?.cleared_cents || 0) / 100).toFixed(2);
-    if (!sweepSummary || sweepSummary.cleared_count === 0) {
-      toast.info('Nothing cleared to sweep yet. Patient payments must clear first.');
-      return;
+    let sinceDate: string | null = null;
+    let scopeLabel = 'all cleared';
+    if (scope === 'week') {
+      // Monday of this week (server-side will also clamp)
+      const today = new Date();
+      const day = today.getDay(); // 0=Sun, 1=Mon, ...
+      const diffToMon = (day === 0 ? -6 : 1 - day);
+      const mon = new Date(today);
+      mon.setDate(today.getDate() + diffToMon);
+      mon.setHours(0, 0, 0, 0);
+      sinceDate = mon.toISOString().substring(0, 10);
+      scopeLabel = `this week (since ${sinceDate})`;
     }
-    if (!confirm(
-      `Transfer $${clearedDollars} to your Stripe Connect account now?\n\n` +
-      `This sweeps ONLY the ${sweepSummary.cleared_count} visit${sweepSummary.cleared_count === 1 ? '' : 's'} where patients have already paid. ` +
-      `${sweepSummary.pending_count} pending-payment visit${sweepSummary.pending_count === 1 ? '' : 's'} will stay on hold until cleared.`
-    )) return;
+
+    // Pre-flight dry-run so the confirm dialog shows the actual scoped numbers
     setSweeping(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const dryResp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({ dry_run: true, since_date: sinceDate }),
+      });
+      const dryJ = await dryResp.json();
+      if (!dryResp.ok) {
+        toast.error(dryJ.message || dryJ.error || 'Pre-flight check failed');
+        return;
+      }
+      const wouldCount = Number(dryJ.would_sweep_count || 0);
+      const wouldCents = Number(dryJ.would_sweep_cents || 0);
+      if (wouldCount === 0) {
+        toast.info(dryJ.message || 'Nothing cleared to sweep in this window.');
+        return;
+      }
+      const ok = confirm(
+        `Transfer $${(wouldCents / 100).toFixed(2)} (${scopeLabel}) to your Stripe Connect account?\n\n` +
+        `• Visits being swept: ${wouldCount}\n` +
+        `• Pending (held for patient payment): ${Number(dryJ.pending_count || 0)} = $${(Number(dryJ.pending_cents || 0) / 100).toFixed(2)}\n` +
+        `• Platform balance after: $${((Number(dryJ.platform_available_cents) - wouldCents) / 100).toFixed(0)} (safety buffer $100 enforced)`
+      );
+      if (!ok) return;
+
+      // Live sweep
       const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token || ''}`,
-        },
-        body: JSON.stringify({}),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({ since_date: sinceDate }),
       });
       const j = await resp.json();
       if (!resp.ok) {
-        // Surface insufficient balance, eligibility errors with full context
         toast.error(j.message || j.error || 'Sweep failed');
         return;
       }
@@ -108,7 +139,7 @@ const PhlebEarningsLedger: React.FC = () => {
         const after = j.platform_balance_after_cents != null
           ? ` · Platform balance after: $${(j.platform_balance_after_cents / 100).toFixed(0)}`
           : '';
-        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} to your Stripe — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}.${after}`);
+        toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} (${scopeLabel}) — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}.${after}`);
       }
       setRefreshKey((k) => k + 1);
     } catch (e: any) {
@@ -271,25 +302,39 @@ const PhlebEarningsLedger: React.FC = () => {
       {/* Cleared (safe-to-sweep) CTA — only shows when patient revenue has cleared */}
       {sweepSummary && sweepSummary.cleared_cents > 0 && (
         <Card className="bg-gradient-to-r from-emerald-500 to-emerald-600 border-emerald-700 text-white">
-          <CardContent className="p-4 flex items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-bold">
-                ${(sweepSummary.cleared_cents / 100).toFixed(0)} cleared — safe to sweep
-              </div>
-              <div className="text-[11px] text-emerald-100 mt-0.5">
-                {sweepSummary.cleared_count} visit{sweepSummary.cleared_count === 1 ? '' : 's'} where the patient has already paid.
-                One Stripe transfer, no risk of overdraft.
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-bold">
+                  ${(sweepSummary.cleared_cents / 100).toFixed(0)} cleared — safe to sweep
+                </div>
+                <div className="text-[11px] text-emerald-100 mt-0.5">
+                  {sweepSummary.cleared_count} visit{sweepSummary.cleared_count === 1 ? '' : 's'} where the patient has already paid.
+                  Platform balance is checked before transfer — no overdraft risk.
+                </div>
               </div>
             </div>
-            <Button
-              onClick={handleSweep}
-              disabled={sweeping}
-              size="sm"
-              className="bg-white text-emerald-700 hover:bg-emerald-50 font-semibold gap-1.5 flex-shrink-0"
-            >
-              {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-              {sweeping ? 'Transferring…' : 'Sweep cleared'}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => handleSweep('week')}
+                disabled={sweeping}
+                size="sm"
+                className="flex-1 bg-white text-emerald-700 hover:bg-emerald-50 font-semibold gap-1.5"
+              >
+                {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                Sweep this week
+              </Button>
+              <Button
+                onClick={() => handleSweep('all')}
+                disabled={sweeping}
+                size="sm"
+                variant="outline"
+                className="flex-1 bg-emerald-700/30 border-emerald-200 text-white hover:bg-emerald-700/50 font-semibold gap-1.5"
+              >
+                {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                Sweep all cleared
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
