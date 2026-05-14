@@ -233,10 +233,60 @@ Deno.serve(async (req) => {
         }
       } catch (e) { console.warn('OCR failed (non-blocking):', e); }
     }
-    // Prefer manually-entered DOB. Fall back to whatever OCR pulled off
-    // the order. This closes the gap: even when the provider forgets to
-    // type the DOB into the modal, the lab order itself has it.
-    const finalDob: string | null = dobClean || ocrDob;
+    // ── DOB RESOLUTION (Hormozi 2026-05-14 fix) ──────────────────────
+    // Three-source fallback chain so the patient never hits the
+    // "no_dob_on_file" dead-end on the unlock page when we have the
+    // DOB SOMEWHERE in the system.
+    //   1. Manual entry in the modal (provider typed it from EMR)
+    //   2. OCR off the uploaded PDF
+    //   3. Existing tenant_patients row matched by email OR normalized phone
+    //
+    // nicq test 2026-05-14: provider faith created a lab request for an
+    // existing patient (nic, in chart since 2026-04-13 with DOB 1983-01-13).
+    // Modal didn't require DOB + no PDF was uploaded → request stored with
+    // patient_dob=NULL → patient hit "we don't have your DOB" even though
+    // it's clearly in the chart. This fixes it at creation time.
+    let chartDob: string | null = null;
+    if (!dobClean && !ocrDob) {
+      try {
+        const emailLower = String(patient_email || '').trim().toLowerCase();
+        const phoneNormalized = String(patient_phone || '').replace(/[^0-9]/g, '');
+        let lookup = admin.from('tenant_patients')
+          .select('date_of_birth')
+          .not('date_of_birth', 'is', null)
+          .is('deleted_at', null)
+          .limit(1);
+        if (emailLower) {
+          const { data } = await admin.from('tenant_patients')
+            .select('date_of_birth')
+            .ilike('email', emailLower)
+            .not('date_of_birth', 'is', null)
+            .is('deleted_at', null)
+            .limit(1)
+            .maybeSingle();
+          chartDob = (data as any)?.date_of_birth || null;
+        }
+        if (!chartDob && phoneNormalized.length >= 10) {
+          // Phone match — normalize on both sides via a server-side eq
+          // would need an RPC; cheaper: fetch by ILIKE and filter.
+          const { data: phoneRows } = await admin.from('tenant_patients')
+            .select('phone, date_of_birth')
+            .not('date_of_birth', 'is', null)
+            .is('deleted_at', null);
+          chartDob = (phoneRows || []).find((r: any) =>
+            String(r.phone || '').replace(/[^0-9]/g, '') === phoneNormalized
+          )?.date_of_birth || null;
+        }
+        if (chartDob) {
+          console.log('[create-lab-request] DOB auto-pulled from tenant_patients chart for', patient_email || patient_phone, '→', chartDob);
+        }
+        void lookup;  // unused — kept to avoid eslint-no-unused warning on the typed builder
+      } catch (e) {
+        console.warn('[create-lab-request] chart-DOB lookup failed (non-blocking):', e);
+      }
+    }
+
+    const finalDob: string | null = dobClean || ocrDob || chartDob;
 
     // Generate one-time token
     const accessToken = crypto.randomUUID() + '-' + crypto.randomUUID().split('-')[0];
