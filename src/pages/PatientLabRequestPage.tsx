@@ -458,6 +458,9 @@ const PatientLabRequestPage: React.FC = () => {
                   <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Your appointment</p>
                   <p className="text-sm"><strong>When:</strong> {format(new Date(bookedDate + 'T12:00:00'), 'EEEE, MMM d')} at {bookedTime}</p>
                   {bookedAddress && <p className="text-sm"><strong>Where:</strong> {bookedAddress}</p>}
+                  {org.org_covers && (
+                    <p className="text-sm text-emerald-700"><strong>Cost to you:</strong> $0 · {org.name} is covering this visit</p>
+                  )}
                 </div>
               )}
 
@@ -688,8 +691,10 @@ const PatientLabRequestPage: React.FC = () => {
                     <span className="flex-1"><strong>Slots opened</strong> — afternoon times for this day are now first come, first served.</span>
                   </div>
                 )}
-                {/* Nudge: if first several slots are locked, surface an unlock callout */}
-                {slots.some(s => s.reason === 'tier_locked') && (
+                {/* Nudge: if first several slots are locked, surface an unlock callout.
+                    Suppressed when org covers the visit — no point pushing membership
+                    math at someone who isn't paying for this visit anyway. */}
+                {!orgCovers && slots.some(s => s.reason === 'tier_locked') && (
                   <div className="mt-2 bg-gradient-to-r from-amber-50 to-red-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex items-center gap-2">
                     <span>⚡</span>
                     <span className="flex-1">Early morning slots unlock with a membership · tap any 🔒 slot to see the math · or join the waitlist for a 5 PM-prior alert.</span>
@@ -758,7 +763,7 @@ const PatientLabRequestPage: React.FC = () => {
             ConveLabs link from the same office. Both visits run on one trip,
             both org-covered (when applicable), both get fasting-aware
             reminders independently. */}
-        {date && time && address.trim().length >= 10 && org?.default_billed_to === 'org' && (
+        {date && time && address.trim().length >= 10 && org?.org_covers && (
           <Card className="shadow-sm mb-4 border-emerald-200 bg-emerald-50/40">
             <CardContent className="p-5 space-y-3">
               <div>
@@ -835,7 +840,11 @@ const PatientLabRequestPage: React.FC = () => {
 
         <Button onClick={handleSubmit} disabled={!canSubmit || submitting}
           className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-14 text-base gap-2">
-          {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Scheduling…</> : <>Book my mobile draw <ArrowRight className="h-4 w-4" /></>}
+          {submitting
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> Scheduling…</>
+            : org.org_covers
+              ? <>Book my mobile draw · $0 due today <ArrowRight className="h-4 w-4" /></>
+              : <>Book my mobile draw <ArrowRight className="h-4 w-4" /></>}
         </Button>
 
         <p className="text-center text-xs text-gray-400 mt-4">

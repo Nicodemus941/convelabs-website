@@ -35,6 +35,8 @@ interface Org {
   name: string;
   billing_email?: string | null;
   contact_email?: string | null;
+  is_active?: boolean | null;
+  discovered_from_lab_order?: boolean | null;
 }
 
 interface LinkedOrg {
@@ -56,8 +58,13 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
     setLoading(true);
     try {
       const [{ data: orgs }, { data: links }, suggestedRes] = await Promise.all([
-        supabase.from('organizations').select('id, name, billing_email, contact_email')
-          .eq('is_active', true).order('name'),
+        // Show ALL orgs, including OCR-discovered ones (is_active=false). When
+        // admin assigns a discovered org we auto-promote it to active below.
+        // Without this, orgs auto-created from lab-order OCR (like "Private
+        // Internal MD") would silently never appear in the picker, forcing
+        // admin to re-create them by hand.
+        supabase.from('organizations').select('id, name, billing_email, contact_email, is_active, discovered_from_lab_order')
+          .order('name'),
         supabase.from('appointment_organizations').select('organization_id, role, notified_delivery_at')
           .eq('appointment_id', appointmentId),
         patientEmail
@@ -109,6 +116,14 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
   const addOrg = async (orgId: string, role: 'primary' | 'cc') => {
     setSubmittingId(orgId);
     try {
+      // Auto-promote OCR-discovered orgs to active on first manual assignment.
+      // An admin actively linking the org = signal that it's a real partner,
+      // not a cold lead. Keeps the picker clean without making the admin
+      // remember to flip is_active separately.
+      const orgRow = allOrgs.find(o => o.id === orgId);
+      if (orgRow && orgRow.is_active === false) {
+        await supabase.from('organizations').update({ is_active: true }).eq('id', orgId);
+      }
       // If adding as primary, demote existing primary to cc
       if (role === 'primary' && primaryOrg && primaryOrg.organization_id !== orgId) {
         await supabase.from('appointment_organizations')
@@ -296,6 +311,11 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
                         {linked && (
                           <Badge variant="outline" className={`text-[9px] ${linked.role === 'primary' ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-gray-100 text-gray-600 border-gray-300'}`}>
                             {linked.role === 'primary' ? 'primary' : 'cc'}
+                          </Badge>
+                        )}
+                        {o.is_active === false && (
+                          <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-800 border-amber-300">
+                            discovered
                           </Badge>
                         )}
                       </div>
