@@ -395,9 +395,37 @@ Deno.serve(async (req) => {
     const orgPays = effectiveBilling === 'org';
 
     if (orgPays) {
-      const orgChargeCents = (org.org_invoice_price_cents
-        ?? org.locked_price_cents
-        ?? MOBILE_PRICE_CENTS) as number;
+      // Pricing precedence:
+      //   1. org_invoice_price_cents (org-specific override) if > 0
+      //   2. locked_price_cents (fixed-price org) if > 0
+      //   3. partner service rates table by service_type (e.g.
+      //      partner-elite-medical-concierge = $72.25)
+      //   4. MOBILE_PRICE_CENTS as final fallback
+      // The previous code defaulted to MOBILE_PRICE_CENTS whenever the org
+      // had locked_price_cents=0 (which Elite Medical does — they have
+      // variable pricing per service type). That caused the Stripe step
+      // to either charge the wrong amount or silently skip.
+      let orgChargeCents = (org.org_invoice_price_cents || 0) > 0
+        ? org.org_invoice_price_cents as number
+        : (org.locked_price_cents || 0) > 0
+          ? org.locked_price_cents as number
+          : 0;
+      // If still 0, look up partner service-type price from price map below
+      if (orgChargeCents === 0) {
+        const partnerPrices: Record<string, number> = {
+          'partner-elite-medical-concierge': 7225,
+          'partner-nd-wellness': 8500,
+          'partner-naturamed': 12000,
+          'partner-restoration-place': 12500,
+          'partner-aristotle-education': 18500,
+        };
+        const lockedType = (org.locked_service_type || '').toLowerCase();
+        orgChargeCents = partnerPrices[lockedType] || MOBILE_PRICE_CENTS;
+      }
+      if (orgChargeCents <= 0) {
+        // Org explicitly free — log + skip the Stripe charge step
+        console.warn('[create-lab-request] org-pays selected but charge=0 — skipping Stripe Checkout for', org.name);
+      }
 
       let stripeUrl: string | null = null;
       try {
