@@ -33,6 +33,7 @@ interface ApptRow {
   service_type: string | null;
   total_amount: number | null;
   status: string;
+  payment_arrangement: string | null;
 }
 
 interface Take {
@@ -158,7 +159,7 @@ const PhlebEarningsLedger: React.FC = () => {
 
         const { data: appts } = await supabase
           .from('appointments')
-          .select('id, appointment_date, appointment_time, patient_name, service_type, total_amount, status')
+          .select('id, appointment_date, appointment_time, patient_name, service_type, total_amount, status, payment_arrangement')
           .eq('phlebotomist_id', user.id)
           .gte('appointment_date', since)
           .in('status', ['completed', 'confirmed', 'scheduled'])
@@ -166,7 +167,13 @@ const PhlebEarningsLedger: React.FC = () => {
           .limit(200);
 
         const apptList = ((appts as ApptRow[]) || []).filter(
-          (a) => !(a.patient_name || '').toLowerCase().includes('block time')
+          (a) =>
+            !(a.patient_name || '').toLowerCase().includes('block time')
+            // Hide prepaid standing-orders / visit-bundles / comps from the
+            // ledger — they're already settled outside the per-visit flow.
+            && a.payment_arrangement !== 'standing_order_prepaid'
+            && a.payment_arrangement !== 'bundle_prepaid'
+            && a.payment_arrangement !== 'comp'
         );
         if (apptList.length === 0) {
           setRows([]);
