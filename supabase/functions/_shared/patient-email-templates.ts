@@ -44,10 +44,11 @@ function shell(params: {
   foundingSeatsRemaining?: number;
 }): string {
   const seatsLine = (params.foundingSeatsRemaining && params.foundingSeatsRemaining > 0 && params.foundingSeatsRemaining < 50)
-    ? `<p style="margin:0 0 6px;color:#92400E;font-size:11px;line-height:1.5;font-weight:600;">
-        ✦ Only ${params.foundingSeatsRemaining} Founding VIP ${params.foundingSeatsRemaining === 1 ? 'seat' : 'seats'} left ·
-        <a href="https://www.convelabs.com/pricing" style="color:#B91C1C;text-decoration:underline;">$199 locked for life →</a>
-       </p>`
+    ? `<div style="margin:0 0 14px;padding:10px 16px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;display:inline-block;">
+         <span style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:#92400E;font-weight:bold;">✦ Founding 50 · ${params.foundingSeatsRemaining} ${params.foundingSeatsRemaining === 1 ? 'seat remains' : 'seats remain'}</span>
+         <span style="display:inline-block;margin-left:8px;color:#6B4513;font-size:12px;">·</span>
+         <a href="https://www.convelabs.com/pricing" style="margin-left:6px;color:#B91C1C;text-decoration:none;font-size:12px;font-weight:600;border-bottom:1px solid #B91C1C;">Lock $199 for life →</a>
+       </div>`
     : '';
   return `<!DOCTYPE html>
 <html>
@@ -123,19 +124,24 @@ export function renderAppointmentConfirmation(p: CommonPatientParams & {
   foundingSeatsRemaining?: number;
 }): string {
   const phone = p.supportPhone || DEFAULT_SUPPORT_PHONE;
-  // Member savings chip — shown ABOVE the success card so the customer
-  // sees the perk delivered before they scroll to the visit details.
+  // Member savings panel — luxury treatment with cream + gold accents so
+  // it reads as a benefit STATEMENT, not a discount coupon. Sits above
+  // the visit details so the patient sees the perk delivered before any
+  // operational copy. Hormozi: "Receipt should feel like an unboxing,
+  // not an invoice."
   const savingsBlock = (p.savingsCents && p.savingsCents > 0) ? `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ECFDF5;border:1px solid #A7F3D0;border-radius:12px;margin-bottom:20px;">
-      <tr><td style="padding:14px 18px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#FFFBEB 0%,#FFFFFF 100%);border:1px solid #FCD34D;border-radius:14px;margin-bottom:24px;box-shadow:0 2px 8px rgba(180,140,40,0.06);">
+      <tr><td style="padding:18px 22px;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
             <td style="vertical-align:middle;">
-              <div style="font-family:Georgia,'Times New Roman',serif;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;color:#047857;font-weight:bold;margin-bottom:2px;">
-                ${p.memberTierLabel ? `${p.memberTierLabel} Member savings` : 'Member savings'}
+              <div style="font-family:Georgia,'Times New Roman',serif;font-size:10px;letter-spacing:3.5px;text-transform:uppercase;color:#92400E;font-weight:bold;margin-bottom:6px;">
+                ${p.memberTierLabel ? `✦ ${p.memberTierLabel} member · benefits applied` : '✦ Member benefits applied'}
               </div>
-              <div style="color:#065F46;font-size:18px;font-weight:bold;">You saved $${(p.savingsCents / 100).toFixed(0)} on this visit</div>
-              ${p.ytdSavingsCents && p.ytdSavingsCents > 0 ? `<div style="color:#047857;font-size:12px;margin-top:2px;">$${(p.ytdSavingsCents / 100).toFixed(0)} saved year-to-date</div>` : ''}
+              <div style="font-family:Georgia,'Times New Roman',serif;color:#111827;font-size:22px;font-weight:normal;letter-spacing:-0.2px;line-height:1.25;">
+                You saved <span style="color:#B45309;font-weight:bold;">$${(p.savingsCents / 100).toFixed(0)}</span> on this visit.
+              </div>
+              ${p.ytdSavingsCents && p.ytdSavingsCents > 0 ? `<div style="color:#6B4513;font-size:13px;margin-top:6px;letter-spacing:0.2px;"><span style="opacity:0.7;">Year-to-date</span> · <strong>$${(p.ytdSavingsCents / 100).toFixed(0)} saved</strong></div>` : ''}
             </td>
           </tr>
         </table>

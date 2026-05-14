@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import StaffRefundButton from '@/components/admin/StaffRefundButton';
 import BulkAssignOrgCard from './BulkAssignOrgCard';
+import ResyncCardTotalsCard from './ResyncCardTotalsCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -104,6 +105,7 @@ const OperationsPanel: React.FC = () => {
         <TabsContent value="appointments">
           <div className="space-y-4">
             <BulkAssignOrgCard />
+            <ResyncCardTotalsCard />
             <AppointmentFixer />
           </div>
         </TabsContent>

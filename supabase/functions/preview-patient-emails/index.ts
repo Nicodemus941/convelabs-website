@@ -71,22 +71,57 @@ Deno.serve(async (req) => {
       address: '1234 Oak Street, Orlando, FL 32801',
     };
 
-    // 1. Confirmation
+    // 1. Confirmation — non-member preview (no savings panel, no scarcity)
     await send(
       to,
-      'Preview:Your ConveLabs appointment is confirmed',
+      'Preview 1/4 · Confirmation · Non-member (baseline)',
       renderAppointmentConfirmation({
         ...common,
         manageUrl: 'https://www.convelabs.com/dashboard',
         fastingRequired: true,
       }),
-      'preview_confirmation'
+      'preview_confirmation_baseline'
     );
 
-    // 2. Reminder
+    // 1b. Confirmation — VIP member with savings + Founding-50 scarcity
+    //     This is the "with new perks" preview the owner asked for.
     await send(
       to,
-      'Preview:Reminder: your ConveLabs appointment is tomorrow at 8:00 AM',
+      'Preview 2/4 · Confirmation · VIP member (savings + Founding scarcity)',
+      renderAppointmentConfirmation({
+        ...common,
+        patientName: 'Mariela Sadrameli',
+        manageUrl: 'https://www.convelabs.com/dashboard/patient',
+        fastingRequired: false,
+        savingsCents: 3500,            // $35 saved this visit at VIP tier
+        ytdSavingsCents: 18500,        // $185 saved YTD
+        memberTierLabel: 'VIP',
+        foundingSeatsRemaining: 48,    // 2 claimed → 48 left
+      }),
+      'preview_confirmation_vip_founding'
+    );
+
+    // 1c. Confirmation — Concierge member, deeper savings, same footer
+    await send(
+      to,
+      'Preview 3/4 · Confirmation · Concierge member (deep savings)',
+      renderAppointmentConfirmation({
+        ...common,
+        patientName: 'Aditya Patel',
+        manageUrl: 'https://www.convelabs.com/dashboard/patient',
+        fastingRequired: true,
+        savingsCents: 5100,            // $51 saved this visit at Concierge tier
+        ytdSavingsCents: 30600,        // $306 saved YTD
+        memberTierLabel: 'Concierge',
+        foundingSeatsRemaining: 48,
+      }),
+      'preview_confirmation_concierge'
+    );
+
+    // 2. Reminder — kept for the visual comparison
+    await send(
+      to,
+      'Preview 4/4 · 24h Reminder',
       renderAppointmentReminder({
         ...common,
         hasLabOrder: false,
@@ -97,21 +132,7 @@ Deno.serve(async (req) => {
       'preview_reminder'
     );
 
-    // 3. Specimen delivered
-    await send(
-      to,
-      'Preview:Your specimens have been delivered to LabCorp',
-      renderSpecimenDelivered({
-        ...common,
-        labName: 'LabCorp',
-        trackingId: 'LC-2026-04-30-8841',
-        tubeCount: 3,
-        resultsTimeline: '48-72 hours',
-      }),
-      'preview_specimen'
-    );
-
-    return new Response(JSON.stringify({ ok: true, sent_to: to, count: 3 }), {
+    return new Response(JSON.stringify({ ok: true, sent_to: to, count: 4 }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {
