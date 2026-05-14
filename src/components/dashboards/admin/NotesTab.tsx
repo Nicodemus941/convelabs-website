@@ -41,8 +41,32 @@ const ACTIVITY_TYPES = [
   { value: 'lab_order_missing', label: 'Lab Order Not Received', icon: AlertTriangle, color: 'bg-red-50 text-red-700' },
   { value: 'cancellation', label: 'Appointment Cancelled', icon: XCircle, color: 'bg-red-50 text-red-700' },
   { value: 'reschedule', label: 'Appointment Rescheduled', icon: Calendar, color: 'bg-indigo-50 text-indigo-700' },
+  // NEW Hormozi categories — every operator interaction must have a home
+  { value: 'complaint', label: 'Complaint', icon: AlertTriangle, color: 'bg-rose-50 text-rose-800 border-rose-300' },
+  { value: 'results_request', label: 'Results Request', icon: FileText, color: 'bg-cyan-50 text-cyan-700' },
+  { value: 'inquiry', label: 'Inquiry / New Patient Q', icon: MessageSquare, color: 'bg-sky-50 text-sky-700' },
+  { value: 'owner_call', label: 'Owner Personal Call', icon: Phone, color: 'bg-fuchsia-50 text-fuchsia-700' },
+  { value: 'message_inbound', label: 'Inbound Message', icon: Mail, color: 'bg-lime-50 text-lime-700' },
+  { value: 'appointment_confirmed', label: 'Appt Confirmed', icon: Calendar, color: 'bg-green-50 text-green-700' },
   { value: 'system', label: 'System Event', icon: Clock, color: 'bg-gray-50 text-gray-600' },
   { value: 'note', label: 'General Note', icon: FileText, color: 'bg-gray-50 text-gray-700' },
+];
+
+// Hormozi daily target: 50 documented touches/day. Operators only do what
+// they can measure; this number drives the scoreboard at the top of the page.
+const DAILY_TOUCH_GOAL = 50;
+
+// Morning checklist — Naquala completes these each day before 9 AM. Items
+// here become her routing so she doesn't have to remember what comes next.
+const MORNING_CHECKLIST = [
+  { id: 'voicemail_review', label: 'Review overnight voicemails (return calls or schedule callbacks)', expectedActivity: 'voicemail' },
+  { id: 'sms_review', label: 'Reply to overnight SMS in Twilio inbox', expectedActivity: 'sms' },
+  { id: 'email_review', label: 'Clear overnight email inbox (results requests, inquiries, complaints)', expectedActivity: 'email' },
+  { id: 'confirm_today', label: 'Confirm all of today\'s appointments (text + call for high-value visits)', expectedActivity: 'appointment_confirmed' },
+  { id: 'no_show_followup', label: 'Follow up on yesterday\'s no-shows & cancellations (reschedule)', expectedActivity: 'contact_attempt' },
+  { id: 'provider_portal_check', label: 'Check provider portal for new lab orders (route to right phleb)', expectedActivity: 'specimen_request' },
+  { id: 'unpaid_invoices', label: 'Review Stripe unpaid invoices — text/email patients owing money', expectedActivity: 'contact_attempt' },
+  { id: 'pheb_huddle', label: '5-min standup with phleb on the day\'s route + any prep needs', expectedActivity: 'note' },
 ];
 
 const PRIORITY_COLOR: Record<string, string> = {
@@ -389,6 +413,155 @@ const NotesTab: React.FC = () => {
           <Button variant="outline" size="sm" onClick={fetchActivities} className="gap-1"><RefreshCw className="h-4 w-4" /> Refresh</Button>
         </div>
       </div>
+
+      {/* ─────────── HORMOZI DAILY SCOREBOARD ───────────
+          Single sentence answers: "How is today going?" Updated in real-time
+          as Naquala logs activities. Tone color flips red/amber/green based
+          on pace vs daily 50-touch goal. */}
+      {(() => {
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const todayActivities = activities.filter(a => (a.created_at || '').startsWith(todayStr));
+        const countByType: Record<string, number> = {};
+        for (const a of todayActivities) {
+          countByType[a.activity_type] = (countByType[a.activity_type] || 0) + 1;
+        }
+        const totalToday = todayActivities.length;
+        const pct = Math.round((totalToday / DAILY_TOUCH_GOAL) * 100);
+        const tone = pct >= 100 ? 'emerald' : pct >= 50 ? 'amber' : 'red';
+        const now = new Date();
+        const hoursIntoDay = now.getHours() + now.getMinutes() / 60;
+        const expectedByNow = Math.max(0, Math.round(DAILY_TOUCH_GOAL * Math.min(1, (hoursIntoDay - 8) / 9))); // 8am→5pm
+        return (
+          <div className={`rounded-xl border-2 p-4 ${
+            tone === 'emerald' ? 'bg-gradient-to-r from-emerald-50 to-emerald-100 border-emerald-300' :
+            tone === 'amber' ? 'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-300' :
+            'bg-gradient-to-r from-red-50 to-red-100 border-red-300'
+          }`}>
+            <div className="flex items-baseline justify-between mb-2">
+              <div>
+                <p className={`text-xs uppercase tracking-wider font-bold ${tone === 'emerald' ? 'text-emerald-800' : tone === 'amber' ? 'text-amber-800' : 'text-red-800'}`}>
+                  Today's scoreboard · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+                </p>
+                <p className={`text-3xl font-bold ${tone === 'emerald' ? 'text-emerald-900' : tone === 'amber' ? 'text-amber-900' : 'text-red-900'}`}>
+                  {totalToday} <span className="text-base font-normal opacity-70">/ {DAILY_TOUCH_GOAL} touches</span>
+                </p>
+              </div>
+              <div className="text-right">
+                <p className={`text-xs ${tone === 'emerald' ? 'text-emerald-700' : tone === 'amber' ? 'text-amber-700' : 'text-red-700'}`}>
+                  Pace target by now: {expectedByNow}
+                </p>
+                <p className={`text-lg font-bold ${
+                  totalToday >= expectedByNow ? 'text-emerald-700' :
+                  totalToday >= expectedByNow * 0.7 ? 'text-amber-700' : 'text-red-700'
+                }`}>
+                  {totalToday >= expectedByNow ? `+${totalToday - expectedByNow} ahead` :
+                   `${expectedByNow - totalToday} behind`}
+                </p>
+              </div>
+            </div>
+            {/* Per-category breakdown */}
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                ['call', 'Calls', countByType.call || 0],
+                ['sms', 'SMS', countByType.sms || 0],
+                ['email', 'Emails', countByType.email || 0],
+                ['voicemail', 'Voicemails', countByType.voicemail || 0],
+                ['appointment_confirmed', 'Confirmed', countByType.appointment_confirmed || 0],
+                ['inquiry', 'Inquiries', countByType.inquiry || 0],
+                ['complaint', 'Complaints', countByType.complaint || 0],
+                ['results_request', 'Results req', countByType.results_request || 0],
+                ['owner_call', 'Owner calls', countByType.owner_call || 0],
+              ].map(([key, lbl, count]) => (
+                <span key={key as string} className="text-[11px] bg-white/70 border border-gray-300 rounded-full px-2.5 py-0.5">
+                  <strong>{count}</strong> {lbl}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ─────────── MORNING CHECKLIST ───────────
+          Hormozi: "The first 60 minutes of the day own the next 480."
+          Each item maps to a documented activity Naquala should log. */}
+      {(() => {
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const todayActivities = activities.filter(a => (a.created_at || '').startsWith(todayStr));
+        const hasTypeToday = (type: string) => todayActivities.some(a => a.activity_type === type);
+        const completedCount = MORNING_CHECKLIST.filter(item => hasTypeToday(item.expectedActivity)).length;
+        const allDone = completedCount === MORNING_CHECKLIST.length;
+        return (
+          <Card className={`shadow-sm border ${allDone ? 'border-emerald-300 bg-emerald-50/30' : 'border-blue-200 bg-blue-50/30'}`}>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="font-bold text-sm flex items-center gap-1.5">
+                  ☀️ Morning ritual
+                  <span className={`text-xs font-normal ${allDone ? 'text-emerald-700' : 'text-blue-700'}`}>
+                    · {completedCount}/{MORNING_CHECKLIST.length} done
+                  </span>
+                </h2>
+                <span className="text-[10px] uppercase tracking-wider text-gray-500">Before 9 AM ET</span>
+              </div>
+              <ul className="space-y-1 text-xs">
+                {MORNING_CHECKLIST.map(item => {
+                  const done = hasTypeToday(item.expectedActivity);
+                  return (
+                    <li key={item.id} className={`flex items-start gap-2 ${done ? 'text-emerald-800' : 'text-gray-700'}`}>
+                      <span className={`mt-0.5 flex-shrink-0 ${done ? '' : 'opacity-30'}`}>{done ? '✅' : '⬜'}</span>
+                      <span className={done ? 'line-through opacity-70' : ''}>{item.label}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {allDone && (
+                <p className="text-[11px] text-emerald-700 mt-2 font-medium">🎯 Morning routine complete — full day ahead.</p>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
+      {/* ─────────── QUICK-LOG BAR ───────────
+          One-tap logging for the most common activity types. Speed > polish. */}
+      <Card className="shadow-sm">
+        <CardContent className="p-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs font-bold text-gray-700">⚡ Quick log:</span>
+            <span className="text-[11px] text-gray-500">tap once = open a pre-filled note</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { type: 'call', label: '📞 Call', desc: 'Phone call: ' },
+              { type: 'voicemail', label: '🎙️ Voicemail', desc: 'Left voicemail for: ' },
+              { type: 'sms', label: '💬 SMS', desc: 'SMS to: ' },
+              { type: 'email', label: '✉️ Email', desc: 'Email to: ' },
+              { type: 'inquiry', label: '❓ Inquiry', desc: 'Inquiry from: ' },
+              { type: 'complaint', label: '⚠️ Complaint', desc: 'Complaint from: ' },
+              { type: 'results_request', label: '📋 Results', desc: 'Results request from: ' },
+              { type: 'owner_call', label: '👤 Owner call', desc: 'Personal call for Nico from: ' },
+              { type: 'appointment_confirmed', label: '✅ Confirmed', desc: 'Confirmed appt for: ' },
+              { type: 'specimen_request', label: '🧪 Specimen', desc: 'Specimen request for: ' },
+            ].map(b => (
+              <button
+                key={b.type}
+                type="button"
+                onClick={() => {
+                  setNoteType(b.type);
+                  setNoteDescription(b.desc);
+                  setShowAddNote(true);
+                  setTimeout(() => {
+                    const ta = document.querySelector('textarea');
+                    if (ta) (ta as HTMLTextAreaElement).focus();
+                  }, 100);
+                }}
+                className="text-xs px-2.5 py-1 rounded-full bg-white border border-gray-300 hover:border-[#B91C1C] hover:bg-red-50 hover:text-[#B91C1C] transition"
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* View tabs */}
       <div className="flex gap-1 border-b">
