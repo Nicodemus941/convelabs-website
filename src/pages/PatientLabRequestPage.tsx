@@ -56,6 +56,8 @@ interface LabRequestData {
     appointment_id: string | null;
     /** Server-detected membership tier from patient_email → user_memberships. */
     detected_tier?: 'none' | 'regular_member' | 'vip' | 'concierge';
+    /** Pre-filled from tenant_patients chart so we don't ask twice. */
+    patient_address?: string | null;
     scheduled_appointment?: {
       date: string;
       time: string;
@@ -157,6 +159,11 @@ const PatientLabRequestPage: React.FC = () => {
         if (!resp.ok) throw new Error(j.error || 'Link not found');
         setData(j);
         if (j.request.already_scheduled) setSuccess(true);
+        // Pre-fill address from the patient's chart (tenant_patients). They can
+        // still edit if they want us to come somewhere else.
+        if (j.request?.patient_address && !address) {
+          setAddress(j.request.patient_address);
+        }
 
         // Fire-and-forget: stamp patient_viewed_at so provider dashboard's
         // timeline shows "Patient opened the booking page" in real time.
@@ -583,7 +590,9 @@ const PatientLabRequestPage: React.FC = () => {
             <div>
               <p className="font-semibold text-sm">We come to you — 100% mobile service</p>
               <p className="text-xs text-gray-600">
-                {org.org_covers ? 'Covered by ' + org.name : `${patientPrice} · billed by ConveLabs`}
+                {org.org_covers
+                  ? `${org.name} is covering this visit — $0 due from you today`
+                  : `${patientPrice} · billed by ConveLabs`}
               </p>
             </div>
           </CardContent>
@@ -722,7 +731,9 @@ const PatientLabRequestPage: React.FC = () => {
           );
         })()}
 
-        {/* Address — required because we're mobile-only, powered by Google Places */}
+        {/* Address — required because we're mobile-only, powered by Google Places.
+            Pre-filled from the patient's chart when we have it on file. They can
+            still edit if today's visit needs to happen at a different location. */}
         <Card className="shadow-sm mb-4">
           <CardContent className="p-5 space-y-3">
             <div>
@@ -732,7 +743,13 @@ const PatientLabRequestPage: React.FC = () => {
                 onChange={setAddress}
                 placeholder="Start typing your address…"
               />
-              <p className="text-[11px] text-gray-500 mt-1">Home, office, hotel, wherever you'll be at your appointment time.</p>
+              {request.patient_address && address === request.patient_address ? (
+                <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Address on file — edit if you'd like us to come somewhere else today.
+                </p>
+              ) : (
+                <p className="text-[11px] text-gray-500 mt-1">Home, office, hotel, wherever you'll be at your appointment time.</p>
+              )}
             </div>
           </CardContent>
         </Card>

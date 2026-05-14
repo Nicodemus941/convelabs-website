@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: request } = await admin
       .from('patient_lab_requests')
-      .select('id, organization_id, patient_name, patient_email, patient_phone, lab_order_file_path, lab_order_panels, fasting_required, urine_required, gtt_required, draw_by_date, next_doctor_appt_date, next_doctor_appt_notes, access_token_expires_at, status, appointment_id, patient_scheduled_at')
+      .select('id, organization_id, patient_name, patient_email, patient_phone, lab_order_file_path, lab_order_panels, fasting_required, urine_required, gtt_required, draw_by_date, next_doctor_appt_date, next_doctor_appt_notes, access_token_expires_at, status, appointment_id, patient_scheduled_at, billed_to, provider_payment_status')
       .eq('access_token', access_token)
       .maybeSingle();
 
@@ -77,6 +77,48 @@ Deno.serve(async (req) => {
     // lab-request page unlocks member slots without requiring sign-in first.
     const detected_tier = await lookupTierByEmail(admin, request.patient_email);
 
+    // Pre-fill the booking address from the patient's chart (tenant_patients).
+    // Patient can still override at submit if they want us to come elsewhere.
+    // We match on email first, then phone as fallback.
+    let patient_address: string | null = null;
+    try {
+      const emailLc = (request.patient_email || '').toLowerCase().trim();
+      const phoneDigits = (request.patient_phone || '').replace(/\D/g, '');
+      let chartRow: any = null;
+      if (emailLc) {
+        const { data } = await admin
+          .from('tenant_patients')
+          .select('address, city, state, zipcode')
+          .ilike('email', emailLc)
+          .limit(1)
+          .maybeSingle();
+        chartRow = data;
+      }
+      if (!chartRow && phoneDigits) {
+        const { data } = await admin
+          .from('tenant_patients')
+          .select('address, city, state, zipcode')
+          .or(`phone.eq.${phoneDigits},phone.eq.+1${phoneDigits}`)
+          .limit(1)
+          .maybeSingle();
+        chartRow = data;
+      }
+      if (chartRow?.address) {
+        const parts = [chartRow.address, chartRow.city, chartRow.state, chartRow.zipcode]
+          .map((p: string | null) => (p || '').trim())
+          .filter(Boolean);
+        patient_address = parts.join(', ');
+      }
+    } catch { /* non-blocking */ }
+
+    // Per-request override beats org default. If the provider already paid
+    // for this specific request, OR the request was explicitly billed to org,
+    // org_covers is true regardless of org.default_billed_to.
+    const requestBilledToOrg = String(request.billed_to || '') === 'org';
+    const providerAlreadyPaid = String(request.provider_payment_status || '') === 'paid';
+    const orgDefaultCovers = org?.default_billed_to === 'org' || org?.member_stacking_rule === 'org_covers';
+    const org_covers = providerAlreadyPaid || requestBilledToOrg || orgDefaultCovers;
+
     return new Response(JSON.stringify({
       request: {
         id: request.id,
@@ -96,6 +138,7 @@ Deno.serve(async (req) => {
         already_scheduled: request.status !== 'pending_schedule',
         scheduled_appointment,
         detected_tier,  // 'none' | 'regular_member' | 'vip' | 'concierge'
+        patient_address,  // pre-fill from chart; patient can override
       },
       org: {
         id: org?.id,
@@ -104,7 +147,7 @@ Deno.serve(async (req) => {
         default_billed_to: org?.default_billed_to,
         member_stacking_rule: org?.member_stacking_rule,
         patient_price_cents: org?.locked_price_cents,
-        org_covers: org?.default_billed_to === 'org' || org?.member_stacking_rule === 'org_covers',
+        org_covers,
       },
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
