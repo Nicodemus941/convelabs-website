@@ -74,12 +74,26 @@ const PhlebEarningsLedger: React.FC = () => {
     cleared_count: number; cleared_cents: number;
     pending_count: number; pending_cents: number;
   } | null>(null);
+  // In-page confirm modal — native confirm() is unreliable on mobile PWA.
+  // Holds the preview from the dry-run so the user sees exactly what will move.
+  const [pendingSweep, setPendingSweep] = useState<{
+    scope: 'week' | 'all';
+    sinceDate: string | null;
+    scopeLabel: string;
+    wouldCount: number;
+    wouldCents: number;
+    platformAvail: number;
+    pendingHeldCount: number;
+    pendingHeldCents: number;
+  } | null>(null);
 
   /**
    * Sweep cleared payouts. Optional `scope` filters by appointment date:
    *   'week'  → only this calendar week (Mon 00:00 onward)
    *   'all'   → every cleared payout regardless of date
    */
+  // STAGE 1: Preview — fires the dry-run, then opens the in-page confirm modal
+  // (or surfaces the inline banner if balance is insufficient / nothing cleared).
   const handleSweep = async (scope: 'week' | 'all' = 'all') => {
     if (sweeping) return;
     let sinceDate: string | null = null;
@@ -97,21 +111,19 @@ const PhlebEarningsLedger: React.FC = () => {
 
     setSweeping(scope);
     setSweepResult(null);
+    setPendingSweep(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
         setSweepResult({ kind: 'error', text: 'Not signed in. Refresh the page and try again.' });
         return;
       }
-
-      // Dry-run preview (v4 always returns 200 with the numbers + warnings)
       const dryResp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ dry_run: true, since_date: sinceDate }),
       });
       const dryJ = await dryResp.json();
-
       if (dryJ?.error) {
         setSweepResult({ kind: 'error', text: dryJ.message || dryJ.error });
         return;
@@ -124,8 +136,6 @@ const PhlebEarningsLedger: React.FC = () => {
         setSweepResult({ kind: 'info', text: dryJ.message || `Nothing cleared to sweep in ${scopeLabel}.` });
         return;
       }
-
-      // If balance insufficient, surface inline (NOT a blocking dialog)
       if (dryJ.sufficient_balance === false) {
         setSweepResult({
           kind: 'error',
@@ -133,19 +143,32 @@ const PhlebEarningsLedger: React.FC = () => {
         });
         return;
       }
+      // Open the in-page modal — DON'T fire the transfer yet
+      setPendingSweep({
+        scope, sinceDate, scopeLabel,
+        wouldCount, wouldCents, platformAvail,
+        pendingHeldCount: Number(dryJ.pending_count || 0),
+        pendingHeldCents: Number(dryJ.pending_cents || 0),
+      });
+    } catch (e: any) {
+      setSweepResult({ kind: 'error', text: e?.message || 'Pre-flight failed (network error). Check connection and retry.' });
+    } finally {
+      setSweeping(null);
+    }
+  };
 
-      // Confirm dialog
-      const ok = window.confirm(
-        `Transfer $${(wouldCents / 100).toFixed(2)} (${scopeLabel}) to your Stripe Connect account?\n\n` +
-        `• Visits being swept: ${wouldCount}\n` +
-        `• Pending (held for patient payment): ${Number(dryJ.pending_count || 0)} = $${(Number(dryJ.pending_cents || 0) / 100).toFixed(2)}\n` +
-        `• Platform balance: $${(platformAvail / 100).toFixed(2)} → $${((platformAvail - wouldCents) / 100).toFixed(2)} after sweep ($100 safety buffer enforced)`
-      );
-      if (!ok) {
-        setSweepResult({ kind: 'info', text: 'Sweep cancelled.' });
+  // STAGE 2: User confirmed the modal — fire the live transfer.
+  const executeSweep = async () => {
+    if (!pendingSweep || sweeping) return;
+    const { scope, sinceDate, scopeLabel, wouldCents } = pendingSweep;
+    setSweeping(scope);
+    setPendingSweep(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setSweepResult({ kind: 'error', text: 'Session expired. Refresh and try again.' });
         return;
       }
-
       const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/sweep-phleb-owed-payouts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
@@ -164,7 +187,7 @@ const PhlebEarningsLedger: React.FC = () => {
           : '';
         setSweepResult({
           kind: 'success',
-          text: `Swept $${(j.total_cents / 100).toFixed(2)} (${scopeLabel}) — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}. Stripe transfer ID: ${j.stripe_transfer_id}.${after}`,
+          text: `✓ Sent $${(j.total_cents / 100).toFixed(2)} (${scopeLabel}) to your Stripe Connect — ${j.swept_count} visit${j.swept_count === 1 ? '' : 's'}. Transfer ID: ${j.stripe_transfer_id}.${after}`,
         });
         toast.success(`Swept $${(j.total_cents / 100).toFixed(0)} to your Stripe`);
       }
@@ -347,27 +370,35 @@ const PhlebEarningsLedger: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => handleSweep('week')}
-                disabled={!!sweeping}
-                size="sm"
-                className="flex-1 bg-white text-emerald-700 hover:bg-emerald-50 font-semibold gap-1.5"
-              >
-                {sweeping === 'week' ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-                {sweeping === 'week' ? 'Working…' : 'Sweep this week'}
-              </Button>
-              <Button
-                onClick={() => handleSweep('all')}
-                disabled={!!sweeping}
-                size="sm"
-                variant="outline"
-                className="flex-1 bg-emerald-700/30 border-emerald-200 text-white hover:bg-emerald-700/50 font-semibold gap-1.5"
-              >
-                {sweeping === 'all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
-                {sweeping === 'all' ? 'Working…' : 'Sweep all cleared'}
-              </Button>
-            </div>
+            {/* Primary CTA — single big button for the common case */}
+            <Button
+              onClick={() => handleSweep('week')}
+              disabled={!!sweeping || !!pendingSweep}
+              className={`w-full font-bold gap-1.5 h-12 text-sm transition-all ${
+                sweeping === 'week'
+                  ? 'bg-emerald-100 text-emerald-700 ring-2 ring-white animate-pulse'
+                  : 'bg-white text-emerald-700 hover:bg-emerald-50'
+              }`}
+            >
+              {sweeping === 'week' ? (
+                <><Loader2 className="h-5 w-5 animate-spin" /> Checking Stripe…</>
+              ) : (
+                <><DollarSign className="h-5 w-5" /> Sweep this week</>
+              )}
+            </Button>
+            {/* Secondary text-link — small, separate, no spinner unless its own scope is firing */}
+            <button
+              type="button"
+              onClick={() => handleSweep('all')}
+              disabled={!!sweeping || !!pendingSweep}
+              className={`w-full text-center text-[11px] mt-2 transition-opacity ${
+                sweeping === 'all'
+                  ? 'text-white font-semibold'
+                  : 'text-emerald-100 hover:text-white underline-offset-2 hover:underline'
+              } disabled:opacity-50`}
+            >
+              {sweeping === 'all' ? '… checking all cleared' : 'or: sweep all cleared payouts'}
+            </button>
 
             {/* Inline result banner — persistent until next action */}
             {sweepResult && (
@@ -479,6 +510,82 @@ const PhlebEarningsLedger: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* In-page sweep confirm modal — replaces native confirm() which can be
+          missed on mobile / PWA. Stays visible until user explicitly chooses. */}
+      {pendingSweep && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/60 flex items-end sm:items-center justify-center p-4"
+          onClick={() => setPendingSweep(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="sweep-confirm-title"
+          >
+            <div className="text-center space-y-1">
+              <div className="text-3xl">💸</div>
+              <h2 id="sweep-confirm-title" className="text-lg font-bold text-gray-900">
+                Confirm transfer
+              </h2>
+              <p className="text-xs text-gray-500">{pendingSweep.scopeLabel}</p>
+            </div>
+
+            <div className="rounded-xl bg-emerald-50 border-2 border-emerald-300 p-4 text-center">
+              <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Amount to your Stripe</div>
+              <div className="text-3xl font-bold text-emerald-900">
+                ${(pendingSweep.wouldCents / 100).toFixed(2)}
+              </div>
+              <div className="text-[11px] text-emerald-700">
+                {pendingSweep.wouldCount} visit{pendingSweep.wouldCount === 1 ? '' : 's'}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-700 space-y-1.5">
+              <div className="flex justify-between">
+                <span>Platform balance now</span>
+                <span className="font-medium">${(pendingSweep.platformAvail / 100).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>After this sweep</span>
+                <span className="font-medium text-gray-900">${((pendingSweep.platformAvail - pendingSweep.wouldCents) / 100).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-gray-500 italic">
+                <span>$100 safety buffer enforced</span>
+              </div>
+              {pendingSweep.pendingHeldCount > 0 && (
+                <div className="border-t border-gray-200 pt-1.5 mt-1.5 flex justify-between">
+                  <span>Held (patient not paid yet)</span>
+                  <span>${(pendingSweep.pendingHeldCents / 100).toFixed(2)} · {pendingSweep.pendingHeldCount} visit{pendingSweep.pendingHeldCount === 1 ? '' : 's'}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={() => { setPendingSweep(null); setSweepResult({ kind: 'info', text: 'Sweep cancelled.' }); }}
+                variant="outline"
+                className="flex-1"
+                disabled={!!sweeping}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={executeSweep}
+                disabled={!!sweeping}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5"
+              >
+                {sweeping ? <Loader2 className="h-4 w-4 animate-spin" /> : <DollarSign className="h-4 w-4" />}
+                {sweeping ? 'Transferring…' : `Send $${(pendingSweep.wouldCents / 100).toFixed(0)} now`}
+              </Button>
+            </div>
+            <p className="text-[10px] text-center text-gray-400">
+              Funds land per your Stripe Connect payout schedule (typically 2 days).
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
