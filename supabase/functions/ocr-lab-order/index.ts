@@ -990,6 +990,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    // FULL response shape — create-lab-request + future callers consume
+    // `patient.dateOfBirth`, `urineRequired`, `gttRequired`, and `fullText`
+    // off this object. Previously these were silently dropped because the
+    // response only carried `panels` + `textPreview`, which made the DOB
+    // auto-stamp in create-lab-request a no-op (John Struck / Michael
+    // Percopo bug 2026-05-13). Always return what we extracted.
     return new Response(JSON.stringify({
       ok: true,
       appointmentId: targetId,
@@ -997,6 +1003,12 @@ Deno.serve(async (req) => {
       panelsDetected: result.panels.length,
       panels: result.panels,
       fastingDetected,
+      fastingRequired: fastingDetected,                    // alias for callers expecting the older field name
+      urineRequired: !!(result as any).urineRequired,
+      gttRequired: !!(result as any).gttRequired,
+      patient: result.patient || null,                     // { dateOfBirth, sex/gender, etc. } — used by create-lab-request to stamp patient_dob
+      provider: (result as any).provider || null,          // org-match info
+      fullText: result.text || '',                          // create-lab-request stores in lab_order_full_text
       textPreview: result.text.substring(0, 300),
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
