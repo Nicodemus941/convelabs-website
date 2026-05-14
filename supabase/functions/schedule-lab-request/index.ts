@@ -88,7 +88,30 @@ Deno.serve(async (req) => {
       }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const orgCovers = org.default_billed_to === 'org' || org.member_stacking_rule === 'org_covers';
+    // ── BILLING RESOLUTION (Hormozi 2026-05-14 fix) ──────────────────
+    // The org's default_billed_to is just the DEFAULT. CreateLabRequestModal
+    // lets the provider override per-request: a patient-pays default org can
+    // choose to cover a specific patient (lab_request.billed_to='org'), or a
+    // provider can pay up-front via card before the request is sent
+    // (provider_payment_status='paid').
+    //
+    // Decision order (most specific wins):
+    //   1. provider_payment_status='paid'  → patient bypasses payment, billed_to='org'
+    //   2. lab_request.billed_to='org'     → patient bypasses payment, billed_to='org'
+    //   3. lab_request.billed_to='patient' → patient pays at checkout
+    //   4. org.default_billed_to            → fallback
+    //   5. member_stacking_rule='org_covers' (legacy alias)
+    //
+    // Before this fix, only signals 4 + 5 were checked. doyainc@gmail.com
+    // (org "faith") flagged: provider chose org-pays for nicq test, but
+    // since faith's org-default is patient-pays, the patient was being
+    // routed through Stripe checkout against the provider's explicit
+    // intent. Each appointment created this way was billed_to='patient'
+    // with $0 by accident (locked_price was 0) — silent ledger lie.
+    const providerAlreadyPaid = String(request.provider_payment_status || '') === 'paid';
+    const requestBilledToOrg = String(request.billed_to || '') === 'org';
+    const orgDefaultIsOrg = org.default_billed_to === 'org' || org.member_stacking_rule === 'org_covers';
+    const orgCovers = providerAlreadyPaid || requestBilledToOrg || orgDefaultIsOrg;
     const billedTo = orgCovers ? 'org' : 'patient';
     const effectivePriceCents = orgCovers
       ? 0
