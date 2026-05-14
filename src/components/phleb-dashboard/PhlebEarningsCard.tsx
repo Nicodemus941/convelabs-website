@@ -92,16 +92,32 @@ const PhlebEarningsCard: React.FC = () => {
       const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const monthStartISO = localISO(monthStart);
 
-      // 1. Banked: actual staff_payouts rows (Stripe transfer already fired)
+      // 1. Banked: actual staff_payouts rows joined to appointment_date.
+      // CRITICAL: We bucket by appointment_date (when the visit happened),
+      // NOT by payouts.created_at (when the DB row was inserted). Otherwise
+      // backfills / reconciliation rows inserted today bleed into "Today's
+      // earnings" and overstate the number by orders of magnitude (e.g.
+      // 35 v2 reconciliation rows for April visits → $2,911 phantom today).
       const { data: payouts } = await supabase
         .from('staff_payouts' as any)
-        .select('amount_cents, base_per_visit_cents, tip_cents, created_at, appointment_id')
+        .select(`amount_cents, base_per_visit_cents, tip_cents, created_at, appointment_id,
+                 appointment:appointments!inner(appointment_date, payment_arrangement)`)
         .eq('staff_id', staffId)
         .gte('created_at', `${monthStartISO}T00:00:00`);
       const payoutsByDate = new Map<string, { amt: number; base: number; tip: number }>();
       const payoutAppointmentIds = new Set<string>();
       for (const p of (payouts || []) as any[]) {
-        const d = String(p.created_at).substring(0, 10);
+        const appt = p.appointment;
+        // Exclude prepaid arrangements — these already settled outside the
+        // per-visit flow (Lawrence Carpenter standing order, etc.)
+        if (appt?.payment_arrangement && ['standing_order_prepaid','bundle_prepaid','imported_legacy','paid_offline','comp'].includes(appt.payment_arrangement)) {
+          continue;
+        }
+        // Bucket by APPOINTMENT_DATE — falls back to created_at only if the
+        // row has no linked appointment (rare).
+        const d = appt?.appointment_date
+          ? String(appt.appointment_date).substring(0, 10)
+          : String(p.created_at).substring(0, 10);
         const cur = payoutsByDate.get(d) || { amt: 0, base: 0, tip: 0 };
         cur.amt += p.amount_cents || 0;
         cur.base += p.base_per_visit_cents || 0;
@@ -211,17 +227,20 @@ const PhlebEarningsCard: React.FC = () => {
       setLastMonthCents(lmTotal);
 
       // ── YTD BANKED + OWED ─────────────────────────────────────────
-      // Pull every staff_payouts row created since Jan 1 of this calendar
-      // year. Combines succeeded (already paid out) + manual_owed (delta
-      // rows that will sweep when balance refills). Excludes reversed/failed.
-      const yearStart = new Date(now.getFullYear(), 0, 1);
+      // Sum every payout row whose APPOINTMENT_DATE is in this calendar
+      // year (not its created_at). Excludes prepaid arrangements + the
+      // failed/reversed statuses.
+      const yearStartISO = `${now.getFullYear()}-01-01`;
       const { data: ytdPayouts } = await supabase
         .from('staff_payouts' as any)
-        .select('amount_cents, status')
+        .select(`amount_cents, status, appointment:appointments!inner(appointment_date, payment_arrangement)`)
         .eq('staff_id', staffId)
-        .gte('created_at', yearStart.toISOString());
+        .gte('appointments.appointment_date', yearStartISO);
       const ytdTotal = ((ytdPayouts || []) as any[])
         .filter(p => !['reversed', 'failed'].includes(String(p.status || '')))
+        .filter(p => !((p.appointment?.payment_arrangement || '') in {
+          'standing_order_prepaid': 1, 'bundle_prepaid': 1, 'imported_legacy': 1, 'paid_offline': 1, 'comp': 1
+        }))
         .reduce((sum, p) => sum + (p.amount_cents || 0), 0);
       setYtd({ ...ZERO, banked_cents: ytdTotal });
 
