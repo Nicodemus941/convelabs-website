@@ -82,6 +82,48 @@ const PhlebEarningsLedger: React.FC = () => {
   // Inline error/result banner so the user always sees what happened —
   // toasts disappear before the user can read them, especially on mobile.
   const [sweepResult, setSweepResult] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+
+  const handleReconcile = async () => {
+    if (reconciling) return;
+    setReconciling(true);
+    setSweepResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setSweepResult({ kind: 'error', text: 'Not signed in. Refresh and try again.' });
+        return;
+      }
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/reconcile-phleb-payouts-from-stripe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+        body: JSON.stringify({}),
+      });
+      const j = await resp.json();
+      if (j?.error || j?.ok === false) {
+        setSweepResult({ kind: 'error', text: j.message || j.error || 'Reconcile failed' });
+        return;
+      }
+      const count = Number(j.reconciled_count || 0);
+      const cents = Number(j.reconciled_cents || 0);
+      if (count === 0) {
+        setSweepResult({ kind: 'info', text: j.message || `Scanned ${j.transfers_scanned || 0} Stripe transfers — no missed matches. Everything in "Pending" is genuinely outstanding.` });
+      } else {
+        const by = j.by_pass || {};
+        setSweepResult({
+          kind: 'success',
+          text: `✓ Reconciled ${count} payouts (${'$' + (cents / 100).toFixed(2)}) — matched against Stripe transfers. ` +
+            `Pass 1 (metadata): ${by.pass1_metadata || 0} · Pass 2 (source): ${by.pass2_source || 0} · Pass 3 (charge.transfer): ${by.pass3_charge || 0}. ` +
+            `No money moved — these were already paid.`,
+        });
+      }
+      setRefreshKey((k) => k + 1);
+    } catch (e: any) {
+      setSweepResult({ kind: 'error', text: e?.message || 'Reconcile failed (network)' });
+    } finally {
+      setReconciling(false);
+    }
+  };
   const [sweepSummary, setSweepSummary] = useState<{
     cleared_count: number; cleared_cents: number;
     pending_count: number; pending_cents: number;
@@ -440,13 +482,26 @@ const PhlebEarningsLedger: React.FC = () => {
       {/* Pending advisory — visits owed but patient hasn't paid yet (HELD) */}
       {sweepSummary && sweepSummary.pending_cents > 0 && (
         <Card className="bg-amber-50 border-amber-300">
-          <CardContent className="p-3 flex items-start gap-2">
-            <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
-            <div className="text-xs text-amber-900">
-              <strong>${(sweepSummary.pending_cents / 100).toFixed(0)} on hold</strong> — {sweepSummary.pending_count} visit{sweepSummary.pending_count === 1 ? '' : 's'} where the
-              patient or partner org hasn't paid yet. These automatically become sweepable as
-              soon as their payment clears in Stripe (or their org invoice is marked paid). No action needed from you.
+          <CardContent className="p-3 space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-700 flex-shrink-0 mt-0.5" />
+              <div className="text-xs text-amber-900 flex-1">
+                <strong>${(sweepSummary.pending_cents / 100).toFixed(0)} on hold</strong> — {sweepSummary.pending_count} visit{sweepSummary.pending_count === 1 ? '' : 's'} where the
+                patient or partner org hasn't paid yet. These automatically become sweepable as
+                soon as their payment clears in Stripe (or their org invoice is marked paid).
+              </div>
             </div>
+            <Button
+              onClick={handleReconcile}
+              disabled={reconciling}
+              size="sm"
+              variant="outline"
+              className="w-full bg-white border-amber-400 text-amber-900 hover:bg-amber-100 gap-1.5 h-8 text-[11px]"
+              title="Cross-check with Stripe: some of these may already have been paid via prior transfers that didn't get stamped back to the DB. This scans your Connect transfers and matches them up — no money moves."
+            >
+              {reconciling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {reconciling ? 'Scanning Stripe…' : 'Cross-check with Stripe (mark already-paid as paid)'}
+            </Button>
           </CardContent>
         </Card>
       )}
