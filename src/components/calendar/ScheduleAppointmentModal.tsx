@@ -726,7 +726,12 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         status: 'scheduled',
         address: [address, city, zipcode].filter(Boolean).join(', ') || 'TBD',
         zipcode: zipcode || '32801',
-        total_amount: finalPrice,
+        // CRITICAL: primary's total_amount must NOT include companion fees.
+        // Each companion appointment row carries its OWN total_amount, and
+        // send-appointment-invoice adds a line item per companion. If we
+        // bake the bundle total into primary here, Stripe double-bills.
+        // Subtract companion fees so primary line = base + surcharges only.
+        total_amount: Math.max(0, finalPrice - companionFeeApplied),
         service_price: basePrice,
         surcharge_amount: surchargeTotal,
         duration_minutes: duration,
