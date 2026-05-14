@@ -314,8 +314,35 @@ const PhlebEarningsCard: React.FC = () => {
   // The headline = today's combined (banked + projected). If the day is
   // half-completed it shows "earned + projected separately."
   const todayTotal = today.banked_cents + today.projected_cents;
-  const goalDailyCents = Math.round((504000 / 30));   // $5,040/mo ÷ 30 days = ~$168/day target
+
+  // ────────── Hormozi pace anchors ──────────
+  // Monthly goal anchor: $5,040 (Hormozi-pace target the user agreed to)
+  const MONTHLY_GOAL_CENTS = 504000;
+  const ANNUAL_GOAL_CENTS = MONTHLY_GOAL_CENTS * 12;     // $60,480
+  const goalDailyCents = Math.round(MONTHLY_GOAL_CENTS / 30);  // ~$168/day
+  const WEEKLY_GOAL_CENTS = goalDailyCents * 7;          // ~$1,176
+
+  const _now = new Date();
+  const _daysIntoMonth = _now.getDate();
+  const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
+  const _daysLeftInMonth = _daysInMonth - _daysIntoMonth;
+  const _dayOfYear = Math.floor((_now.getTime() - new Date(_now.getFullYear(), 0, 1).getTime()) / 86400000) + 1;
+  const _daysInYear = (new Date(_now.getFullYear(), 11, 31).getTime() - new Date(_now.getFullYear(), 0, 1).getTime()) / 86400000 + 1;
+  const _ytdGoalProRated = Math.round(ANNUAL_GOAL_CENTS * (_dayOfYear / _daysInYear));
+
   const todayPaceVsGoal = goalDailyCents > 0 ? Math.round((todayTotal / goalDailyCents) * 100) : 0;
+  const mtdTotal = mtd.banked_cents + mtd.projected_cents;
+  const mtdGoalProRated = Math.round(MONTHLY_GOAL_CENTS * (_daysIntoMonth / _daysInMonth));
+  const mtdPacePct = mtdGoalProRated > 0 ? Math.round((mtdTotal / mtdGoalProRated) * 100) : 0;
+  // Color tier: <70% red, 70-99% amber, >=100% green
+  const mtdPaceColor = mtdPacePct >= 100 ? 'emerald' : mtdPacePct >= 70 ? 'amber' : 'red';
+  const dailyNeededCents = _daysLeftInMonth > 0
+    ? Math.max(0, Math.round((MONTHLY_GOAL_CENTS - mtdTotal) / _daysLeftInMonth))
+    : 0;
+
+  const wtdTotal = week.banked_cents + week.projected_cents;
+  const wtdPacePct = WEEKLY_GOAL_CENTS > 0 ? Math.round((wtdTotal / WEEKLY_GOAL_CENTS) * 100) : 0;
+  const ytdPacePct = _ytdGoalProRated > 0 ? Math.round((ytd.banked_cents / _ytdGoalProRated) * 100) : 0;
 
   return (
     <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 -mt-4 mb-4">
@@ -346,27 +373,53 @@ const PhlebEarningsCard: React.FC = () => {
           )}
         </div>
 
-        {/* Phleb-earnings subgrid — all numbers are YOUR take per the v2
-            comp rule (NOT gross patient revenue). WTD · MTD · YTD · Last mo
-            give the operator visibility into "what am I making right now"
-            at every relevant time horizon. */}
+        {/* Hormozi pace strip — single line of math the operator can act on */}
+        <div className={`px-4 py-2 text-[11px] flex items-center justify-between gap-2 ${
+          mtdPaceColor === 'emerald' ? 'bg-emerald-50 text-emerald-900' :
+          mtdPaceColor === 'amber' ? 'bg-amber-50 text-amber-900' :
+          'bg-red-50 text-red-900'
+        }`}>
+          <span className="font-semibold">
+            {mtdPacePct}% of May goal · {_daysLeftInMonth} day{_daysLeftInMonth === 1 ? '' : 's'} left
+          </span>
+          <span className="font-bold">
+            {dailyNeededCents > 0
+              ? `Need ${fmt(dailyNeededCents)}/day to close`
+              : '🎯 goal hit'}
+          </span>
+        </div>
+
+        {/* Phleb-earnings subgrid — all values are YOUR v2 take.
+            Each cell shows: amount · % of pro-rated pace anchor.
+            Color tier on MTD (red <70% / amber 70-99 / emerald 100+). */}
         <div className="grid grid-cols-4 divide-x divide-gray-100 text-center bg-white">
-          <div className="px-2 py-3" title="Your phleb earnings this calendar week (Sun→today): banked transfers + projected from scheduled visits.">
+          <div className="px-2 py-3" title={`This week (Sun→today). Goal: ${fmt(WEEKLY_GOAL_CENTS)}. You're at ${wtdPacePct}% of weekly target.`}>
             <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">WTD</p>
-            <p className="text-lg font-bold text-gray-900 mt-0.5">{fmt(week.banked_cents + week.projected_cents)}</p>
-            <p className="text-[10px] text-gray-500 mt-0.5">{week.visit_count} visit{week.visit_count === 1 ? '' : 's'}</p>
+            <p className="text-lg font-bold text-gray-900 mt-0.5">{fmt(wtdTotal)}</p>
+            <p className={`text-[10px] mt-0.5 ${wtdPacePct >= 100 ? 'text-emerald-700' : wtdPacePct >= 70 ? 'text-gray-500' : 'text-red-600'}`}>
+              {wtdPacePct}% of {fmt(WEEKLY_GOAL_CENTS)}
+            </p>
           </div>
-          <div className="px-2 py-3 bg-emerald-50/30" title="Your phleb earnings this calendar month: banked + projected. Target: $5,040 (Hormozi-pace).">
-            <p className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold flex items-center justify-center gap-1">
+          <div className={`px-2 py-3 ${mtdPaceColor === 'emerald' ? 'bg-emerald-50/40' : mtdPaceColor === 'amber' ? 'bg-amber-50/40' : 'bg-red-50/40'}`}
+               title={`This month. Pro-rated pace target through today: ${fmt(mtdGoalProRated)}. Full month: ${fmt(MONTHLY_GOAL_CENTS)}.`}>
+            <p className={`text-[10px] uppercase tracking-wider font-semibold flex items-center justify-center gap-1 ${
+              mtdPaceColor === 'emerald' ? 'text-emerald-700' : mtdPaceColor === 'amber' ? 'text-amber-800' : 'text-red-700'
+            }`}>
               <TrendingUp className="h-2.5 w-2.5" /> MTD
             </p>
-            <p className="text-lg font-bold text-emerald-900 mt-0.5">{fmt(mtd.banked_cents + mtd.projected_cents)}</p>
-            <p className="text-[10px] text-emerald-700 mt-0.5">/ $5,040 goal</p>
+            <p className={`text-lg font-bold mt-0.5 ${
+              mtdPaceColor === 'emerald' ? 'text-emerald-900' : mtdPaceColor === 'amber' ? 'text-amber-900' : 'text-red-900'
+            }`}>{fmt(mtdTotal)}</p>
+            <p className={`text-[10px] mt-0.5 ${
+              mtdPaceColor === 'emerald' ? 'text-emerald-700' : mtdPaceColor === 'amber' ? 'text-amber-800' : 'text-red-700'
+            }`}>{mtdPacePct}% / $5,040</p>
           </div>
-          <div className="px-2 py-3 bg-blue-50/30" title="Your phleb earnings year-to-date: every staff_payouts row (banked + manual_owed) created since Jan 1.">
+          <div className="px-2 py-3 bg-blue-50/30" title={`Year-to-date phleb earnings. Pro-rated pace target through day ${_dayOfYear}: ${fmt(_ytdGoalProRated)}. Full year: ${fmt(ANNUAL_GOAL_CENTS)}.`}>
             <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">YTD</p>
             <p className="text-lg font-bold text-blue-900 mt-0.5">{fmt(ytd.banked_cents)}</p>
-            <p className="text-[10px] text-blue-700 mt-0.5">banked + owed</p>
+            <p className={`text-[10px] mt-0.5 ${ytdPacePct >= 100 ? 'text-emerald-700' : ytdPacePct >= 70 ? 'text-blue-700' : 'text-red-600'}`}>
+              {ytdPacePct}% of {fmt(_ytdGoalProRated)} pace
+            </p>
           </div>
           <div className="px-2 py-3 bg-amber-50/40" title="Banked + reconciliation rows for the prior calendar month.">
             <p className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">Last mo</p>
@@ -374,6 +427,56 @@ const PhlebEarningsCard: React.FC = () => {
             <p className="text-[10px] text-amber-700 mt-0.5">banked + owed</p>
           </div>
         </div>
+
+        {/* Next-Best-Action tile — turns the scoreboard into a coaching dashboard.
+            One specific lift recommendation based on the weakest signal we see. */}
+        {(() => {
+          // Decision tree (Hormozi: one number, one action)
+          let action: { icon: string; title: string; detail: string; tone: 'urgent' | 'ok' } | null = null;
+          if (mtdPacePct < 70 && _daysLeftInMonth > 0) {
+            action = {
+              icon: '⚡',
+              title: `You're ${100 - mtdPacePct}% behind May pace`,
+              detail: `Hit ${fmt(dailyNeededCents)}/day every remaining day (${_daysLeftInMonth} left) to close. Pick up 1 extra mobile visit/day = +$63 toward goal.`,
+              tone: 'urgent',
+            };
+          } else if (wtdPacePct < 70) {
+            action = {
+              icon: '📅',
+              title: `Slow week — ${wtdPacePct}% of weekly pace`,
+              detail: `Open early-AM slots (6-8 AM) for the next 3 days. Member-only window converts at 2x normal rate.`,
+              tone: 'urgent',
+            };
+          } else if (today.visit_count === 0 && tomorrow.visit_count === 0) {
+            action = {
+              icon: '🪟',
+              title: 'Nothing on the books for today or tomorrow',
+              detail: `Text 3 partner orgs offering same-day capacity. Aristotle and Elite Medical typically respond within 1 hr.`,
+              tone: 'urgent',
+            };
+          } else if (mtdPacePct >= 100) {
+            action = {
+              icon: '🎯',
+              title: `Crushing it — ${mtdPacePct}% of May pace`,
+              detail: `Use surplus capacity to lock in next month: schedule 5 standing-order patients for June.`,
+              tone: 'ok',
+            };
+          }
+          if (!action) return null;
+          return (
+            <div className={`px-4 py-2.5 border-t border-gray-100 flex items-start gap-2.5 ${
+              action.tone === 'urgent' ? 'bg-white' : 'bg-emerald-50/30'
+            }`}>
+              <div className="text-lg flex-shrink-0">{action.icon}</div>
+              <div className="min-w-0 flex-1">
+                <p className={`text-[11px] font-bold ${action.tone === 'urgent' ? 'text-red-800' : 'text-emerald-800'}`}>
+                  {action.title}
+                </p>
+                <p className="text-[10px] text-gray-700 mt-0.5 leading-relaxed">{action.detail}</p>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Last 7 days sparkline. Each bar = one day, height proportional
             to that day's earnings (banked + projected). Today is the
