@@ -58,12 +58,14 @@ const DAILY_TOUCH_GOAL = 50;
 
 // Morning checklist — Naquala completes these each day before 9 AM. Items
 // here become her routing so she doesn't have to remember what comes next.
+// Removed (owner directive 2026-05-14):
+//   • voicemail_review — calls forward to her but she can't access owner's voicemails
+//   • sms_review — SMS tab is real-time (subscribes to sms_messages INSERT),
+//     so inbound messages surface instantly throughout the day; no morning clear needed
+//   • confirm_today — automated SMS/email confirmation cron handles this
 const MORNING_CHECKLIST = [
-  { id: 'voicemail_review', label: 'Review overnight voicemails (return calls or schedule callbacks)', expectedActivity: 'voicemail' },
-  { id: 'sms_review', label: 'Reply to overnight SMS in Twilio inbox', expectedActivity: 'sms' },
   { id: 'email_review', label: 'Clear overnight email inbox (results requests, inquiries, complaints)', expectedActivity: 'email' },
-  { id: 'confirm_today', label: 'Confirm all of today\'s appointments (text + call for high-value visits)', expectedActivity: 'appointment_confirmed' },
-  { id: 'no_show_followup', label: 'Follow up on yesterday\'s no-shows & cancellations (reschedule)', expectedActivity: 'contact_attempt' },
+  { id: 'no_show_followup', label: 'Follow up on yesterday\'s no-shows & cancellations (reschedule them)', expectedActivity: 'contact_attempt' },
   { id: 'provider_portal_check', label: 'Check provider portal for new lab orders (route to right phleb)', expectedActivity: 'specimen_request' },
   { id: 'unpaid_invoices', label: 'Review Stripe unpaid invoices — text/email patients owing money', expectedActivity: 'contact_attempt' },
   { id: 'pheb_huddle', label: '5-min standup with phleb on the day\'s route + any prep needs', expectedActivity: 'note' },
@@ -476,6 +478,31 @@ const NotesTab: React.FC = () => {
                   <strong>{count}</strong> {lbl}
                 </span>
               ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ─────────── BEHIND-PACE NUDGE ───────────
+          Fires after 11 AM ET when scoreboard < 15. Drops a red bar with a
+          specific outbound action so Naquala has somewhere to go immediately. */}
+      {(() => {
+        const todayStr = new Date().toISOString().substring(0, 10);
+        const todayCount = activities.filter(a => (a.created_at || '').startsWith(todayStr)).length;
+        const hour = new Date().getHours();
+        // Show between 11 AM and 4 PM if pace is sub-15
+        if (hour < 11 || hour > 16) return null;
+        if (todayCount >= 15) return null;
+        return (
+          <div className="rounded-xl bg-red-600 text-white p-4 shadow-lg border-2 border-red-700 flex items-start gap-3">
+            <div className="text-2xl">⚠️</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold">You're behind pace · {todayCount} touches by {hour > 12 ? hour - 12 : hour} {hour >= 12 ? 'PM' : 'AM'}</p>
+              <p className="text-[12px] mt-1 leading-relaxed">
+                Drop into outbound NOW: <strong>Pick 5 patients with appts next week</strong> and call to confirm.
+                <strong> Reach out to 3 partner orgs</strong> with open invoices.
+                <strong> Each touch = 1 toward your 50 goal</strong>.
+              </p>
             </div>
           </div>
         );
