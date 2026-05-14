@@ -350,10 +350,13 @@ const OrganizationsTab: React.FC = () => {
   const [listFilter, setListFilter] = useState<'all' | 'welcomed' | 'cold' | 'inactive'>('all');
   const [sortBy, setSortBy] = useState<'recent' | 'name' | 'welcomed_first'>('recent');
 
-  const directoryBase = orgs.filter(o => {
-    if (o.source === 'discovered_from_ocr' && !['signed'].includes(String(o.outreach_status))) return false;
-    return true;
-  });
+  // Show ALL orgs in the directory — including OCR-discovered ones that
+  // haven't signed yet. Previously these were hidden so the Organizations
+  // page only listed "real" partners, but admins kept asking "where's
+  // {discovered org}?" when trying to link / promote / contact them.
+  // Hormozi rule: never hide rows the operator is searching for; tag the
+  // state instead. Discovered orgs get a "Discovered" badge in the row.
+  const directoryBase = orgs;
 
   // KPI counts for the strip (based on directoryBase — everything in the directory)
   const kpi = {
@@ -1124,6 +1127,11 @@ ConveLabs · (941) 527-9169`
                       )}
 
                       <Badge variant="outline" className={org.is_active ? 'bg-emerald-50 text-emerald-700 flex-shrink-0' : 'bg-gray-50 text-gray-500 flex-shrink-0'}>{org.is_active ? 'Active' : 'Inactive'}</Badge>
+                      {org.source === 'discovered_from_ocr' && org.outreach_status !== 'signed' && (
+                        <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 flex-shrink-0" title={`Auto-discovered from a lab order. Outreach: ${org.outreach_status || 'untouched'}`}>
+                          Discovered
+                        </Badge>
+                      )}
                     </CardContent>
                   </Card>
                 );
