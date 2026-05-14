@@ -1024,13 +1024,22 @@ Deno.serve(async (req) => {
           // we default to false here — the companion's own row gets its
           // own transfer when its checkout fires.
           const hasCompanion = false;
-          const { data: takeRes } = await supabaseClient.rpc('compute_phleb_take_cents' as any, {
+          // v2 inline rule: business floor $87 for default services, per-service
+          // base for partner-* / senior / in-office. Surcharge is already
+          // baked into `amount` so we pass 0 for p_surcharge_cents — the
+          // default-path math (amount - $87) flows the surcharge through to
+          // the phleb naturally.
+          const { data: v2Rows } = await supabaseClient.rpc('compute_phleb_take_v2_inline' as any, {
             p_staff_id: phleb.id,
             p_service_type: serviceType || 'mobile',
+            p_total_paid_cents: amount,
+            p_surcharge_cents: 0,
             p_tip_cents: tipAmount || 0,
             p_has_companion: hasCompanion,
           });
-          const takeCents = Math.max(0, Math.min(Number(takeRes) || 0, amount + (tipAmount || 0)));
+          const v2Row: any = Array.isArray(v2Rows) ? v2Rows[0] : v2Rows;
+          const takeCents = Math.max(0, Math.min(Number(v2Row?.take_cents) || 0, amount + (tipAmount || 0)));
+          console.log(`[connect] v2 rule '${v2Row?.rule_used}' → phleb $${(takeCents/100).toFixed(2)} business $${(((v2Row?.business_keep_cents)||0)/100).toFixed(2)}`);
           if (takeCents > 0 && phleb.stripe_connect_account_id) {
             connectTransfer = { destination: phleb.stripe_connect_account_id, amount: takeCents };
             const { data: rate } = await supabaseClient
