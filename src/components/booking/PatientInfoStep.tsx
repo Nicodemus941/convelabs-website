@@ -101,10 +101,25 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
         setRecognizedName(tp.first_name || '');
         setHasAuthAccount(!!tp.user_id);
 
-        // Auto-fill fields if empty
-        if (!getValues('patientDetails.firstName') && tp.first_name) setValue('patientDetails.firstName', tp.first_name);
-        if (!getValues('patientDetails.lastName') && tp.last_name) setValue('patientDetails.lastName', tp.last_name);
-        if (!getValues('patientDetails.phone') && tp.phone) setValue('patientDetails.phone', tp.phone);
+        // Auto-overwrite when matched email belongs to a DIFFERENT patient.
+        // Previous logic only filled if fields were empty — when booker is
+        // logged in (booking for someone else), pre-filled names from their
+        // own profile blocked the swap. Mariela's case: Naquala booked from
+        // patient chart, name fields stayed 'Nicodemme/Jean-Baptiste' instead
+        // of becoming 'Mariela/Sadrameli'.
+        const curFirst = (getValues('patientDetails.firstName') || '').trim().toLowerCase();
+        const curLast = (getValues('patientDetails.lastName') || '').trim().toLowerCase();
+        const matchedFirst = (tp.first_name || '').trim().toLowerCase();
+        const matchedLast = (tp.last_name || '').trim().toLowerCase();
+        const namesMatch = curFirst === matchedFirst && curLast === matchedLast;
+        if (!namesMatch && tp.first_name) {
+          setValue('patientDetails.firstName', tp.first_name);
+          setValue('patientDetails.lastName', tp.last_name || '');
+        }
+        if (tp.phone) setValue('patientDetails.phone', tp.phone);
+        if (tp.date_of_birth && !getValues('patientDetails.dateOfBirth')) {
+          setValue('patientDetails.dateOfBirth', tp.date_of_birth);
+        }
 
         toast.success(`Welcome back, ${tp.first_name}! We've filled in your info.`);
       } else {
