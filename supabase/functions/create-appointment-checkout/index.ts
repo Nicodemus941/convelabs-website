@@ -40,30 +40,41 @@ const TIER_PRICING: Record<string, Record<MemberTier, number>> = {
  * than what the frontend claimed (ex: client forgot to pass memberTier).
  */
 async function verifyMemberTier(email: string | undefined): Promise<MemberTier> {
-  if (!email) return 'none';
+  const r = await verifyMembership(email);
+  return r.tier;
+}
+
+/**
+ * Returns the server-authoritative membership state for a patient email:
+ * tier + founding_member flag. Replaces the older verifyMemberTier so
+ * downstream code can also enforce founding-perk free family slot.
+ */
+async function verifyMembership(email: string | undefined): Promise<{ tier: MemberTier; isFounding: boolean }> {
+  if (!email) return { tier: 'none', isFounding: false };
   try {
     const { data: tp } = await supabaseClient
       .from('tenant_patients')
       .select('user_id')
       .ilike('email', email)
-      .maybeSingle();
-    if (!tp?.user_id) return 'none';
+      .limit(1).maybeSingle();
+    if (!tp?.user_id) return { tier: 'none', isFounding: false };
 
     const { data: mem } = await supabaseClient
       .from('user_memberships')
-      .select('*, membership_plans(name)')
+      .select('founding_member, membership_plans(name)')
       .eq('user_id', tp.user_id)
       .eq('status', 'active')
       .maybeSingle();
-    if (!mem) return 'none';
+    if (!mem) return { tier: 'none', isFounding: false };
 
     const planName = ((mem as any).membership_plans?.name || '').toLowerCase();
-    if (planName.includes('concierge')) return 'concierge';
-    if (planName.includes('vip')) return 'vip';
-    return 'member';
+    let tier: MemberTier = 'member';
+    if (planName.includes('concierge')) tier = 'concierge';
+    else if (planName.includes('vip')) tier = 'vip';
+    return { tier, isFounding: Boolean((mem as any).founding_member) };
   } catch (err) {
-    console.warn('verifyMemberTier failed:', err);
-    return 'none';
+    console.warn('verifyMembership failed:', err);
+    return { tier: 'none', isFounding: false };
   }
 }
 
@@ -529,7 +540,9 @@ Deno.serve(async (req) => {
     // entitles them to.
     let amount = Math.max(0, clientAmount - apologyCreditApplied);
     let priceCorrection = 0;
-    const serverTier = await verifyMemberTier(patientDetails?.email);
+    const membership = await verifyMembership(patientDetails?.email);
+    const serverTier = membership.tier;
+    const serverIsFounding = membership.isFounding;
     const pricing = TIER_PRICING[serviceType];
 
     if (pricing && serverTier !== 'none') {
@@ -545,6 +558,38 @@ Deno.serve(async (req) => {
           `client=$${clientAmount / 100} server=$${amount / 100} saved=$${priceCorrection / 100}`
         );
       }
+    }
+
+    // ─── SERVER-SIDE FOUNDING-PERK FREE FAMILY SLOT ENFORCEMENT ────
+    // Defense-in-depth: even if the client doesn't apply the founding-VIP
+    // perk (or attempts to overcharge), the server detects + waives the
+    // first companion's surcharge for founding VIPs (or first 2 for Concierge).
+    // The companion surcharges live in `pricingBreakdown.additional` as
+    // an array OR an `additional_patients` count; we discount the appropriate
+    // number of slots at the per-tier non-member rate ($75/$45/$35).
+    try {
+      const additionalArr: any[] = Array.isArray((pricingBreakdown as any)?.additional)
+        ? (pricingBreakdown as any).additional : [];
+      const additionalCount = additionalArr.length;
+      let perPatientCents = 7500; // $75 non-member default
+      if (serverTier === 'concierge') perPatientCents = 3500;
+      else if (serverTier === 'vip') perPatientCents = 4500;
+      else if (serverTier === 'member') perPatientCents = 5500;
+      const freeSlots = serverTier === 'concierge' ? 2
+        : (serverIsFounding && serverTier === 'vip') ? 1
+        : 0;
+      if (additionalCount > 0 && freeSlots > 0) {
+        const slotsToWaive = Math.min(additionalCount, freeSlots);
+        const waiverCents = slotsToWaive * perPatientCents;
+        amount = Math.max(0, amount - waiverCents);
+        console.warn(
+          `[founding-perk-server-waive] ${patientDetails.email} tier=${serverTier} ` +
+          `founding=${serverIsFounding} additionalCount=${additionalCount} ` +
+          `freeSlots=${freeSlots} waived=$${waiverCents / 100} new_amount=$${amount / 100}`
+        );
+      }
+    } catch (perkErr) {
+      console.warn('[founding-perk-server-waive] non-blocking failure:', (perkErr as any)?.message);
     }
 
     // ─── PARTNER PRICING OVERRIDE ──────────────────────────────────
