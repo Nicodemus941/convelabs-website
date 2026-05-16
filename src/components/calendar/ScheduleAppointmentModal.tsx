@@ -105,6 +105,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
   // Sprint: auto-apply member benefits in admin flow
   const [detectedTier, setDetectedTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  // Founding member detection — when true AND tier='vip', the first companion
+  // in this booking is FREE (Founding-50 perk).
+  const [isFoundingMember, setIsFoundingMember] = useState<boolean>(false);
   const [referralCredits, setReferralCredits] = useState<Array<{ id: string; amount_cents: number; description: string | null }>>([]);
   const [referralModalOpen, setReferralModalOpen] = useState(false);
   const [redeemReferralIds, setRedeemReferralIds] = useState<string[]>([]);
@@ -407,7 +410,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // Active membership?
         const { data: mem } = await supabase
           .from('user_memberships' as any)
-          .select('membership_plans(name)')
+          .select('founding_member, membership_plans(name)')
           .eq('user_id', uid).eq('status', 'active').maybeSingle();
         const planName = String((mem as any)?.membership_plans?.name || '').toLowerCase();
         let tier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
@@ -415,6 +418,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         else if (planName.includes('vip')) tier = 'vip';
         else if (planName.includes('regular') || planName.includes('member')) tier = 'member';
         setDetectedTier(tier);
+        // Surface founding member status so the family-add UI can show
+        // the "first companion FREE" perk live in the form
+        setIsFoundingMember(Boolean((mem as any)?.founding_member));
 
         // Unredeemed referral credits?
         const { data: credits } = await supabase
@@ -541,9 +547,17 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     if (tier === 'member') return 55;
     return 75;
   })();
-  // Multi-companion total: each additional family member pays the same
-  // tier-aware companion price. Family of 4 (primary + 3 companions) = 3 × price.
-  const companionAdd = companions.length * companionPrice;
+  // Multi-companion total with founding-perk + Concierge waivers:
+  //   • Founding VIP: 1 free companion slot per visit
+  //   • Concierge: 2 free companion slots per visit
+  //   • Everyone else: pays tier rate × N
+  const freeCompanionSlots = (() => {
+    if (detectedTier === 'concierge') return 2;
+    if (isFoundingMember && detectedTier === 'vip') return 1;
+    return 0;
+  })();
+  const billableCompanionCount = Math.max(0, companions.length - freeCompanionSlots);
+  const companionAdd = billableCompanionCount * companionPrice;
 
   // Hormozi specialty-kit bundle path. When the admin picks a `specialty-kit*`
   // service, the bundle pricing handles primary + companion + multi-kit math
@@ -645,8 +659,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       // included it in the UI preview but not in finalPrice, so the primary
       // invoice went out at $150 instead of $225 and admin had to create a
       // manual make-up invoice for $75.
-      // Multi-companion fee total — primary appt absorbs full family billing
-      const companionFeeApplied = companions.length * companionPrice;
+      // Multi-companion fee total with founding-perk + Concierge waivers
+      const companionFeeApplied = billableCompanionCount * companionPrice;
       // Specialty-kit bundle override: replace base+companion math with the
       // bundle subtotal so the admin invoice matches what the patient-facing
       // bundle card would have produced.
@@ -1312,14 +1326,32 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                     Family at the same address
                     {companions.length > 0 && (
                       <span className="ml-2 text-[11px] font-normal text-blue-800">
-                        · {companions.length} added · +${(companions.length * companionPrice).toFixed(0)}
+                        · {companions.length} added · +${companionAdd.toFixed(0)}
+                        {freeCompanionSlots > 0 && (
+                          <span className="ml-1 text-emerald-700 font-semibold">
+                            ({Math.min(companions.length, freeCompanionSlots)} FREE
+                            {freeCompanionSlots === 1 ? ' · Founding VIP perk' : ' · Concierge perk'})
+                          </span>
+                        )}
                       </span>
                     )}
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-0.5">
-                    Each additional family member: <strong>${companionPrice}</strong>
-                    {detectedTier !== 'none' && <span className="ml-1">({detectedTier.toUpperCase()} rate · saves ${75 - companionPrice} each vs non-member)</span>}
-                    {detectedTier === 'none' && <span className="ml-1">($75 non-member · members save up to $40 each)</span>}
+                    {freeCompanionSlots > 0 ? (
+                      <>
+                        <strong className="text-emerald-700">
+                          First {freeCompanionSlots === 2 ? '2 family members FREE' : 'family member FREE'}
+                        </strong>
+                        {' '}({freeCompanionSlots === 1 ? 'Founding VIP perk' : 'Concierge perk'}).
+                        Additional: ${companionPrice} each ({detectedTier.toUpperCase()} rate).
+                      </>
+                    ) : (
+                      <>
+                        Each additional family member: <strong>${companionPrice}</strong>
+                        {detectedTier !== 'none' && <span className="ml-1">({detectedTier.toUpperCase()} rate · saves ${75 - companionPrice} each vs non-member)</span>}
+                        {detectedTier === 'none' && <span className="ml-1">($75 non-member · members save up to $40 each)</span>}
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -1327,12 +1359,18 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               {/* List of currently-added companions */}
               {companions.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  {companions.map((c, idx) => (
-                    <div key={c.id} className="bg-white border border-blue-200 rounded-lg p-2.5 space-y-2">
+                  {companions.map((c, idx) => {
+                    const isFreeSlot = idx < freeCompanionSlots;
+                    return (
+                    <div key={c.id} className={`bg-white border rounded-lg p-2.5 space-y-2 ${isFreeSlot ? 'border-emerald-300 bg-emerald-50/30' : 'border-blue-200'}`}>
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-blue-900">
-                          Family member {idx + 2} {/* +2 because primary is #1 */}
-                          <span className="ml-2 text-[10px] font-normal text-gray-500">+${companionPrice}</span>
+                          Family member {idx + 2}
+                          {isFreeSlot ? (
+                            <span className="ml-2 text-[10px] font-semibold text-emerald-700">FREE · {detectedTier === 'concierge' ? 'Concierge' : 'Founding VIP'} perk</span>
+                          ) : (
+                            <span className="ml-2 text-[10px] font-normal text-gray-500">+${companionPrice}</span>
+                          )}
                         </span>
                         <button
                           type="button"
@@ -1372,17 +1410,21 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                         />
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
-              {/* Add-another button */}
+              {/* Add-another button — label reflects perk status */}
               <button
                 type="button"
                 onClick={addCompanionRow}
                 className="mt-3 w-full text-center text-[12px] font-semibold py-2 rounded-lg border-2 border-dashed border-blue-300 text-blue-700 hover:bg-blue-50 hover:border-blue-400 transition"
               >
-                + Add {companions.length === 0 ? 'a family member' : 'another family member'} (+${companionPrice} each)
+                + Add {companions.length === 0 ? 'a family member' : 'another family member'}
+                {companions.length < freeCompanionSlots
+                  ? <span className="text-emerald-700"> (FREE — {detectedTier === 'concierge' ? 'Concierge' : 'Founding VIP'} perk)</span>
+                  : <span> (+${companionPrice} each)</span>}
               </button>
 
               {companions.length > 0 && (
