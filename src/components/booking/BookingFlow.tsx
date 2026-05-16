@@ -982,9 +982,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                 );
               })()}
 
-              {/* Step 3: Patient Info */}
+              {/* Step 3: Patient Info — bubbles member tier + founding flag UP
+                  so the top "Est. $X" badge reflects the discount immediately,
+                  not only at the final checkout step. */}
               {currentStep === BookingStep.PatientInfo && (
-                <PatientInfoStep onNext={handleNext} onBack={handleBack} />
+                <PatientInfoStep
+                  onNext={handleNext}
+                  onBack={handleBack}
+                  onMemberTierDetected={setMemberTier}
+                  onFoundingMemberDetected={setIsFoundingMember}
+                />
               )}
 
               {/* Step 4: Location & Lab Order (combined) — skip the lab

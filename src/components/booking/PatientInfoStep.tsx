@@ -23,11 +23,18 @@ import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 interface PatientInfoStepProps {
   onNext: () => void;
   onBack: () => void;
+  /** When the email matches a tenant_patient with an active membership,
+   *  fire this so the parent's top "Est. $X" badge can flip to the
+   *  member rate IMMEDIATELY — not only when the user reaches Checkout. */
+  onMemberTierDetected?: (tier: 'none' | 'member' | 'vip' | 'concierge') => void;
+  onFoundingMemberDetected?: (isFounding: boolean) => void;
 }
 
 const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
   onNext,
-  onBack
+  onBack,
+  onMemberTierDetected,
+  onFoundingMemberDetected,
 }) => {
   const { user } = useAuth();
   const { control, watch, setValue, getValues } = useFormContext<BookingFormValues>();
@@ -36,6 +43,20 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
   const [recognizedName, setRecognizedName] = useState('');
   const [hasAuthAccount, setHasAuthAccount] = useState(false);
   const [checking, setChecking] = useState(false);
+  // Mirror of bubbled tier — drives the dynamic companion-fee copy
+  const [detectedTier, setDetectedTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
+  const [detectedFounding, setDetectedFounding] = useState(false);
+  const detectedCompanionPrice = (() => {
+    if (detectedTier === 'concierge') return 35;
+    if (detectedTier === 'vip') return 45;
+    if (detectedTier === 'member') return 55;
+    return 75;
+  })();
+  const detectedFreeSlots = (() => {
+    if (detectedTier === 'concierge') return 2;
+    if (detectedFounding && detectedTier === 'vip') return 1;
+    return 0;
+  })();
   const [bookingForSelf, setBookingForSelf] = useState(true);
   // Family members saved on the logged-in user's chart. When booking for
   // "someone else," we show these as quick-pick cards so they don't re-type
@@ -94,7 +115,7 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
       const { data: tp } = await supabase.from('tenant_patients')
         .select('first_name, last_name, phone, date_of_birth, user_id, insurance_provider')
         .ilike('email', email.trim())
-        .maybeSingle();
+        .limit(1).maybeSingle();
 
       if (tp) {
         setRecognized(true);
@@ -122,6 +143,36 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
         }
 
         toast.success(`Welcome back, ${tp.first_name}! We've filled in your info.`);
+
+        // Membership tier detection — bubble up so parent's "Est. $X" badge
+        // reflects the discount IMMEDIATELY at step 4 (Patient Info), not
+        // only after the patient reaches step 7 (Checkout). Fixes the
+        // 'why am I seeing non-member price as a VIP?' UX gap.
+        if (tp.user_id) {
+          try {
+            const { data: mem } = await supabase
+              .from('user_memberships' as any)
+              .select('founding_member, membership_plans(name)')
+              .eq('user_id', tp.user_id)
+              .eq('status', 'active')
+              .maybeSingle();
+            if (mem) {
+              const planName = String((mem as any).membership_plans?.name || '').toLowerCase();
+              let tier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+              if (planName.includes('concierge')) tier = 'concierge';
+              else if (planName.includes('vip')) tier = 'vip';
+              else if (planName) tier = 'member';
+              if (tier !== 'none') {
+                onMemberTierDetected?.(tier);
+                onFoundingMemberDetected?.(Boolean((mem as any).founding_member));
+                setDetectedTier(tier);
+                setDetectedFounding(Boolean((mem as any).founding_member));
+              }
+            }
+          } catch (e) {
+            console.warn('[patient-info-tier-detect]', e);
+          }
+        }
       } else {
         setRecognized(false);
       }
@@ -424,7 +475,22 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                     <Users className="h-4 w-4" /> More than one person at this address?
                   </h3>
                   <p className="text-xs text-emerald-800 mt-1 leading-relaxed">
-                    Add a partner, parent, or kid getting labs the same visit. <strong>$75 each — saves $75-$150 vs. booking separately</strong>, and we only roll up once. Each person can have their own fasting status.
+                    Add a partner, parent, or kid getting labs the same visit.
+                    {detectedFreeSlots > 0 ? (
+                      <>
+                        {' '}<strong className="text-emerald-900">
+                          First {detectedFreeSlots === 2 ? '2 family members FREE' : 'family member FREE'} · {detectedTier === 'concierge' ? 'Concierge' : 'Founding VIP'} perk
+                        </strong>
+                        {' '}— additional ${detectedCompanionPrice} each ({detectedTier.toUpperCase()} rate).
+                      </>
+                    ) : detectedTier !== 'none' ? (
+                      <>
+                        {' '}<strong>${detectedCompanionPrice} each ({detectedTier.toUpperCase()} rate · saves ${75 - detectedCompanionPrice} per person)</strong>, and we only roll up once.
+                      </>
+                    ) : (
+                      <> <strong>$75 each — saves $75-$150 vs. booking separately</strong>, and we only roll up once.</>
+                    )}
+                    {' '}Each person can have their own fasting status.
                   </p>
                 </div>
                 <Button
