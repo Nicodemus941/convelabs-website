@@ -372,6 +372,33 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         email: p.email || null,
         phone: p.phone || null,
       });
+      // CRITICAL: run the membership-tier + founding-member detection that
+      // was previously only firing on selectPatient() from the search
+      // dropdown. Without this, opening the modal from a patient chart
+      // (PatientProfileTab → 'Schedule') left detectedTier='none' and the
+      // patient was charged non-member rate. Reported on Mariela Sadrameli
+      // (VIP founding #2) — her \$115 mobile draw was being quoted at \$150.
+      (async () => {
+        try {
+          const { data: tp } = await supabase
+            .from('tenant_patients').select('user_id').eq('id', p.id).maybeSingle();
+          const uid = (tp as any)?.user_id;
+          if (!uid) return;
+          const { data: mem } = await supabase
+            .from('user_memberships' as any)
+            .select('founding_member, membership_plans(name)')
+            .eq('user_id', uid).eq('status', 'active').maybeSingle();
+          const planName = String((mem as any)?.membership_plans?.name || '').toLowerCase();
+          let tier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+          if (planName.includes('concierge')) tier = 'concierge';
+          else if (planName.includes('vip')) tier = 'vip';
+          else if (planName.includes('regular') || planName.includes('member')) tier = 'member';
+          setDetectedTier(tier);
+          setIsFoundingMember(Boolean((mem as any)?.founding_member));
+        } catch (e) {
+          console.warn('[modal-tier-detect] failed:', e);
+        }
+      })();
     }
     // Skip the patient-search step — admin is booking for THIS patient.
     setStep(2);
