@@ -78,11 +78,11 @@ const PatientDashboard = () => {
     if (!user) return;
     const loadStats = async () => {
       let all: any[] = [];
-      const { data: byId } = await supabase.from('appointments').select('status, appointment_date, appointment_time, total_amount, payment_status')
+      const { data: byId } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path')
         .eq('patient_id', user.id);
       if (byId) all = [...byId];
       if (user.email) {
-        const { data: byEmail } = await supabase.from('appointments').select('status, appointment_date, appointment_time, total_amount, payment_status')
+        const { data: byEmail } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path')
           .ilike('patient_email', user.email);
         if (byEmail) { const ids = new Set(all.map(a => a.id)); all = [...all, ...(byEmail.filter(a => !ids.has(a.id)))]; }
       }
@@ -104,7 +104,25 @@ const PatientDashboard = () => {
       const nextDate = isoDay
         ? new Date(`${isoDay}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
         : '';
-      const nextTime = next?.appointment_time || '';
+      // Time display normalization: appointment_time comes back as 'HH:MM:SS'
+      // from Postgres TIME column. Hero card was rendering it raw ("09:00:00")
+      // which felt military / unfriendly. Convert to "9:00 AM" so the patient
+      // sees what they'd expect to read aloud. (nicq E2E 2026-05-17.)
+      const rawTime = String(next?.appointment_time || '');
+      const nextTime = (() => {
+        if (!rawTime) return '';
+        if (rawTime.toUpperCase().includes('AM') || rawTime.toUpperCase().includes('PM')) return rawTime;
+        const [h, m] = rawTime.split(':').map(Number);
+        if (Number.isNaN(h)) return rawTime;
+        const period = h >= 12 ? 'PM' : 'AM';
+        const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+        return `${h12}:${String(m || 0).padStart(2, '0')} ${period}`;
+      })();
+      // Lab-order readiness for the hero card "Have your lab order ready"
+      // copy. nicq E2E 2026-05-17 confirmed Valli's complaint: the static
+      // copy persisted even after a successful upload — we now flip it to
+      // a confirmation chip when the appointment row already has a path.
+      const nextHasLabOrder = Boolean(next?.lab_order_file_path);
       const lastCompleted = completed[0];
       const daysSince = lastCompleted?.appointment_date ? Math.floor((Date.now() - new Date(lastCompleted.appointment_date).getTime()) / 86400000) : 0;
       const totalSpent = all.filter(a => a.payment_status === 'completed').reduce((s: number, a: any) => s + (a.total_amount || 0), 0);
@@ -116,7 +134,7 @@ const PatientDashboard = () => {
         for (let i = 1; i < dates.length; i++) gaps.push((dates[i] - dates[i-1]) / 86400000);
         avgFrequency = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length);
       }
-      setStats({ upcoming: upcoming.length, completed: completed.length, pastVisits: pastVisitsCount, nextDate, nextTime, daysSince, totalSpent, avgFrequency } as any);
+      setStats({ upcoming: upcoming.length, completed: completed.length, pastVisits: pastVisitsCount, nextDate, nextTime, nextHasLabOrder, daysSince, totalSpent, avgFrequency } as any);
     };
     loadStats();
     supabase.from('email_preferences').select('notification_method').eq('user_id', user.id).maybeSingle()
@@ -170,7 +188,21 @@ const PatientDashboard = () => {
               <p className="text-sm font-medium text-gray-400 mb-1">Your Next Visit</p>
               <h2 className="text-xl sm:text-2xl font-bold">{stats.nextDate}</h2>
               {stats.nextTime && <p className="text-lg text-gray-300">{stats.nextTime}</p>}
-              <p className="text-sm text-gray-400 mt-2">Have your lab order and insurance card ready.</p>
+              {/*
+               * Dynamic readiness copy — was a static "Have your lab order and
+               * insurance card ready" that didn't change after the patient
+               * actually uploaded their lab order. Trust gap: patient finishes
+               * the upload flow, returns to dashboard, sees the same
+               * "you still need to" copy and wonders if it landed. (Valli &
+               * John Ritenour 2026-05-17.) Now: when lab order is on file we
+               * confirm it; otherwise we still nudge.
+               */}
+              <p className="text-sm text-gray-400 mt-2">
+                {(stats as any).nextHasLabOrder
+                  ? <span className="text-emerald-300">✓ Lab order on file · Insurance card optional</span>
+                  : <>Have your lab order and insurance card ready.</>
+                }
+              </p>
             </div>
             <div className="flex gap-2">
               <Button variant="outline" className="border-gray-600 text-white hover:bg-gray-700 rounded-xl" asChild>

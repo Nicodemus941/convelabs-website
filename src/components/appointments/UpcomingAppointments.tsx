@@ -144,6 +144,41 @@ const UpcomingAppointments = () => {
                       {a.service_name || a.service_type?.replace(/_|-/g, ' ')}
                     </p>
                   )}
+                  {/*
+                   * Lab order + insurance status badges. Closes the Valli
+                   * & John Ritenour case (2026-05-17): patient uploaded but
+                   * the appointment card never reflected it — pre-fix this
+                   * card pulled appointments.* and rendered ZERO indicators
+                   * for lab_order_file_path, panels, fasting flag, or
+                   * insurance. Patient saw the same "you need to upload"
+                   * nudge even after a successful upload, which is the
+                   * single biggest trust-collapse moment in the patient
+                   * lifecycle. Now:
+                   *   - ✓ Lab order on file (with panel chips if OCR'd)
+                   *   - ⚠ Fasting required (if OCR detected)
+                   *   - ⚠ Upload lab order (deep-link if missing)
+                   *   - ✓ Insurance on file OR ⚠ Add insurance card
+                   *     (deep-link to /profile)
+                   */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    {a.lab_order_file_path ? (
+                      <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                        ✓ Lab order on file
+                      </Badge>
+                    ) : (
+                      <a
+                        href={`/dashboard/patient`}
+                        className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
+                      >
+                        ⚠ Lab order needed
+                      </a>
+                    )}
+                    {Array.isArray(a.lab_order_panels) && a.lab_order_panels.length > 0 && (
+                      <Badge variant="outline" className="text-[10px] bg-gray-50 text-gray-700 border-gray-200">
+                        {a.lab_order_panels.length} panel{a.lab_order_panels.length === 1 ? '' : 's'}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
                 <Badge variant="outline" className={`text-[10px] flex-shrink-0 ${
                   a.status === 'confirmed' ? 'bg-green-50 text-green-700 border-green-200' :
