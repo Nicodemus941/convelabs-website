@@ -34,6 +34,7 @@ const PatientProfile = () => {
     insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '',
   });
   const [editingFamilyId, setEditingFamilyId] = useState<string | null>(null);
+  const [familySaving, setFamilySaving] = useState(false);
 
   // Form state
   const [form, setForm] = useState({
@@ -410,46 +411,69 @@ const PatientProfile = () => {
                     </div>
                   </div>
 
-                  <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!familyForm.firstName || !familyForm.lastName}
+                  <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!familyForm.firstName || !familyForm.lastName || familySaving}
                     onClick={async () => {
-                      const payload = {
-                        first_name: familyForm.firstName,
-                        last_name: familyForm.lastName,
-                        email: familyForm.email || null,
-                        phone: familyForm.phone || null,
-                        date_of_birth: familyForm.dob || null,
-                        relationship: familyForm.relationship,
-                        insurance_provider: familyForm.insuranceProvider || null,
-                        insurance_member_id: familyForm.insuranceMemberId || null,
-                        insurance_group_number: familyForm.insuranceGroup || null,
-                      };
+                      // Re-entrancy guard: nicq E2E surfaced two identical
+                      // "TEST ME / spouse" rows created 3 seconds apart on a
+                      // double-click. Lock the button while the insert is
+                      // in-flight, then dedupe-by-name+dob within the
+                      // existing patient_id before allowing the insert.
+                      if (familySaving) return;
+                      setFamilySaving(true);
+                      try {
+                        const payload = {
+                          first_name: familyForm.firstName,
+                          last_name: familyForm.lastName,
+                          email: familyForm.email || null,
+                          phone: familyForm.phone || null,
+                          date_of_birth: familyForm.dob || null,
+                          relationship: familyForm.relationship,
+                          insurance_provider: familyForm.insuranceProvider || null,
+                          insurance_member_id: familyForm.insuranceMemberId || null,
+                          insurance_group_number: familyForm.insuranceGroup || null,
+                        };
 
-                      if (editingFamilyId) {
-                        const { data, error } = await supabase
-                          .from('family_members' as any)
-                          .update(payload)
-                          .eq('id', editingFamilyId)
-                          .select()
-                          .single();
-                        if (error) { toast.error(error.message); return; }
-                        setFamilyMembers(prev => prev.map(f => f.id === editingFamilyId ? data : f));
-                        toast.success(`${familyForm.firstName} updated`);
-                      } else {
-                        const { data, error } = await supabase
-                          .from('family_members' as any)
-                          .insert({ patient_id: patient?.id, ...payload })
-                          .select()
-                          .single();
-                        if (error) { toast.error(error.message); return; }
-                        setFamilyMembers(prev => [...prev, data]);
-                        toast.success(`${familyForm.firstName} added to family`);
+                        if (editingFamilyId) {
+                          const { data, error } = await supabase
+                            .from('family_members' as any)
+                            .update(payload)
+                            .eq('id', editingFamilyId)
+                            .select()
+                            .single();
+                          if (error) { toast.error(error.message); return; }
+                          setFamilyMembers(prev => prev.map(f => f.id === editingFamilyId ? data : f));
+                          toast.success(`${familyForm.firstName} updated`);
+                        } else {
+                          // Pre-insert dedupe: same patient, same first+last,
+                          // same DOB (when provided). Surfaces "already in
+                          // your family" rather than silently creating dup.
+                          const dupExisting = familyMembers.find(f =>
+                            String(f.first_name || '').trim().toLowerCase() === payload.first_name.trim().toLowerCase()
+                            && String(f.last_name || '').trim().toLowerCase() === payload.last_name.trim().toLowerCase()
+                            && (!payload.date_of_birth || String(f.date_of_birth || '') === payload.date_of_birth)
+                          );
+                          if (dupExisting) {
+                            toast.error(`${payload.first_name} ${payload.last_name} is already on your family list`);
+                            return;
+                          }
+                          const { data, error } = await supabase
+                            .from('family_members' as any)
+                            .insert({ patient_id: patient?.id, ...payload })
+                            .select()
+                            .single();
+                          if (error) { toast.error(error.message); return; }
+                          setFamilyMembers(prev => [...prev, data]);
+                          toast.success(`${familyForm.firstName} added to family`);
+                        }
+
+                        setFamilyForm({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+                        setEditingFamilyId(null);
+                        setAddFamilyOpen(false);
+                      } finally {
+                        setFamilySaving(false);
                       }
-
-                      setFamilyForm({ firstName: '', lastName: '', email: '', phone: '', dob: '', relationship: 'spouse', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
-                      setEditingFamilyId(null);
-                      setAddFamilyOpen(false);
                     }}>
-                    {editingFamilyId ? 'Save Changes' : 'Add Family Member'}
+                    {familySaving ? 'Saving…' : editingFamilyId ? 'Save Changes' : 'Add Family Member'}
                   </Button>
                 </div>
               </DialogContent>
