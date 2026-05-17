@@ -199,8 +199,8 @@ const PatientDashboard = () => {
                */}
               <p className="text-sm text-gray-400 mt-2">
                 {(stats as any).nextHasLabOrder
-                  ? <span className="text-emerald-300">✓ Lab order on file · Insurance card optional</span>
-                  : <>Have your lab order and insurance card ready.</>
+                  ? <span className="text-emerald-300">✓ Lab order on file. Bring your insurance card — your lab (Quest, LabCorp, AdventHealth) bills it directly, not us.</span>
+                  : <>Have your lab order + insurance card ready. The lab bills your insurance directly.</>
                 }
               </p>
             </div>

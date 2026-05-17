@@ -56,6 +56,59 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
   const [summary, setSummary] = useState<ApptSummary | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
+  // Insurance card upload — independent of the lab-order flow but lives on
+  // the same page so the patient captures both in one sitting. Lab needs
+  // the card to bill the patient's insurance directly (we never bill
+  // insurance ourselves).
+  const insuranceFileRef = useRef<HTMLInputElement>(null);
+  const [uploadingInsurance, setUploadingInsurance] = useState(false);
+  const [insuranceUploaded, setInsuranceUploaded] = useState(false);
+
+  async function handleInsuranceFile(rawFile: File) {
+    if (!token || uploadingInsurance) return;
+    setUploadingInsurance(true);
+    try {
+      const file = await resizeImageForUpload(rawFile);
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      const fileB64 = btoa(binary);
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/submit-insurance-card`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          token,
+          file_b64: fileB64,
+          content_type: file.type || 'application/pdf',
+          original_filename: file.name,
+        }),
+      });
+      const j = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        setError(j.message || j.error || 'Insurance card upload failed. Please try again or email it to info@convelabs.com.');
+      } else {
+        setInsuranceUploaded(true);
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Insurance card upload crashed.');
+    } finally {
+      setUploadingInsurance(false);
+    }
+  }
+
+  const onInsuranceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handleInsuranceFile(f);
+    if (insuranceFileRef.current) insuranceFileRef.current.value = '';
+  };
   // Hormozi auto-magic-link: server returns a Supabase magiclink on
   // successful upload. We surface it as a "View my dashboard" CTA so the
   // patient lands on /dashboard already authed — no password wall, ever.
@@ -367,7 +420,61 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
               Most patients finish in under 30 seconds.
             </p>
 
+            {/*
+             * Insurance card upload — surfaced at the SAME moment the
+             * patient is in upload-mindset, file-in-hand. ConveLabs doesn't
+             * bill insurance, but the lab (Quest, LabCorp, AdventHealth)
+             * needs the patient's insurance to process the specimen and
+             * bill the patient's plan directly. Without it the lab either
+             * rejects the kit or hits the patient with a surprise
+             * self-pay bill. So this is a REQUIRED prep item, not a billing
+             * nicety. We frame it that way in the copy. (Hormozi reframe
+             * 2026-05-17 — was previously buried in /profile → Insurance.)
+             */}
             <div className="mt-6 pt-4 border-t border-gray-100">
+              <p className="text-[12px] font-semibold text-gray-900 mb-1">📋 Insurance card</p>
+              <p className="text-[11px] text-gray-600 leading-relaxed mb-2">
+                We don't bill your insurance — but your lab (Quest, LabCorp, AdventHealth) does. Without your card they may reject the specimen or send you a surprise bill.
+              </p>
+              <input
+                ref={insuranceFileRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={onInsuranceChange}
+              />
+              {insuranceUploaded ? (
+                <div className="border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> Insurance card on file — thank you!
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => insuranceFileRef.current?.click()}
+                  disabled={uploadingInsurance}
+                  className={`w-full border-2 border-dashed rounded-lg p-3 text-center transition ${
+                    uploadingInsurance
+                      ? 'border-blue-200 bg-blue-50 cursor-not-allowed'
+                      : 'border-amber-400/60 bg-amber-50/40 hover:bg-amber-50 cursor-pointer'
+                  }`}
+                >
+                  {uploadingInsurance ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-auto mb-1" />
+                      <p className="text-[12px] font-semibold text-blue-800">Uploading insurance card…</p>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="h-5 w-5 text-amber-700 mx-auto mb-1" />
+                      <p className="text-[12px] font-bold text-gray-900">Tap to upload insurance card</p>
+                      <p className="text-[10px] text-gray-600 mt-0.5">Front (or front + back). PDF / JPG / PNG.</p>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-gray-100">
               <p className="text-[12px] text-gray-600 leading-relaxed">
                 <strong>Don't have your lab order yet?</strong> Ask your doctor's office to fax it to <a href="tel:+19412518467" className="text-[#B91C1C] font-semibold">(941) 251-8467</a> — we'll match it to your visit automatically.
               </p>

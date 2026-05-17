@@ -41,6 +41,23 @@ const UpcomingAppointments = () => {
         }
       }
 
+      // Patch each appointment with insurance-on-file status from the
+      // patient's chart. ConveLabs doesn't bill insurance, but the LAB
+      // (Quest/LabCorp/AdventHealth) needs it to process the specimen —
+      // missing insurance = lab rejection OR surprise self-pay bill for
+      // the patient. So the card shows it as a required prep item.
+      try {
+        const { data: tp } = await supabase.from('tenant_patients')
+          .select('insurance_card_path, insurance_provider, insurance_member_id')
+          .or(`user_id.eq.${user.id},email.ilike.${user.email || 'none'}`)
+          .limit(1).maybeSingle();
+        const insOnFile = Boolean(
+          (tp as any)?.insurance_card_path ||
+          ((tp as any)?.insurance_provider && (tp as any)?.insurance_member_id)
+        );
+        results = results.map(a => ({ ...a, insurance_on_file: insOnFile }));
+      } catch { /* non-blocking — card just falls back to "needed" */ }
+
       setAppointments(results);
       setLoading(false);
     };
@@ -145,20 +162,17 @@ const UpcomingAppointments = () => {
                     </p>
                   )}
                   {/*
-                   * Lab order + insurance status badges. Closes the Valli
-                   * & John Ritenour case (2026-05-17): patient uploaded but
-                   * the appointment card never reflected it — pre-fix this
-                   * card pulled appointments.* and rendered ZERO indicators
-                   * for lab_order_file_path, panels, fasting flag, or
-                   * insurance. Patient saw the same "you need to upload"
-                   * nudge even after a successful upload, which is the
-                   * single biggest trust-collapse moment in the patient
-                   * lifecycle. Now:
+                   * Lab order + insurance status badges. ConveLabs doesn't
+                   * bill insurance — the LAB (Quest, LabCorp, AdventHealth)
+                   * bills the patient's insurance directly. Missing
+                   * insurance means the lab either rejects the specimen or
+                   * the patient gets a surprise self-pay bill from the
+                   * lab. So the card surfaces "insurance needed" as a
+                   * REQUIRED prep item, not a billing nicety. (Valli &
+                   * John Ritenour bug + nicq E2E 2026-05-17.)
                    *   - ✓ Lab order on file (with panel chips if OCR'd)
-                   *   - ⚠ Fasting required (if OCR detected)
-                   *   - ⚠ Upload lab order (deep-link if missing)
-                   *   - ✓ Insurance on file OR ⚠ Add insurance card
-                   *     (deep-link to /profile)
+                   *   - ⚠ Lab order needed (deep-link to upload)
+                   *   - ✓ Insurance on file OR ⚠ Insurance card needed
                    */}
                   <div className="flex flex-wrap items-center gap-1.5 mt-2">
                     {a.lab_order_file_path ? (
@@ -177,6 +191,19 @@ const UpcomingAppointments = () => {
                       <Badge variant="outline" className="text-[10px] bg-gray-50 text-gray-700 border-gray-200">
                         {a.lab_order_panels.length} panel{a.lab_order_panels.length === 1 ? '' : 's'}
                       </Badge>
+                    )}
+                    {(a as any).insurance_on_file ? (
+                      <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                        ✓ Insurance card on file
+                      </Badge>
+                    ) : (
+                      <a
+                        href="/profile?tab=insurance"
+                        title="Required: your lab (Quest/LabCorp/AdventHealth) bills your insurance directly, not us"
+                        className="text-[10px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100"
+                      >
+                        ⚠ Insurance card needed
+                      </a>
                     )}
                   </div>
                 </div>
