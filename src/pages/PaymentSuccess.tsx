@@ -20,9 +20,13 @@ const PaymentSuccess = () => {
   const isUpgrade = queryParams.get('upgrade') === 'true';
   
   useEffect(() => {
+    // Clear any reschedule-carry-over stash so the next /book-now load
+    // doesn't show the "Rescheduling your..." banner pointing at the
+    // already-cancelled-by-webhook old appointment.
+    try { sessionStorage.removeItem('convelabs_reschedule_from'); } catch { /* private-browsing safe */ }
     const verifyCheckout = async () => {
       if (!sessionId) return;
-      
+
       setIsVerifying(true);
       
       try {

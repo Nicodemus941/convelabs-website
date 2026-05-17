@@ -7,7 +7,7 @@ import { useTenant } from '@/contexts/tenant/TenantContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { bookingFormSchema, BookingFormValues } from '@/types/appointmentTypes';
 import { useAvailableServices } from '@/hooks/useAvailableServices';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
 import { createAppointmentCheckoutSession } from '@/services/stripe/appointmentCheckout';
@@ -635,6 +635,21 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // OR manually entered in CheckoutStep. Server re-validates against
         // referral_codes table and applies the discount before Stripe charge.
         referralCode: (typeof window !== 'undefined' ? sessionStorage.getItem('convelabs_referral') : null) || null,
+        // Reschedule carry-over — when the patient clicked Reschedule on an
+        // existing appointment, that appointment's id is stashed in
+        // sessionStorage. Forward it to create-appointment-checkout so it
+        // lands in Stripe metadata; the stripe-webhook then cancels the
+        // OLD appointment on successful payment of the new one. Hormozi
+        // trust ceremony: patient is never left with zero appointments,
+        // and the cancel only fires AFTER the new charge clears.
+        rescheduleFromId: (() => {
+          try {
+            const raw = typeof window !== 'undefined' ? sessionStorage.getItem('convelabs_reschedule_from') : null;
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            return parsed?.appointment_id || null;
+          } catch { return null; }
+        })(),
         pricingBreakdown,
         appointmentDate,
         appointmentTime: data.time,
@@ -867,9 +882,51 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   );
   const progressPercent = Math.min((displayStep / (totalSteps - 1)) * 100, 100);
 
+  // Reschedule context banner — surfaced when patient clicked Reschedule
+  // on the dashboard. Confirms what they're rescheduling so they don't
+  // worry the old visit is "lost". Old appt is cancelled by stripe-webhook
+  // ONLY after the new visit is paid for.
+  const rescheduleFrom = (() => {
+    try {
+      const raw = typeof window !== 'undefined' ? sessionStorage.getItem('convelabs_reschedule_from') : null;
+      if (!raw) return null;
+      const p = JSON.parse(raw);
+      if (!p?.appointment_id) return null;
+      const oldDate = (p.old_date || '').substring(0, 10);
+      const oldTime = (p.old_time || '').substring(0, 5);
+      const oldDisplay = oldDate
+        ? new Date(`${oldDate}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        : '';
+      return { id: p.appointment_id, oldDisplay, oldTime };
+    } catch { return null; }
+  })();
+
   return (
     <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 md:px-0">
       <FormProvider {...methods}>
+        {rescheduleFrom && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-start gap-2.5">
+            <RefreshCw className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-blue-900">
+                Rescheduling your {rescheduleFrom.oldDisplay}{rescheduleFrom.oldTime ? ` ${rescheduleFrom.oldTime}` : ''} visit
+              </p>
+              <p className="text-[11px] text-blue-700 mt-0.5">
+                We'll release the original slot the moment this new booking is confirmed. No double-charge.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="text-[11px] text-blue-700 underline hover:text-blue-900 flex-shrink-0"
+              onClick={() => {
+                try { sessionStorage.removeItem('convelabs_reschedule_from'); } catch { /* noop */ }
+                window.location.reload();
+              }}
+            >
+              Cancel reschedule
+            </button>
+          </div>
+        )}
         {/* Progress indicator — desktop */}
         {currentStep < BookingStep.Confirmation && (
           <>

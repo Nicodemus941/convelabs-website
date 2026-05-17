@@ -157,59 +157,41 @@ const UpcomingAppointments = () => {
                 return (
                   <div className="mt-3 pt-2 border-t flex justify-end gap-2">
                     {/*
-                     * Reschedule = confirm + cancel old + redirect to
-                     * /book-now. Previously the button was a bare
-                     * <a href="/book-now"> which left the original
-                     * appointment scheduled AND sent the patient into a
-                     * fresh booking flow -> double-booking, double-charge,
-                     * phleb shows up twice. The confirm dialog walks the
-                     * patient through the cancel-then-rebook tradeoff so
-                     * they understand the original will be released.
+                     * Reschedule = book new FIRST, auto-cancel old on
+                     * Stripe success. Hormozi trust ceremony: never let
+                     * the patient end with zero appointments. Original
+                     * iteration pre-cancelled the old visit and redirected
+                     * to /book-now — risk was the patient closing the tab
+                     * mid-checkout and ending with no appointment + no
+                     * refund clarity. New flow:
+                     *   1. Stash old appointment id in sessionStorage.
+                     *   2. Navigate to /book-now.
+                     *   3. BookingFlow reads the stash + shows a banner
+                     *      AND forwards reschedule_from_id to
+                     *      create-appointment-checkout.
+                     *   4. Stripe metadata carries reschedule_from_id
+                     *      through to the success webhook, which calls
+                     *      cancel-appointment on the OLD row (free,
+                     *      cancellation_reason="rescheduled to <new-id>").
                      */}
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="outline" size="sm" className="text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
-                          <RefreshCw className="h-3 w-3 mr-1" />Reschedule
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent className="w-[90vw] max-w-md">
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Reschedule this visit?</AlertDialogTitle>
-                          <AlertDialogDescription className="space-y-2">
-                            <span className="block">We'll release your current slot and send you to pick a new date + time.</span>
-                            {policy.fee > 0 && a.total_amount > 0 ? (
-                              <span className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-xs">
-                                <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-                                <span>Less than 24 hours notice — a 50% rebook fee (<strong>${(a.total_amount * 0.5).toFixed(2)}</strong>) applies.</span>
-                              </span>
-                            ) : (
-                              <span className="block text-green-700 text-xs">Free reschedule (24+ hours notice).</span>
-                            )}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Keep current visit</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={async () => {
-                              try {
-                                const { data, error } = await supabase.functions.invoke('cancel-appointment', {
-                                  body: { appointment_id: a.id, reason: 'Patient initiated reschedule' },
-                                });
-                                if (error) throw error;
-                                if (data?.error) throw new Error(data.error);
-                                toast.success('Old visit released. Pick your new time.');
-                                window.location.href = '/book-now';
-                              } catch (e: any) {
-                                toast.error(e?.message || 'Could not reschedule. Please call (941) 527-9169.');
-                              }
-                            }}
-                            className="bg-blue-600 hover:bg-blue-700"
-                          >
-                            Yes, reschedule
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+                      onClick={() => {
+                        try {
+                          sessionStorage.setItem('convelabs_reschedule_from', JSON.stringify({
+                            appointment_id: a.id,
+                            old_date: a.appointment_date,
+                            old_time: a.appointment_time,
+                            old_service_type: a.service_type,
+                          }));
+                        } catch { /* private-browsing safe */ }
+                        window.location.href = '/book-now';
+                      }}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />Reschedule
+                    </Button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="outline" size="sm" className="text-xs text-red-600 border-red-200 hover:bg-red-50">Cancel</Button>

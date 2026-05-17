@@ -860,6 +860,12 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Reschedule carry-over — if this booking originated from a Reschedule
+    // click on the patient dashboard, BookingFlow forwards the old
+    // appointment id. We stamp it in Stripe metadata so the success webhook
+    // can cancel the OLD appointment AFTER this new charge clears. Patient
+    // trust ceremony: never left with zero appointments.
+    const rescheduleFromId = String((body as any)?.rescheduleFromId || '').trim();
     // Store all appointment data in metadata for the webhook
     const metadata: Record<string, string> = {
       type: 'appointment_payment',
@@ -869,6 +875,11 @@ Deno.serve(async (req) => {
       tip_amount: String(tipAmount),
       appointment_date: appointmentDate,
       appointment_time: appointmentTime || '',
+      // UUID format check — only carry through valid UUIDs so we don't pollute
+      // metadata with random strings if a misbehaving client sends garbage.
+      ...(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rescheduleFromId)
+        ? { reschedule_from_id: rescheduleFromId }
+        : {}),
       patient_first_name: patientDetails.firstName || '',
       patient_last_name: patientDetails.lastName || '',
       patient_email: patientDetails.email || '',

@@ -1325,6 +1325,35 @@ async function handleAppointmentPayment(session: any) {
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
 
+    // ─── RESCHEDULE CARRY-OVER ───────────────────────────────────
+    // When the new booking came from the dashboard's Reschedule flow,
+    // metadata.reschedule_from_id carries the OLD appointment id. Cancel
+    // it now (after the new charge has cleared) so the patient ends with
+    // exactly 1 scheduled appointment. Free cancellation regardless of
+    // the 24h policy — the new booking already paid us. Cross-links the
+    // two appointments in cancellation_reason so admin can audit.
+    const rescheduleFromId = String(metadata.reschedule_from_id || '').trim();
+    if (rescheduleFromId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rescheduleFromId)) {
+      try {
+        const { error: cancelErr } = await supabaseClient
+          .from('appointments')
+          .update({
+            status: 'cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancellation_reason: `Rescheduled — new appointment ${appointment.id}`,
+          } as any)
+          .eq('id', rescheduleFromId)
+          .in('status', ['scheduled', 'confirmed', 'pending_payment']);
+        if (cancelErr) {
+          console.warn(`[reschedule-carryover] cancel old ${rescheduleFromId} failed:`, cancelErr.message);
+        } else {
+          console.log(`[reschedule-carryover] cancelled old appointment ${rescheduleFromId} after new ${appointment.id} confirmed`);
+        }
+      } catch (rErr: any) {
+        console.warn('[reschedule-carryover] non-blocking failure:', rErr?.message || rErr);
+      }
+    }
+
     // ─── INSURANCE PERSISTENCE ────────────────────────────────────
     // Decode the OCR-extracted insurance fields packed into metadata.insurance_json
     // and write them onto the patient's chart. Prior bug: the booking flow's

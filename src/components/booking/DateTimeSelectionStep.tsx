@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { format, addDays, subDays } from 'date-fns';
-import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X } from 'lucide-react';
+import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown } from 'lucide-react';
 import { toast } from 'sonner';
 import MemberOtpUnlockButton from './MemberOtpUnlockButton';
 import JoinWaitlistButton from './JoinWaitlistButton';
@@ -518,6 +518,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     const stillBookableSameDay = isToday && todayHour < cutoffHour;
     methods.setValue('serviceDetails.sameDay', stillBookableSameDay);
     methods.setValue('serviceDetails.weekend', isWknd);
+    // After-hours (extended hours) +$50 surcharge — was visually tagged on
+    // the slot card but never applied to the Est. badge or the actual charge.
+    // Pre-fix: 5:30 PM and 5:45 PM slots said "+$50" but Stripe charged the
+    // base price = revenue leak on every late visit. Fix: when the selected
+    // time falls inside afterHoursWindows, flip extendedHours=true so
+    // pricingService.SURCHARGES.extendedHours ($50) gets applied.
+    const isAfterHours = selectedTime
+      ? afterHoursWindows.some(w => w.time === selectedTime)
+      : false;
+    methods.setValue('serviceDetails.extendedHours', isAfterHours);
 
     // If switching to today, clear time if it's now past the lead time
     if (isToday && selectedTime) {
@@ -527,7 +537,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         methods.setValue('time', '');
       }
     }
-  }, [selectedDate]);
+  }, [selectedDate, selectedTime]);
 
   // Lab destination — synced bidirectionally with form's labOrder.labDestination
   // (the same field set on step 6's LabDestinationSelector). Pre-asking it here
@@ -761,6 +771,50 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Appointment Time</FormLabel>
+
+                  {/*
+                   * Hormozi: surface the membership discount math at the
+                   * exact moment the patient is about to commit a slot.
+                   * Most upsell timing is wrong — banners on page load get
+                   * banner-blindness; checkout-time feels like a bait-switch.
+                   * Slot selection is the conversion-honest moment: "you're
+                   * about to spend $150 — VIP makes it $115 today AND every
+                   * future visit." Math comes from the same TIER_PRICING
+                   * map the server uses, so what we show is what they pay.
+                   * Only renders for non-members on a service with a real
+                   * member delta.
+                   */}
+                  {patientTier === 'none' && (() => {
+                    const visitType = (methods.getValues() as any)?.serviceDetails?.visitType || '';
+                    if (!visitType || visitType === 'dev-testing') return null;
+                    // Inline the price map so we don't import pricingService
+                    // at the slot-picker level (avoid circular deps).
+                    const priceMap: Record<string, { base: number; vip: number }> = {
+                      mobile: { base: 150, vip: 115 },
+                      'in-office': { base: 55, vip: 45 },
+                      senior: { base: 100, vip: 75 },
+                      'specialty-kit': { base: 185, vip: 150 },
+                      'specialty-kit-genova': { base: 200, vip: 165 },
+                      therapeutic: { base: 200, vip: 165 },
+                    };
+                    const p = priceMap[visitType];
+                    if (!p) return null;
+                    const save = p.base - p.vip;
+                    if (save < 10) return null;
+                    return (
+                      <div className="bg-gradient-to-r from-amber-50 to-amber-100 border border-amber-300 rounded-lg p-3 mb-2 flex items-start gap-2.5">
+                        <Crown className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs sm:text-sm font-semibold text-amber-900">
+                            Members pay <span className="tabular-nums">${p.vip}</span>. You'd save <span className="tabular-nums">${save}</span> today + every future visit.
+                          </p>
+                          <p className="text-[11px] text-amber-700 mt-0.5">
+                            VIP membership $199/yr — recoups itself in <span className="tabular-nums">{Math.ceil(199 / save)}</span> visit{Math.ceil(199 / save) === 1 ? '' : 's'}.
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Same-day booking notice */}
                   {isSameDay && !isStat && (

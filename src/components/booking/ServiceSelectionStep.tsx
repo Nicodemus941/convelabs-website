@@ -48,7 +48,7 @@ const MOBILE_SENIOR_SERVICES = ['routine-blood-draw', 'fasting-blood-draw', 'sta
 
 // All services for other visit types
 const ALL_SERVICES: Service[] = [
-  { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. Available 9 AM - 1:30 PM.' },
+  { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. 9 AM – 1:30 PM, Mon–Sat. AdventHealth deliveries extend to 6 PM.' },
   { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. 6–9 AM Mon–Fri for non-members; members unlock wider windows. We verify against your uploaded lab order — if fasting isn\'t required, booking will be rejected.' },
   { id: 'stat-blood-draw', name: 'STAT / Same-Day', duration: 60, credits: 1, description: 'Next available slot. +$100 surcharge.' },
   { id: 'therapeutic-phlebotomy', name: 'Therapeutic Phlebotomy', duration: 75, credits: 1, description: 'Blood removal per doctor order. 1hr 15min.' },
