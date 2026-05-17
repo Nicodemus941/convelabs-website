@@ -77,19 +77,51 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   const onDropLabOrder = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
-    // Step 1: show files in UI right away
+    // Step 1: show files in UI right away (optimistic)
     onFilesSelected([...selectedFiles, ...acceptedFiles]);
     setValue('labOrder.hasFile', true);
     setValue('labOrder.skipped', false);
 
-    // Step 2: upload to storage so OCR can read them + so checkout doesn't re-upload
+    // Step 2: upload to storage so OCR can read them + so checkout doesn't re-upload.
+    // PRE-FIX (Valli & John Ritenour case, 2026-05-17): a failed upload only
+    // logged console.warn and left the optimistic UI showing the file as
+    // "added" — patient hit Continue, completed booking, but
+    // lab_order_file_path stayed null on the appointment. Storage had zero
+    // files for them. New behavior:
+    //   - toast.error with the real reason on EVERY failed file
+    //   - remove the failed file from selectedFiles so the UI matches reality
+    //   - clear hasFile when nothing successfully uploaded
     const previouslyUploaded: string[] = (getValues('labOrder.uploadedPaths' as any) || []) as any;
     const newPaths: string[] = [];
+    const failedFiles: File[] = [];
     for (const file of acceptedFiles) {
       const fileName = `laborder_${Date.now()}_${file.name}`;
       const { error } = await supabase.storage.from('lab-orders').upload(fileName, file);
-      if (!error) newPaths.push(fileName);
-      else console.warn('Immediate lab-order upload failed (will retry at checkout):', error);
+      if (!error) {
+        newPaths.push(fileName);
+      } else {
+        failedFiles.push(file);
+        console.error('[lab-order upload failed]', file.name, error);
+        // Surface a real toast so the patient knows the file didn't land.
+        // Use the storage error message when available so the cause is
+        // actionable (size cap, RLS, network, etc.).
+        const reason = (error as any)?.message || (error as any)?.error || 'unknown error';
+        toast.error(`Couldn't upload ${file.name}: ${reason}. Please try again or email it to info@convelabs.com.`);
+      }
+    }
+    // Reconcile optimistic UI with actual upload result: drop the failed
+    // files from selectedFiles so the patient doesn't see them as "added".
+    if (failedFiles.length > 0) {
+      const failedNameSet = new Set(failedFiles.map(f => `${f.name}::${f.size}`));
+      const survivingNew = acceptedFiles.filter(f => !failedNameSet.has(`${f.name}::${f.size}`));
+      onFilesSelected([...selectedFiles, ...survivingNew]);
+      // If every newly-dropped file failed AND there are no surviving files
+      // overall, clear the hasFile flag so the booking flow knows the patient
+      // hasn't actually uploaded anything. Prevents "lab order required" CTAs
+      // from disappearing prematurely.
+      if (survivingNew.length === 0 && selectedFiles.length === 0 && previouslyUploaded.length === 0) {
+        setValue('labOrder.hasFile', false);
+      }
     }
     if (newPaths.length === 0) return;
 
