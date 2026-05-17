@@ -46,16 +46,25 @@ const UpcomingAppointments = () => {
       // (Quest/LabCorp/AdventHealth) needs it to process the specimen —
       // missing insurance = lab rejection OR surprise self-pay bill for
       // the patient. So the card shows it as a required prep item.
+      // When OCR extracted provider + memberId we surface them on the card
+      // so the phleb (and the patient) can verify what the lab will see.
       try {
         const { data: tp } = await supabase.from('tenant_patients')
           .select('insurance_card_path, insurance_provider, insurance_member_id')
           .or(`user_id.eq.${user.id},email.ilike.${user.email || 'none'}`)
           .limit(1).maybeSingle();
+        const insProvider = (tp as any)?.insurance_provider || null;
+        const insMemberId = (tp as any)?.insurance_member_id || null;
         const insOnFile = Boolean(
           (tp as any)?.insurance_card_path ||
-          ((tp as any)?.insurance_provider && (tp as any)?.insurance_member_id)
+          (insProvider && insMemberId)
         );
-        results = results.map(a => ({ ...a, insurance_on_file: insOnFile }));
+        results = results.map(a => ({
+          ...a,
+          insurance_on_file: insOnFile,
+          insurance_provider: insProvider,
+          insurance_member_id: insMemberId,
+        }));
       } catch { /* non-blocking — card just falls back to "needed" */ }
 
       setAppointments(results);
@@ -193,8 +202,18 @@ const UpcomingAppointments = () => {
                       </Badge>
                     )}
                     {(a as any).insurance_on_file ? (
-                      <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
-                        ✓ Insurance card on file
+                      <Badge
+                        variant="outline"
+                        title={
+                          (a as any).insurance_provider
+                            ? `On file: ${(a as any).insurance_provider}${(a as any).insurance_member_id ? ` · Member ${(a as any).insurance_member_id}` : ''}`
+                            : 'Insurance card on file'
+                        }
+                        className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200"
+                      >
+                        ✓ {(a as any).insurance_provider
+                          ? <>Ins: <span className="font-semibold">{String((a as any).insurance_provider).length > 18 ? String((a as any).insurance_provider).slice(0, 18) + '…' : (a as any).insurance_provider}</span></>
+                          : 'Insurance card on file'}
                       </Badge>
                     ) : (
                       <a

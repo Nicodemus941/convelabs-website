@@ -104,33 +104,70 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // Stamp tenant_patients.insurance_card_path so the chart has it for
-    // THIS visit + every future visit (auto-prefill on next /book-now).
+    // OCR the card via the existing extract-insurance-ocr edge fn (front only —
+    // back contains member-services phone + claims address but we get that
+    // off the front 95% of the time and the patient experience is faster
+    // without a second photo). Back-side capture stays available behind the
+    // admin UI when needed for claim verification. Non-blocking — if OCR
+    // fails we still save the image and stamp the path; the phleb can read
+    // the card at the visit.
+    let ocrExtracted: any = null;
+    try {
+      const ocrResp = await fetch(`${SUPABASE_URL}/functions/v1/extract-insurance-ocr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}` },
+        body: JSON.stringify({
+          filePath: fileName,
+          patientId: (appt as any).patient_id || null,
+          appointmentId: (appt as any).id,
+          rank: 'primary',
+          side: 'front',
+        }),
+      });
+      if (ocrResp.ok) {
+        const j = await ocrResp.json().catch(() => null);
+        if (j && j.ok !== false) ocrExtracted = j.extracted || j.parsed || j;
+      } else {
+        console.warn('[submit-insurance-card] OCR non-200:', ocrResp.status);
+      }
+    } catch (ocrErr: any) {
+      console.warn('[submit-insurance-card] OCR threw (non-blocking):', ocrErr?.message || ocrErr);
+    }
+
+    // Stamp tenant_patients.insurance_card_path + structured OCR fields so the
+    // chart has everything it needs for THIS visit + every future visit
+    // (auto-prefill on next /book-now). The lab needs provider + memberId +
+    // groupNumber to bill — without those they reject the kit or self-bill
+    // the patient.
+    const patchPayload: Record<string, any> = {
+      insurance_card_path: fileName,
+      updated_at: new Date().toISOString(),
+    };
+    if (ocrExtracted?.provider) patchPayload.insurance_provider = String(ocrExtracted.provider).slice(0, 200);
+    if (ocrExtracted?.memberId) patchPayload.insurance_member_id = String(ocrExtracted.memberId).slice(0, 100);
+    if (ocrExtracted?.groupNumber) patchPayload.insurance_group_number = String(ocrExtracted.groupNumber).slice(0, 100);
+
     if ((appt as any).patient_id) {
       try {
-        await admin.from('tenant_patients').update({
-          insurance_card_path: fileName,
-          updated_at: new Date().toISOString(),
-        }).eq('user_id', (appt as any).patient_id);
+        await admin.from('tenant_patients').update(patchPayload).eq('user_id', (appt as any).patient_id);
       } catch (chartErr: any) {
         console.warn('[submit-insurance-card] chart stamp failed (non-blocking):', chartErr?.message);
       }
     }
-
-    // Mirror via email when the patient_id link is missing (guest bookings,
-    // partner-created appts). Ensures the chart still picks it up next visit.
     if (!(appt as any).patient_id && (appt as any).patient_email) {
       try {
-        await admin.from('tenant_patients').update({
-          insurance_card_path: fileName,
-          updated_at: new Date().toISOString(),
-        }).ilike('email', (appt as any).patient_email);
+        await admin.from('tenant_patients').update(patchPayload).ilike('email', (appt as any).patient_email);
       } catch { /* non-blocking */ }
     }
 
     return new Response(JSON.stringify({
       ok: true,
       file_path: fileName,
+      ocr_extracted: ocrExtracted ? {
+        provider: ocrExtracted.provider || null,
+        memberId: ocrExtracted.memberId || null,
+        groupNumber: ocrExtracted.groupNumber || null,
+      } : null,
       message: 'Insurance card on file — your lab will bill your insurance directly.',
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {

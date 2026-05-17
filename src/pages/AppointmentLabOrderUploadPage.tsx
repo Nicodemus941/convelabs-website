@@ -63,6 +63,10 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
   const insuranceFileRef = useRef<HTMLInputElement>(null);
   const [uploadingInsurance, setUploadingInsurance] = useState(false);
   const [insuranceUploaded, setInsuranceUploaded] = useState(false);
+  // OCR result surfaced back to the patient as a trust ceremony — when we
+  // can extract provider + memberId we confirm it visually so the patient
+  // knows the card was actually read, not just stored.
+  const [insuranceExtracted, setInsuranceExtracted] = useState<{ provider?: string | null; memberId?: string | null; groupNumber?: string | null } | null>(null);
 
   async function handleInsuranceFile(rawFile: File) {
     if (!token || uploadingInsurance) return;
@@ -96,6 +100,7 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
         setError(j.message || j.error || 'Insurance card upload failed. Please try again or email it to info@convelabs.com.');
       } else {
         setInsuranceUploaded(true);
+        if (j?.ocr_extracted) setInsuranceExtracted(j.ocr_extracted);
       }
     } catch (e: any) {
       setError(e?.message || 'Insurance card upload crashed.');
@@ -444,8 +449,18 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                 onChange={onInsuranceChange}
               />
               {insuranceUploaded ? (
-                <div className="border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800 flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4" /> Insurance card on file — thank you!
+                <div className="border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="h-4 w-4" /> Insurance card on file — thank you!
+                  </div>
+                  {insuranceExtracted?.provider && (
+                    <div className="mt-1.5 text-[11px] text-emerald-900/80 leading-relaxed">
+                      We read: <strong>{insuranceExtracted.provider}</strong>
+                      {insuranceExtracted.memberId && <> · Member <strong>{insuranceExtracted.memberId}</strong></>}
+                      {insuranceExtracted.groupNumber && <> · Group <strong>{insuranceExtracted.groupNumber}</strong></>}
+                      <span className="block mt-0.5 opacity-80">If anything looks off, just call <a href="tel:+19415279169" className="underline">(941) 527-9169</a> and we'll fix it.</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <button
