@@ -23,11 +23,28 @@ const PLANS = [
 const PatientDashboard = () => {
   const { user, logout } = useAuth();
   const [searchParams] = useSearchParams();
-  const [stats, setStats] = useState({ upcoming: 0, completed: 0, nextDate: '', nextTime: '', daysSince: 0, totalSpent: 0, avgFrequency: 0 });
+  const [stats, setStats] = useState({ upcoming: 0, completed: 0, pastVisits: 0, nextDate: '', nextTime: '', daysSince: 0, totalSpent: 0, avgFrequency: 0 });
   const [notifMethod, setNotifMethod] = useState<'sms' | 'email' | 'both'>('both');
   const [notifSaving, setNotifSaving] = useState(false);
   const [membershipModalOpen, setMembershipModalOpen] = useState(false);
   const [subscribing, setSubscribing] = useState<string | null>(null);
+  // Founding-50 scarcity status — populated from get_founding_seats_status('vip')
+  // RPC. When fewer than 50 VIP founding seats have been claimed, the upgrade
+  // modal shows a real-time scarcity banner + the stacked-value card on the
+  // VIP tile. Once cap is reached, both elements gracefully disappear and the
+  // standard tile renders.
+  const [foundingStatus, setFoundingStatus] = useState<{ tier: string; cap: number; claimed: number; remaining: number; next_number: number; is_open: boolean } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase.rpc('get_founding_seats_status' as any, { tier: 'vip' });
+        if (!cancelled && data) setFoundingStatus(data as any);
+      } catch { /* non-blocking — modal still renders without scarcity */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (searchParams.get('membership') === 'success') {
@@ -71,8 +88,22 @@ const PatientDashboard = () => {
       }
       const upcoming = all.filter(a => ['scheduled', 'confirmed'].includes(a.status)).sort((a, b) => new Date(a.appointment_date || 0).getTime() - new Date(b.appointment_date || 0).getTime());
       const completed = all.filter(a => a.status === 'completed').sort((a, b) => new Date(b.appointment_date || 0).getTime() - new Date(a.appointment_date || 0).getTime());
+      // Past Visits count = anything AppointmentHistory shows (completed +
+      // specimen_delivered + cancelled). Previously this header rendered
+      // `${stats.completed} total` which only counted status=completed, so
+      // a patient with 1 completed + 1 cancelled visit saw "1 total" above
+      // a list of 2 rows. (Bug #11 in nicq E2E.)
+      const pastVisitsCount = all.filter(a => ['completed', 'specimen_delivered', 'cancelled'].includes(a.status)).length;
       const next = upcoming[0];
-      const nextDate = next?.appointment_date ? new Date(next.appointment_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : '';
+      // TZ-safe display: appointment_date comes back as 'YYYY-MM-DD...' from Postgres.
+      // Naive `new Date(str)` parses the ISO timestamp in UTC, then renders local —
+      // for a US-East user that shifts a 2026-05-21T00:00:00+00 row to "May 20".
+      // Fix: extract the YYYY-MM-DD portion and pin to noon local before formatting,
+      // so the displayed day matches the stored calendar day. (Bug #7 in nicq E2E.)
+      const isoDay = (next?.appointment_date || '').substring(0, 10);
+      const nextDate = isoDay
+        ? new Date(`${isoDay}T12:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        : '';
       const nextTime = next?.appointment_time || '';
       const lastCompleted = completed[0];
       const daysSince = lastCompleted?.appointment_date ? Math.floor((Date.now() - new Date(lastCompleted.appointment_date).getTime()) / 86400000) : 0;
@@ -85,7 +116,7 @@ const PatientDashboard = () => {
         for (let i = 1; i < dates.length; i++) gaps.push((dates[i] - dates[i-1]) / 86400000);
         avgFrequency = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length);
       }
-      setStats({ upcoming: upcoming.length, completed: completed.length, nextDate, nextTime, daysSince, totalSpent, avgFrequency });
+      setStats({ upcoming: upcoming.length, completed: completed.length, pastVisits: pastVisitsCount, nextDate, nextTime, daysSince, totalSpent, avgFrequency } as any);
     };
     loadStats();
     supabase.from('email_preferences').select('notification_method').eq('user_id', user.id).maybeSingle()
@@ -231,8 +262,8 @@ const PatientDashboard = () => {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-bold">Past Visits</CardTitle>
-                {stats.completed > 0 && (
-                  <span className="text-xs text-muted-foreground">{stats.completed} total</span>
+                {stats.pastVisits > 0 && (
+                  <span className="text-xs text-muted-foreground">{stats.pastVisits} total</span>
                 )}
               </div>
             </CardHeader>
@@ -370,6 +401,19 @@ const PatientDashboard = () => {
               )}
             </DialogTitle>
           </DialogHeader>
+          {/* Founding-50 scarcity banner — Hormozi $100M Offers chapter 2.
+              Real-time count of remaining founding VIP seats (RPC, capped at
+              50). When seats remain, displays a finite-resource scarcity hook
+              that beats every countdown timer because the constraint is
+              actually enforced server-side. */}
+          {foundingStatus && foundingStatus.is_open && (
+            <div className="mt-3 mx-auto max-w-md bg-gradient-to-r from-amber-50 to-amber-100 border border-amber-300 rounded-xl px-4 py-2.5 text-center">
+              <p className="text-xs font-bold text-amber-900">
+                🔥 Founding VIP · <span className="tabular-nums">{foundingStatus.claimed}</span> of <span className="tabular-nums">{foundingStatus.cap}</span> claimed · <span className="tabular-nums">{foundingStatus.remaining}</span> seats left
+              </p>
+              <p className="text-[10px] text-amber-800 mt-0.5">Rate locked for life · 1 free family member every visit</p>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
             {PLANS.map(plan => (
               <div key={plan.name} className={`border-2 ${plan.color} rounded-xl p-4 relative ${plan.badge ? 'ring-1 ring-[#B91C1C]/20' : ''}`}>
@@ -380,6 +424,26 @@ const PatientDashboard = () => {
                 <ul className="mt-3 space-y-1.5">
                   {plan.features.map(f => (<li key={f} className="flex items-start gap-1.5 text-xs"><Check className="h-3.5 w-3.5 text-green-600 mt-0.5 flex-shrink-0" /><span>{f}</span></li>))}
                 </ul>
+                {/* Stacked value card — only on VIP (the Most Popular anchor).
+                    Hormozi Grand Slam: show what each bonus is worth, sum it,
+                    contrast with the price. Math taken from master plan K1
+                    so a future buyer/founder can audit the line items. */}
+                {plan.name === 'VIP' && foundingStatus?.is_open && (
+                  <div className="mt-3 pt-3 border-t border-dashed border-[#B91C1C]/30">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#B91C1C] mb-1.5">Founding Stack</p>
+                    <div className="space-y-0.5 text-[11px]">
+                      <div className="flex justify-between"><span className="text-gray-600">12 mo VIP membership</span><span className="font-medium tabular-nums">$199</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Rate locked for life</span><span className="font-medium tabular-nums text-green-700">+$50</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">1 free family / visit</span><span className="font-medium tabular-nums text-green-700">+$75</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">Priority same-day</span><span className="font-medium tabular-nums text-green-700">+$150</span></div>
+                      <div className="flex justify-between pt-1.5 border-t mt-1.5">
+                        <span className="font-bold">Stacked value</span>
+                        <span className="font-bold tabular-nums">$474</span>
+                      </div>
+                      <p className="text-[10px] text-center text-green-700 font-semibold mt-1">Pays for itself in 1 visit</p>
+                    </div>
+                  </div>
+                )}
                 <Button className={`w-full mt-4 rounded-xl text-sm ${plan.badge ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white' : ''}`}
                   variant={plan.badge ? 'default' : 'outline'} disabled={subscribing === plan.name} onClick={() => handleSubscribe(plan.name)}>
                   {subscribing === plan.name ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
