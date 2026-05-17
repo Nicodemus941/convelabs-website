@@ -58,6 +58,12 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   const [drawByDate, setDrawByDate] = useState('');
   const [nextApptDate, setNextApptDate] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
+  // Provider-asserted fasting flag. Independent of OCR (which sets it when
+  // a PDF is uploaded). Toggled by the "12-hour fast required" notes chip so
+  // a single click both inserts the patient-facing copy AND stamps the
+  // boolean that the patient lab-request page reads to surface the amber
+  // "Fasting required" banner + the fasting reminder SMS the night before.
+  const [fastingRequired, setFastingRequired] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [filePath, setFilePath] = useState<string | null>(null); // remembered for re-submit
   const [uploading, setUploading] = useState(false);
@@ -125,7 +131,7 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
 
   const reset = () => {
     setPatientName(''); setPatientEmail(''); setPatientPhone(''); setPatientDob('');
-    setDrawByDate(''); setNextApptDate(''); setAdminNotes('');
+    setDrawByDate(''); setNextApptDate(''); setAdminNotes(''); setFastingRequired(false);
     setAddrLabel('home'); setAddrLine1(''); setAddrCity(''); setAddrZip('');
     setAddrAccessNotes(''); setShowAddrSection(false);
     setFile(null); setFilePath(null); setOcr(null); setShowPreview(false);
@@ -249,6 +255,7 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
           draw_by_date: drawByDate,
           next_doctor_appt_date: nextApptDate || null,
           admin_notes: adminNotes.trim() || null,
+          fasting_required: fastingRequired || null,
           billed_to: billedTo,
           provider_pay_method: billedTo === 'org' ? providerPayMethod : 'invoice',
         }),
@@ -585,16 +592,30 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                 'Drink water beforehand.',
                 'Bring photo ID.',
                 'Results go to the ordering provider.',
-              ].map(chip => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => setAdminNotes(n => (n ? `${n} ${chip}` : chip))}
-                  className="text-[11px] px-2 py-0.5 rounded-full border border-gray-200 text-gray-600 hover:border-[#B91C1C] hover:text-[#B91C1C] hover:bg-red-50 transition"
-                >
-                  + {chip.replace('.', '')}
-                </button>
-              ))}
+              ].map(chip => {
+                const isFastingChip = chip.startsWith('12-hour fast');
+                const isActive = isFastingChip && fastingRequired;
+                return (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => {
+                      setAdminNotes(n => (n ? `${n} ${chip}` : chip));
+                      // Fasting chip is dual-purpose: drops the note copy AND
+                      // sets the boolean flag the patient page + fasting-reminder
+                      // SMS cron both read.
+                      if (isFastingChip) setFastingRequired(true);
+                    }}
+                    className={`text-[11px] px-2 py-0.5 rounded-full border transition ${
+                      isActive
+                        ? 'border-amber-500 text-amber-900 bg-amber-50'
+                        : 'border-gray-200 text-gray-600 hover:border-[#B91C1C] hover:text-[#B91C1C] hover:bg-red-50'
+                    }`}
+                  >
+                    {isActive ? '✓ ' : '+ '}{chip.replace('.', '')}
+                  </button>
+                );
+              })}
             </div>
             <Textarea value={adminNotes} onChange={e => setAdminNotes(e.target.value)} rows={2}
               placeholder="e.g. 'Remember the 12-hour fast', or 'Please arrive at a LabCorp location — we're waiting for a delivery slot'" />

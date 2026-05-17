@@ -170,6 +170,11 @@ Deno.serve(async (req) => {
       organization_id, patient_name, patient_email, patient_phone,
       lab_order_file_path, draw_by_date, next_doctor_appt_date,
       next_doctor_appt_notes, admin_notes, billed_to,
+      // Provider-asserted fasting flag (set by the modal's "12-hour fast
+      // required" chip when no PDF was uploaded). OCR result wins if a PDF
+      // is uploaded AND OCR found fasting evidence — otherwise this flag
+      // sets the boolean the patient page + fasting-reminder cron read.
+      fasting_required: clientFasting,
       // Patient DOB — required for the HIPAA gate on the patient lab-request
       // page. Without it, verify_lab_request_dob returns 'no_dob_on_file'
       // and the patient is blocked from booking. (2026-05-07: Michael Percopo
@@ -219,7 +224,9 @@ Deno.serve(async (req) => {
           const ocr = await ocrResp.json();
           detectedPanels = ocr.panels || [];
           fullText = ocr.fullText || '';
-          fasting = !!ocr.fastingRequired;
+          // OCR positive ⇒ assert fasting. Provider-asserted flag adds on top
+          // so the boolean is true if either source flagged it.
+          fasting = !!ocr.fastingRequired || !!clientFasting;
           urine = !!ocr.urineRequired;
           gtt = !!ocr.gttRequired;
           // Patient DOB straight off the doctor's order. Used as the source
@@ -233,6 +240,10 @@ Deno.serve(async (req) => {
         }
       } catch (e) { console.warn('OCR failed (non-blocking):', e); }
     }
+    // No PDF uploaded ⇒ OCR never ran. Fall back to the provider-asserted
+    // flag from the modal so the chip-click path correctly stamps the
+    // boolean. (Pre-fix: fasting stayed false unless a PDF was uploaded.)
+    if (!lab_order_file_path && clientFasting) fasting = true;
     // ── DOB RESOLUTION (Hormozi 2026-05-14 fix) ──────────────────────
     // Three-source fallback chain so the patient never hits the
     // "no_dob_on_file" dead-end on the unlock page when we have the
@@ -364,7 +375,7 @@ Deno.serve(async (req) => {
           await admin.from('patient_lab_requests').update({
             admin_viewed_at: new Date().toISOString(),
             patient_notified_at: new Date().toISOString(),
-          }).eq('id', (request as any).id);
+          }).eq('id', inserted.id);
           console.log(`[auto-fulfill] sent booking link for ${patient_name} from ${org.name}`);
         } else {
           console.warn('[auto-fulfill] booking link send returned no ok:', bplResp);
