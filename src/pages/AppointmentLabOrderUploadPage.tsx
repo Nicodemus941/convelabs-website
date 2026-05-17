@@ -46,6 +46,9 @@ interface ApptSummary {
   org_name: string | null;
   family_group_id?: string | null;
   family_members?: FamilyMember[];
+  insurance_on_file?: boolean;
+  insurance_provider?: string | null;
+  insurance_member_id?: string | null;
 }
 
 const AppointmentLabOrderUploadPage: React.FC = () => {
@@ -426,21 +429,20 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
             </p>
 
             {/*
-             * Insurance card upload — surfaced at the SAME moment the
-             * patient is in upload-mindset, file-in-hand. ConveLabs doesn't
-             * bill insurance, but the lab (Quest, LabCorp, AdventHealth)
-             * needs the patient's insurance to process the specimen and
-             * bill the patient's plan directly. Without it the lab either
-             * rejects the kit or hits the patient with a surprise
-             * self-pay bill. So this is a REQUIRED prep item, not a billing
-             * nicety. We frame it that way in the copy. (Hormozi reframe
-             * 2026-05-17 — was previously buried in /profile → Insurance.)
+             * Insurance card section — three states:
+             *   (a) Already on file from a prior visit: confirm + offer
+             *       a small "Update card" link. No re-upload needed,
+             *       because the LAB only needs it once per patient.
+             *   (b) Just uploaded this session: green confirmation +
+             *       OCR'd provider/memberId trust ceremony.
+             *   (c) Not on file: amber prompt with the correct framing
+             *       ("we don't bill, your lab does").
+             * Hormozi reframe 2026-05-17: skip the upload entirely if
+             * the chart already has it — every extra ask is a churn
+             * lever even for a 30-second action.
              */}
             <div className="mt-6 pt-4 border-t border-gray-100">
               <p className="text-[12px] font-semibold text-gray-900 mb-1">📋 Insurance card</p>
-              <p className="text-[11px] text-gray-600 leading-relaxed mb-2">
-                We don't bill your insurance — but your lab (Quest, LabCorp, AdventHealth) does. Without your card they may reject the specimen or send you a surprise bill.
-              </p>
               <input
                 ref={insuranceFileRef}
                 type="file"
@@ -448,7 +450,29 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                 className="hidden"
                 onChange={onInsuranceChange}
               />
-              {insuranceUploaded ? (
+              {(summary?.insurance_on_file && !insuranceUploaded) ? (
+                <div className="border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="h-4 w-4" /> Insurance already on file
+                  </div>
+                  {summary?.insurance_provider && (
+                    <p className="mt-1 text-[11px] text-emerald-900/80">
+                      <strong>{summary.insurance_provider}</strong>
+                      {summary?.insurance_member_id && <> · Member <strong>{summary.insurance_member_id}</strong></>}
+                    </p>
+                  )}
+                  <p className="mt-1.5 text-[10px] text-emerald-900/70">
+                    Changed plans?{' '}
+                    <button
+                      type="button"
+                      onClick={() => insuranceFileRef.current?.click()}
+                      className="underline font-semibold hover:text-emerald-700"
+                    >
+                      Upload an updated card
+                    </button>
+                  </p>
+                </div>
+              ) : insuranceUploaded ? (
                 <div className="border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800">
                   <div className="flex items-center gap-2 font-semibold">
                     <CheckCircle2 className="h-4 w-4" /> Insurance card on file — thank you!
@@ -463,29 +487,34 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                   )}
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => insuranceFileRef.current?.click()}
-                  disabled={uploadingInsurance}
-                  className={`w-full border-2 border-dashed rounded-lg p-3 text-center transition ${
-                    uploadingInsurance
-                      ? 'border-blue-200 bg-blue-50 cursor-not-allowed'
-                      : 'border-amber-400/60 bg-amber-50/40 hover:bg-amber-50 cursor-pointer'
-                  }`}
-                >
-                  {uploadingInsurance ? (
-                    <>
-                      <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-auto mb-1" />
-                      <p className="text-[12px] font-semibold text-blue-800">Uploading insurance card…</p>
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="h-5 w-5 text-amber-700 mx-auto mb-1" />
-                      <p className="text-[12px] font-bold text-gray-900">Tap to upload insurance card</p>
-                      <p className="text-[10px] text-gray-600 mt-0.5">Front (or front + back). PDF / JPG / PNG.</p>
-                    </>
-                  )}
-                </button>
+                <>
+                  <p className="text-[11px] text-gray-600 leading-relaxed mb-2">
+                    We don't bill your insurance — but your lab (Quest, LabCorp, AdventHealth) does. Without your card they may reject the specimen or send you a surprise bill.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => insuranceFileRef.current?.click()}
+                    disabled={uploadingInsurance}
+                    className={`w-full border-2 border-dashed rounded-lg p-3 text-center transition ${
+                      uploadingInsurance
+                        ? 'border-blue-200 bg-blue-50 cursor-not-allowed'
+                        : 'border-amber-400/60 bg-amber-50/40 hover:bg-amber-50 cursor-pointer'
+                    }`}
+                  >
+                    {uploadingInsurance ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin text-blue-600 mx-auto mb-1" />
+                        <p className="text-[12px] font-semibold text-blue-800">Uploading insurance card…</p>
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="h-5 w-5 text-amber-700 mx-auto mb-1" />
+                        <p className="text-[12px] font-bold text-gray-900">Tap to upload insurance card</p>
+                        <p className="text-[10px] text-gray-600 mt-0.5">Front photo. PDF / JPG / PNG.</p>
+                      </>
+                    )}
+                  </button>
+                </>
               )}
             </div>
 

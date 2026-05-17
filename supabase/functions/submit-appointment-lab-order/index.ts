@@ -56,10 +56,31 @@ async function loadRequestRow(admin: any, token: string) {
 async function loadAppointmentSummary(admin: any, appointmentId: string) {
   const { data: appt } = await admin
     .from('appointments')
-    .select('id, patient_name, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id, family_group_id')
+    .select('id, patient_id, patient_name, patient_email, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id, family_group_id')
     .eq('id', appointmentId)
     .maybeSingle();
   if (!appt) return null;
+  // Look up the patient's insurance status so the upload page can skip the
+  // insurance-card prompt when it's already on file. ConveLabs doesn't bill
+  // insurance, but the LAB does — once we have a card + provider + memberId
+  // they can carry the patient forever, no need to ask again.
+  let insuranceOnFile = false;
+  let insuranceProvider: string | null = null;
+  let insuranceMemberId: string | null = null;
+  if (appt.patient_id || appt.patient_email) {
+    try {
+      const { data: tp } = await admin.from('tenant_patients')
+        .select('insurance_card_path, insurance_provider, insurance_member_id')
+        .or(`user_id.eq.${appt.patient_id || '00000000-0000-0000-0000-000000000000'},email.ilike.${appt.patient_email || 'none'}`)
+        .limit(1).maybeSingle();
+      insuranceProvider = (tp as any)?.insurance_provider || null;
+      insuranceMemberId = (tp as any)?.insurance_member_id || null;
+      insuranceOnFile = Boolean(
+        (tp as any)?.insurance_card_path ||
+        (insuranceProvider && insuranceMemberId)
+      );
+    } catch { /* non-blocking */ }
+  }
   let orgName: string | null = null;
   if (appt.organization_id) {
     const { data: org } = await admin
@@ -109,6 +130,9 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
     org_name: orgName,
     family_group_id: appt.family_group_id,
     family_members: familyMembers,
+    insurance_on_file: insuranceOnFile,
+    insurance_provider: insuranceProvider,
+    insurance_member_id: insuranceMemberId,
   };
 }
 
