@@ -822,13 +822,22 @@ Deno.serve(async (req) => {
     // and a $0 line item adds no value. Tip (or bundled subscription) carries
     // the session when the visit is free.
     const lineItems: any[] = [];
+    // Membership signups route through this same endpoint (PatientDashboard's
+    // "Get VIP/Member/Concierge" upgrade modal). For those the "Appointment on
+    // YYYY-MM-DD" description is wrong — there's no appointment, just an
+    // annual subscription. Show the membership cadence instead so the Stripe
+    // Checkout line item makes sense and doesn't erode trust at pay time.
+    const isMembershipPurchase = String(serviceType || '').toLowerCase() === 'membership';
+    const lineDescription = isMembershipPurchase
+      ? 'Annual membership — discounts apply immediately. Cancel anytime.'
+      : `Appointment on ${appointmentDate}`;
     if (amount > 0) {
       lineItems.push({
         price_data: {
           currency: 'usd',
           product_data: {
             name: serviceName || 'Blood Draw Service',
-            description: `Appointment on ${appointmentDate}`,
+            description: lineDescription,
           },
           unit_amount: amount,
         },

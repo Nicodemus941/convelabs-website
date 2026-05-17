@@ -84,6 +84,58 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
     })();
   }, [user]);
 
+  // Auto-prefill DOB + phone for logged-in returning patients.
+  // Previously these were only filled on email-blur, which never fires
+  // when the form lands with email already populated from auth context
+  // (the most common path for returning patients). Result: returning
+  // patient sees their name + email pre-filled but DOB and phone empty
+  // — friction at the highest-intent step. This mirrors the handleEmailBlur
+  // lookup so the same fields auto-fill from the chart on mount.
+  useEffect(() => {
+    if (!user?.email) return;
+    let cancelled = false;
+    (async () => {
+      const currentDob = getValues('patientDetails.dateOfBirth');
+      const currentPhone = getValues('patientDetails.phone');
+      if (currentDob && currentPhone) return;
+      const { data: tp } = await supabase.from('tenant_patients')
+        .select('phone, date_of_birth, user_id, first_name')
+        .or(`user_id.eq.${user.id},email.ilike.${user.email}`)
+        .limit(1).maybeSingle();
+      if (cancelled || !tp) return;
+      if (!currentPhone && tp.phone) setValue('patientDetails.phone', tp.phone);
+      if (!currentDob && tp.date_of_birth) setValue('patientDetails.dateOfBirth', tp.date_of_birth);
+      // Detect tier so the Est. badge upstairs reflects member pricing on
+      // initial render — without this, logged-in members had to blur the
+      // email to see their discount.
+      if (tp.user_id) {
+        try {
+          const { data: mem } = await supabase
+            .from('user_memberships' as any)
+            .select('founding_member, membership_plans(name)')
+            .eq('user_id', tp.user_id)
+            .eq('status', 'active')
+            .maybeSingle();
+          if (cancelled || !mem) return;
+          const planName = String((mem as any).membership_plans?.name || '').toLowerCase();
+          let tier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+          if (planName.includes('concierge')) tier = 'concierge';
+          else if (planName.includes('vip')) tier = 'vip';
+          else if (planName) tier = 'member';
+          if (tier !== 'none') {
+            onMemberTierDetected?.(tier);
+            onFoundingMemberDetected?.(Boolean((mem as any).founding_member));
+            setDetectedTier(tier);
+            setDetectedFounding(Boolean((mem as any).founding_member));
+          }
+        } catch (e) {
+          console.warn('[patient-info-mount-prefill] tier detect failed:', e);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
   const handlePickFamilyMember = (fm: any) => {
     setSelectedFamilyMemberId(fm.id);
     setValue('patientDetails.firstName', fm.first_name || '');

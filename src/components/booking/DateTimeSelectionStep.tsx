@@ -507,7 +507,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
       && selectedDate.getDate() === today.getDate();
     const isWknd = selectedDate.getDay() === 0 || selectedDate.getDay() === 6;
 
-    methods.setValue('serviceDetails.sameDay', isToday);
+    // sameDay flag drives the +$100 surcharge in pricingService. Only flip it
+    // on when today's slot is actually bookable — i.e. before the 3 PM cutoff
+    // (or the phleb-on-duty extended cutoff). After cutoff, same-day is
+    // blocked entirely, so charging the same-day fee is meaningless AND it
+    // inflates the displayed Est. price (e.g. $325 on a Saturday afternoon
+    // when the real price is $225 = $150 mobile + $75 weekend). Pre-fix:
+    // patients saw $100 of surcharge they could never actually be charged.
+    const todayHour = today.getHours();
+    const stillBookableSameDay = isToday && todayHour < cutoffHour;
+    methods.setValue('serviceDetails.sameDay', stillBookableSameDay);
     methods.setValue('serviceDetails.weekend', isWknd);
 
     // If switching to today, clear time if it's now past the lead time
