@@ -66,21 +66,29 @@ const UpcomingAppointments = () => {
     const policy = getCancelPolicy(appt);
     if (!policy.allowed) { toast.error(policy.label); return; }
 
-    const updateData: any = {
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancellation_reason: policy.fee > 0 ? 'Patient cancelled (<24h notice, 50% fee)' : 'Patient cancelled (free)',
-    };
-
-    const { error } = await supabase.from('appointments').update(updateData).eq('id', id);
-    if (error) { toast.error('Failed to cancel'); return; }
-
-    if (policy.fee > 0 && appt.total_amount > 0) {
-      toast.success(`Appointment cancelled. A 50% fee ($${(appt.total_amount * 0.5).toFixed(2)}) applies.`);
-    } else {
-      toast.success('Appointment cancelled — no fee applied.');
+    // Server-side cancel via cancel-appointment edge fn. Previously the UI
+    // called supabase.from('appointments').update(...) directly — but the
+    // appointments table only has UPDATE RLS policies for staff/phleb/admin,
+    // not patients. Patient updates were silently filtered (0 rows affected,
+    // no error thrown), so the UI said "cancelled" while the DB row stayed
+    // status=scheduled and phlebs still showed up. Edge fn does the cancel
+    // with service-role + fires phleb SMS + patient confirmation + activity
+    // log + 24h-fee policy enforcement. (E2E test 2026-05-16, nicq.)
+    try {
+      const { data, error } = await supabase.functions.invoke('cancel-appointment', {
+        body: { appointment_id: id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      if (data?.fee_cents > 0) {
+        toast.success(`Appointment cancelled. A 50% fee ($${(data.fee_cents / 100).toFixed(2)}) applies.`);
+      } else {
+        toast.success('Appointment cancelled — no fee applied.');
+      }
+      setAppointments(prev => prev.filter(a => a.id !== id));
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to cancel. Please call (941) 527-9169.');
     }
-    setAppointments(prev => prev.filter(a => a.id !== id));
   };
 
   if (loading) {
@@ -148,9 +156,60 @@ const UpcomingAppointments = () => {
                 const policy = getCancelPolicy(a);
                 return (
                   <div className="mt-3 pt-2 border-t flex justify-end gap-2">
-                    <Button variant="outline" size="sm" className="text-xs text-blue-600 border-blue-200 hover:bg-blue-50" asChild>
-                      <a href="/book-now"><RefreshCw className="h-3 w-3 mr-1" />Reschedule</a>
-                    </Button>
+                    {/*
+                     * Reschedule = confirm + cancel old + redirect to
+                     * /book-now. Previously the button was a bare
+                     * <a href="/book-now"> which left the original
+                     * appointment scheduled AND sent the patient into a
+                     * fresh booking flow -> double-booking, double-charge,
+                     * phleb shows up twice. The confirm dialog walks the
+                     * patient through the cancel-then-rebook tradeoff so
+                     * they understand the original will be released.
+                     */}
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" size="sm" className="text-xs text-blue-600 border-blue-200 hover:bg-blue-50">
+                          <RefreshCw className="h-3 w-3 mr-1" />Reschedule
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="w-[90vw] max-w-md">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Reschedule this visit?</AlertDialogTitle>
+                          <AlertDialogDescription className="space-y-2">
+                            <span className="block">We'll release your current slot and send you to pick a new date + time.</span>
+                            {policy.fee > 0 && a.total_amount > 0 ? (
+                              <span className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded-md text-amber-800 text-xs">
+                                <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                                <span>Less than 24 hours notice — a 50% rebook fee (<strong>${(a.total_amount * 0.5).toFixed(2)}</strong>) applies.</span>
+                              </span>
+                            ) : (
+                              <span className="block text-green-700 text-xs">Free reschedule (24+ hours notice).</span>
+                            )}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Keep current visit</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={async () => {
+                              try {
+                                const { data, error } = await supabase.functions.invoke('cancel-appointment', {
+                                  body: { appointment_id: a.id, reason: 'Patient initiated reschedule' },
+                                });
+                                if (error) throw error;
+                                if (data?.error) throw new Error(data.error);
+                                toast.success('Old visit released. Pick your new time.');
+                                window.location.href = '/book-now';
+                              } catch (e: any) {
+                                toast.error(e?.message || 'Could not reschedule. Please call (941) 527-9169.');
+                              }
+                            }}
+                            className="bg-blue-600 hover:bg-blue-700"
+                          >
+                            Yes, reschedule
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button variant="outline" size="sm" className="text-xs text-red-600 border-red-200 hover:bg-red-50">Cancel</Button>
