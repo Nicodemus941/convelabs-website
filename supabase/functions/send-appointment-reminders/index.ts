@@ -119,9 +119,21 @@ Deno.serve(async (req) => {
           } else {
             const formattedPhone = patientPhone.startsWith('+') ? patientPhone : `+1${patientPhone.replace(/\D/g, '')}`;
 
+            // Fasting + urine flags — surfaced as a one-line prep nudge so
+            // patients aren't surprised the night before. The fasting reminder
+            // cron at 8 PM carries the precise cutoff; this is the heads-up.
+            const isFasting = !!(appt as any).fasting_required;
+            const needsUrine = !!(appt as any).urine_required;
+            const prepLine = isFasting && needsUrine
+              ? ` ⚠️ Fasting required (8h) + bring a morning urine sample — full details in tonight's 8 PM reminder.`
+              : isFasting
+                ? ` ⚠️ Fasting required (8h before draw) — full details in tonight's 8 PM reminder.`
+                : needsUrine
+                  ? ` 💧 Bring a morning urine sample for tomorrow's visit.`
+                  : '';
             const baseBody = hasLabOrder
-              ? `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Your lab order is on file — we're all set! Please have a sterile, well-lit area ready and wear a short-sleeved shirt. See you soon!`
-              : `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have your lab order and insurance card ready. If you'd like to upload them now, visit convelabs.com/dashboard. Prepare a sterile, well-lit area. See you soon!`;
+              ? `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Your lab order is on file — we're all set!${prepLine} Please have a sterile, well-lit area ready and wear a short-sleeved shirt. See you soon!`
+              : `Hi ${patientName}! Your ConveLabs appointment is tomorrow, ${formattedDate} at ${appointmentTime}. Please have your lab order and insurance card ready. If you'd like to upload them now, visit convelabs.com/dashboard.${prepLine} Prepare a sterile, well-lit area. See you soon!`;
 
             const smsBody = isSubscription
               ? `${baseBody}\n\nThis is a recurring visit. Need to push it? Log in at convelabs.com/dashboard and tap "Skip next" — or reply CALL to talk to us.`

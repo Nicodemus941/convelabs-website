@@ -101,10 +101,13 @@ Deno.serve(async (_req) => {
     const rangeStart = `${tomorrow.iso}T00:00:00`;
     const rangeEnd = `${tomorrow.iso}T23:59:59`;
 
-    // Pull all fasting-required appointments for tomorrow that still need a reminder
+    // Pull all fasting-required appointments for tomorrow that still need a reminder.
+    // urine_required is now selected so the SMS / email can prompt the patient to
+    // collect a morning urine sample alongside the fasting cutoff. (Gap surfaced
+    // in 2026-05-18 audit — was silently omitted, patients arrived without urine.)
     const { data: appts, error: q } = await admin
       .from('appointments')
-      .select('id, patient_name, patient_email, patient_phone, appointment_time, address, lab_order_panels')
+      .select('id, patient_name, patient_email, patient_phone, appointment_time, address, lab_order_panels, urine_required')
       .eq('fasting_required', true)
       .is('fasting_reminder_sent_at', null)
       .not('status', 'in', '(cancelled,completed)')
@@ -135,11 +138,34 @@ Deno.serve(async (_req) => {
       }
       const firstName = String(a.patient_name || 'there').split(' ')[0];
       const addrShort = a.address ? String(a.address).substring(0, 40) : '';
+      // Format the appointment time as "9:00 AM" instead of the raw
+      // "09:00:00" stored in Postgres — was rendering military-style in
+      // every SMS/email line that interpolated a.appointment_time.
+      const apptTimeFriendly = (() => {
+        const { h, m } = parsed;
+        const period = h >= 12 ? 'PM' : 'AM';
+        const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+        return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+      })();
+      // Urine sample prompt — only when the appointment row has
+      // urine_required=true. Phrased to dovetail with the fasting rule
+      // (you can drink water; you'll need to collect first urine of the
+      // morning when you wake up). (2026-05-18 audit.)
+      const urineNeeded = !!(a as any).urine_required;
+      const urineSmsLine = urineNeeded
+        ? ` Bring a urine sample: collect your FIRST urine of the morning in the cup we'll provide (or any clean container — we'll transfer it).`
+        : '';
+      const urineEmailBlock = urineNeeded
+        ? `<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:14px 16px;margin:14px 0;">
+      <p style="margin:0;font-size:14px;color:#1e40af;"><strong>💧 Urine sample needed</strong></p>
+      <p style="margin:6px 0 0;font-size:13px;color:#1e3a8a;">Collect your <strong>first morning urine</strong> in a clean container — we'll transfer it to the lab cup on arrival. Drink water normally; do not save urine from earlier in the night.</p>
+    </div>`
+        : '';
 
       // ── SMS ────────────────────────────────────────────────────────────
       if (a.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
         try {
-          const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${a.appointment_time}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water). Arriving at ${addrShort}. Reply HELP.`;
+          const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${apptTimeFriendly}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water).${urineSmsLine} Arriving at ${addrShort}. Reply HELP.`;
           const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
           const fd = new URLSearchParams({ To: normalizePhone(a.patient_phone), From: TWILIO_FROM, Body: smsBody });
           const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
@@ -159,26 +185,27 @@ Deno.serve(async (_req) => {
           ).join(' ');
           const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;">
   <div style="background:linear-gradient(135deg,#B91C1C,#7F1D1D);color:#fff;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
-    <h2 style="margin:0;font-size:18px;">Fasting reminder — draw tomorrow at ${a.appointment_time}</h2>
+    <h2 style="margin:0;font-size:18px;">Fasting reminder — draw tomorrow at ${apptTimeFriendly}</h2>
   </div>
   <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;">
     <p>Hi ${firstName},</p>
-    <p>Quick reminder: your ConveLabs blood draw is <strong>tomorrow (${tomorrow.label}) at ${a.appointment_time}</strong>.</p>
+    <p>Quick reminder: your ConveLabs blood draw is <strong>tomorrow (${tomorrow.label}) at ${apptTimeFriendly}</strong>.</p>
     <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:14px 16px;margin:16px 0;">
       <p style="margin:0;font-size:15px;color:#78350f;"><strong>🍽️ Stop ${cutoff}</strong></p>
       <p style="margin:8px 0 0;font-size:13px;color:#92400e;"><strong>Avoid:</strong> food, juice, coffee, tea, soda, energy drinks, gum, mints, cough drops, breath strips.</p>
       <p style="margin:4px 0 0;font-size:13px;color:#92400e;"><strong>OK:</strong> plain water (as much as you like) + any daily medications you normally take with water.</p>
       <p style="margin:8px 0 0;font-size:12px;color:#92400e;font-style:italic;">If you're on insulin or have a medical reason you can't fast safely, call us at (941) 527-9169 — we'll reschedule.</p>
     </div>
+    ${urineEmailBlock}
     ${panelChips ? `<p style="font-size:13px;color:#6b7280;margin:14px 0 4px;">What your provider ordered:</p><div>${panelChips}</div>` : ''}
-    <p style="font-size:13px;color:#6b7280;margin-top:14px;">We'll arrive at <strong>${addrShort || 'your address'}</strong> at ${a.appointment_time}.</p>
+    <p style="font-size:13px;color:#6b7280;margin-top:14px;">We'll arrive at <strong>${addrShort || 'your address'}</strong> at ${apptTimeFriendly}.</p>
     <p style="font-size:13px;color:#6b7280;">Running late or need to reschedule? Call/text (941) 527-9169.</p>
   </div>
 </div>`;
           const fd = new FormData();
           fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', a.patient_email);
-          fd.append('subject', `Fasting reminder — draw tomorrow at ${a.appointment_time}`);
+          fd.append('subject', `Fasting reminder — draw tomorrow at ${apptTimeFriendly}`);
           fd.append('html', html);
           fd.append('o:tracking-clicks', 'no');
           await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
