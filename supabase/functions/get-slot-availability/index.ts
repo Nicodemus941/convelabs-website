@@ -53,6 +53,10 @@ Deno.serve(async (req) => {
     const currentTier: string = String(body?.current_tier || 'none');
     const applyTierGating: boolean = body?.apply_tier_gating !== false; // default true
     const orgId: string | null = body?.org_id || null;
+    // service_type of the NEW appointment being checked. Passed through to
+    // getAvailableSlotsForDate so the forward-block lookback scales correctly
+    // for 75-min therapeutic / specialty-kit and 80-min specialty-kit-genova.
+    const newServiceType: string | null = body?.service_type || null;
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
 
@@ -68,7 +72,7 @@ Deno.serve(async (req) => {
     }
 
     // Base availability — the canonical busy logic (bidirectional duration-aware blocking)
-    let slots = await getAvailableSlotsForDate(admin, orgId || '', date, timeWindowRules, labDestination);
+    let slots = await getAvailableSlotsForDate(admin, orgId || '', date, timeWindowRules, labDestination, newServiceType);
 
     const advent = isAdventHealthDestination(labDestination);
     const unlocked = await isDateUnlocked(admin, date);

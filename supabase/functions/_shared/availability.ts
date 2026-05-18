@@ -363,12 +363,23 @@ export async function getAvailableSlotsForDate(
   // legacy callers keep working unchanged.
   const NEW_APPT_FOOTPRINT_MIN = VISIT_DURATIONS[String(newServiceType || '').toLowerCase()] || 60;
 
+  // Helper: parse either canonical "11:30 AM" OR Postgres TIME "11:30:00".
+  // Server-side bug surfaced 2026-05-18: appointment_time from Postgres
+  // returns as "HH:MM:SS" but parseTime() only matched the 12-hour AM/PM
+  // form, returning {h:0,m:0} for every existing appt — meaning the server's
+  // last-mile slotIsBooked() check NEVER blocked anything. Now we normalize
+  // first so both formats work.
+  const parseTimeFlexible = (raw: string): { h: number; m: number } => {
+    const canonical = normalizeSlotTime(raw);
+    if (canonical) return parseTime(canonical);
+    return parseTime(raw); // fallback to original behavior
+  };
   const slotIsBooked = (t: string): boolean => {
-    const { h: th, m: tm } = parseTime(t);
+    const { h: th, m: tm } = parseTimeFlexible(t);
     const slotMin = th * 60 + tm;
     for (const a of apptResp.data || []) {
       if (!a.appointment_time) continue;
-      const { h, m } = parseTime(String(a.appointment_time));
+      const { h, m } = parseTimeFlexible(String(a.appointment_time));
       const apptStart = h * 60 + m;
       const duration = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : DEFAULT_DURATION_MIN;
       const buffer = getBufferMinutes(a);
