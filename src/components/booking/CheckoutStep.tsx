@@ -893,7 +893,9 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         </div>
 
         {/* Tip selector */}
-        <TipSelector value={tipAmount} onChange={setTipAmount} />
+        {/* Pass the visit subtotal so the preset chips become percentage-
+            based (15% / 20% / 25%) — better anchor than flat $5/$10/$15. */}
+        <TipSelector value={tipAmount} onChange={setTipAmount} visitSubtotal={breakdown?.subtotal || 0} />
 
         {tipAmount > 0 && (
           <div className="flex justify-between text-sm">

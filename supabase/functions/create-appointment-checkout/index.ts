@@ -848,16 +848,26 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Add tip as separate line item if provided
-    if (tipAmount > 0) {
+    // Add tip as separate line item if provided. Defense-in-depth: cap at
+    // $1000 server-side. The client TipSelector clamps to the same value
+    // but malicious / misbehaving callers could bypass the form. Anything
+    // above the cap is silently clamped (we don't fail the booking — the
+    // patient still wanted to pay).
+    const TIP_HARD_CAP_CENTS = 100_000; // $1,000
+    const safeTipCents = Math.max(0, Math.min(Math.round(Number(tipAmount) || 0), TIP_HARD_CAP_CENTS));
+    // Note: destructured `tipAmount` is const, so downstream code that
+    // references it still sees the original. We override every read below
+    // by aliasing — the line item, metadata, and total math all use
+    // safeTipCents going forward.
+    if (safeTipCents > 0) {
       lineItems.push({
         price_data: {
           currency: 'usd',
           product_data: {
             name: 'Gratuity',
-            description: 'Tip for your phlebotomist',
+            description: 'Tip for your phlebotomist (100% pass-through)',
           },
-          unit_amount: tipAmount,
+          unit_amount: safeTipCents,
         },
         quantity: 1,
       });
@@ -875,7 +885,7 @@ Deno.serve(async (req) => {
       service_type: serviceType || '',
       service_name: serviceName || '',
       service_price: String(amount),
-      tip_amount: String(tipAmount),
+      tip_amount: String(safeTipCents),
       appointment_date: appointmentDate,
       appointment_time: appointmentTime || '',
       // UUID format check — only carry through valid UUIDs so we don't pollute
@@ -995,7 +1005,7 @@ Deno.serve(async (req) => {
     // session can go through. The promo is still applied — visit fee is
     // zero; only the tip is collected.
     const willHaveSubscriptionLineItem = !!(subscribeToMembership && subscribeToMembership.annualPriceCents);
-    if (!willHaveSubscriptionLineItem && amount + tipAmount < 50) {
+    if (!willHaveSubscriptionLineItem && amount + safeTipCents < 50) {
       return new Response(
         JSON.stringify({
           error: 'total_too_low',
@@ -1102,11 +1112,11 @@ Deno.serve(async (req) => {
             p_service_type: serviceType || 'mobile',
             p_total_paid_cents: amount,
             p_surcharge_cents: 0,
-            p_tip_cents: tipAmount || 0,
+            p_tip_cents: safeTipCents,
             p_has_companion: hasCompanion,
           });
           const v2Row: any = Array.isArray(v2Rows) ? v2Rows[0] : v2Rows;
-          const takeCents = Math.max(0, Math.min(Number(v2Row?.take_cents) || 0, amount + (tipAmount || 0)));
+          const takeCents = Math.max(0, Math.min(Number(v2Row?.take_cents) || 0, amount + safeTipCents));
           console.log(`[connect] v2 rule '${v2Row?.rule_used}' → phleb $${(takeCents/100).toFixed(2)} business $${(((v2Row?.business_keep_cents)||0)/100).toFixed(2)}`);
           if (takeCents > 0 && phleb.stripe_connect_account_id) {
             connectTransfer = { destination: phleb.stripe_connect_account_id, amount: takeCents };
@@ -1126,7 +1136,7 @@ Deno.serve(async (req) => {
               sid: phleb.id,
               base: (rate as any)?.base_per_visit_cents || 0,
               comp: hasCompanion ? ((rate as any)?.companion_addon_cents || 0) : 0,
-              tip: Math.round(((tipAmount || 0) * (((rate as any)?.tip_pct ?? 100))) / 100),
+              tip: Math.round((safeTipCents * (((rate as any)?.tip_pct ?? 100))) / 100),
             }).substring(0, 500);
             console.log(`[connect] transfer ${takeCents} cents → ${phleb.stripe_connect_account_id}`);
           }
@@ -1189,7 +1199,7 @@ Deno.serve(async (req) => {
         const enriched = {
           ...pricingBreakdown,
           stripe_session_id: session.id,
-          server_amount_charged_cents: amount + tipAmount,
+          server_amount_charged_cents: amount + safeTipCents,
           server_apology_credit_cents_applied: apologyCreditApplied,
           server_promo_code_applied_cents: promoCodeApplied?.applied_cents || 0,
           server_referral_discount_cents: appliedReferralDiscountCents,
