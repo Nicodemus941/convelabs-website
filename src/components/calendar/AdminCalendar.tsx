@@ -437,32 +437,91 @@ const AdminCalendar: React.FC = () => {
     };
   });
 
-  // Add blocked dates as background events
-  const blockEvents = timeBlocks.map((block: any) => ({
-    id: `block-${block.id}`,
-    title: `BLOCKED: ${block.reason || 'Time Off'}`,
-    start: block.start_date,
-    end: block.end_date ? new Date(new Date(block.end_date + 'T00:00:00').getTime() + 86400000).toISOString().split('T')[0] : block.start_date,
-    allDay: true,
-    display: 'background',
-    backgroundColor: '#fecaca',
-    borderColor: '#ef4444',
-    classNames: ['fc-blocked-date'],
-    extendedProps: { isBlock: true, reason: block.reason },
-  }));
+  // Convert "6:00 PM" / "6:00 AM" → "HH:MM:SS" for ISO datetime composition.
+  const time12to24 = (t: string | null | undefined): string | null => {
+    if (!t) return null;
+    const m = /^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)$/.exec(String(t).trim());
+    if (!m) {
+      // Already 24h "HH:MM" or "HH:MM:SS" — pass through padded to seconds
+      const h24 = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(t).trim());
+      if (h24) return `${h24[1].padStart(2, '0')}:${h24[2]}:00`;
+      return null;
+    }
+    let h = parseInt(m[1], 10);
+    const period = m[3].toUpperCase();
+    if (period === 'PM' && h !== 12) h += 12;
+    if (period === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${m[2]}:00`;
+  };
 
-  // Also add text overlay events for blocks so the reason is visible
-  const blockLabelEvents = timeBlocks.map((block: any) => ({
-    id: `block-label-${block.id}`,
-    title: `🚫 ${block.reason || 'Blocked'}`,
-    start: block.start_date,
-    end: block.end_date ? new Date(new Date(block.end_date + 'T00:00:00').getTime() + 86400000).toISOString().split('T')[0] : block.start_date,
-    allDay: true,
-    backgroundColor: '#ef4444',
-    borderColor: '#dc2626',
-    textColor: '#ffffff',
-    extendedProps: { isBlock: true },
-  }));
+  // Render blocks correctly based on whether they're partial-day or full-day.
+  //   - start_time + end_time SET   → timed band (only the blocked hours grey)
+  //   - start_time + end_time NULL  → all-day background covering the whole date
+  // Pre-fix bug (Tuesday 5/19 case): every block rendered allDay=true regardless
+  // of times, so a 12:30 PM–8:00 PM block painted the entire day red and staff
+  // had no idea why the morning was also greyed.
+  const blockEvents = timeBlocks.flatMap((block: any) => {
+    const start24 = time12to24(block.start_time);
+    const end24 = time12to24(block.end_time);
+    const isPartial = !!(start24 && end24);
+    const reasonLine = block.reason ? `: ${block.reason}` : '';
+    const timeLine = isPartial ? ` (${block.start_time}–${block.end_time})` : '';
+    const title = `🚫 BLOCKED${reasonLine}${timeLine}`;
+
+    if (isPartial) {
+      // Timed band — appears in the time grid only over the blocked hours.
+      // No allDay strip on the date header.
+      const startDt = `${block.start_date}T${start24}`;
+      const endDt = `${block.end_date || block.start_date}T${end24}`;
+      return [{
+        id: `block-${block.id}`,
+        title,
+        start: startDt,
+        end: endDt,
+        allDay: false,
+        backgroundColor: '#fecaca',
+        borderColor: '#ef4444',
+        textColor: '#7f1d1d',
+        classNames: ['fc-blocked-date'],
+        extendedProps: { isBlock: true, reason: block.reason, partial: true, start_time: block.start_time, end_time: block.end_time },
+      }];
+    }
+
+    // Full-day block — covers the whole date as a background event + a
+    // visible all-day label strip so staff sees the reason at a glance.
+    const inclusiveEnd = block.end_date
+      ? new Date(new Date(block.end_date + 'T00:00:00').getTime() + 86400000).toISOString().split('T')[0]
+      : block.start_date;
+    return [
+      {
+        id: `block-${block.id}`,
+        title,
+        start: block.start_date,
+        end: inclusiveEnd,
+        allDay: true,
+        display: 'background',
+        backgroundColor: '#fecaca',
+        borderColor: '#ef4444',
+        classNames: ['fc-blocked-date'],
+        extendedProps: { isBlock: true, reason: block.reason, partial: false },
+      },
+      {
+        id: `block-label-${block.id}`,
+        title,
+        start: block.start_date,
+        end: inclusiveEnd,
+        allDay: true,
+        backgroundColor: '#ef4444',
+        borderColor: '#dc2626',
+        textColor: '#ffffff',
+        extendedProps: { isBlock: true, reason: block.reason },
+      },
+    ];
+  });
+
+  // No separate blockLabelEvents — partial blocks render their own band with
+  // title; full-day blocks include the label strip in blockEvents above.
+  const blockLabelEvents: any[] = [];
 
   const allEvents = [...calendarEvents, ...blockEvents, ...blockLabelEvents];
 
