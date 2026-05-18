@@ -74,10 +74,15 @@ export function usePhlebotomistAppointments() {
   const [lastCacheAt, setLastCacheAt] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [monthDates, setMonthDates] = useState<Set<string>>(new Set());
-  // Fetch all appointments for the current month for this phlebotomist
-  const fetchMonthAppointments = useCallback(async (targetMonth?: Date) => {
+  // Fetch all appointments for the current month for this phlebotomist.
+  // `silent=true` skips the isLoading toggle so background refetches
+  // (realtime push, visibility-change resume) don't flash the loading
+  // spinner + reset the user's scroll position / expanded patient card.
+  // Owner-confirmed Hormozi UX rule: foreground = honest loading,
+  // background = invisible.
+  const fetchMonthAppointments = useCallback(async (targetMonth?: Date, opts?: { silent?: boolean }) => {
     if (!user) return;
-    setIsLoading(true);
+    if (!opts?.silent) setIsLoading(true);
 
     // When targetMonth is passed (user navigated to a specific month),
     // fetch ONLY that month — efficient calendar paging.
@@ -438,17 +443,39 @@ export function usePhlebotomistAppointments() {
     fetchMonthAppointments();
   }, [fetchMonthAppointments]);
 
-  // NOTE: visibility/focus refetch was previously here but caused a
-  // loading flash on every PWA resume that reset the user's scroll
-  // position + closed any expanded patient card. The realtime
-  // postgres_changes subscription below already keeps the appointment
-  // list fresh, so the explicit refetch was redundant. Patients can
-  // pull-to-refresh or hit the manual refresh button if they suspect
-  // staleness after long offline periods.
+  // Visibility / focus resume — silent background refetch when the
+  // phleb returns to the PWA after navigating away. Previously this
+  // listener was removed because fetchMonthAppointments unconditionally
+  // flashed the loading spinner; now we pass silent:true so the
+  // refetch happens invisibly. Scroll + expanded cards preserved.
+  // Debounced to once-per-30s so a quick alt-tab doesn't hammer the API.
+  useEffect(() => {
+    let lastRefresh = Date.now();
+    const refreshIfStale = () => {
+      const now = Date.now();
+      if (now - lastRefresh < 30_000) return; // 30s debounce
+      lastRefresh = now;
+      fetchMonthAppointments(undefined, { silent: true });
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshIfStale(); };
+    const onFocus = () => refreshIfStale();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    // Also fire on `pageshow` for iOS Safari which uses bfcache and
+    // doesn't always fire focus/visibility on bfcache restore.
+    window.addEventListener('pageshow', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onFocus);
+    };
+  }, [fetchMonthAppointments]);
 
   // Realtime push: subscribe to INSERT/UPDATE on appointments scoped
   // to this phleb. Any new manual booking by admin pushes to the PWA
   // within seconds. Falls back gracefully if realtime is unavailable.
+  // Realtime fetches go through the silent path too — same scroll/UX
+  // preservation as the visibility resume above.
   useEffect(() => {
     if (!user?.id) return;
     const channel = supabase
@@ -456,7 +483,7 @@ export function usePhlebotomistAppointments() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${user.id}` },
-        () => { fetchMonthAppointments(); },
+        () => { fetchMonthAppointments(undefined, { silent: true }); },
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
