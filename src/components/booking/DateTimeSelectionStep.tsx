@@ -29,6 +29,7 @@ import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
+import { VISIT_DURATIONS, DEFAULT_APPOINTMENT_DURATION } from '@/services/pricing/pricingService';
 
 // US Government holidays - ConveLabs is closed on these dates
 function getBlockedHolidays(year: number): Date[] {
@@ -344,7 +345,20 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         // Identical helper is mirrored in supabase/functions/_shared/availability.ts
         // so client + admin modal + server last-mile guard all agree.
         const DEFAULT_DURATION_MIN = 60;
-        const NEW_APPT_FOOTPRINT_MIN = 60; // new 60-min slot, no buffer for the new appt itself
+        // The forward-block lookback used to be hardcoded 60 min — which
+        // was correct for a mobile draw but undersized for therapeutic
+        // (75 min), specialty-kit (75 min), and specialty-kit-genova
+        // (80 min). Patient picking 10:30 AM for a 75-min therapeutic
+        // visit with an existing 11:30 AM appt would slip through the
+        // client grid and only get caught by the server-side 409
+        // slot_unavailable response — after they'd filled the entire
+        // form. Now: scale the footprint to the actual NEW service's
+        // duration so the grid is honest the first time. (Gap #2 from
+        // distance-based slot blocking audit 2026-05-18.)
+        // Read selectedService via methods.getValues() to avoid a TDZ
+        // ref to the top-level const declared below this useEffect.
+        const newServiceType = String(((methods.getValues() as any)?.serviceDetails?.selectedService || '') as string).toLowerCase();
+        const NEW_APPT_FOOTPRINT_MIN = VISIT_DURATIONS[newServiceType] || DEFAULT_APPOINTMENT_DURATION;
 
         data?.forEach((appt: any) => {
           if (!appt.appointment_time) return;

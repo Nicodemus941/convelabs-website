@@ -224,12 +224,31 @@ export interface AvailableSlot {
  * Grey out unavailable slots on the UI (still visible so patients see what's been
  * taken, not just a shorter menu — Hormozi: visible unavailability signals demand).
  */
+/**
+ * @param newServiceType — service_type of the NEW appointment being booked.
+ *   Used to scale the forward-block lookback (60 min for mobile/in-office,
+ *   75 for therapeutic/specialty-kit, 80 for specialty-kit-genova). Pre-fix
+ *   was hardcoded 60, so a 75-min therapeutic booking 10:30 -> 11:45 could
+ *   slip through the grid against an existing 11:30 appt and only get caught
+ *   by the server-side checkout 409. Default 'mobile' preserves prior
+ *   behavior for callers that don't yet pass the field.
+ */
+const VISIT_DURATIONS: Record<string, number> = {
+  'mobile': 60,
+  'in-office': 60,
+  'senior': 60,
+  'therapeutic': 75,
+  'specialty-kit': 75,
+  'specialty-kit-genova': 80,
+};
+
 export async function getAvailableSlotsForDate(
   supabase: SupabaseClient,
   orgId: string,
   dateIso: string,
   timeWindowRules: any,
   labDestination?: string | null,
+  newServiceType?: string | null,
 ): Promise<AvailableSlot[]> {
   // AdventHealth bypass: 7-day extended hours (6 AM - 7:30 PM, Sun included).
   // Org time_window_rules and standard Sunday block are ignored — the lab
@@ -337,7 +356,12 @@ export async function getAvailableSlotsForDate(
   }
 
   const DEFAULT_DURATION_MIN = 60;
-  const NEW_APPT_FOOTPRINT_MIN = 60; // new 60-min slot, no buffer for the new appt itself
+  // Scale the new-appt footprint to the actual service duration so the
+  // forward-block lookback is honest. Therapeutic (75 min) / specialty-kit
+  // (75) / specialty-kit-genova (80) now block more time in front of the
+  // next existing appt. Default to 60 when newServiceType is missing so
+  // legacy callers keep working unchanged.
+  const NEW_APPT_FOOTPRINT_MIN = VISIT_DURATIONS[String(newServiceType || '').toLowerCase()] || 60;
 
   const slotIsBooked = (t: string): boolean => {
     const { h: th, m: tm } = parseTime(t);
@@ -510,13 +534,14 @@ export async function isSlotStillAvailable(
   dateIso: string,
   time: string,
   timeWindowRules: any,
+  newServiceType?: string | null,
 ): Promise<boolean> {
   // Normalize whatever the caller sent ("11:30:00" / "11:30" / "11:30 AM")
   // to the canonical "H:MM AM/PM" the slot grid uses. Without this, every
   // 24-hour-formatted time was silently rejected as "slot_unavailable".
   const canonical = normalizeSlotTime(time);
   if (!canonical) return false;
-  const slots = await getAvailableSlotsForDate(supabase, orgId, dateIso, timeWindowRules);
+  const slots = await getAvailableSlotsForDate(supabase, orgId, dateIso, timeWindowRules, undefined, newServiceType);
   const match = slots.find(s => s.time === canonical);
   return !!match?.available;
 }

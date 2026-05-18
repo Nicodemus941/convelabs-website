@@ -293,12 +293,15 @@ Deno.serve(async (req) => {
       // "11:30:00", or "11:30" uniformly — every consumer of appointmentTime
       // beyond this line uses the canonical "H:MM AM/PM" form.
       const canonicalTime = normalizeSlotTime(appointmentTime) || appointmentTime;
-      const stillOpen = await isSlotStillAvailable(supabaseClient, '', dateOnly, canonicalTime, null);
+      // Pass the NEW service_type through so the forward-block lookback
+      // scales to the actual visit duration. 75-min therapeutic / specialty
+      // bookings used to slip past the legacy hardcoded 60-min footprint.
+      const stillOpen = await isSlotStillAvailable(supabaseClient, '', dateOnly, canonicalTime, null, serviceType);
 
       if (!stillOpen) {
         // ─── SUGGEST 3 CLOSEST OPEN SLOTS (Hormozi: never let buyer leave
         // empty-handed) ──────────────────────────────────────────────────
-        const allSlots = await getAvailableSlotsForDate(supabaseClient, '', dateOnly, null);
+        const allSlots = await getAvailableSlotsForDate(supabaseClient, '', dateOnly, null, undefined, serviceType);
         const parseMin = (t: string): number => {
           const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
           if (!m) return 0;
