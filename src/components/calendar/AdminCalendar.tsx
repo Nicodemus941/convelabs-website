@@ -786,15 +786,80 @@ const AdminCalendar: React.FC = () => {
                   // input gets ignored (warned in UI above).
                   const useTimeWindow = !!(startTime12 && endTime12);
 
+                  // Gap #4 fix (2026-05-18): warn the admin if existing
+                  // appointments fall inside the block they're about to
+                  // create. Pre-fix, the block went in silently and any
+                  // patient already booked in that window stayed scheduled
+                  // — phleb would either no-show or have to be there
+                  // anyway. Now we surface the conflicts BEFORE the insert
+                  // so admin can either reschedule them first or
+                  // explicitly acknowledge the override.
+                  const overlapStartIso = `${blockForm.startDate}T00:00:00`;
+                  const overlapEndIso = `${blockForm.endDate}T23:59:59`;
+                  const { data: conflicting } = await supabase.from('appointments')
+                    .select('id, patient_name, appointment_date, appointment_time, service_type')
+                    .gte('appointment_date', overlapStartIso)
+                    .lte('appointment_date', overlapEndIso)
+                    .not('status', 'in', '("cancelled","no_show")');
+
+                  // Helper: 12h parser identical to slot-blocking logic so
+                  // window math agrees across the codebase.
+                  const parse12 = (s: string | null | undefined): number | null => {
+                    if (!s) return null;
+                    const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(s).trim());
+                    if (!m) return null;
+                    let h = parseInt(m[1], 10);
+                    const mm = parseInt(m[2], 10);
+                    if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+                    if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+                    return h * 60 + mm;
+                  };
+                  const blkStart = parse12(startTime12);
+                  const blkEnd = parse12(endTime12);
+                  const conflicts = (conflicting || []).filter((a: any) => {
+                    if (!useTimeWindow) return true; // full-day block hits every appt that day
+                    if (!a.appointment_time) return true; // unknown time → assume conflict
+                    const tRaw = String(a.appointment_time);
+                    // appointment_time may be "11:30:00" (24h) or "11:30 AM" (12h)
+                    let apptMin: number | null = null;
+                    const m24 = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(tRaw.trim());
+                    if (m24) {
+                      apptMin = parseInt(m24[1], 10) * 60 + parseInt(m24[2], 10);
+                    } else {
+                      apptMin = parse12(tRaw);
+                    }
+                    if (apptMin === null || blkStart === null || blkEnd === null) return true;
+                    return apptMin >= blkStart && apptMin < blkEnd;
+                  });
+
+                  if (conflicts.length > 0) {
+                    const list = conflicts.slice(0, 5).map((a: any) =>
+                      `• ${String(a.patient_name || 'Unknown')} — ${String(a.appointment_time || '?').slice(0, 5)} (${a.service_type || 'visit'})`
+                    ).join('\n');
+                    const extra = conflicts.length > 5 ? `\n…and ${conflicts.length - 5} more` : '';
+                    const ok = window.confirm(
+                      `⚠️ ${conflicts.length} appointment${conflicts.length === 1 ? '' : 's'} will be inside this block:\n\n${list}${extra}\n\n` +
+                      `Continuing will leave these scheduled — you'll need to reschedule them manually.\n\n` +
+                      `Block anyway?`
+                    );
+                    if (!ok) {
+                      setIsBlockSubmitting(false);
+                      return;
+                    }
+                  }
+
                   const { error } = await supabase.from('time_blocks' as any).insert({
                     start_date: blockForm.startDate, end_date: blockForm.endDate,
                     reason: blockForm.reason || 'Blocked', block_type: blockForm.blockType,
                     ...(useTimeWindow ? { start_time: startTime12, end_time: endTime12 } : {}),
                   }).select();
                   if (error) throw error;
-                  toast.success(useTimeWindow
+                  const conflictsNote = conflicts.length > 0
+                    ? ` · ⚠ ${conflicts.length} overlapping appt${conflicts.length === 1 ? '' : 's'} — reschedule manually`
+                    : '';
+                  toast.success((useTimeWindow
                     ? `Blocked ${startTime12}–${endTime12} on ${blockForm.startDate}`
-                    : 'Dates blocked successfully');
+                    : 'Dates blocked successfully') + conflictsNote);
                   setBlockForm({ startDate: '', endDate: '', startTime: '', endTime: '', reason: '', blockType: 'office_closure' });
                   setBlockModalOpen(false);
                   fetchTimeBlocks();
