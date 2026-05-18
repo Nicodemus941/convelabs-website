@@ -234,6 +234,33 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── PHLEB PAYOUT TRACKING — real-time bank-side reconciliation ────────
+    // Gap #2 fix (audit 2026-05-18): the daily track-stripe-payouts cron means
+    // we learn about completed payouts up to 24h late. These handlers stamp
+    // staff_payouts the moment Stripe fires the event — phleb sees "in transit
+    // → in bank" status without waiting for cron, and admins can see failed
+    // payouts before the phleb calls support.
+    //
+    // Event cascade for a typical sweep:
+    //   1. sweep-phleb-owed-payouts → stripe.transfers.create() → transfer.created
+    //   2. Connected account holds the funds → payout.created (pending)
+    //   3. Bank ACH clears → payout.paid OR payout.failed
+    else if (event.type === 'transfer.created' || event.type === 'transfer.updated') {
+      await handleStripeTransferEvent(event.data.object, event.type);
+    }
+    else if (event.type === 'transfer.failed' || event.type === 'transfer.reversed') {
+      await handleStripeTransferFailed(event.data.object, event.type);
+    }
+    else if (event.type === 'payout.created' || event.type === 'payout.updated') {
+      await handleStripePayoutEvent(event.data.object, event.type);
+    }
+    else if (event.type === 'payout.paid') {
+      await handleStripePayoutPaid(event.data.object);
+    }
+    else if (event.type === 'payout.failed' || event.type === 'payout.canceled') {
+      await handleStripePayoutFailed(event.data.object, event.type);
+    }
+
     // Log success (insert, not update — we no longer write a pre-handler row)
     // NOTE: Supabase query builders are thenable but do NOT expose .catch()
     // directly. Calling .catch() on .insert() throws "catch is not a function"
@@ -2693,5 +2720,193 @@ async function handleLabRequestProviderPayment(session: any) {
     console.log(`[lab-request-org-pay] paid + notified: ${labRequestId} for ${existing.patient_name} via ${org.name}`);
   } catch (e: any) {
     console.error('[lab-request-org-pay] top-level error:', e?.message || e);
+  }
+}
+
+// ── STRIPE PAYOUT + TRANSFER HANDLERS ─────────────────────────────────────
+// Gap #2 fix (2026-05-18): real-time tracking of phleb payouts. Webhooks
+// stamp staff_payouts with stripe_payout_id/status/paid_at and fire an SMS
+// to the phleb when money actually hits their bank.
+
+const PAYOUT_TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+const PAYOUT_TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+const PAYOUT_TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+
+function normPhlebPhone(p: string): string {
+  const d = (p || '').replace(/\D/g, '');
+  if (d.length === 10) return `+1${d}`;
+  if (d.length === 11 && d.startsWith('1')) return `+${d}`;
+  if (p?.startsWith('+')) return p;
+  return d ? `+${d}` : '';
+}
+
+async function smsPhleb(to: string, body: string): Promise<void> {
+  if (!PAYOUT_TWILIO_SID || !PAYOUT_TWILIO_TOKEN || !PAYOUT_TWILIO_FROM || !to) return;
+  try {
+    const auth = btoa(`${PAYOUT_TWILIO_SID}:${PAYOUT_TWILIO_TOKEN}`);
+    const fd = new URLSearchParams({ To: normPhlebPhone(to), From: PAYOUT_TWILIO_FROM, Body: body });
+    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${PAYOUT_TWILIO_SID}/Messages.json`, {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: fd.toString(),
+    });
+  } catch (e: any) {
+    console.warn('[phleb-payout-sms] send failed:', e?.message);
+  }
+}
+
+async function handleStripeTransferEvent(transfer: any, eventType: string) {
+  try {
+    const transferId = transfer?.id;
+    if (!transferId) return;
+    const { data: existing } = await supabaseClient
+      .from('staff_payouts' as any)
+      .select('id')
+      .eq('stripe_transfer_id', transferId)
+      .limit(1)
+      .maybeSingle();
+    if (!existing) {
+      console.log(`[stripe-${eventType}] no staff_payouts row for transfer ${transferId} — likely manual transfer.`);
+      return;
+    }
+    console.log(`[stripe-${eventType}] confirmed transfer ${transferId} (already tracked at sweep time)`);
+  } catch (e: any) {
+    console.warn(`[stripe-${eventType}] handler error:`, e?.message);
+  }
+}
+
+async function handleStripeTransferFailed(transfer: any, eventType: string) {
+  try {
+    const transferId = transfer?.id;
+    if (!transferId) return;
+    const { data: rows } = await supabaseClient
+      .from('staff_payouts' as any)
+      .select('id, staff_id')
+      .eq('stripe_transfer_id', transferId);
+    if (!rows || (rows as any[]).length === 0) {
+      console.warn(`[stripe-${eventType}] no staff_payouts rows for transfer ${transferId}`);
+      return;
+    }
+    await supabaseClient.from('staff_payouts' as any).update({
+      status: 'manual_owed',
+      stripe_payout_status: 'failed',
+      stripe_payout_failed_at: new Date().toISOString(),
+      stripe_payout_failure_message: transfer?.failure_message || transfer?.reason || eventType,
+    }).eq('stripe_transfer_id', transferId);
+    console.warn(`[stripe-${eventType}] flipped ${(rows as any[]).length} rows back to manual_owed`);
+    try {
+      await supabaseClient.from('activity_log' as any).insert({
+        activity_type: 'phleb_payout_failed',
+        description: `Stripe ${eventType}: transfer ${transferId} — ${transfer?.failure_message || 'no message'}.`,
+        status: 'pending',
+        priority: 'urgent',
+      });
+    } catch { /* non-blocking */ }
+  } catch (e: any) {
+    console.warn(`[stripe-${eventType}] handler error:`, e?.message);
+  }
+}
+
+async function handleStripePayoutEvent(payout: any, eventType: string) {
+  try {
+    const payoutId = payout?.id;
+    const status = payout?.status;
+    const destinationAcct = payout?.destination;
+    if (!payoutId) return;
+    const createdMs = (payout?.created || 0) * 1000;
+    const arrivalDateMs = (payout?.arrival_date || 0) * 1000;
+    const windowStartIso = new Date(createdMs - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const updatePayload: any = {
+      stripe_payout_id: payoutId,
+      stripe_payout_status: status,
+    };
+    if (status === 'paid' && arrivalDateMs > 0) {
+      updatePayload.stripe_paid_at = new Date(arrivalDateMs).toISOString();
+    }
+    await supabaseClient.from('staff_payouts' as any).update(updatePayload)
+      .eq('status', 'succeeded')
+      .eq('stripe_destination_account_id', destinationAcct)
+      .is('stripe_payout_id', null)
+      .gte('succeeded_at', windowStartIso);
+    console.log(`[stripe-${eventType}] stamped payout ${payoutId} status=${status} on acct ${destinationAcct}`);
+  } catch (e: any) {
+    console.warn(`[stripe-${eventType}] handler error:`, e?.message);
+  }
+}
+
+async function handleStripePayoutPaid(payout: any) {
+  try {
+    const payoutId = payout?.id;
+    const arrivalDateMs = (payout?.arrival_date || 0) * 1000;
+    const destinationAcct = payout?.destination;
+    const amountCents = payout?.amount || 0;
+    if (!payoutId) return;
+    const { data: stamped } = await supabaseClient.from('staff_payouts' as any).update({
+      stripe_payout_id: payoutId,
+      stripe_payout_status: 'paid',
+      stripe_paid_at: arrivalDateMs > 0 ? new Date(arrivalDateMs).toISOString() : new Date().toISOString(),
+    })
+      .eq('status', 'succeeded')
+      .eq('stripe_destination_account_id', destinationAcct)
+      .is('stripe_payout_id', null)
+      .select('staff_id');
+    const staffIds = [...new Set(((stamped as any[]) || []).map(r => r.staff_id))];
+    for (const staffId of staffIds) {
+      try {
+        const { data: phleb } = await supabaseClient.from('staff_profiles' as any)
+          .select('phone, first_name')
+          .eq('id', staffId).maybeSingle();
+        const phlebPhone = String((phleb as any)?.phone || '').trim();
+        const firstName = String((phleb as any)?.first_name || 'there');
+        if (phlebPhone) {
+          await smsPhleb(phlebPhone, `Hi ${firstName} — $${(amountCents / 100).toFixed(2)} just hit your bank from ConveLabs. Thanks for the work this week!`);
+        }
+      } catch { /* per-phleb non-blocking */ }
+    }
+    console.log(`[stripe-payout.paid] stamped ${((stamped as any[]) || []).length} row(s), SMS'd ${staffIds.length} phleb(s)`);
+  } catch (e: any) {
+    console.warn('[stripe-payout.paid] handler error:', e?.message);
+  }
+}
+
+async function handleStripePayoutFailed(payout: any, eventType: string) {
+  try {
+    const payoutId = payout?.id;
+    const destinationAcct = payout?.destination;
+    const failureMsg = payout?.failure_message || payout?.failure_code || eventType;
+    if (!payoutId) return;
+    const { data: stamped } = await supabaseClient.from('staff_payouts' as any).update({
+      stripe_payout_id: payoutId,
+      stripe_payout_status: eventType === 'payout.canceled' ? 'canceled' : 'failed',
+      stripe_payout_failed_at: new Date().toISOString(),
+      stripe_payout_failure_message: failureMsg,
+    })
+      .eq('stripe_destination_account_id', destinationAcct)
+      .is('stripe_payout_id', null)
+      .select('staff_id');
+    const staffIds = [...new Set(((stamped as any[]) || []).map(r => r.staff_id))];
+    for (const staffId of staffIds) {
+      try {
+        const { data: phleb } = await supabaseClient.from('staff_profiles' as any)
+          .select('phone, first_name')
+          .eq('id', staffId).maybeSingle();
+        const phlebPhone = String((phleb as any)?.phone || '').trim();
+        const firstName = String((phleb as any)?.first_name || 'there');
+        if (phlebPhone) {
+          await smsPhleb(phlebPhone, `Hi ${firstName} — heads up: your ConveLabs payout had an issue (${failureMsg}). Reply or call (941) 527-9169 and we'll sort it.`);
+        }
+      } catch { /* non-blocking */ }
+    }
+    try {
+      await supabaseClient.from('activity_log' as any).insert({
+        activity_type: 'phleb_payout_failed',
+        description: `Stripe ${eventType}: payout ${payoutId} for acct ${destinationAcct} — ${failureMsg}.`,
+        status: 'pending',
+        priority: 'urgent',
+      });
+    } catch { /* non-blocking */ }
+    console.warn(`[stripe-${eventType}] flagged ${((stamped as any[]) || []).length} row(s)`);
+  } catch (e: any) {
+    console.warn(`[stripe-${eventType}] handler error:`, e?.message);
   }
 }
