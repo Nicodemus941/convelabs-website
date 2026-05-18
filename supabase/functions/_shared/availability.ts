@@ -289,6 +289,19 @@ export async function getAvailableSlotsForDate(
     'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola',
     'daytona beach', 'deland', 'debary', 'orange city',
   ];
+  // Zip fallback for free-text addresses that fail the city substring match.
+  // Kept in sync with get_busy_slots() RPC + src/lib/bookingBuffer.ts.
+  const EXTENDED_ZIPS = new Set([
+    '32827','32832','34747',
+    '34741','34742','34743','34744','34745','34746','34758','34759',
+    '32771','32772','32773',
+    '32726','32727','32736',
+    '34711','34712','34713','34714','34715',
+    '34756','32725','32738','32732','32778','32757',
+    '34748','34788','34789','34736','34753',
+    '32114','32115','32117','32118','32119','32120','32121','32122','32123','32124','32125','32126','32127','32128','32129',
+    '32720','32721','32722','32723','32724','32713','32763',
+  ]);
   function detectCityFromAddress(addr: string | null | undefined): string | null {
     if (!addr) return null;
     const parts = String(addr).split(',').map(s => s.trim()).filter(Boolean);
@@ -298,10 +311,27 @@ export async function getAvailableSlotsForDate(
     if (!city) return false;
     return EXTENDED_AREA_CITIES.includes(city.toLowerCase().trim());
   }
+  // Robust extended-area detector mirroring get_busy_slots() RPC:
+  // city-substring (with delimiter boundary so "Sanford Street" in Orlando
+  // doesn't false-positive) + zip fallback for missing-city addresses.
+  function addressLooksExtended(addr: string | null | undefined): boolean {
+    if (!addr) return false;
+    const lower = String(addr).toLowerCase();
+    for (const city of EXTENDED_AREA_CITIES) {
+      const re = new RegExp(`(^|[ ,])${city}($|,| fl[^a-z]| fl$|\\s+\\d)`);
+      if (re.test(lower)) return true;
+    }
+    const zipRe = /(^|[^0-9])([0-9]{5})($|[^0-9])/g;
+    let m: RegExpExecArray | null;
+    while ((m = zipRe.exec(String(addr))) !== null) {
+      if (EXTENDED_ZIPS.has(m[2])) return true;
+    }
+    return false;
+  }
   function getBufferMinutes(a: any): number {
     let b = 0;
     if (a.service_type && HEAVY_SERVICE_TYPES[String(a.service_type).toLowerCase()]) b += 30;
-    if (isExtendedAreaCity(detectCityFromAddress(a.address))) b += 30;
+    if (isExtendedAreaCity(detectCityFromAddress(a.address)) || addressLooksExtended(a.address)) b += 30;
     if (a.family_group_id) b += 15;
     return b;
   }

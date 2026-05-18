@@ -17,6 +17,21 @@ const BUFFER_HEAVY_SERVICE = 30;       // specialty-kit, therapeutic, aristotle
 const BUFFER_EXTENDED_AREA = 30;       // outer-zip drive time
 const BUFFER_COMPANION = 15;           // same-address second patient
 
+// Curated zip-code fallback — kept in sync with get_busy_slots() RPC.
+// Triggers the extended-area buffer even when the address text fails the
+// city substring match (e.g. zip-only / missing-city addresses).
+const EXTENDED_ZIPS = new Set([
+  '32827','32832','34747',
+  '34741','34742','34743','34744','34745','34746','34758','34759',
+  '32771','32772','32773',
+  '32726','32727','32736',
+  '34711','34712','34713','34714','34715',
+  '34756','32725','32738','32732','32778','32757',
+  '34748','34788','34789','34736','34753',
+  '32114','32115','32117','32118','32119','32120','32121','32122','32123','32124','32125','32126','32127','32128','32129',
+  '32720','32721','32722','32723','32724','32713','32763',
+]);
+
 const HEAVY_SERVICE_TYPES = new Set([
   'specialty-kit',
   'specialty-kit-genova',
@@ -52,6 +67,34 @@ export function isExtendedAreaCity(city: string | null | undefined): boolean {
 }
 
 /**
+ * Robust extended-area detection mirrored from get_busy_slots() server RPC.
+ * Used when the address text doesn't conform to the "<street>, <city>, ..." comma
+ * format. Two-step:
+ *   1. Substring match each EXTENDED_AREA_CITIES against the lowercased address,
+ *      bounded so "Sanford Street" in Orlando doesn't trigger the Sanford city.
+ *   2. Zip fallback — extract every standalone 5-digit number and check it
+ *      against EXTENDED_ZIPS.
+ */
+function addressLooksExtended(addr: string | null | undefined): boolean {
+  if (!addr) return false;
+  const lower = addr.toLowerCase();
+  // City substring with delimiter on either side
+  for (const city of EXTENDED_AREA_CITIES) {
+    // Match city preceded by start, space, or comma — and followed by end, comma,
+    // " fl"+non-letter, or whitespace+digits (zip).
+    const re = new RegExp(`(^|[ ,])${city}($|,| fl[^a-z]| fl$|\\s+\\d)`);
+    if (re.test(lower)) return true;
+  }
+  // Zip fallback: every standalone 5-digit number
+  const zipRe = /(^|[^0-9])([0-9]{5})($|[^0-9])/g;
+  let m: RegExpExecArray | null;
+  while ((m = zipRe.exec(addr)) !== null) {
+    if (EXTENDED_ZIPS.has(m[2])) return true;
+  }
+  return false;
+}
+
+/**
  * Returns the travel + prep buffer in minutes that should be appended to an
  * appointment's duration when computing slot blocking.
  *
@@ -66,8 +109,15 @@ export function getBufferMinutes(ctx: BufferContext): number {
     buffer += BUFFER_HEAVY_SERVICE;
   }
 
+  // Detection order (each falls through if the prior misses):
+  //   1. Explicit isExtendedArea flag (caller already knows)
+  //   2. Structured city field
+  //   3. Address-text substring + zip fallback (matches server RPC)
+  //   4. Zip-only field on context
   const inExtendedArea = ctx.isExtendedArea === true
-    || isExtendedAreaCity(ctx.city ?? detectCityFromAddress(ctx.address));
+    || isExtendedAreaCity(ctx.city ?? detectCityFromAddress(ctx.address))
+    || addressLooksExtended(ctx.address)
+    || (typeof ctx.zipcode === 'string' && EXTENDED_ZIPS.has(ctx.zipcode.trim()));
   if (inExtendedArea) {
     buffer += BUFFER_EXTENDED_AREA;
   }
