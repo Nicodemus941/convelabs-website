@@ -181,9 +181,41 @@ Deno.serve(async (req) => {
             break;
           }
           case 'review_request': {
-            // Send both SMS and email for review requests
+            // Franchise-safe: resolve review URL from org or business_metrics
+            // default, never hardcode. Skip when neither configured. Mirrors
+            // the H3 `google_review` step's resolution logic.
+            let reviewUrl: string | null = null;
+            if (seq.appointment_id) {
+              const { data: appt } = await supabase
+                .from('appointments')
+                .select('organization_id')
+                .eq('id', seq.appointment_id)
+                .maybeSingle();
+              if (appt?.organization_id) {
+                const { data: org } = await supabase
+                  .from('organizations')
+                  .select('google_review_url, google_review_enabled')
+                  .eq('id', appt.organization_id)
+                  .maybeSingle();
+                if (org?.google_review_enabled && org.google_review_url) reviewUrl = org.google_review_url;
+              }
+            }
+            if (!reviewUrl) {
+              const { data: defaultRow } = await supabase
+                .from('business_metrics')
+                .select('value_text')
+                .eq('metric_key', 'google_review_url')
+                .maybeSingle();
+              if (defaultRow?.value_text) reviewUrl = defaultRow.value_text;
+            }
+            if (!reviewUrl) {
+              // No URL configured anywhere — skip rather than send a broken
+              // ask. Mark this row 'skipped' so the cron doesn't retry.
+              await admin.from('post_visit_sequences').update({ status: 'skipped' }).eq('id', seq.id);
+              break;
+            }
             if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
-              await sendSMS(seq.patient_phone, `Hi ${patientName}! Thank you for choosing ConveLabs. We'd love to hear about your experience. Leave us a Google review: https://g.page/r/CQYNAuLgDPeiEAI/review`);
+              await sendSMS(seq.patient_phone, `Hi ${patientName}! Thank you for choosing ConveLabs. We'd love to hear about your experience. Leave us a Google review: ${reviewUrl}`);
             }
             if (MAILGUN_API_KEY && seq.patient_email) {
               await sendEmail(seq.patient_email, 'We\'d Love Your Feedback!', `
@@ -195,7 +227,7 @@ Deno.serve(async (req) => {
                     <p>Hi ${patientName},</p>
                     <p>Thank you for choosing ConveLabs! Your feedback means the world to us and helps other patients discover our luxury mobile phlebotomy services.</p>
                     <div style="text-align:center;margin:24px 0;">
-                      <a href="https://g.page/r/CQYNAuLgDPeiEAI/review" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Leave a Google Review ⭐</a>
+                      <a href="${reviewUrl}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Leave a Google Review ⭐</a>
                     </div>
                     <p style="text-align:center;font-size:12px;color:#6b7280;">It takes less than 30 seconds and makes a huge difference.</p>
                     <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;">ConveLabs - 1800 Pembrook Drive, Suite 300, Orlando, FL 32810</p>

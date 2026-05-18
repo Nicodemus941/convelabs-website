@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 import { brandedEmailWrapper } from '../_shared/branded-email.ts';
+import { shouldSendNow, logDeferral } from '../_shared/quiet-hours.ts';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
 /**
@@ -431,11 +432,30 @@ Deno.serve(async (req) => {
       formData.append('html', emailHtml);
       formData.append('o:tracking-clicks', 'no');
 
-      await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
-        method: 'POST',
-        headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
-        body: formData,
-      });
+      // Quiet-hours gate (9pm-8am ET). Invoice emails are 'dunning'-class —
+      // defer to next 8am ET instead of waking the patient. The reconcile-
+      // invoice-payments cron + check-stale-payments retry the same row, so
+      // a deferred row goes out on the next cron pass after quiet hours end.
+      const invoiceGate = shouldSendNow('dunning');
+      if (!invoiceGate.allow) {
+        try {
+          await logDeferral(supabase, {
+            category: 'dunning',
+            recipient: invoiceToEmail,
+            channel: 'email',
+            payload_summary: `Invoice ${invoice.id} for appointment ${appointmentId} — $${(servicePrice || 0).toFixed(2)}`,
+            next_allowed_at: invoiceGate.nextAllowedAt,
+            origin_function: 'send-appointment-invoice',
+          });
+        } catch { /* telemetry never blocks */ }
+        console.log(`[quiet-hours] invoice email deferred to ${invoiceGate.nextAllowedAt}`);
+      } else {
+        await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+          body: formData,
+        });
+      }
     }
 
     console.log(`Invoice ${invoice.id} → ${billedToOrg ? `ORG ${org!.name}` : 'patient'} (${invoiceToEmail}) for appointment ${appointmentId}`);

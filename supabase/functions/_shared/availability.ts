@@ -160,13 +160,48 @@ export function isAdventHealthDestination(dest: string | null | undefined): bool
   return !!k && ADVENT_HEALTH_KEYS.has(k);
 }
 
-// ET date helpers
+// ET date helpers.
+// Critical bug (2026-05-18 audit): the original nowET() round-tripped
+// toLocaleString — broken on Deno edge. First fix attempt used
+// Intl.DateTimeFormat with timeZone option, but Deno's bundled tzdata
+// does NOT honor it (verified live: server reported "08:58" when real
+// ET was 12:58). Final fix: compute the offset manually from US DST
+// rules. Stable since 2007.
+function isUSEasternDST(date: Date): boolean {
+  const year = date.getUTCFullYear();
+  // 2nd Sunday in March at 2 AM EST → DST begins
+  const marchStart = (() => {
+    const d = new Date(Date.UTC(year, 2, 1));
+    const dow = d.getUTCDay();
+    const firstSun = 1 + ((7 - dow) % 7);
+    return Date.UTC(year, 2, firstSun + 7, 7); // 2 AM EST = 7 AM UTC
+  })();
+  // 1st Sunday in November at 2 AM EDT → DST ends
+  const novEnd = (() => {
+    const d = new Date(Date.UTC(year, 10, 1));
+    const dow = d.getUTCDay();
+    const firstSun = 1 + ((7 - dow) % 7);
+    return Date.UTC(year, 10, firstSun, 6); // 2 AM EDT = 6 AM UTC
+  })();
+  const t = date.getTime();
+  return t >= marchStart && t < novEnd;
+}
+function etOffsetHours(date: Date): number {
+  return isUSEasternDST(date) ? -4 : -5;
+}
 function nowET(): Date {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  // Returns a Date whose UTC components carry the ET wall-clock values.
+  // Downstream code reads via getUTCHours/Minutes/Year/Month/Date so
+  // behavior is identical regardless of the server's local TZ.
+  const real = new Date();
+  const offsetMs = etOffsetHours(real) * 3600 * 1000;
+  return new Date(real.getTime() + offsetMs);
 }
 
 function isoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // After nowET()'s shift, .getUTCFullYear/Month/Date carry the ET date.
+  // Use UTC accessors so behavior matches across runtimes.
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 // Parse "8:00 AM" into hour, minute
@@ -412,15 +447,59 @@ export async function getAvailableSlotsForDate(
   };
 
   // Same-day lead time — phleb needs SAME_DAY_LEAD_MIN (90 min) to mobilize.
-  // Removed the prior hard 11 AM cutoff; this is the only same-day filter now.
+  // Plus the same-day cutoff (3 PM ET default, relaxed when a phleb is on
+  // duty). Pre-fix: server enforced ONLY the lead time, so malformed POSTs
+  // could book after-hours slots even with no phleb scheduled to work them.
+  // The client UI showed the 3 PM cutoff but never wrote it through.
   const now = nowET();
   const isToday = isoDate(now) === dateIso;
+  // Read getUTCHours after nowET()'s wall-clock shift — these now match ET.
+  const etHourNow = now.getUTCHours();
+  const etMinNow = now.getUTCMinutes();
   const hasEnoughLead = (t: string) => {
     if (!isToday) return true;
     const { h, m } = parseTime(t);
     const slotMin = h * 60 + m;
-    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const nowMin = etHourNow * 60 + etMinNow;
     return slotMin >= nowMin + SAME_DAY_LEAD_MIN;
+  };
+
+  // Same-day cutoff: 3 PM default. When a phleb has flipped on-duty for
+  // today via OnDutyToggle (writes phleb_duty_status.duty_through), the
+  // cutoff extends to that timestamp so post-3PM slots stay open. Read
+  // lazily — only fetch the duty status when isToday and we'd otherwise
+  // need to block.
+  let sameDayCutoffMin = 15 * 60; // 3 PM
+  if (isToday && etHourNow * 60 + etMinNow >= sameDayCutoffMin) {
+    try {
+      const { data: dutyRow } = await (supabase as any).rpc('get_any_phleb_on_duty_now');
+      const row = Array.isArray(dutyRow) ? dutyRow[0] : dutyRow;
+      if (row?.on_duty && row?.duty_through) {
+        const through = new Date(row.duty_through);
+        // Convert duty_through (UTC) to ET wall-clock hour using same
+        // Intl trick so cutoff math agrees with the patient UI.
+        const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
+        const parts = fmt.formatToParts(through);
+        const dH = Number(parts.find(p => p.type === 'hour')?.value || 0);
+        const dM = Number(parts.find(p => p.type === 'minute')?.value || 0);
+        const dutyMin = (dH === 24 ? 0 : dH) * 60 + dM;
+        sameDayCutoffMin = Math.max(sameDayCutoffMin, dutyMin);
+      }
+    } catch { /* non-blocking — fall back to 3 PM cutoff */ }
+  }
+  const passesSameDayCutoff = (t: string) => {
+    if (!isToday) return true;
+    const { h, m } = parseTime(t);
+    const slotMin = h * 60 + m;
+    // Block the slot only when current ET time is already past the
+    // effective cutoff. Pre-cutoff, all slots that pass the lead-time
+    // check remain bookable regardless of when they sit in the afternoon.
+    const nowMin = etHourNow * 60 + etMinNow;
+    if (nowMin < sameDayCutoffMin) return true;
+    // Past the cutoff (e.g. 3 PM with no phleb on duty) — only future
+    // slots within the relaxed window pass. With sameDayCutoffMin already
+    // = 3 PM in the default case, this rejects every slot once 3 PM hits.
+    return slotMin > nowMin && slotMin <= sameDayCutoffMin;
   };
 
   // Lab destination cutoff — slots after the lab's drop-off cutoff are
@@ -438,6 +517,7 @@ export async function getAvailableSlotsForDate(
     if (slotInsideWindowBlock(t)) return { time: t, available: false, reason: 'blocked' };
     if (!allowed.includes(t)) return { time: t, available: false, reason: 'outside_window' };
     if (!hasEnoughLead(t)) return { time: t, available: false, reason: 'past' };
+    if (!passesSameDayCutoff(t)) return { time: t, available: false, reason: 'same_day_cutoff' };
     if (!fitsLabCutoff(t)) return { time: t, available: false, reason: 'outside_window' };
     if (slotIsBooked(t)) return { time: t, available: false, reason: 'booked' };
     return { time: t, available: true };

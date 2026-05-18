@@ -216,6 +216,10 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
         rescheduled_at: new Date().toISOString(),
         reschedule_count: (appt.reschedule_count || 0) + 1,
         status: 'scheduled',
+        // Flag every admin reschedule with booking_source so the double-
+        // booking detector's manual-override branch suppresses the patient
+        // apology credit (admin moved them intentionally — not our mistake).
+        booking_source: 'manual_reschedule',
       };
       if (surchargeDelta !== 0) {
         updatePayload.total_amount = Math.max(0, (appt.total_amount || 0) + surchargeDelta);
@@ -224,6 +228,26 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
 
       const { error } = await supabase.from('appointments').update(updatePayload).eq('id', appt.id);
       if (error) throw error;
+
+      // Auto-issue Stripe invoice for the upcharge instead of "process
+      // manually in Stripe" — was a silent revenue leak: admins forgot
+      // every time. send-appointment-invoice handles patient/org routing,
+      // Stripe customer keying, and email delivery (quiet-hours gated).
+      if (surchargeDelta > 0) {
+        try {
+          await supabase.functions.invoke('send-appointment-invoice', {
+            body: {
+              appointmentId: appt.id,
+              forceAmount: surchargeDelta,
+              description: `After-hours reschedule surcharge — moved to ${newDate} ${newTime}`,
+              reasonTag: 'reschedule_surcharge',
+            },
+          });
+        } catch (e) {
+          console.warn('reschedule surcharge invoice failed:', e);
+          toast.warning('Reschedule saved, but the surcharge invoice could not be auto-sent. Check Stripe.');
+        }
+      }
 
       // Dual audit trail
       try {
@@ -432,7 +456,7 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
                 <p className="font-semibold">
                   Patient will be charged an extra ${surchargeDelta} after-hours fee
                 </p>
-                <p className="mt-0.5">New total will be ${Math.max(0, (appt.total_amount || 0) + surchargeDelta).toFixed(2)}. Process manually in Stripe.</p>
+                <p className="mt-0.5">New total: ${Math.max(0, (appt.total_amount || 0) + surchargeDelta).toFixed(2)}. A Stripe invoice for the ${surchargeDelta} delta will be auto-emailed when you confirm.</p>
               </div>
             </div>
           )}

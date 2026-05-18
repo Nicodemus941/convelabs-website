@@ -220,19 +220,45 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setLoadingSlots(true);
     (async () => {
       try {
-        const { data } = await supabase
-          .from('appointments')
-          .select('appointment_time, status, duration_minutes, service_type, address, family_group_id')
-          .gte('appointment_date', `${date}T00:00:00`)
-          .lte('appointment_date', `${date}T23:59:59`)
-          .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']);
+        // Pull active slot_holds in parallel — a patient mid-checkout has a
+        // reservation we must NOT let admin book over (pre-fix: admin modal
+        // never read this table; admin could book on top of patient holds
+        // and the patient would 409 at Stripe).
+        const nowIso = new Date().toISOString();
+        const [apptResp, holdResp, blockResp] = await Promise.all([
+          supabase
+            .from('appointments')
+            .select('appointment_time, status, duration_minutes, service_type, address, family_group_id')
+            .gte('appointment_date', `${date}T00:00:00`)
+            .lte('appointment_date', `${date}T23:59:59`)
+            .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress']),
+          (supabase as any)
+            .from('slot_holds')
+            .select('appointment_time')
+            .eq('appointment_date', date)
+            .gt('expires_at', nowIso),
+          (supabase as any)
+            .from('time_blocks')
+            .select('start_time, end_time')
+            .lte('start_date', date)
+            .gte('end_date', date),
+        ]);
+        const data = apptResp.data;
         if (cancelled) return;
 
         // Buffer math owner-confirmed 2026-04-27 — see src/lib/bookingBuffer.ts.
         // Default 0; +30 specialty/therapeutic/aristotle, +30 extended-area,
         // +15 same-address companion (family_group_id present).
         const DEFAULT_DURATION_MIN = 60;
-        const NEW_APPT_FOOTPRINT_MIN = 60; // new 60-min slot, no buffer for the new appt itself
+        // Scale the new-appt forward-block by the selected service's actual
+        // duration (mirrors server VISIT_DURATIONS in availability.ts). Pre-fix
+        // was hardcoded 60, so admin could book a 75-min therapeutic at 10:30
+        // even though it'd run into an 11:30 existing appt.
+        const VISIT_DURATIONS: Record<string, number> = {
+          'mobile': 60, 'in-office': 60, 'senior': 60,
+          'therapeutic': 75, 'specialty-kit': 75, 'specialty-kit-genova': 80,
+        };
+        const NEW_APPT_FOOTPRINT_MIN = VISIT_DURATIONS[String(serviceType || '').toLowerCase()] || 60;
 
         const parseTimeStr = (t: string): number => {
           // Handles both "09:00:00" (24h) and "9:00 AM" (12h)
@@ -288,6 +314,31 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             booked.add(formatTime12(t));
           }
         }
+        // Mark active patient slot_holds as TAKEN — same key-shape variants
+        // as appointments so the dropdown match still works.
+        for (const h of (holdResp?.data || []) as any[]) {
+          if (!h.appointment_time) continue;
+          const t = parseTimeStr(String(h.appointment_time));
+          if (t < 0) continue;
+          const hh = Math.floor(t / 60), mm = t % 60;
+          booked.add(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`);
+          booked.add(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+          booked.add(formatTime12(t));
+        }
+        // Time-block windowed closures — block every 15-min slot inside
+        // (matches AdminCalendar's partial-day rendering).
+        for (const b of (blockResp?.data || []) as any[]) {
+          if (!b.start_time || !b.end_time) continue;
+          const sMin = parseTimeStr(String(b.start_time));
+          const eMin = parseTimeStr(String(b.end_time));
+          if (sMin < 0 || eMin < 0) continue;
+          for (let t = sMin; t < eMin; t += 15) {
+            const hh = Math.floor(t / 60), mm = t % 60;
+            booked.add(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`);
+            booked.add(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+            booked.add(formatTime12(t));
+          }
+        }
         setBookedTimesOnDate(booked);
       } catch (e) {
         console.warn('[slot load] failed:', e);
@@ -296,7 +347,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       }
     })();
     return () => { cancelled = true; };
-  }, [date]);
+  }, [date, serviceType]);
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [overrideSlot, setOverrideSlot] = useState(false);

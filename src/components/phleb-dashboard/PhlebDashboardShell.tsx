@@ -178,9 +178,14 @@ const PhlebDashboardShell: React.FC = () => {
           );
         })()}
 
-        {/* Tab Content */}
+        {/*
+          Tab Content — hide via CSS instead of unmounting. Pre-fix, switching
+          tabs unmounted the prior subtree, destroying scroll position, expanded-
+          card state, and any in-progress modal state. Now every tab stays in
+          the tree once visited and we toggle `hidden`.
+        */}
         <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mt-4">
-          {activeTab === 'schedule' && (
+          <div hidden={activeTab !== 'schedule'}>
             <ScheduleTab
               appointments={appointments}
               isLoading={isLoading}
@@ -190,27 +195,25 @@ const PhlebDashboardShell: React.FC = () => {
               isOnline={isOnline}
               lastCacheAt={lastCacheAt}
             />
-          )}
-          {activeTab === 'completed' && (
+          </div>
+          <div hidden={activeTab !== 'completed'}>
             <CompletedTab appointments={appointments} />
-          )}
-          {activeTab === 'messages' && (
+          </div>
+          <div hidden={activeTab !== 'messages'}>
             <MessagesTab appointments={appointments} />
-          )}
-          {activeTab === 'directory' && (
+          </div>
+          <div hidden={activeTab !== 'directory'}>
             <DirectoryTab />
-          )}
-          {activeTab === 'deliveries' && (
+          </div>
+          <div hidden={activeTab !== 'deliveries'}>
             <DeliveriesTab />
-          )}
-          {activeTab === 'earnings' && (
-            <div className="max-w-lg md:max-w-3xl mx-auto px-4 md:px-6 pb-24">
-              <PhlebEarningsLedger />
-            </div>
-          )}
-          {activeTab === 'settings' && (
+          </div>
+          <div hidden={activeTab !== 'earnings'} className="max-w-lg md:max-w-3xl mx-auto pb-24">
+            <PhlebEarningsLedger />
+          </div>
+          <div hidden={activeTab !== 'settings'}>
             <SettingsTab />
-          )}
+          </div>
         </div>
 
         {/* Bottom Nav - mobile only */}

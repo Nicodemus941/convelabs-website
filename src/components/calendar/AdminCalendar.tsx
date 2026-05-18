@@ -568,25 +568,79 @@ const AdminCalendar: React.FC = () => {
     const newDateTimestamp = `${newDateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
 
     try {
+      // Pre-flight conflict check — drag had no guardrails; admin could
+      // drop an appt on top of another and the double-booking detector would
+      // fire patient apology credits because the override wasn't flagged.
+      const newDateOnly = newDateStr;
+      const newSlotMin = h * 60 + m;
+      const { data: conflictRows } = await supabase
+        .from('appointments')
+        .select('id, patient_name, appointment_time, duration_minutes')
+        .gte('appointment_date', `${newDateOnly}T00:00:00`)
+        .lte('appointment_date', `${newDateOnly}T23:59:59`)
+        .in('status', ['scheduled', 'confirmed', 'en_route', 'arrived', 'in_progress'])
+        .neq('id', appt.id);
+      const conflictsAt = (conflictRows || []).filter((r: any) => {
+        const t = String(r.appointment_time || '');
+        const ampm = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
+        let sMin = -1;
+        if (ampm) {
+          let hh = parseInt(ampm[1], 10);
+          const mm = parseInt(ampm[2], 10);
+          if (ampm[3].toUpperCase() === 'PM' && hh !== 12) hh += 12;
+          if (ampm[3].toUpperCase() === 'AM' && hh === 12) hh = 0;
+          sMin = hh * 60 + mm;
+        } else {
+          const mil = /^(\d{1,2}):(\d{2})/.exec(t.trim());
+          if (mil) sMin = parseInt(mil[1], 10) * 60 + parseInt(mil[2], 10);
+        }
+        if (sMin < 0) return false;
+        const dur = r.duration_minutes || 60;
+        return newSlotMin >= sMin && newSlotMin < sMin + dur;
+      });
+      if (conflictsAt.length > 0) {
+        const conflictNames = conflictsAt.map((c: any) => c.patient_name || 'patient').join(', ');
+        if (!window.confirm(`This slot already has: ${conflictNames}. Drop on top anyway? (Both appointments will keep this time — phleb will see overlap.)`)) {
+          info.revert();
+          return;
+        }
+      }
+
       const { error } = await supabase
         .from('appointments')
         .update({
           appointment_date: newDateTimestamp,
           appointment_time: newTimeStr,
           rescheduled_at: new Date().toISOString(),
+          // Suppress false apology credits — admin moved the appt
+          // intentionally, not a system double-booking.
+          booking_source: 'manual_reschedule',
         })
         .eq('id', appt.id);
 
       if (error) throw error;
 
-      // Log activity
+      // Log activity + booking audit trail (drag had zero audit trail before)
       try {
         await supabase.from('activity_log' as any).insert({
           patient_id: appt.patient_id || null,
           activity_type: 'reschedule',
-          description: `Appointment drag-rescheduled to ${newDateStr} at ${newTimeStr}`,
+          description: `Appointment drag-rescheduled to ${newDateStr} at ${newTimeStr}${conflictsAt.length > 0 ? ` (overlapping ${conflictsAt.length} other)` : ''}`,
           performed_by: 'admin',
           appointment_id: appt.id,
+        });
+      } catch { /* non-fatal */ }
+      try {
+        await supabase.from('booking_audit_log' as any).insert({
+          stage: 'admin_drag_reschedule',
+          patient_email: appt.patient_email || null,
+          patient_phone: appt.patient_phone || null,
+          patient_name: appt.patient_name || null,
+          client_appointment_date: appt.appointment_date || null,
+          client_appointment_time: appt.appointment_time || null,
+          server_appointment_date: newDateStr,
+          server_appointment_time: newTimeStr,
+          raw_payload: { drag: true, conflicts: conflictsAt.map((c: any) => ({ id: c.id, name: c.patient_name, time: c.appointment_time })) },
         });
       } catch { /* non-fatal */ }
 

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { verifyRecipientPhone } from "../_shared/verify-recipient.ts"
+import { shouldSendNow, logDeferral, NotificationCategory } from "../_shared/quiet-hours.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -75,6 +76,50 @@ serve(async (req) => {
     let normalizedPhone = phoneNumber.replace(/\D/g, '')
     if (normalizedPhone.length === 10) normalizedPhone = `+1${normalizedPhone}`
     else if (!normalizedPhone.startsWith('+')) normalizedPhone = `+${normalizedPhone}`
+
+    // ─── QUIET-HOURS GATE ──────────────────────────────────────────
+    // Centralized 9pm-8am ET silence. Callers can pass `category` to opt
+    // their send into a specific class; if absent, we infer from
+    // notificationType. Transactional categories (otp/booking_confirmation/
+    // payment_confirmation/admin_alert/password_reset) always allow. Anything
+    // else (reminder/dunning/marketing/post_visit) is deferred and logged.
+    const inferCategory = (): NotificationCategory => {
+      if (body.category) return body.category as NotificationCategory;
+      const t = (notificationType || '').toLowerCase();
+      if (t.includes('otp') || t.includes('verification')) return 'otp';
+      if (t.includes('confirmation') || t === 'booking_confirmed') return 'booking_confirmation';
+      if (t === 'payment_confirmation' || t === 'payment_success') return 'payment_confirmation';
+      if (t === 'password_reset') return 'password_reset';
+      if (t === 'on_the_way' || t === 'on_the_way_custom' || t === 'sample_delivered' || t === 'completed') return 'booking_confirmation';
+      if (t.includes('reminder') || t.includes('fasting')) return 'reminder';
+      if (t.includes('dunning') || t.includes('invoice') || t.includes('past_due')) return 'dunning';
+      if (t.includes('post_visit') || t.includes('review')) return 'post_visit';
+      if (t.includes('marketing') || t.includes('campaign') || t.includes('promo')) return 'marketing';
+      // Default: treat unknown ad-hoc SMS as transactional admin_alert so
+      // existing internal callers (admin notify, status updates) don't break.
+      return 'admin_alert';
+    };
+    const category = inferCategory();
+    const gate = shouldSendNow(category);
+    if (!gate.allow) {
+      try {
+        const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.38.4');
+        const sb = createClient(Deno.env.get('SUPABASE_URL') || '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '');
+        await logDeferral(sb, {
+          category,
+          recipient: normalizedPhone,
+          channel: 'sms',
+          payload_summary: `[${notificationType || 'custom'}] ${(message || '').substring(0, 160)}`,
+          next_allowed_at: gate.nextAllowedAt,
+          origin_function: 'send-sms-notification',
+        });
+      } catch { /* telemetry never breaks the path */ }
+      console.log(`[quiet-hours] SMS deferred to ${gate.nextAllowedAt} (category=${category})`);
+      return new Response(
+        JSON.stringify({ success: false, deferred: true, category, next_allowed_at: gate.nextAllowedAt, reason: gate.reason }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // HIPAA verification guard: verify recipient before sending
     const patientName = body.patientName || 'Unknown';

@@ -66,18 +66,48 @@ const QUIET_START_HOUR = 21; // 9:00 PM ET
 const QUIET_END_HOUR = 8;    // 8:00 AM ET
 const ET_TIMEZONE = 'America/New_York';
 
+// US Eastern DST math — manual, because Deno's edge runtime ships a stripped
+// tzdata that silently ignores `timeZone: 'America/New_York'` in
+// Intl.DateTimeFormat (verified live 2026-05-18 in _shared/availability.ts).
+// This is the same fix pattern documented there. DST rules stable since 2007.
+function isUSEasternDST(date: Date): boolean {
+  const year = date.getUTCFullYear();
+  // 2nd Sunday in March at 2 AM EST → DST begins
+  const marchStart = (() => {
+    const d = new Date(Date.UTC(year, 2, 1));
+    const firstSun = 1 + ((7 - d.getUTCDay()) % 7);
+    return Date.UTC(year, 2, firstSun + 7, 7); // 2 AM EST = 7 AM UTC
+  })();
+  // 1st Sunday in November at 2 AM EDT → DST ends
+  const novEnd = (() => {
+    const d = new Date(Date.UTC(year, 10, 1));
+    const firstSun = 1 + ((7 - d.getUTCDay()) % 7);
+    return Date.UTC(year, 10, firstSun, 6); // 2 AM EDT = 6 AM UTC
+  })();
+  const t = date.getTime();
+  return t >= marchStart && t < novEnd;
+}
+function etOffsetHours(date: Date): number {
+  return isUSEasternDST(date) ? -4 : -5;
+}
 /**
- * Returns current hour (0-23) in ET, accounting for DST automatically.
- * Used instead of naive UTC math so EDT/EST transitions are handled.
+ * Returns current hour (0-23) in ET, accounting for DST manually.
+ * Manual offset is required: Deno's Intl.DateTimeFormat doesn't honor
+ * `timeZone` (see availability.ts comment block).
  */
 function hourInET(now: Date): number {
-  // Intl.DateTimeFormat is the only Deno-safe way to coerce a tz-accurate hour
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: ET_TIMEZONE,
-    hour: 'numeric',
-    hour12: false,
-  });
-  return parseInt(fmt.format(now), 10);
+  const shifted = new Date(now.getTime() + etOffsetHours(now) * 3600 * 1000);
+  return shifted.getUTCHours();
+}
+/** Returns ET wall-clock parts (year/month/day/hour) for the given UTC instant. */
+function etParts(now: Date): { year: number; month: number; day: number; hour: number } {
+  const shifted = new Date(now.getTime() + etOffsetHours(now) * 3600 * 1000);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    hour: shifted.getUTCHours(),
+  };
 }
 
 /** True if `now` falls inside the 9pm-8am ET quiet window. */
@@ -94,43 +124,22 @@ export function isQuietHours(now: Date = new Date()): boolean {
 export function nextAllowedSendAt(now: Date = new Date()): Date {
   if (!isQuietHours(now)) return new Date(now.getTime());
 
-  // Target: 8:00 AM ET on the next calendar day that contains it
-  const etParts = new Intl.DateTimeFormat('en-US', {
-    timeZone: ET_TIMEZONE,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: 'numeric', hour12: false,
-  }).formatToParts(now);
-  const get = (t: string) => parseInt(etParts.find(p => p.type === t)!.value, 10);
-  const yearET = get('year');
-  const monthET = get('month');
-  const dayET = get('day');
-  const hourET = get('hour');
-
-  // If we're in the EVENING portion (>= 21), target is TOMORROW 8am ET.
-  // If we're in the MORNING portion (< 8), target is TODAY 8am ET.
-  let targetDay = dayET;
-  let targetMonth = monthET;
-  let targetYear = yearET;
-  if (hourET >= QUIET_START_HOUR) {
-    // advance to tomorrow via Date math on a midnight-ET anchor
-    const anchor = new Date(Date.UTC(yearET, monthET - 1, dayET, 12, 0, 0));
+  const { year, month, day, hour } = etParts(now);
+  let targetYear = year, targetMonth = month, targetDay = day;
+  if (hour >= QUIET_START_HOUR) {
+    // Evening — target TOMORROW 8 AM ET. Advance via UTC math on midday-ET anchor.
+    const anchor = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
     anchor.setUTCDate(anchor.getUTCDate() + 1);
     targetYear = anchor.getUTCFullYear();
     targetMonth = anchor.getUTCMonth() + 1;
     targetDay = anchor.getUTCDate();
   }
-
-  // Construct 8am ET as a UTC timestamp. Because ET observes DST, we offer
-  // 8:00 ET = either 12:00 UTC (EST, winter) or 12:00 UTC (EDT, summer —
-  // same UTC number because DST shifts clocks not UTC). Actually EDT is
-  // UTC-4 so 8am EDT = 12:00 UTC; EST is UTC-5 so 8am EST = 13:00 UTC.
-  // Compute offset by rendering a known 8am-ET timestamp and diffing.
+  // 8 AM ET in UTC: EDT (DST) = 12:00 UTC, EST = 13:00 UTC.
+  // Use a probe to detect which side of DST the target date sits on.
   const probe = new Date(Date.UTC(targetYear, targetMonth - 1, targetDay, 12, 0, 0));
-  const etHourAtProbe = hourInET(probe);
-  // Adjust: if probe renders as 8am ET, we're good. If it renders as 7 or 9, shift.
-  const diffHours = 8 - etHourAtProbe;
-  probe.setUTCHours(probe.getUTCHours() + diffHours);
-  return probe;
+  const offset = etOffsetHours(probe); // -4 (EDT) or -5 (EST)
+  // 8 AM ET = 8 - offset hours UTC (e.g., EDT: 8 - (-4) = 12 UTC)
+  return new Date(Date.UTC(targetYear, targetMonth - 1, targetDay, 8 - offset, 0, 0));
 }
 
 export interface SendDecision {
