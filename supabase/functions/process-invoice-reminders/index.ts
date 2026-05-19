@@ -224,7 +224,13 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('invoice_status', 'sent')
       .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
-      .not('status', 'eq', 'cancelled');
+      .not('status', 'eq', 'cancelled')
+      // Belt-and-suspenders: never dun a row that's already been paid.
+      // 2026-05-19: an admin marking payment_status='paid' without also
+      // clearing invoice_status left rows stuck in the cascade. The DB
+      // trigger trg_clear_invoice_status_when_paid is the primary defense;
+      // this filter is the second line of defense for legacy rows.
+      .not('payment_status', 'in', '("paid","succeeded")');
     const sentAppts = (sentApptsRaw || []).filter((a: any) => {
       if (!a.is_vip) return true;  // non-VIPs always in scope
       // VIPs only when visit is within 24h
@@ -314,7 +320,13 @@ Deno.serve(async (req) => {
       .select('*')
       .eq('invoice_status', 'reminded')
       .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
-      .not('status', 'eq', 'cancelled');
+      .not('status', 'eq', 'cancelled')
+      // Belt-and-suspenders: never dun a row that's already been paid.
+      // 2026-05-19: an admin marking payment_status='paid' without also
+      // clearing invoice_status left rows stuck in the cascade. The DB
+      // trigger trg_clear_invoice_status_when_paid is the primary defense;
+      // this filter is the second line of defense for legacy rows.
+      .not('payment_status', 'in', '("paid","succeeded")');
     const remindedAppts = (remindedApptsRaw || []).filter((a: any) => {
       if (!a.is_vip) return true;
       const hoursUntil = (getApptTimeMs(a) - now) / (1000 * 60 * 60);
@@ -400,7 +412,13 @@ Deno.serve(async (req) => {
       .eq('invoice_status', 'final_warning')
       .eq('is_vip', false)
       .neq('invoice_email_bounced', true)  // skip rows where the invoice email bounced — admin must intervene
-      .not('status', 'eq', 'cancelled');
+      .not('status', 'eq', 'cancelled')
+      // Belt-and-suspenders: never dun a row that's already been paid.
+      // 2026-05-19: an admin marking payment_status='paid' without also
+      // clearing invoice_status left rows stuck in the cascade. The DB
+      // trigger trg_clear_invoice_status_when_paid is the primary defense;
+      // this filter is the second line of defense for legacy rows.
+      .not('payment_status', 'in', '("paid","succeeded")');
 
     for (const appt of (warningAppts || [])) {
       const apptTimeMs = getApptTimeMs(appt);
