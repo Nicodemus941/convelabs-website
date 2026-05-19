@@ -91,9 +91,9 @@ Deno.serve(async (req) => {
       .is('stripe_transfer_id', null);
 
     const owedRows = (owedRowsRaw as any[]) || [];
-    if (owedRows.length === 0) {
-      return new Response(JSON.stringify({ ok: true, reconciled_count: 0, total_cents: 0, message: 'No manual_owed rows to reconcile.' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
+    // NOTE: do NOT short-circuit on owedRows.length === 0 — the back-fill
+    // pass at the bottom still needs to run so we surface orphan Stripe
+    // transfers (the source-of-truth mismatch the owner reported).
 
     // ──────────────────────────────────────────────────────────────────
     // FETCH 2: All Stripe transfers to this Connect account, last 365 days
