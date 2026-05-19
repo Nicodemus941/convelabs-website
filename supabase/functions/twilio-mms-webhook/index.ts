@@ -47,6 +47,27 @@ function emptyTwiml(): string {
 function lastTen(p: string): string {
   return p.replace(/\D/g, '').slice(-10);
 }
+function redactPhone(p: string): string {
+  const d = (p || '').replace(/\D/g, '');
+  return d.length >= 4 ? `***${d.slice(-4)}` : '***';
+}
+
+/**
+ * Twilio HMAC-SHA1 signature validation. See twilio-inbound-sms for full
+ * comment. Rejects spoofed POSTs that could attach attacker-supplied media
+ * to any open lab-order request whose phone last-10 was guessed.
+ */
+async function isValidTwilioSignature(url: string, params: URLSearchParams, sigHeader: string): Promise<boolean> {
+  if (Deno.env.get('SKIP_TWILIO_SIGNATURE') === 'true') return true;
+  if (!sigHeader || !TWILIO_TOKEN) return false;
+  const sortedKeys = [...params.keys()].sort();
+  const joined = sortedKeys.map(k => k + params.get(k)).join('');
+  const payload = url + joined;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(TWILIO_TOKEN), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+  const expected = btoa(String.fromCharCode(...new Uint8Array(sig)));
+  return expected === sigHeader;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -55,12 +76,18 @@ Deno.serve(async (req) => {
     // Twilio sends application/x-www-form-urlencoded
     const formText = await req.text();
     const params = new URLSearchParams(formText);
+    const sigHeader = req.headers.get('X-Twilio-Signature') || '';
+    if (!(await isValidTwilioSignature(req.url, params, sigHeader))) {
+      console.warn('[mms-webhook] signature validation failed — rejected');
+      return new Response('Forbidden', { status: 403 });
+    }
     const from = params.get('From') || '';
     const numMedia = parseInt(params.get('NumMedia') || '0', 10);
     const mediaUrl = params.get('MediaUrl0') || '';
     const mediaType = params.get('MediaContentType0') || 'image/jpeg';
 
-    console.log(`[mms-webhook] From=${from} NumMedia=${numMedia}`);
+    // HIPAA: redact phone, never log MediaUrl0 (24h bearer-equivalent URL).
+    console.log(`[mms-webhook] from=${redactPhone(from)} numMedia=${numMedia}`);
 
     if (!from) {
       return new Response(emptyTwiml(), { status: 200, headers: { 'Content-Type': 'text/xml' } });

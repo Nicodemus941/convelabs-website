@@ -23,6 +23,44 @@ import { formatSlotsForSms } from '../_shared/preoffered-slots.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const PUBLIC_SITE_URL = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
+const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+
+/**
+ * Twilio webhook signature validation. Twilio signs every webhook with
+ * HMAC-SHA1 over (full URL + sorted form params concatenated). Reject any
+ * POST that doesn't validate — pre-fix this endpoint was open to spoofed
+ * POSTs that could attach attacker-supplied media to any open lab-order
+ * request whose patient_phone_at_send last-10 the attacker guessed.
+ *
+ * Set SKIP_TWILIO_SIGNATURE=true in env for local dev only.
+ */
+async function isValidTwilioSignature(req: Request, params: URLSearchParams): Promise<boolean> {
+  if (Deno.env.get('SKIP_TWILIO_SIGNATURE') === 'true') return true;
+  const sigHeader = req.headers.get('X-Twilio-Signature') || '';
+  if (!sigHeader || !TWILIO_AUTH_TOKEN) return false;
+  // Sort form keys alphabetically and concat key+value
+  const sortedKeys = [...params.keys()].sort();
+  const joined = sortedKeys.map(k => k + params.get(k)).join('');
+  const url = req.url;
+  const payload = url + joined;
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(TWILIO_AUTH_TOKEN),
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+  // Twilio sends base64-encoded
+  const expected = btoa(String.fromCharCode(...new Uint8Array(sig)));
+  return expected === sigHeader;
+}
+
+/** Last-4-only redaction for logs — full phone is PHI under HIPAA. */
+function redactPhone(p: string): string {
+  const d = (p || '').replace(/\D/g, '');
+  return d.length >= 4 ? `***${d.slice(-4)}` : '***';
+}
 
 function twiml(message: string): Response {
   const xml = `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</Message></Response>`;
@@ -41,7 +79,7 @@ function lastTen(p: string): string { return phoneDigits(p).slice(-10); }
  *      patient_phone_at_send — the "text a photo" promise lives here.
  *   2. If no match, helpful fallback.
  */
-async function handleMmsUpload(admin: any, from: string, formData: FormData): Promise<string> {
+async function handleMmsUpload(admin: any, from: string, formData: URLSearchParams | FormData): Promise<string> {
   const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
   const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
   const mediaUrl = String(formData.get('MediaUrl0') || '');
@@ -52,16 +90,68 @@ async function handleMmsUpload(admin: any, from: string, formData: FormData): Pr
   }
 
   const fromTen = lastTen(from);
+  // Primary match: open lab-order request the patient was asked to fulfill.
   const { data: candidates } = await admin
     .from('appointment_lab_order_requests')
-    .select('id, appointment_id, patient_phone_at_send, status, expires_at')
+    .select('id, appointment_id, patient_phone_at_send, status, expires_at, requested_at')
     .in('status', ['pending', 'sent', 'opened'])
     .gt('expires_at', new Date().toISOString())
     .order('requested_at', { ascending: false })
     .limit(20);
-  const match = (candidates || []).find((c: any) =>
+  const matches = (candidates || []).filter((c: any) =>
     c.patient_phone_at_send && lastTen(String(c.patient_phone_at_send)) === fromTen
   );
+
+  // Ambiguous-match guard: if a patient has 2+ open requests, we used to
+  // silently pick "the newest" — meaning the older appointment never got
+  // the photo. Reply asking the patient to disambiguate by appointment date
+  // instead of guessing.
+  let match: any = matches[0] || null;
+  if (matches.length > 1) {
+    try {
+      const { data: appts } = await admin
+        .from('appointments')
+        .select('id, appointment_date')
+        .in('id', matches.map((m: any) => m.appointment_id))
+        .order('appointment_date', { ascending: true });
+      const lines = (appts || []).slice(0, 3).map((a: any, i: number) => {
+        const d = a.appointment_date ? new Date(a.appointment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '?';
+        return `${i + 1}) ${d}`;
+      }).join('  ');
+      return `We see ${matches.length} upcoming appointments. Reply with the number for which one this lab order is for: ${lines}`;
+    } catch { /* fall through to first-match behavior below */ }
+  }
+
+  // Fallback: no open lab-order request, but the patient HAS an upcoming
+  // appointment we just didn't formally ask about. Attach to the next
+  // upcoming appointment so the "text a photo any time" promise doesn't
+  // dead-end. Look up via tenant_patients → appointments.
+  if (!match) {
+    try {
+      const { data: tp } = await admin
+        .from('tenant_patients')
+        .select('id, primary_user_id')
+        .or(`phone.ilike.%${fromTen},mobile_phone.ilike.%${fromTen}`)
+        .limit(1)
+        .maybeSingle();
+      const patientId = (tp as any)?.id || null;
+      if (patientId) {
+        const { data: appt } = await admin
+          .from('appointments')
+          .select('id, appointment_date, lab_order_file_path')
+          .eq('patient_id', patientId)
+          .gte('appointment_date', new Date().toISOString())
+          .in('status', ['scheduled', 'confirmed'])
+          .order('appointment_date', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if ((appt as any)?.id) {
+          match = { id: null, appointment_id: (appt as any).id };
+        }
+      }
+    } catch (e) { console.warn('[inbound-sms-mms] fallback lookup err:', (e as any)?.message); }
+  }
+
   if (!match) {
     return "We couldn't match your number to an open lab-order request. If you got a link from us, tap that link to upload. Questions? Email info@convelabs.com or call (941) 527-9169.";
   }
@@ -121,14 +211,18 @@ async function handleMmsUpload(admin: any, from: string, formData: FormData): Pr
       .eq('id', match.appointment_id);
   } catch (e) { console.warn('[inbound-sms-mms] legacy stamp failed:', e); }
 
-  await admin.from('appointment_lab_order_requests')
-    .update({
-      status: 'uploaded',
-      uploaded_at: new Date().toISOString(),
-      uploaded_file_path: safeName,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', match.id);
+  // match.id is null when the fallback path attached to a next-upcoming
+  // appointment without a formal request — skip the request-row update.
+  if (match.id) {
+    await admin.from('appointment_lab_order_requests')
+      .update({
+        status: 'uploaded',
+        uploaded_at: new Date().toISOString(),
+        uploaded_file_path: safeName,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', match.id);
+  }
 
   if (lo?.id) {
     try { admin.functions.invoke('ocr-lab-order', { body: { labOrderId: lo.id } }).catch(() => {}); } catch {}
@@ -140,13 +234,25 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
 
   try {
-    const formData = await req.formData();
+    // Twilio signature validation — read raw body first so we can validate
+    // before parsing. formData() consumes the stream, so we clone the
+    // request and parse from the raw text.
+    const rawText = await req.text();
+    const params = new URLSearchParams(rawText);
+    const reqForSig = new Request(req.url, { method: 'POST' });
+    if (!(await isValidTwilioSignature(reqForSig, params))) {
+      console.warn('[inbound-sms] signature validation failed — rejected');
+      return new Response('Forbidden', { status: 403 });
+    }
+    const formData = params;
     const from = String(formData.get('From') || '');
     const body = String(formData.get('Body') || '').trim();
     const fromDigits = phoneDigits(from);
     const numMedia = parseInt(String(formData.get('NumMedia') || '0'), 10) || 0;
 
-    console.log(`[inbound-sms] from=${from} body="${body}" numMedia=${numMedia}`);
+    // HIPAA: redact phone to last-4, never log MediaUrl0 (Twilio media URLs
+    // are bearer-equivalent for 24h before SID auth expires).
+    console.log(`[inbound-sms] from=${redactPhone(from)} bodyLen=${body.length} numMedia=${numMedia}`);
 
     if (!fromDigits) return twiml('Message received.');
 
