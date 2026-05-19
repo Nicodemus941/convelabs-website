@@ -1,0 +1,376 @@
+<!--
+ConveLabs API — pricing page mockup
+For owner review only. Not linked from site nav. No Stripe wiring yet.
+
+To preview locally: open this file in a browser. Standalone, no dependencies.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ConveLabs API — Pricing</title>
+<style>
+  :root {
+    --burgundy: #7F1D1D;
+    --burgundy-dark: #5C1212;
+    --gold: #C9A961;
+    --cream: #FAF4E8;
+    --ink: #1F1A17;
+    --muted: #6B5E54;
+    --border: #E5DCC8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    color: var(--ink);
+    background: linear-gradient(180deg, var(--cream) 0%, #fff 800px);
+    line-height: 1.55;
+  }
+  header {
+    text-align: center;
+    padding: 64px 24px 32px;
+  }
+  header .badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    color: var(--gold);
+    text-transform: uppercase;
+    border: 1px solid var(--gold);
+    border-radius: 999px;
+    padding: 4px 12px;
+    background: white;
+  }
+  header h1 {
+    font-size: 44px;
+    line-height: 1.15;
+    margin: 16px 0 12px;
+    color: var(--burgundy);
+    font-weight: 800;
+  }
+  header p.subhead {
+    font-size: 18px;
+    color: var(--muted);
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  .roi-strip {
+    max-width: 800px;
+    margin: 24px auto 0;
+    padding: 18px 24px;
+    background: white;
+    border-left: 4px solid var(--gold);
+    border-radius: 6px;
+    font-size: 15px;
+    color: var(--ink);
+    text-align: left;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .roi-strip strong { color: var(--burgundy); }
+
+  section.pricing { max-width: 1100px; margin: 32px auto 0; padding: 0 24px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 24px;
+  }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+
+  .tier {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 24px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .tier.popular {
+    border-color: var(--gold);
+    box-shadow: 0 8px 24px rgba(201, 169, 97, 0.18);
+    transform: translateY(-8px);
+  }
+  .tier .popular-flag {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--gold);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 6px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .tier h3 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+  .tier .price {
+    font-size: 44px;
+    font-weight: 800;
+    color: var(--burgundy);
+    line-height: 1;
+  }
+  .tier .price .per {
+    font-size: 14px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .tier ul {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 24px;
+    flex-grow: 1;
+  }
+  .tier li {
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border);
+    font-size: 14px;
+  }
+  .tier li:last-child { border-bottom: 0; }
+  .tier li::before {
+    content: "✓ ";
+    color: var(--gold);
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .tier .cta {
+    display: block;
+    text-align: center;
+    background: var(--burgundy);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .tier.popular .cta { background: var(--gold); }
+  .tier .cta.outline {
+    background: transparent;
+    border: 1.5px solid var(--burgundy);
+    color: var(--burgundy);
+  }
+
+  /* Credit packs */
+  section.credits {
+    max-width: 1100px;
+    margin: 56px auto 0;
+    padding: 0 24px;
+  }
+  section.credits h2 {
+    text-align: center;
+    color: var(--burgundy);
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  section.credits p.lead {
+    text-align: center;
+    color: var(--muted);
+    margin-top: 0;
+  }
+  .packs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 24px;
+  }
+  @media (max-width: 800px) { .packs { grid-template-columns: 1fr; } }
+  .pack {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+  }
+  .pack .calls { font-size: 22px; font-weight: 800; color: var(--burgundy); }
+  .pack .pack-price { font-size: 28px; color: var(--ink); margin: 8px 0; font-weight: 700; }
+  .pack .per-call { font-size: 13px; color: var(--muted); }
+  .pack.decoy {
+    border: 2px dashed var(--gold);
+    background: linear-gradient(180deg, var(--cream) 0%, white 100%);
+  }
+  .pack.decoy .calls::after { content: " ⭐"; }
+
+  /* FAQ-ish */
+  section.faq {
+    max-width: 900px;
+    margin: 56px auto 0;
+    padding: 0 24px 64px;
+  }
+  section.faq h2 {
+    color: var(--burgundy);
+    margin-bottom: 24px;
+  }
+  details {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+  }
+  details summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  details p {
+    margin-top: 8px;
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+
+  footer {
+    background: var(--burgundy-dark);
+    color: white;
+    padding: 36px 24px;
+    text-align: center;
+  }
+  footer a { color: var(--gold); }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="badge">Private Beta · 3 spots available</span>
+  <h1>The mobile blood-draw network,<br/>now as an API</h1>
+  <p class="subhead">
+    Embed lab-draw booking in your app, EHR, CRM, or AI agent. We deliver the visit, you keep the relationship.
+  </p>
+  <div class="roi-strip">
+    Building your own mobile phlebotomy network costs <strong>$200K+ before the first vein is drawn</strong> — medical director, salaried phlebs, malpractice insurance, kit logistics, EHR work. We sell you the network on a subscription. <strong>The first visit you don't have to source pays for the year.</strong>
+  </div>
+</header>
+
+<section class="pricing">
+  <div class="grid">
+
+    <!-- STARTER -->
+    <div class="tier">
+      <h3>Starter</h3>
+      <div class="price">$99<span class="per"> / month</span></div>
+      <ul>
+        <li>200 API calls / month</li>
+        <li>50 booked visits / month</li>
+        <li>Email support (24-hour response)</li>
+        <li>Click-through BAA</li>
+        <li>Standard webhooks</li>
+        <li>Overage: $0.50 per extra call</li>
+      </ul>
+      <a href="#beta-apply" class="cta outline">Apply for beta</a>
+    </div>
+
+    <!-- GROWTH -->
+    <div class="tier popular">
+      <span class="popular-flag">Most popular</span>
+      <h3>Growth</h3>
+      <div class="price">$499<span class="per"> / month</span></div>
+      <ul>
+        <li>2,000 API calls / month</li>
+        <li><strong>Unlimited booked visits</strong></li>
+        <li>Slack channel · 4-hour response</li>
+        <li>Click-through BAA</li>
+        <li>White-label booking widget</li>
+        <li>Webhooks with retries + signed payloads</li>
+        <li>Member tier inheritance for partner patients</li>
+        <li>Overage: $0.30 per extra call</li>
+      </ul>
+      <a href="#beta-apply" class="cta">Apply for beta</a>
+    </div>
+
+    <!-- SCALE -->
+    <div class="tier">
+      <h3>Scale</h3>
+      <div class="price">$2,499<span class="per"> / month</span></div>
+      <ul>
+        <li><strong>Unlimited API calls</strong></li>
+        <li>Single Sign-On (SSO)</li>
+        <li>Dedicated Customer Success Manager</li>
+        <li>99.5% uptime SLA + credits</li>
+        <li>Custom signed BAA</li>
+        <li>Per-zip capacity reservations</li>
+        <li>Territory exclusivity available ($500/zip/mo)</li>
+        <li>Quarterly business review</li>
+      </ul>
+      <a href="#beta-apply" class="cta outline">Apply for beta</a>
+    </div>
+
+  </div>
+
+  <p style="text-align:center; margin-top:24px; color: var(--muted); font-size: 14px;">
+    <strong>30-day free trial</strong> on every plan — first 100 calls or 30 days, whichever comes first. No credit card to start.
+  </p>
+</section>
+
+<section class="credits">
+  <h2>Or buy credits without a subscription</h2>
+  <p class="lead">For bursty usage. Credits never expire. Stack with any plan.</p>
+  <div class="packs">
+    <div class="pack">
+      <div class="calls">1,000 calls</div>
+      <div class="pack-price">$300</div>
+      <div class="per-call">$0.30 per call</div>
+    </div>
+    <div class="pack">
+      <div class="calls">10,000 calls</div>
+      <div class="pack-price">$1,500</div>
+      <div class="per-call">$0.15 per call</div>
+    </div>
+    <div class="pack decoy">
+      <div class="calls">100,000 calls</div>
+      <div class="pack-price">$10,000</div>
+      <div class="per-call">$0.10 per call · enterprise</div>
+    </div>
+  </div>
+</section>
+
+<section class="faq">
+  <h2>Common questions</h2>
+
+  <details>
+    <summary>Do I keep my customer relationship?</summary>
+    <p>Yes. We deliver the draw under our brand and license, but the patient is yours. Visit data lives in your CRM via webhooks. The patient pays you (or us, your choice) at the rate you set within our minimums.</p>
+  </details>
+
+  <details>
+    <summary>Is there a per-visit fee in addition to the subscription?</summary>
+    <p>The subscription pays for API access (calls, webhooks, support). Visit revenue is separate — every appointment is still a ConveLabs visit at our standard rates ($87 floor to ConveLabs, remainder to the phlebotomist for visits $150+; partner-specific rates available). Your partner contract sets who collects from the patient.</p>
+  </details>
+
+  <details>
+    <summary>What about HIPAA?</summary>
+    <p>Every partner signs a Business Associate Agreement before we issue an API key. Click-through for Starter and Growth tiers. Custom-signed for Scale.</p>
+  </details>
+
+  <details>
+    <summary>Where can you deliver visits?</summary>
+    <p>Currently the greater Orlando, FL metropolitan area. Service area expands as we grow.</p>
+  </details>
+
+  <details>
+    <summary>How fast can I integrate?</summary>
+    <p>Less than a day for the REST endpoints. The Claude Code MCP connector and Zapier app drop integration to under 10 minutes. White-label booking widget is a single iframe.</p>
+  </details>
+
+  <details>
+    <summary>Can I get exclusivity in my territory?</summary>
+    <p>Yes, on the Scale tier. $500/zip/month locks the territory so no other partner can route to phlebs in those ZIPs.</p>
+  </details>
+</section>
+
+<footer>
+  <p>Mockup only · not yet live · <a href="mailto:info@convelabs.com">info@convelabs.com</a></p>
+</footer>
+
+</body>
+</html>
