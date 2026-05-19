@@ -278,7 +278,7 @@ Deno.serve(async (req) => {
       if (!emailCheck1.safe) {
         console.warn(`HIPAA guard blocked email to ${email}: ${emailCheck1.reason}`);
       } else {
-        await sendEmail(email, `Friendly Reminder — Your ${amount} ConveLabs Invoice`, emailWrapper(
+        await sendEmail(email, `Quick reminder about your ConveLabs visit`, emailWrapper(
           '#1e40af', 'Friendly Reminder',
           `<p>Hi ${name},</p>
            <p>Just a quick reminder — your invoice of <strong>${amount}</strong> for your upcoming ConveLabs visit is still open.</p>
@@ -349,16 +349,19 @@ Deno.serve(async (req) => {
       if (!emailCheck2.safe) {
         console.warn(`HIPAA guard blocked email to ${email}: ${emailCheck2.reason}`);
       } else {
-        await sendEmail(email, `Action Required — Your Appointment Will Be Cancelled`, emailWrapper(
-          '#d97706', '⏰ Final Notice',
+        // Softened tone — pre-fix used "ACTION REQUIRED — Your Appointment
+        // Will Be Cancelled" which reads collection-agency for a healthcare
+        // visit. Now warm, friendly, with the support number front-and-center.
+        await sendEmail(email, `Your ConveLabs appointment — quick payment needed to keep your slot`, emailWrapper(
+          '#d97706', 'Quick heads up',
           `<p>Hi ${name},</p>
-           <p>Your ConveLabs invoice of <strong>${amount}</strong> is still unpaid.</p>
-           <p style="color:#b45309;font-weight:600;font-size:15px;">Your appointment will be automatically cancelled in ${cancelTimeLabel} if payment is not received.</p>
-           <p>We don't want to cancel — please pay now to keep your spot:</p>
+           <p>Friendly nudge — your ConveLabs invoice of <strong>${amount}</strong> is still open. We'd love to keep your visit on the calendar.</p>
+           <p>If we don't hear back, we'll need to release your slot in about ${cancelTimeLabel} so another patient can take it. No hard feelings either way.</p>
            <div style="text-align:center;margin:20px 0;">
-             <a href="${payLink}" style="display:inline-block;background:#d97706;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} — Keep My Appointment</a>
+             <a href="${payLink}" style="display:inline-block;background:#d97706;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} — Keep My Slot</a>
            </div>
-           <p style="font-size:13px;color:#6b7280;">If you're having trouble paying or need assistance, call us at (941) 527-9169.</p>`
+           <p style="font-size:14px;color:#374151;">Need a hand? Text or call us at <strong>(941) 527-9169</strong> — we'll sort it out together.</p>
+           <p style="font-size:13px;color:#6b7280;">Already paid? Just ignore this — we're double-checking on our end.</p>`
         ));
       }
 
@@ -367,11 +370,17 @@ Deno.serve(async (req) => {
         console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck2.reason}`);
       } else {
         await sendSMS(phone,
-          `${name}, your ConveLabs appointment will be cancelled in ${cancelTimeLabel} due to unpaid invoice (${amount}). Pay now to keep your spot: ${payLink}`
+          `Hi ${name} — friendly heads up, we'll need to release your ConveLabs slot in ${cancelTimeLabel} if the ${amount} invoice isn't settled. Pay: ${payLink} — or text/call (941) 527-9169 if you need a hand.`
         );
       }
 
-      console.log(`[FINAL WARNING] ${name} (${tier} tier, ${hoursUntilAppt.toFixed(1)}h until appt)`);
+      // Bug fix 2026-05-19: `tier` and `hoursUntilAppt` were undefined in
+      // this Phase-2 loop scope — every successful send threw a
+      // ReferenceError at this console.log, silently killing the rest of
+      // the loop AND blocking Phase 3 from running. Compute them locally.
+      const tierP2 = getApptTier(appt.appointment_date, appt.appointment_time);
+      const hoursUntilApptP2 = (getApptTimeMs(appt) - now) / (1000 * 60 * 60);
+      console.log(`[FINAL WARNING] ${name} (${tierP2} tier, ${hoursUntilApptP2.toFixed(1)}h until appt)`);
       finalWarnings++;
     }
 
@@ -397,10 +406,32 @@ Deno.serve(async (req) => {
       const apptTimeMs = getApptTimeMs(appt);
       const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
 
-      // SAFEGUARD: Never auto-cancel if the appointment is more than 7 days away.
-      // There's no urgency — just keep the final_warning status and wait.
+      // SAFEGUARD #1: Never auto-cancel if the appointment is more than 7 days away.
       if (hoursUntilAppt > NO_CANCEL_IF_MORE_THAN_HOURS) {
         console.log(`Skipping cancel for appt ${appt.id} — ${hoursUntilAppt.toFixed(0)}h away, no urgency`);
+        skippedRelaxed++;
+        continue;
+      }
+      // SAFEGUARD #2 (critical, added 2026-05-19): NEVER auto-cancel a
+      // PAST appointment. Pre-fix the only check was "within 7 days" —
+      // negative hoursUntilAppt (past) satisfied that, so completed visits
+      // whose invoice never got paid were getting their slot "released"
+      // and their Stripe invoice voided, even though the phleb may have
+      // already performed the visit. This bug exposed itself the moment
+      // the Phase-2/3 ReferenceError was fixed: 3 of 5 first-pass cancels
+      // were past-date.
+      if (hoursUntilAppt < -2) {  // -2h to allow appts that just ended
+        console.log(`Skipping cancel for appt ${appt.id} — appt was ${Math.abs(hoursUntilAppt).toFixed(0)}h ago; admin must reconcile manually`);
+        skippedRelaxed++;
+        continue;
+      }
+      // SAFEGUARD #3: Never auto-cancel an appointment whose status is
+      // already 'completed' or 'specimen_delivered' — the phleb performed
+      // the visit, the invoice just hasn't been paid yet. Belt + suspenders
+      // with #2, but #2 alone wouldn't catch a completed visit scheduled
+      // for the same hour.
+      if (['completed', 'specimen_delivered', 'en_route', 'arrived', 'in_progress'].includes(appt.status)) {
+        console.log(`Skipping cancel for appt ${appt.id} — status=${appt.status}, visit already happened`);
         skippedRelaxed++;
         continue;
       }
@@ -418,6 +449,9 @@ Deno.serve(async (req) => {
       }
 
       const { name, email, phone } = getContact(appt);
+      // Bug fix: tier was undefined in this Phase-3 scope — every
+      // cancellation threw a ReferenceError. Compute it locally.
+      const tier = getApptTier(appt.appointment_date, appt.appointment_time);
 
       // Cancel appointment
       await supabase.from('appointments').update({
@@ -441,15 +475,18 @@ Deno.serve(async (req) => {
       if (!emailCheck3.safe) {
         console.warn(`HIPAA guard blocked email to ${email}: ${emailCheck3.reason}`);
       } else {
-        await sendEmail(email, `Your ConveLabs Appointment Has Been Cancelled`, emailWrapper(
-          '#991B1B', 'Appointment Cancelled',
+        // Softened cancel email — pre-fix read "payment was not received
+        // within the required timeframe" (parking-ticket language). New
+        // version owns the inconvenience, opens the door back, no shame.
+        await sendEmail(email, `We released your ConveLabs slot — easy to come back`, emailWrapper(
+          '#991B1B', 'Slot released',
           `<p>Hi ${name},</p>
-           <p>Your ConveLabs appointment has been cancelled because payment was not received within the required timeframe.</p>
-           <p>Your appointment slot has been released and is now available for other patients.</p>
-           <p><strong>Want to rebook?</strong> We'd love to continue serving you:</p>
+           <p>We had to release your appointment slot since the invoice didn't get settled in time. No hard feelings at all — life gets busy.</p>
+           <p>If you'd still like that visit, we'd love to have you back. Rebooking takes about 90 seconds:</p>
            <div style="text-align:center;margin:20px 0;">
-             <a href="https://convelabs.com/book-now" style="display:inline-block;background:#B91C1C;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Book a New Appointment</a>
-           </div>`
+             <a href="https://convelabs.com/book-now" style="display:inline-block;background:#B91C1C;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Book a new visit</a>
+           </div>
+           <p style="font-size:14px;color:#374151;">Anything you'd like to talk through? Text or call us at <strong>(941) 527-9169</strong> — we're here.</p>`
         ));
       }
 
@@ -458,9 +495,21 @@ Deno.serve(async (req) => {
         console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck3.reason}`);
       } else {
         await sendSMS(phone,
-          `Hi ${name}, your ConveLabs appointment has been cancelled due to non-payment. You can easily rebook at convelabs.com/book-now — we'd love to see you!`
+          `Hi ${name} — we had to release your ConveLabs slot today. No worries — rebook anytime: convelabs.com/book-now. Questions? (941) 527-9169.`
         );
       }
+
+      // Owner-visibility SMS — pre-fix the owner had no idea an auto-
+      // cancel had fired same-day. Now a one-line ping so they know.
+      try {
+        await supabase.functions.invoke('send-sms-notification', {
+          body: {
+            to: '9415279169',
+            message: `[Auto-cancel] ${name} — ${appt.appointment_date?.substring(0, 10) || '?'} ${appt.appointment_time || ''} — invoice unpaid (${tier} tier)`,
+            category: 'admin_alert',
+          },
+        });
+      } catch (e) { console.warn('owner SMS failed:', (e as any)?.message); }
 
       console.log(`[CANCELLED] ${name} (${hoursUntilAppt.toFixed(1)}h until appt, ${hoursSinceWarning.toFixed(1)}h since warning)`);
       cancellations++;

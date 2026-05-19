@@ -350,6 +350,40 @@ Deno.serve(async (req) => {
       return new Response('', { status: 200 });
     }
 
+    // ─── "PAID" / "I PAID" HANDLER ─────────────────────────────────
+    // Patient says they already paid — trigger reconciliation against
+    // Stripe + pause the dunning cascade until reconcile-invoice-payments
+    // confirms or rejects. Pre-fix: cascade kept firing past their reply.
+    if (/^(i\s*)?paid$|^already\s*paid$|^just\s*paid$/i.test(body.trim())) {
+      try {
+        const { data: appts } = await admin
+          .from('appointments')
+          .select('id, total_amount')
+          .or(`patient_phone.ilike.%${fromDigits.slice(-10)},patient_phone.ilike.%${fromDigits.slice(-10)}%`)
+          .in('invoice_status', ['sent', 'reminded', 'final_warning'])
+          .not('status', 'eq', 'cancelled')
+          .order('invoice_sent_at', { ascending: false })
+          .limit(3);
+        const ids = (appts || []).map((a: any) => a.id);
+        if (ids.length > 0) {
+          // Pause the cascade — mark invoice_status='paid_pending_verify' so
+          // the cron skips these rows. reconcile-invoice-payments will flip
+          // them to 'paid' if Stripe confirms, or back to their prior state
+          // if not.
+          await admin.from('appointments').update({
+            invoice_paid_pending_verify_at: new Date().toISOString(),
+          }).in('id', ids);
+          // Fire-and-forget reconciliation
+          admin.functions.invoke('reconcile-invoice-payments', { body: { trigger: 'inbound_paid_sms', appointment_ids: ids } }).catch(() => {});
+          // Notify owner so they can manually verify if needed
+          admin.functions.invoke('send-sms-notification', {
+            body: { to: '9415279169', category: 'admin_alert', message: `[Patient replied PAID] ${from.slice(-4)} — appts ${ids.length} → triggered reconcile` },
+          }).catch(() => {});
+        }
+      } catch (e) { console.warn('[paid-handler] err:', (e as any)?.message); }
+      return twiml("Thanks for the heads up — we're double-checking on our end and will follow up shortly. Questions? (941) 527-9169.");
+    }
+
     if (!match) {
       // If they're a booked patient, give them useful info instead of a brick-wall reply
       if (alreadyBooked && alreadyBooked.appointment_id) {
