@@ -12,7 +12,7 @@ import {
   CalendarClock, XCircle, DollarSign, FileText, Shield,
   ChevronDown, ChevronUp, UserPlus, AlertTriangle, UserX,
   X, MoreHorizontal, ChevronRight, Upload, ExternalLink,
-  Pencil, Save, Loader2, Crown,
+  Pencil, Save, Loader2, Crown, Send,
 } from 'lucide-react';
 
 // Tier -> badge style. Extracted so the modal + chart match pixel-for-pixel.
@@ -486,6 +486,47 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               refundedAmountCents={appt.refund_amount_cents}
               onRefunded={onUpdate}
             />
+          )}
+
+          {/*
+            Manual invoice reminder — friendly nudge for any unpaid row.
+            For VIP patients (Mariela etc.) the auto-cancel cron explicitly
+            skips them per the is_vip=false filter in process-invoice-
+            reminders/Phase 3, so this button is THE way to chase them.
+            Hidden once payment_status is paid/completed.
+          */}
+          {!['paid', 'completed', 'succeeded'].includes(String(appt.payment_status)) &&
+           appt.status !== 'cancelled' &&
+           (appt.total_amount || 0) > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-8 gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+              onClick={async () => {
+                if (!window.confirm(`Send a friendly invoice reminder to ${appt.patient_name}? Email + SMS will go out.`)) return;
+                try {
+                  const { data, error } = await supabase.functions.invoke('send-manual-invoice-reminder', {
+                    body: { appointment_id: appt.id, email: true, sms: true },
+                  });
+                  if (error) throw error;
+                  const r = (data as any)?.results || {};
+                  const okBits: string[] = [];
+                  if (r.email?.ok) okBits.push('email');
+                  if (r.sms?.ok) okBits.push('SMS');
+                  if (okBits.length === 0) {
+                    toast.error(`Reminder failed — ${r.email?.error || r.sms?.error || 'unknown'}`);
+                  } else {
+                    toast.success(`Reminder sent via ${okBits.join(' + ')}`);
+                  }
+                } catch (e: any) {
+                  toast.error(e?.message || 'Failed to send reminder');
+                }
+              }}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Send Invoice Reminder
+              {appt.is_vip && <span className="ml-1 text-[10px] opacity-70">(VIP-safe)</span>}
+            </Button>
           )}
         </div>
 
