@@ -294,6 +294,27 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'unknown_tier', tier: tierKey, supported: Object.keys(TIER_META) }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // Rate limit: don't re-send to the same email within the last hour
+    // unless { force: true } is passed. Prevents double-click double-send
+    // and accidental harassment. (Gap #9 from the audit.)
+    if (!body?.force) {
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data: recent } = await admin
+        .from('membership_offers_sent')
+        .select('id, sent_at')
+        .eq('patient_email', patientEmail)
+        .gte('sent_at', oneHourAgo)
+        .limit(1)
+        .maybeSingle();
+      if (recent) {
+        return new Response(JSON.stringify({
+          error: 'rate_limited',
+          message: `Already sent an offer to ${patientEmail} in the last hour. Pass force:true to override.`,
+          last_sent_at: (recent as any).sent_at,
+        }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
+
     // Pull patient phone from tenant_patients if not provided
     let phone: string | null = patientPhoneRaw;
     if (!phone) {
@@ -341,13 +362,25 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Tracking token — populated in the URL so JoinTier can call the
+    // public click-tracking endpoint on mount. Also lets stripe-webhook
+    // attribute the eventual conversion to THIS specific offer.
+    const trackingToken = crypto.randomUUID().replace(/-/g, '');
+
     // Construct invite URL — routes to existing JoinTier page which prefills
     // email + maps tier → membership_plans → create-checkout-session.
+    // UTM params added so analytics can split organic vs invited conversions
+    // (gap #3 from the audit).
     const params = new URLSearchParams({
       tier: tierKey,
       email: patientEmail,
       billing: 'annual',
       src: 'admin_invite',
+      invite: trackingToken,
+      utm_source: 'admin_chart',
+      utm_medium: 'sms_email',
+      utm_campaign: 'membership_offer',
+      utm_content: tierKey,
     });
     const inviteUrl = `${PUBLIC_SITE_URL}/join?${params.toString()}`;
 
@@ -360,7 +393,7 @@ Deno.serve(async (req) => {
       phone ? sendSMS(phone, smsText) : Promise.resolve({ ok: false, error: 'no_phone_on_file' as string }),
     ]);
 
-    // Audit row
+    // Audit row — token included so click + conversion can attribute back.
     try {
       await admin.from('membership_offers_sent').insert({
         patient_email: patientEmail,
@@ -369,6 +402,7 @@ Deno.serve(async (req) => {
         tier: tierKey,
         personal_note: personalNote,
         invite_url: inviteUrl,
+        tracking_token: trackingToken,
         sms_sent: smsResult.ok,
         email_sent: emailResult.ok,
         sms_error: smsResult.ok ? null : smsResult.error,
@@ -383,6 +417,7 @@ Deno.serve(async (req) => {
       ok: emailResult.ok || smsResult.ok,
       seats_remaining: seatsRemaining,
       invite_url: inviteUrl,
+      tracking_token: trackingToken,
       sms_sent: smsResult.ok,
       email_sent: emailResult.ok,
       sms_error: smsResult.ok ? null : smsResult.error,

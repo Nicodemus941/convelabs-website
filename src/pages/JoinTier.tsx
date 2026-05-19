@@ -43,6 +43,18 @@ const JoinTier: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('Loading your plan…');
 
+  // Fire click-tracking beacon when the URL carries an admin-invite token.
+  // Lets membership_offers_sent.clicked_at populate so we can measure
+  // email/SMS → click conversion. Fire-and-forget — never blocks UX.
+  useEffect(() => {
+    const inviteToken = params.get('invite');
+    if (inviteToken && inviteToken.length >= 16) {
+      supabase.functions.invoke('track-membership-offer-click', {
+        body: { token: inviteToken, ua: navigator.userAgent },
+      }).catch(() => { /* never block landing */ });
+    }
+  }, [params]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -75,6 +87,11 @@ const JoinTier: React.FC = () => {
         if (cancelled) return;
         setStatus(`Opening secure checkout for ${plan.name}…`);
 
+        // Pass the admin-invite tracking_token through to Stripe metadata
+        // so stripe-webhook's handleMembershipSignup can attribute the
+        // conversion back to membership_offers_sent + fire the owner SMS.
+        const inviteToken = params.get('invite') || undefined;
+
         const result = await createCheckoutSession(
           plan.id,
           billing,
@@ -84,6 +101,7 @@ const JoinTier: React.FC = () => {
             source: 'join_tier_link',
             tier,
             ...(email ? { prefill_email: email } : {}),
+            ...(inviteToken ? { invite_token: inviteToken } : {}),
           },
           false,
           null,

@@ -632,6 +632,58 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       console.warn('[tier-mirror] exception (non-blocking):', e?.message || e);
     }
 
+    // ── ATTRIBUTE TO ADMIN-INVITE OFFER (if any) ──────────────────
+    // If this signup originated from an admin chart-button invite, the
+    // tracking_token rode through the URL → JoinTier → create-checkout-
+    // session metadata. Look it up and stamp converted_at + the membership
+    // id so we can measure invite → conversion ROI per admin.
+    //
+    // Also fires a 🎯 owner SMS so the team sees the win same-day (closes
+    // the loop psychologically; gap #5 from the audit).
+    try {
+      const tokenFromMeta = (session?.metadata as any)?.invite_token
+                          || (session?.metadata as any)?.tracking_token
+                          || null;
+      const patientEmail = String(session?.customer_email || session?.customer_details?.email || '').toLowerCase();
+      let attribQ = supabaseClient
+        .from('membership_offers_sent')
+        .select('id, tier, sent_by, patient_name')
+        .is('converted_at', null);
+      if (tokenFromMeta) {
+        attribQ = attribQ.eq('tracking_token', tokenFromMeta);
+      } else if (patientEmail) {
+        // Fallback: most recent un-converted offer for this email.
+        attribQ = attribQ.eq('patient_email', patientEmail).order('sent_at', { ascending: false }).limit(1);
+      } else {
+        attribQ = attribQ.limit(0); // nothing to do
+      }
+      const { data: attribRows } = await attribQ;
+      const attrib: any = Array.isArray(attribRows) && attribRows.length > 0 ? attribRows[0] : null;
+      if (attrib?.id) {
+        await supabaseClient.from('membership_offers_sent').update({
+          converted_at: new Date().toISOString(),
+          converted_membership_id: (membershipData as any)?.id || null,
+        }).eq('id', attrib.id);
+        console.log(`[membership-attrib] linked offer ${attrib.id} → membership ${(membershipData as any)?.id}`);
+
+        // Fire 🎯 win-SMS to owner. Non-blocking. category=admin_alert
+        // bypasses quiet hours (the team wants to see wins immediately).
+        try {
+          const tierLabelMap: Record<string, string> = { vip: 'VIP', member: 'Member', concierge: 'Concierge' };
+          const tierLabel = tierLabelMap[String(attrib.tier).toLowerCase()] || attrib.tier;
+          const patientName = attrib.patient_name || patientEmail || 'a patient';
+          const msg = `🎯 ${patientName} just upgraded to ${tierLabel} from your invite! 🎉`;
+          await supabaseClient.functions.invoke('send-sms-notification', {
+            body: { to: Deno.env.get('OWNER_PHONE') || '9415279169', category: 'admin_alert', message: msg },
+          });
+        } catch (smsErr: any) {
+          console.warn('[membership-attrib] owner-SMS failed (non-blocking):', smsErr?.message);
+        }
+      }
+    } catch (attribErr: any) {
+      console.warn('[membership-attrib] attribution exception (non-blocking):', attribErr?.message);
+    }
+
     // ── FOUNDING 50 SEAT CLAIM ─────────────────────────────────────
     // If (a) the checkout flagged this as founding intent AND (b) the
     // plan is VIP, atomically claim the next founding seat number.
