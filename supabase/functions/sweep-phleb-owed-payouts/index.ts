@@ -39,6 +39,42 @@ interface PayoutRow {
   notes: string | null;
 }
 
+/**
+ * Reusable sweep core — shared between user-auth path and cron mode.
+ * Returns { ok, swept_count, total_cents, stripe_transfer_id?, message? }.
+ */
+async function sweepForStaff(admin: any, staffId: string, stripeAcct: string) {
+  const { data: owed } = await admin
+    .from('staff_payouts')
+    .select('id, appointment_id, amount_cents, stripe_destination_account_id, notes')
+    .eq('staff_id', staffId)
+    .eq('status', 'manual_owed')
+    .order('created_at', { ascending: true });
+  const rows = (owed as PayoutRow[]) || [];
+  if (rows.length === 0) return { ok: true, swept_count: 0, total_cents: 0, message: 'nothing_owed' };
+  const wrongDest = rows.filter(r => r.stripe_destination_account_id && r.stripe_destination_account_id !== stripeAcct);
+  if (wrongDest.length > 0) return { ok: false, error: 'destination_mismatch', wrong_count: wrongDest.length };
+  const totalCents = rows.reduce((s, r) => s + (r.amount_cents || 0), 0);
+  if (totalCents <= 0) return { ok: true, swept_count: 0, total_cents: 0 };
+  const today = new Date().toISOString().substring(0, 10);
+  const transferGroup = `phleb_sweep_${staffId}_${today}`;
+  const transfer = await stripe.transfers.create({
+    amount: totalCents,
+    currency: 'usd',
+    destination: stripeAcct,
+    transfer_group: transferGroup,
+    description: `Phleb sweep: ${rows.length} owed visits, ${today}`,
+    metadata: { staff_id: staffId, row_count: String(rows.length), sweep_date: today, source: 'sweep-phleb-owed-payouts' },
+  }, { idempotencyKey: transferGroup });
+  await admin.from('staff_payouts').update({
+    status: 'succeeded',
+    stripe_transfer_id: transfer.id,
+    transferred_at: new Date().toISOString(),
+    notes: rows[0].notes ? `${rows[0].notes} · swept ${today}` : `swept ${today}`,
+  }).in('id', rows.map(r => r.id));
+  return { ok: true, swept_count: rows.length, total_cents: totalCents, stripe_transfer_id: transfer.id, transfer_group: transferGroup };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') {
@@ -48,6 +84,48 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+    const body = await req.json().catch(() => ({} as any));
+    const adminRequestedStaffId: string | undefined = body?.p_staff_id;
+    const isCronMode = body?.cron_secret && body.cron_secret === Deno.env.get('CRON_SECRET');
+
+    // Resolve which staff_profile we're sweeping for
+    let staffId: string | null = null;
+    let stripeAcct: string | null = null;
+
+    // ─── CRON MODE ──────────────────────────────────────────────────
+    // Daily cron passes { cron_secret, all_staff: true } to sweep every
+    // Connect-enabled phleb in one invocation. Each phleb is processed
+    // independently — one bad transfer doesn't stop the rest. Returns
+    // an aggregate report.
+    if (isCronMode && body?.all_staff === true) {
+      const { data: phlebs } = await admin
+        .from('staff_profiles')
+        .select('id, stripe_connect_account_id')
+        .not('stripe_connect_account_id', 'is', null)
+        .eq('stripe_connect_charges_enabled', true)
+        .eq('stripe_connect_payouts_enabled', true);
+      const results: any[] = [];
+      for (const p of (phlebs || []) as any[]) {
+        try {
+          const result = await sweepForStaff(admin, p.id, p.stripe_connect_account_id);
+          results.push({ staff_id: p.id, ...result });
+        } catch (e: any) {
+          results.push({ staff_id: p.id, error: e?.message || 'sweep_failed' });
+        }
+      }
+      const totalSweptCents = results.reduce((s, r) => s + (r.total_cents || 0), 0);
+      console.log(`[sweep:cron] swept ${results.length} phlebs, total $${(totalSweptCents/100).toFixed(2)}`);
+      return new Response(JSON.stringify({
+        ok: true,
+        mode: 'cron_all_staff',
+        phlebs_processed: results.length,
+        total_swept_cents: totalSweptCents,
+        results,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ─── USER-AUTH PATH ─────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization') || '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
     if (!token) {
@@ -55,21 +133,12 @@ Deno.serve(async (req) => {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: { user } } = await admin.auth.getUser(token);
     if (!user) {
       return new Response(JSON.stringify({ error: 'invalid_token' }), {
         status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
     }
-
-    const body = await req.json().catch(() => ({} as any));
-    const adminRequestedStaffId: string | undefined = body?.p_staff_id;
-
-    // Resolve which staff_profile we're sweeping for
-    let staffId: string | null = null;
-    let stripeAcct: string | null = null;
 
     if (adminRequestedStaffId) {
       // Admin override path
