@@ -236,10 +236,51 @@ Deno.serve(async (req) => {
     const results = await Promise.allSettled(updates);
     const failed = results.filter(r => r.status === 'rejected').length;
 
+    // ──────────────────────────────────────────────────────────────────
+    // BACK-FILL — Stripe transfers we have NO matching DB row for. The
+    // pre-fix reconciler only flipped existing rows; transfers created via
+    // the Stripe dashboard (or by old code that never wrote staff_payouts
+    // because connect_json was truncated to invalid JSON) were silently
+    // invisible to ConveLabs' books → owner saw "less" on dashboard than
+    // on Stripe. Now we INSERT a row per orphan transfer so totals
+    // reconcile bidirectionally.
+    const matchedTransferIds = new Set(reconciled.map(r => r.transfer_id));
+    const { data: existingRows } = await admin
+      .from('staff_payouts')
+      .select('stripe_transfer_id')
+      .eq('staff_id', staffId)
+      .not('stripe_transfer_id', 'is', null);
+    const knownTransferIds = new Set((existingRows || []).map((r: any) => r.stripe_transfer_id));
+    const orphans = allTransfers.filter(t =>
+      !matchedTransferIds.has(t.id) && !knownTransferIds.has(t.id)
+    );
+    let backfilledCount = 0;
+    let backfilledCents = 0;
+    for (const t of orphans) {
+      try {
+        const apptId = t.metadata?.appointment_id || null;
+        await admin.from('staff_payouts').insert({
+          staff_id: staffId,
+          appointment_id: apptId,
+          amount_cents: t.amount,
+          status: 'succeeded',
+          stripe_transfer_id: t.id,
+          transferred_at: new Date(t.created * 1000).toISOString(),
+          notes: `back-filled from Stripe (orphan transfer ${t.id})`,
+        });
+        backfilledCount++;
+        backfilledCents += t.amount;
+      } catch (e: any) {
+        console.warn(`[reconcile] back-fill insert failed for ${t.id}:`, e?.message);
+      }
+    }
+
     return new Response(JSON.stringify({
       ok: true,
       reconciled_count: reconciled.length - failed,
       reconciled_cents: totalCents,
+      backfilled_count: backfilledCount,
+      backfilled_cents: backfilledCents,
       remaining_manual_owed: owedRows.length - reconciled.length + failed,
       transfers_scanned: allTransfers.length,
       by_pass: {
@@ -248,9 +289,9 @@ Deno.serve(async (req) => {
         pass3_charge: reconciled.filter(r => r.via === 'pass3_charge_destination').length,
       },
       db_failures: failed,
-      message: reconciled.length === 0
-        ? 'No matches found — all manual_owed rows still truly outstanding.'
-        : `Marked ${reconciled.length} rows as already-paid (no money moved). $${(totalCents/100).toFixed(2)} removed from your pending sweep.`,
+      message: reconciled.length === 0 && backfilledCount === 0
+        ? 'No matches found — all manual_owed rows still truly outstanding, no orphan transfers.'
+        : `Marked ${reconciled.length} rows as already-paid + back-filled ${backfilledCount} orphan transfer(s) = $${((totalCents + backfilledCents)/100).toFixed(2)} accounted for.`,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (e: any) {

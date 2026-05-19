@@ -248,8 +248,26 @@ Deno.serve(async (req) => {
     else if (event.type === 'transfer.created' || event.type === 'transfer.updated') {
       await handleStripeTransferEvent(event.data.object, event.type);
     }
-    else if (event.type === 'transfer.failed' || event.type === 'transfer.reversed') {
+    else if (event.type === 'transfer.failed') {
       await handleStripeTransferFailed(event.data.object, event.type);
+    }
+    else if (event.type === 'transfer.reversed') {
+      // transfer.reversed means Stripe already debited the platform and the
+      // money is back. The original row should be marked 'reversed', NOT
+      // flipped to manual_owed (which would tell sweep-phleb-owed-payouts
+      // to PAY THE PHLEB AGAIN — pre-fix bookkeeping bug audited 2026-05-19).
+      await handleStripeTransferReversed(event.data.object);
+    }
+    else if (event.type === 'charge.dispute.created') {
+      // Chargeback opened — Stripe auto-debits the platform pending evidence.
+      // Flag the appointment + log activity so owner sees it.
+      await handleChargeDisputeCreated(event.data.object);
+    }
+    else if (event.type === 'account.updated') {
+      // Connect account status change (charges_disabled / payouts_disabled /
+      // requirements.disabled_reason). Sync to staff_profiles so booking UI
+      // doesn't silently keep assigning patients to a phleb who can't be paid.
+      await handleAccountUpdated(event.data.object);
     }
     else if (event.type === 'payout.created' || event.type === 'payout.updated') {
       await handleStripePayoutEvent(event.data.object, event.type);
@@ -1029,6 +1047,55 @@ async function handleChargeRefunded(charge: any) {
           payment_status: isFullRefund ? 'refunded' : 'partial_refund',
         })
         .eq('id', existing.appointment_id);
+    }
+
+    // 4. PHLEB CLAWBACK — pre-fix gap audited 2026-05-19: charge.refunded
+    //    never touched staff_payouts. Stripe automatically reverses the
+    //    destination-charge transfer on its side, but our books still showed
+    //    phleb paid → owner's dashboard overstated phleb earnings vs Stripe.
+    //
+    //    For a FULL refund: mark every staff_payouts row tied to this
+    //    appointment as 'reversed' and insert a compensating negative row
+    //    so PhlebEarningsCard's sums net to zero.
+    //
+    //    For a PARTIAL refund: insert ONE compensating row proportional to
+    //    the refunded amount. We do not mutate the original row — the audit
+    //    trail must show "$X paid then $Y clawed back."
+    if (existing?.appointment_id) {
+      try {
+        const { data: payoutRows } = await supabaseClient
+          .from('staff_payouts' as any)
+          .select('id, staff_id, amount_cents, status, stripe_transfer_id')
+          .eq('appointment_id', existing.appointment_id)
+          .in('status', ['succeeded', 'manual_owed', 'pending']);
+        const rows = (payoutRows || []) as any[];
+        if (rows.length > 0) {
+          const totalPaidCents = rows.reduce((s, r) => s + (r.amount_cents || 0), 0);
+          const refundRatio = charge.amount > 0 ? totalRefunded / charge.amount : 0;
+          const clawbackCents = Math.round(totalPaidCents * refundRatio);
+          if (isFullRefund) {
+            await supabaseClient.from('staff_payouts' as any).update({
+              status: 'reversed',
+              reversed_at: new Date().toISOString(),
+              reversed_reason: `charge.refunded ${chargeId}`,
+            }).in('id', rows.map(r => r.id));
+          }
+          if (clawbackCents > 0) {
+            const primaryPhleb = rows[0]?.staff_id;
+            await supabaseClient.from('staff_payouts' as any).insert({
+              staff_id: primaryPhleb,
+              appointment_id: existing.appointment_id,
+              amount_cents: -clawbackCents,
+              status: isFullRefund ? 'reversed' : 'partial_clawback',
+              reversed_reason: `charge.refunded ${chargeId} ratio=${(refundRatio * 100).toFixed(1)}%`,
+              stripe_transfer_id: rows[0]?.stripe_transfer_id || null,
+            });
+          }
+          console.log(`[charge.refunded] phleb clawback ${rows.length} row(s) → -$${(clawbackCents / 100).toFixed(2)}`);
+        }
+      } catch (clawbackErr: any) {
+        console.warn('[charge.refunded] phleb clawback failed (non-blocking):', clawbackErr?.message);
+      }
     }
 
     console.log(`[charge.refunded] processed ${chargeId}: refunded $${(totalRefunded / 100).toFixed(2)}${isFullRefund ? ' (full)' : ' (partial)'}`);
@@ -2772,6 +2839,84 @@ async function handleStripeTransferEvent(transfer: any, eventType: string) {
     console.log(`[stripe-${eventType}] confirmed transfer ${transferId} (already tracked at sweep time)`);
   } catch (e: any) {
     console.warn(`[stripe-${eventType}] handler error:`, e?.message);
+  }
+}
+
+async function handleStripeTransferReversed(transfer: any) {
+  // The transfer was reversed by Stripe (typically because the underlying
+  // charge was refunded). Mark the staff_payouts row 'reversed' so the
+  // dashboard sums net to zero, and DO NOT mark it manual_owed (that would
+  // re-pay the phleb). The handleChargeRefunded path also writes a
+  // compensating row; this handler is the deterministic Stripe-side mirror.
+  try {
+    const transferId = transfer?.id;
+    if (!transferId) return;
+    await supabaseClient.from('staff_payouts' as any).update({
+      status: 'reversed',
+      reversed_at: new Date().toISOString(),
+      reversed_reason: `transfer.reversed ${transferId}`,
+    }).eq('stripe_transfer_id', transferId).in('status', ['succeeded', 'manual_owed', 'pending']);
+    console.log(`[stripe-transfer.reversed] marked rows reversed for ${transferId}`);
+  } catch (e: any) {
+    console.warn('[stripe-transfer.reversed] handler error:', e?.message);
+  }
+}
+
+async function handleChargeDisputeCreated(dispute: any) {
+  try {
+    const chargeId = typeof dispute?.charge === 'string' ? dispute.charge : dispute?.charge?.id;
+    if (!chargeId) return;
+    const { data: existing } = await supabaseClient
+      .from('stripe_qb_sync_log')
+      .select('id, appointment_id')
+      .eq('stripe_charge_id', chargeId)
+      .is('stripe_balance_transaction_id', null)
+      .limit(1)
+      .maybeSingle();
+    if (existing?.appointment_id) {
+      await supabaseClient.from('appointments')
+        .update({ payment_status: 'disputed', refund_status: 'disputed' })
+        .eq('id', existing.appointment_id);
+    }
+    await supabaseClient.from('activity_log' as any).insert({
+      activity_type: 'chargeback_opened',
+      description: `Stripe dispute ${dispute.id} on charge ${chargeId} — reason: ${dispute.reason || 'unknown'}, amount $${((dispute.amount || 0) / 100).toFixed(2)}`,
+      status: 'pending',
+      priority: 'urgent',
+      appointment_id: existing?.appointment_id || null,
+    });
+    console.warn(`[charge.dispute.created] ${dispute.id} on ${chargeId}`);
+  } catch (e: any) {
+    console.warn('[charge.dispute.created] error:', e?.message);
+  }
+}
+
+async function handleAccountUpdated(account: any) {
+  try {
+    const acctId = account?.id;
+    if (!acctId) return;
+    const charges_enabled = !!account.charges_enabled;
+    const payouts_enabled = !!account.payouts_enabled;
+    const disabled_reason = account.requirements?.disabled_reason || null;
+    await supabaseClient.from('staff_profiles' as any).update({
+      stripe_connect_charges_enabled: charges_enabled,
+      stripe_connect_payouts_enabled: payouts_enabled,
+      stripe_connect_disabled_reason: disabled_reason,
+      stripe_connect_updated_at: new Date().toISOString(),
+    }).eq('stripe_connect_account_id', acctId);
+    if (!charges_enabled || !payouts_enabled) {
+      try {
+        await supabaseClient.from('activity_log' as any).insert({
+          activity_type: 'phleb_connect_disabled',
+          description: `Connect ${acctId} disabled (charges=${charges_enabled}, payouts=${payouts_enabled}) reason=${disabled_reason || 'n/a'}`,
+          status: 'pending',
+          priority: 'urgent',
+        });
+      } catch { /* non-blocking */ }
+    }
+    console.log(`[account.updated] ${acctId} charges=${charges_enabled} payouts=${payouts_enabled}`);
+  } catch (e: any) {
+    console.warn('[account.updated] handler error:', e?.message);
   }
 }
 

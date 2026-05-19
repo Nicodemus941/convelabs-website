@@ -30,6 +30,111 @@ function twiml(message: string): Response {
 }
 
 function phoneDigits(p: string): string { return (p || '').replace(/\D/g, ''); }
+function lastTen(p: string): string { return phoneDigits(p).slice(-10); }
+
+/**
+ * MMS photo upload — mirrors twilio-mms-webhook so EITHER webhook URL on the
+ * Twilio number works. Returns the patient-facing reply text.
+ *
+ * Resolution order:
+ *   1. appointment_lab_order_requests (pending/sent/opened, not expired) by
+ *      patient_phone_at_send — the "text a photo" promise lives here.
+ *   2. If no match, helpful fallback.
+ */
+async function handleMmsUpload(admin: any, from: string, formData: FormData): Promise<string> {
+  const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+  const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+  const mediaUrl = String(formData.get('MediaUrl0') || '');
+  const mediaType = String(formData.get('MediaContentType0') || 'image/jpeg');
+  if (!mediaUrl) return "Got your text — but no photo came through. Please attach a clear photo of your lab order and send again.";
+  if (!mediaType.startsWith('image/') && mediaType !== 'application/pdf') {
+    return "Thanks! We can only accept photos (JPG/PNG/HEIC) or PDFs of your lab order. Please retake and resend.";
+  }
+
+  const fromTen = lastTen(from);
+  const { data: candidates } = await admin
+    .from('appointment_lab_order_requests')
+    .select('id, appointment_id, patient_phone_at_send, status, expires_at')
+    .in('status', ['pending', 'sent', 'opened'])
+    .gt('expires_at', new Date().toISOString())
+    .order('requested_at', { ascending: false })
+    .limit(20);
+  const match = (candidates || []).find((c: any) =>
+    c.patient_phone_at_send && lastTen(String(c.patient_phone_at_send)) === fromTen
+  );
+  if (!match) {
+    return "We couldn't match your number to an open lab-order request. If you got a link from us, tap that link to upload. Questions? Email info@convelabs.com or call (941) 527-9169.";
+  }
+
+  // Download via Twilio basic-auth, cap at 20 MB
+  const mediaResp = await fetch(mediaUrl, {
+    headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}` },
+  });
+  if (!mediaResp.ok) {
+    console.error('[inbound-sms-mms] media fetch failed:', mediaResp.status);
+    return "We had trouble downloading your photo. Please try again or use the upload link we texted you.";
+  }
+  const buf = new Uint8Array(await mediaResp.arrayBuffer());
+  if (buf.length > 20 * 1024 * 1024) {
+    return "That photo is too large. Please retake at a lower resolution, or use the upload link we texted you.";
+  }
+
+  const ext = mediaType === 'application/pdf' ? 'pdf'
+    : mediaType.includes('png') ? 'png'
+    : mediaType.includes('heic') ? 'heic'
+    : 'jpg';
+  const safeName = `mms_${String(match.appointment_id).substring(0, 8)}_${Date.now()}.${ext}`;
+  const { error: upErr } = await admin.storage
+    .from('lab-orders')
+    .upload(safeName, buf, { contentType: mediaType, upsert: false });
+  if (upErr) {
+    console.error('[inbound-sms-mms] upload err:', upErr);
+    return "We hit an issue saving your photo. Please tap the upload link in our text instead.";
+  }
+
+  const { data: lo } = await admin
+    .from('appointment_lab_orders')
+    .insert({
+      appointment_id: match.appointment_id,
+      file_path: safeName,
+      original_filename: `mms-upload.${ext}`,
+      file_size: buf.length,
+      mime_type: mediaType,
+      ocr_status: 'pending',
+    })
+    .select('id')
+    .single();
+
+  // Stamp legacy column so admin appointment card still shows the badge
+  try {
+    const { data: appt } = await admin
+      .from('appointments')
+      .select('lab_order_file_path')
+      .eq('id', match.appointment_id)
+      .maybeSingle();
+    const existing = (appt as any)?.lab_order_file_path
+      ? String((appt as any).lab_order_file_path).split('\n').filter(Boolean)
+      : [];
+    if (!existing.includes(safeName)) existing.push(safeName);
+    await admin.from('appointments')
+      .update({ lab_order_file_path: existing.join('\n') })
+      .eq('id', match.appointment_id);
+  } catch (e) { console.warn('[inbound-sms-mms] legacy stamp failed:', e); }
+
+  await admin.from('appointment_lab_order_requests')
+    .update({
+      status: 'uploaded',
+      uploaded_at: new Date().toISOString(),
+      uploaded_file_path: safeName,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', match.id);
+
+  if (lo?.id) {
+    try { admin.functions.invoke('ocr-lab-order', { body: { labOrderId: lo.id } }).catch(() => {}); } catch {}
+  }
+  return "Got it ✓ Your lab order is on file. We'll see you at your appointment. — ConveLabs";
+}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
@@ -39,13 +144,47 @@ Deno.serve(async (req) => {
     const from = String(formData.get('From') || '');
     const body = String(formData.get('Body') || '').trim();
     const fromDigits = phoneDigits(from);
+    const numMedia = parseInt(String(formData.get('NumMedia') || '0'), 10) || 0;
 
-    console.log(`[inbound-sms] from=${from} body="${body}"`);
+    console.log(`[inbound-sms] from=${from} body="${body}" numMedia=${numMedia}`);
 
-    if (!fromDigits || !body) return twiml('Message received.');
+    if (!fromDigits) return twiml('Message received.');
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const messageSid = String(formData.get('MessageSid') || '') || null;
+
+    // ─── OWNER FORWARDING ──────────────────────────────────────────
+    // Forward every inbound to OWNER_PHONE so the user actually sees
+    // patient replies. Best-effort, non-blocking. Pre-fix: inbound
+    // landed in sms_messages for the Messages tab but no live
+    // notification reached the owner's phone.
+    try {
+      const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '+19415279169';
+      const preview = numMedia > 0
+        ? `[MMS ${numMedia}× photo] ${body ? body.substring(0, 80) : ''}`.trim()
+        : body.substring(0, 140);
+      admin.functions.invoke('send-sms-notification', {
+        body: {
+          to: OWNER_PHONE,
+          message: `[Patient SMS from ${from}] ${preview}`,
+          category: 'admin_alert', // bypasses quiet hours — owner asked to see these
+        },
+      }).catch(() => {});
+    } catch { /* never block patient reply */ }
+
+    // ─── MMS PHOTO UPLOAD PATH ─────────────────────────────────────
+    // Twilio sends ONE webhook per number. Pre-fix the inbound-sms
+    // webhook silently returned "Message received." when a patient
+    // texted a photo (Body empty + NumMedia>0). Now we dispatch into
+    // the lab-order upload flow when media is present, matching the
+    // promise in the lab-order request SMS template:
+    //   "just text a photo back to this number"
+    if (numMedia > 0) {
+      const mmsResult = await handleMmsUpload(admin, from, formData);
+      return twiml(mmsResult);
+    }
+
+    if (!body) return twiml('Message received.');
 
     // ─── TWO-WAY SMS THREADING ─────────────────────────────────────
     // Every inbound message lands in sms_messages tied to a per-phone

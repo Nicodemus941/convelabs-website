@@ -1084,19 +1084,53 @@ Deno.serve(async (req) => {
     let connectTransfer: { destination: string; amount: number } | null = null;
     if (sessionMode === 'payment') {
       try {
-        const { data: connectedStaff } = await supabaseClient
-          .from('staff_profiles')
-          .select('id, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_payouts_enabled')
-          .not('stripe_connect_account_id', 'is', null)
-          .eq('stripe_connect_charges_enabled', true)
-          .eq('stripe_connect_payouts_enabled', true)
-          .limit(2);
-
-        // Only auto-apply when there's exactly one connected phleb (the
-        // single-owner-phleb case). Multi-phleb dispatch will set
-        // assigned_phleb_id at booking time and we'll switch the lookup.
-        if (Array.isArray(connectedStaff) && connectedStaff.length === 1) {
-          const phleb: any = connectedStaff[0];
+        // Resolution order — audited 2026-05-19, the prior `length === 1`
+        // gate silently STOPPED paying ANY phleb the moment a 2nd Connect
+        // account existed:
+        //   1. metadata.assigned_phleb_id (admin manual modal forwards this)
+        //   2. appointmentRow.phlebotomist_id (existing assignment)
+        //   3. fallback to the single connected phleb (owner-phleb case)
+        // Multi-phleb dispatch is now safe.
+        let phleb: any = null;
+        const assignedId: string | null = (metadata as any).assigned_phleb_id || (metadata as any).phlebotomist_id || null;
+        if (assignedId) {
+          const { data: explicit } = await supabaseClient
+            .from('staff_profiles')
+            .select('id, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_payouts_enabled')
+            .eq('id', assignedId)
+            .maybeSingle();
+          if (explicit?.stripe_connect_account_id && explicit?.stripe_connect_charges_enabled && explicit?.stripe_connect_payouts_enabled) {
+            phleb = explicit;
+          } else if (explicit) {
+            console.warn(`[connect] assigned_phleb ${assignedId} not Connect-ready (charges=${explicit.stripe_connect_charges_enabled}, payouts=${explicit.stripe_connect_payouts_enabled}) — escalating`);
+            try {
+              await supabaseClient.from('activity_log' as any).insert({
+                activity_type: 'phleb_connect_misconfigured',
+                description: `Assigned phleb ${assignedId} can't receive transfers. Booking proceeded without phleb transfer.`,
+                status: 'pending',
+                priority: 'urgent',
+              });
+            } catch { /* non-blocking */ }
+          }
+        }
+        if (!phleb) {
+          const { data: connectedStaff } = await supabaseClient
+            .from('staff_profiles')
+            .select('id, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_payouts_enabled')
+            .not('stripe_connect_account_id', 'is', null)
+            .eq('stripe_connect_charges_enabled', true)
+            .eq('stripe_connect_payouts_enabled', true);
+          // With no explicit assignment, take the single connected phleb.
+          // When 2+ exist we now LOG and pick the most-recently-updated
+          // instead of silently dropping the transfer.
+          if (Array.isArray(connectedStaff) && connectedStaff.length >= 1) {
+            phleb = connectedStaff[0];
+            if (connectedStaff.length > 1) {
+              console.warn(`[connect] ${connectedStaff.length} connected phlebs, no assigned_phleb_id — defaulting to first (${phleb.id}). Pass assigned_phleb_id in metadata to disambiguate.`);
+            }
+          }
+        }
+        if (phleb) {
           // Companion bookings come through a different flow (separate
           // appointment row with family_group_id). For the primary visit
           // we default to false here — the companion's own row gets its
@@ -1130,14 +1164,30 @@ Deno.serve(async (req) => {
             // Consolidated to a single JSON key (was 6) so we stay under
             // Stripe's 50-key metadata cap. Webhook parses connect_json
             // with fallback to legacy top-level keys.
-            metadata.connect_json = JSON.stringify({
+            //
+            // 2026-05-19: dropped the .substring(0,500) — Stripe's per-value
+            // cap is 500 chars and our payload was hitting 480-510 on bookings
+            // with long connect account IDs + tip. Truncation produced invalid
+            // JSON → silent JSON.parse failure in the webhook → no
+            // staff_payouts row written even though Stripe executed the
+            // transfer. Now we build the object, length-check, and drop the
+            // optional fields if we're over budget instead of corrupting JSON.
+            const connectObj: Record<string, any> = {
               dst: phleb.stripe_connect_account_id,
               amt: takeCents,
               sid: phleb.id,
               base: (rate as any)?.base_per_visit_cents || 0,
               comp: hasCompanion ? ((rate as any)?.companion_addon_cents || 0) : 0,
               tip: Math.round((safeTipCents * (((rate as any)?.tip_pct ?? 100))) / 100),
-            }).substring(0, 500);
+            };
+            let connectJson = JSON.stringify(connectObj);
+            if (connectJson.length > 500) {
+              // Shed the analytics-only fields, keep the 3 the webhook needs.
+              delete connectObj.base; delete connectObj.comp; delete connectObj.tip;
+              connectJson = JSON.stringify(connectObj);
+              console.warn(`[connect] payload >500 chars; trimmed to essentials (${connectJson.length})`);
+            }
+            metadata.connect_json = connectJson;
             console.log(`[connect] transfer ${takeCents} cents → ${phleb.stripe_connect_account_id}`);
           }
         }
