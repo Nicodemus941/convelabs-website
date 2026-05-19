@@ -53,6 +53,40 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'not_paid', payment_status: appt.payment_status }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // ─── FAMILY BUNDLE AWARENESS ─────────────────────────────────────
+    // Per owner decision 2026-05-19: the $87 business floor applies ONCE
+    // per family bundle, not per appointment row. Sum every row sharing
+    // this row's family_group_id, run the v2 floor math against the combined
+    // total, attach the transfer to the PRIMARY row (the one whose id =
+    // family_group_id) for audit. Other rows in the bundle get their own
+    // staff_payouts rows with amount_cents=0 + a note pointing at the primary.
+    let bundleTotalCents = Math.round((appt.total_amount || 0) * 100);
+    let bundleTipCents = Math.round(((appt.tip_amount || 0) as number) * 100);
+    let bundleRowIds: string[] = [appointment_id];
+    const isPrimaryOfBundle = appt.family_group_id && appt.family_group_id === appointment_id;
+    if (appt.family_group_id) {
+      if (!isPrimaryOfBundle) {
+        // Non-primary companion row — delegate to the primary so the bundle
+        // math runs ONCE and stays attached to the primary appointment.
+        return new Response(JSON.stringify({
+          ok: true, delegated_to_primary: true, primary_appointment_id: appt.family_group_id,
+          message: 'Companion row — bundle transfer handled on primary appointment.',
+        }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const { data: bundleRows } = await admin
+        .from('appointments')
+        .select('id, total_amount, tip_amount')
+        .eq('family_group_id', appt.family_group_id);
+      bundleTotalCents = 0;
+      bundleTipCents = 0;
+      bundleRowIds = [];
+      for (const r of (bundleRows || []) as any[]) {
+        bundleTotalCents += Math.round((r.total_amount || 0) * 100);
+        bundleTipCents += Math.round((r.tip_amount || 0) * 100);
+        bundleRowIds.push(r.id);
+      }
+    }
+
     // Idempotency: skip if a successful transfer already exists for this appt
     const { data: existing } = await admin
       .from('staff_payouts' as any)
@@ -109,16 +143,30 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Compute phleb's take
-    const tipCents = Math.round(((appt.tip_amount || 0) as number) * 100);
+    // Compute phleb's take using the v2 BUSINESS-FLOOR rule.
+    // Pre-fix this function called v1 compute_phleb_take_cents which only
+    // returned base+tip+companion and never applied the $87 business floor —
+    // so admin-billed visits with surcharges (Mark Disler $225, Mitesh Jivan
+    // $375 family) silently shorted the phleb by the full surcharge.
+    //
+    // The v2 RPC needs the total charged (per family-bundle aggregate above),
+    // and it handles the floor internally. Surcharge is passed as 0 because
+    // the bundle total already includes any surcharges.
+    const tipCents = bundleTipCents;
     const hasCompanion = !!appt.family_group_id;
-    const { data: takeRes } = await admin.rpc('compute_phleb_take_cents' as any, {
+    const { data: v2Rows } = await admin.rpc('compute_phleb_take_v2_inline' as any, {
       p_staff_id: phleb.id,
       p_service_type: appt.service_type || 'mobile',
+      p_total_paid_cents: bundleTotalCents,
+      p_surcharge_cents: 0,
       p_tip_cents: tipCents,
       p_has_companion: hasCompanion,
     });
-    const takeCents = parseInt(String(takeRes || 0), 10);
+    const v2Row: any = Array.isArray(v2Rows) ? v2Rows[0] : v2Rows;
+    const takeCents = Math.max(0, Math.min(Number(v2Row?.take_cents) || 0, bundleTotalCents + tipCents));
+    const ruleUsed = v2Row?.rule_used || 'unknown';
+    const businessKeepCents = Number(v2Row?.business_keep_cents) || 0;
+    console.log(`[transfer-invoice-phleb-cut] v2 rule '${ruleUsed}' → phleb $${(takeCents/100).toFixed(2)} business $${(businessKeepCents/100).toFixed(2)} (bundle total $${(bundleTotalCents/100).toFixed(2)}, rows ${bundleRowIds.length})`);
     if (takeCents <= 0) {
       return new Response(JSON.stringify({ error: 'take_zero' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
