@@ -360,25 +360,49 @@ const PatientProfileTab: React.FC = () => {
                 <MessageSquare className="h-3.5 w-3.5" /> Message
               </Button>
             )}
-            {/* Membership upgrade — only show if patient isn't already a member */}
-            {p.email && !(p.user_id && memberTiers.has(p.user_id)) && (
-              <Button
-                size="sm"
-                className="gap-1.5 text-xs bg-[#B91C1C] hover:bg-[#991B1B] text-white"
-                onClick={() => setShowMembershipModal(true)}
-              >
-                <Sparkles className="h-3.5 w-3.5" /> Membership
-              </Button>
-            )}
+            {/*
+              Membership button — Hormozi rule: never stop selling the next
+              tier up. Show for non-members (initial offer) AND for current
+              members below Concierge (tier upgrade nudge). Only hides when
+              the patient is already at the top tier.
+            */}
+            {p.email && (() => {
+              const currentTier = p.user_id ? (memberTiers.get(p.user_id) || '').toLowerCase() : '';
+              if (currentTier === 'concierge') return null; // already at top tier
+              const isUpgrade = currentTier === 'member' || currentTier === 'vip';
+              const label = isUpgrade ? `Upgrade · ${currentTier === 'member' ? 'VIP' : 'Concierge'}` : 'Membership';
+              return (
+                <Button
+                  size="sm"
+                  className="gap-1.5 text-xs bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+                  onClick={() => setShowMembershipModal(true)}
+                  title={isUpgrade ? `${p.first_name || 'Patient'} is currently ${currentTier.toUpperCase()} — send a one-tier-up offer` : 'Send a membership offer to this patient'}
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> {label}
+                </Button>
+              );
+            })()}
           </div>
         </div>
 
-        {/* Membership offer / registration modal */}
+        {/*
+          Membership offer / registration modal — defaults the tier selector
+          to the next tier UP from the patient's current membership so the
+          admin doesn't have to think about it. Member → VIP, VIP → Concierge,
+          non-member → VIP (the most popular).
+        */}
         <MembershipActionsModal
           open={showMembershipModal}
           onClose={() => setShowMembershipModal(false)}
           patientEmail={p.email || ''}
           patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
+          defaultTier={(() => {
+            const curr = p.user_id ? (memberTiers.get(p.user_id) || '').toLowerCase() : '';
+            if (curr === 'member') return 'vip';
+            if (curr === 'vip') return 'concierge';
+            return 'vip'; // non-members default to the "Most popular" tier
+          })()}
+          currentTier={p.user_id ? (memberTiers.get(p.user_id) || '').toLowerCase() : ''}
           onSuccess={() => loadPatientData(p)}
         />
 

@@ -31,6 +31,12 @@ interface Props {
   onClose: () => void;
   patientEmail: string;
   patientName: string;
+  /** Pre-select this tier when the modal opens. Default: 'vip'. */
+  defaultTier?: 'member' | 'vip' | 'concierge';
+  /** The patient's current membership tier (if any). Used to surface
+   *  upgrade context in the modal copy and to hide the patient's current
+   *  tier from the upgrade options (you don't upgrade laterally). */
+  currentTier?: string;
   onSuccess?: () => void;
 }
 
@@ -43,9 +49,9 @@ const TIER_META: Record<Tier, { label: string; price: number; value: number; col
   concierge:  { label: 'Concierge',    price: 399, value: 939, color: '#7C3AED', icon: Crown,     oneliner: 'Unlimited reschedules + dedicated coordinator' },
 };
 
-const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, patientName, onSuccess }) => {
+const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, patientName, defaultTier = 'vip', currentTier = '', onSuccess }) => {
   const [tab, setTab] = useState<Tab>('offer');
-  const [tier, setTier] = useState<Tier>('vip');
+  const [tier, setTier] = useState<Tier>(defaultTier);
   const [personalNote, setPersonalNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -62,17 +68,24 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
 
   useEffect(() => {
     if (!open) {
-      setTab('offer'); setTier('vip'); setPersonalNote(''); setSuccess(null);
+      // On close, reset to the prop default (so re-opening for a different
+      // patient picks up THEIR upgrade target, not the last patient's).
+      setTab('offer'); setTier(defaultTier); setPersonalNote(''); setSuccess(null);
     } else {
-      // Fetch Founding-50 seats for scarcity context
+      // Refresh tier selection to match the prop in case the modal is being
+      // reused across patients without unmounting.
+      setTier(defaultTier);
+      // Fetch Founding-50 seats for scarcity context.
+      // RPC param name is p_tier (not tier) — same bug we fixed in the
+      // edge function. Use the correct name here too.
       (async () => {
         try {
-          const { data } = await supabase.rpc('get_founding_seats_status' as any, { tier: 'vip' });
+          const { data } = await supabase.rpc('get_founding_seats_status' as any, { p_tier: 'vip' });
           if (data?.remaining != null) setSeatsRemaining(data.remaining);
         } catch { /* non-blocking */ }
       })();
     }
-  }, [open]);
+  }, [open, defaultTier]);
 
   const sendOffer = async () => {
     setSubmitting(true);
