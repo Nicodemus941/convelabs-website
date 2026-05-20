@@ -301,25 +301,42 @@ const PhlebEarningsLedger: React.FC = () => {
         );
         const takeMap = new Map(takes.map(([id, t]) => [id, t]));
 
-        // Payouts for these appointments
+        // Payouts for these appointments — pull transferred_at + stripe_paid_at
+        // so the ledger can sort + group by ACTUAL payment date, not just
+        // appointment_date. 2026-05-20 audit: "Each earning should reflect
+        // the most recent payment."
         const { data: payouts } = await supabase
           .from('staff_payouts')
-          .select('appointment_id, amount_cents, status, notes')
-          .in('appointment_id', apptList.map((a) => a.id));
-        const paidMap = new Map<string, { paid: number; owed: number }>();
-        for (const p of (payouts as Payout[]) || []) {
-          const cur = paidMap.get(p.appointment_id) || { paid: 0, owed: 0 };
+          .select('appointment_id, amount_cents, status, notes, transferred_at, stripe_paid_at, created_at')
+          .in('appointment_id', apptList.map((a) => a.id))
+          .order('created_at', { ascending: false });
+        const paidMap = new Map<string, { paid: number; owed: number; lastPaymentAt: string | null; lastStatus: string | null }>();
+        for (const p of (payouts as any[]) || []) {
+          const cur = paidMap.get(p.appointment_id) || { paid: 0, owed: 0, lastPaymentAt: null, lastStatus: null };
           if (p.status === 'succeeded') cur.paid += p.amount_cents;
           else if (p.status === 'manual_owed') cur.owed += p.amount_cents;
+          // Most-recent meaningful payment date wins. Prefer stripe_paid_at
+          // (bank-confirmed) over transferred_at (Connect-confirmed) over
+          // created_at (DB row insert).
+          const candidate = p.stripe_paid_at || p.transferred_at || p.created_at;
+          if (candidate && (!cur.lastPaymentAt || candidate > cur.lastPaymentAt)) {
+            cur.lastPaymentAt = candidate;
+            cur.lastStatus = p.status;
+          }
           paidMap.set(p.appointment_id, cur);
         }
 
-        const decorated = apptList.map((a) => ({
-          ...a,
-          take: takeMap.get(a.id) || ({ take_cents: 0, rule_used: 'unknown', total_charged_cents: 0, business_keep_cents: 0, companion_addon_cents: 0, tip_cents: 0 } as Take),
-          paid_cents: paidMap.get(a.id)?.paid || 0,
-          owed_cents: paidMap.get(a.id)?.owed || 0,
-        }));
+        const decorated = apptList.map((a) => {
+          const pm = paidMap.get(a.id);
+          return {
+            ...a,
+            take: takeMap.get(a.id) || ({ take_cents: 0, rule_used: 'unknown', total_charged_cents: 0, business_keep_cents: 0, companion_addon_cents: 0, tip_cents: 0 } as Take),
+            paid_cents: pm?.paid || 0,
+            owed_cents: pm?.owed || 0,
+            last_payment_at: pm?.lastPaymentAt || null,
+            last_payout_status: pm?.lastStatus || null,
+          };
+        });
 
         setRows(decorated);
 
@@ -348,6 +365,35 @@ const PhlebEarningsLedger: React.FC = () => {
       }
     })();
   }, [user?.id, refreshKey]);
+
+  // Realtime subscription: whenever staff_payouts for this phleb changes
+  // (Stripe webhook flips a row to succeeded, or the sweep cron settles a
+  // manual_owed → reversed clawback, etc.), reload the ledger. No manual
+  // refresh required.
+  useEffect(() => {
+    if (!user?.id) return;
+    let staffIdLocal: string | null = null;
+    let channel: any = null;
+    (async () => {
+      const { data: sp } = await supabase
+        .from('staff_profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      staffIdLocal = (sp as any)?.id || null;
+      if (!staffIdLocal) return;
+      channel = supabase
+        .channel(`phleb-earnings-${staffIdLocal}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_payouts', filter: `staff_id=eq.${staffIdLocal}` },
+          () => setRefreshKey(k => k + 1))
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${staffIdLocal}` },
+          () => setRefreshKey(k => k + 1))
+        .subscribe();
+    })();
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   const totals = useMemo(() => {
     const now = new Date();
@@ -534,49 +580,130 @@ const PhlebEarningsLedger: React.FC = () => {
           {rows.length === 0 ? (
             <div className="p-6 text-center text-sm text-gray-500">No appointments in the last 90 days.</div>
           ) : (
-            <div className="divide-y">
-              {rows.map((r) => {
-                const ruleInfo = RULE_LABEL[r.take.rule_used] || { label: r.take.rule_used, color: 'bg-gray-50 text-gray-700 border-gray-200', explainer: '' };
-                const fullyPaid = r.paid_cents >= r.take.take_cents && r.owed_cents === 0;
-                const hasOwed = r.owed_cents > 0;
-                return (
-                  <div key={r.id} className="p-3 flex items-start justify-between gap-3 hover:bg-gray-50">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium truncate">{r.patient_name || 'Patient'}</div>
-                      <div className="text-[11px] text-gray-500">
-                        {format(parseISO(r.appointment_date), 'EEE MMM d')}
-                        {r.appointment_time && ` · ${r.appointment_time}`}
-                        {' · '}{r.service_type || 'mobile'}
-                      </div>
-                      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
-                        <Badge variant="outline" className={`text-[9px] ${ruleInfo.color}`} title={ruleInfo.explainer}>{ruleInfo.label}</Badge>
-                        <span className="text-[10px] text-gray-500">
-                          Patient ${(r.take.total_charged_cents / 100).toFixed(0)} · Business ${(r.take.business_keep_cents / 100).toFixed(0)} · You ${(r.take.take_cents / 100).toFixed(0)}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-lg font-bold text-emerald-700">
-                        +${(r.take.take_cents / 100).toFixed(0)}
-                      </div>
-                      {fullyPaid && (
-                        <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[9px] gap-0.5">
-                          <CheckCircle2 className="h-2.5 w-2.5" /> paid
-                        </Badge>
-                      )}
-                      {hasOwed && (
-                        <Badge className="bg-amber-100 text-amber-900 border-amber-300 text-[9px] gap-0.5">
-                          <AlertCircle className="h-2.5 w-2.5" /> ${(r.owed_cents / 100).toFixed(0)} owed
-                        </Badge>
-                      )}
-                      {!fullyPaid && !hasOwed && r.take.take_cents > 0 && (
-                        <Badge className="bg-gray-100 text-gray-700 border-gray-300 text-[9px]">pending payout</Badge>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            // Group Day → Month → Year by most-recent payment date (fall back
+            // to appointment_date when no payment has hit yet — typically
+            // pending-payout rows). Sort newest first inside every level.
+            // Hormozi rule: at any zoom level the phleb sees "how much did I
+            // make today / this month / this year" without scrolling.
+            (() => {
+              type Group<T> = { key: string; label: string; total: number; rows: any[]; sub?: Group<T>[] };
+              const yearMap = new Map<string, { months: Map<string, { days: Map<string, any[]> }> }>();
+              for (const r of rows) {
+                const ref = r.last_payment_at || r.appointment_date;
+                const d = parseISO(ref);
+                const y = format(d, 'yyyy');
+                const m = format(d, 'yyyy-MM');
+                const day = format(d, 'yyyy-MM-dd');
+                if (!yearMap.has(y)) yearMap.set(y, { months: new Map() });
+                const yr = yearMap.get(y)!;
+                if (!yr.months.has(m)) yr.months.set(m, { days: new Map() });
+                const mo = yr.months.get(m)!;
+                if (!mo.days.has(day)) mo.days.set(day, []);
+                mo.days.get(day)!.push(r);
+              }
+              const years = Array.from(yearMap.keys()).sort().reverse();
+              return (
+                <div className="divide-y">
+                  {years.map((y) => {
+                    const yr = yearMap.get(y)!;
+                    const yrRows = Array.from(yr.months.values()).flatMap(m => Array.from(m.days.values()).flat());
+                    const yrTotal = yrRows.reduce((s, r) => s + (r.take?.take_cents || 0), 0);
+                    const months = Array.from(yr.months.keys()).sort().reverse();
+                    return (
+                      <details key={y} open className="group">
+                        <summary className="px-3 py-2 bg-gray-50 cursor-pointer flex items-center justify-between text-sm font-bold hover:bg-gray-100">
+                          <span className="flex items-center gap-2">
+                            <TrendingUp className="h-3.5 w-3.5 text-[#B91C1C]" /> {y} — {yrRows.length} {yrRows.length === 1 ? 'visit' : 'visits'}
+                          </span>
+                          <span className="font-mono text-emerald-700">${(yrTotal / 100).toFixed(0)}</span>
+                        </summary>
+                        <div className="divide-y">
+                          {months.map((m) => {
+                            const mo = yr.months.get(m)!;
+                            const moRows = Array.from(mo.days.values()).flat();
+                            const moTotal = moRows.reduce((s, r) => s + (r.take?.take_cents || 0), 0);
+                            const moLabel = format(parseISO(m + '-01'), 'MMMM yyyy');
+                            const days = Array.from(mo.days.keys()).sort().reverse();
+                            return (
+                              <details key={m} open className="group">
+                                <summary className="px-4 py-1.5 bg-white cursor-pointer flex items-center justify-between text-xs font-semibold text-gray-700 hover:bg-gray-50">
+                                  <span>{moLabel} — {moRows.length} {moRows.length === 1 ? 'visit' : 'visits'}</span>
+                                  <span className="font-mono text-emerald-700">${(moTotal / 100).toFixed(0)}</span>
+                                </summary>
+                                <div className="divide-y">
+                                  {days.map((day) => {
+                                    const dayRows = mo.days.get(day)!.slice().sort((a, b) => {
+                                      const ad = a.last_payment_at || a.appointment_date;
+                                      const bd = b.last_payment_at || b.appointment_date;
+                                      return bd.localeCompare(ad);
+                                    });
+                                    const dayTotal = dayRows.reduce((s, r) => s + (r.take?.take_cents || 0), 0);
+                                    const dayLabel = format(parseISO(day + 'T12:00:00'), 'EEE, MMM d');
+                                    return (
+                                      <div key={day}>
+                                        <div className="px-5 py-1 bg-gray-50/60 flex items-center justify-between text-[11px] uppercase tracking-wide text-gray-500">
+                                          <span>{dayLabel}</span>
+                                          <span className="font-mono">${(dayTotal / 100).toFixed(0)}</span>
+                                        </div>
+                                        <div className="divide-y">
+                                          {dayRows.map((r) => {
+                                            const ruleInfo = RULE_LABEL[r.take.rule_used] || { label: r.take.rule_used, color: 'bg-gray-50 text-gray-700 border-gray-200', explainer: '' };
+                                            const fullyPaid = r.paid_cents >= r.take.take_cents && r.owed_cents === 0;
+                                            const hasOwed = r.owed_cents > 0;
+                                            const paidLabel = r.last_payment_at ? format(parseISO(r.last_payment_at), 'MMM d') : null;
+                                            return (
+                                              <div key={r.id} className="p-3 flex items-start justify-between gap-3 hover:bg-gray-50">
+                                                <div className="min-w-0 flex-1">
+                                                  <div className="text-sm font-medium truncate">{r.patient_name || 'Patient'}</div>
+                                                  <div className="text-[11px] text-gray-500">
+                                                    Visit {format(parseISO(r.appointment_date), 'MMM d')}
+                                                    {r.appointment_time && ` · ${r.appointment_time}`}
+                                                    {' · '}{r.service_type || 'mobile'}
+                                                    {paidLabel && fullyPaid && ` · paid ${paidLabel}`}
+                                                  </div>
+                                                  <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                                                    <Badge variant="outline" className={`text-[9px] ${ruleInfo.color}`} title={ruleInfo.explainer}>{ruleInfo.label}</Badge>
+                                                    <span className="text-[10px] text-gray-500">
+                                                      Patient ${(r.take.total_charged_cents / 100).toFixed(0)} · Business ${(r.take.business_keep_cents / 100).toFixed(0)} · You ${(r.take.take_cents / 100).toFixed(0)}
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                                <div className="text-right flex-shrink-0">
+                                                  <div className="text-lg font-bold text-emerald-700">
+                                                    +${(r.take.take_cents / 100).toFixed(0)}
+                                                  </div>
+                                                  {fullyPaid && (
+                                                    <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 text-[9px] gap-0.5">
+                                                      <CheckCircle2 className="h-2.5 w-2.5" /> paid
+                                                    </Badge>
+                                                  )}
+                                                  {hasOwed && (
+                                                    <Badge className="bg-amber-100 text-amber-900 border-amber-300 text-[9px] gap-0.5">
+                                                      <AlertCircle className="h-2.5 w-2.5" /> ${(r.owed_cents / 100).toFixed(0)} owed
+                                                    </Badge>
+                                                  )}
+                                                  {!fullyPaid && !hasOwed && r.take.take_cents > 0 && (
+                                                    <Badge className="bg-gray-100 text-gray-700 border-gray-300 text-[9px]">pending payout</Badge>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </details>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    );
+                  })}
+                </div>
+              );
+            })()
           )}
         </CardContent>
       </Card>
