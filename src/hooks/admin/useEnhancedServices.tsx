@@ -71,6 +71,8 @@ export function useEnhancedServices() {
       add_ons: _ao,
       sub_services: _ss,
       parent_service: _ps,
+      // Package children — written separately via writePackageChildren()
+      _package_children: _pkg,
       // Strip server-managed fields if the form ever surfaced them
       id: _id,
       created_at: _ca,
@@ -106,9 +108,40 @@ export function useEnhancedServices() {
     };
   };
 
+  /**
+   * Rewrites the package children for a given package id. Deletes existing
+   * rows + reinserts in a single transaction-ish flow (best-effort; if the
+   * delete succeeds but insert fails, we surface the error and the admin
+   * can re-save). The denormalized child_service_code + child_service_name
+   * make the catalog read super-fast (no joins per package preview).
+   */
+  const writePackageChildren = async (packageId: string, children: any[]) => {
+    if (!packageId) return;
+    // Wipe existing
+    const { error: delErr } = await supabase
+      .from('service_package_items')
+      .delete()
+      .eq('package_id', packageId);
+    if (delErr) throw delErr;
+    if (!children || children.length === 0) return;
+    const rows = children.map((c, i) => ({
+      package_id: packageId,
+      child_service_id: c.child_service_id,
+      child_service_code: c.child_service_code,
+      child_service_name: c.child_service_name,
+      quantity: Math.max(1, Number(c.quantity) || 1),
+      sort_order: i,
+    }));
+    const { error: insErr } = await supabase
+      .from('service_package_items')
+      .insert(rows);
+    if (insErr) throw insErr;
+  };
+
   const createService = async (serviceData: Partial<ServiceEnhanced>) => {
     try {
       setIsLoading(true);
+      const pkgChildren = (serviceData as any)._package_children || null;
       const payload = sanitizeServicePayload(serviceData);
       const { data, error } = await supabase
         .from('services_enhanced')
@@ -117,6 +150,16 @@ export function useEnhancedServices() {
         .single();
 
       if (error) throw error;
+
+      // Persist package children to service_package_items after the parent
+      // exists. If this throws the parent still exists — admin can re-save.
+      if (data && Array.isArray(pkgChildren)) {
+        try {
+          await writePackageChildren((data as any).id, pkgChildren);
+        } catch (e: any) {
+          toast.error(`Service saved, but package items failed: ${e?.message}`, { duration: 10000 });
+        }
+      }
 
       toast.success(`Service created: ${(data as any)?.name || 'OK'}`);
       fetchServices();
@@ -135,6 +178,7 @@ export function useEnhancedServices() {
   const updateService = async (id: string, updates: Partial<ServiceEnhanced>) => {
     try {
       setIsLoading(true);
+      const pkgChildren = (updates as any)._package_children || null;
       const payload = sanitizeServicePayload(updates);
       const { data, error } = await supabase
         .from('services_enhanced')
@@ -144,6 +188,14 @@ export function useEnhancedServices() {
         .single();
 
       if (error) throw error;
+
+      if (Array.isArray(pkgChildren)) {
+        try {
+          await writePackageChildren(id, pkgChildren);
+        } catch (e: any) {
+          toast.error(`Service saved, but package items failed: ${e?.message}`, { duration: 10000 });
+        }
+      }
 
       toast.success(`Service updated: ${(data as any)?.name || 'OK'}`);
       fetchServices();

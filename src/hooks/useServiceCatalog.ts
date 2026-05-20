@@ -38,6 +38,12 @@ export interface DynamicServiceEntry {
   category?: string;
   /** Whether this entry came from the DB (true) vs the hardcoded legacy table. */
   source: 'db' | 'legacy';
+  /** True when service_type === 'package'. Card UI shows the "Includes:" line. */
+  is_package?: boolean;
+  /** Resolved children for a package — denormalized + display-ready. */
+  package_items?: Array<{ child_service_code: string; child_service_name: string; quantity: number }>;
+  /** Bundle-level discount percent (informational; price already reflects it). */
+  bundle_discount_pct?: number;
 }
 
 export interface UseServiceCatalogResult {
@@ -97,6 +103,9 @@ export function useServiceCatalog(): UseServiceCatalogResult {
       requires_lab_order: !!r.requires_lab_order,
       category: r.category,
       source: 'db',
+      is_package: r.service_type === 'package',
+      package_items: Array.isArray(r.package_items) ? r.package_items : undefined,
+      bundle_discount_pct: r.bundle_discount_pct != null ? Number(r.bundle_discount_pct) : undefined,
     }));
 
   const bySlug: Record<string, DynamicServiceEntry> = {};

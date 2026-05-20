@@ -10,6 +10,8 @@ import { ServiceEnhanced } from '@/types/adminTypes';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import ServiceStaffSection from './ServiceStaffSection';
 import ServiceAddOnsSection from './ServiceAddOnsSection';
+import PackageBuilder, { PackageChildDraft } from './PackageBuilder';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ServiceFormProps {
   service?: ServiceEnhanced;
@@ -50,6 +52,9 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
 
   const [staffAssignments, setStaffAssignments] = useState([]);
   const [addOns, setAddOns] = useState([]);
+  // Package builder state — used only when service_type === 'package'
+  const [packageChildren, setPackageChildren] = useState<PackageChildDraft[]>([]);
+  const [bundleDiscountPct, setBundleDiscountPct] = useState<number>(0);
 
   // Auto-suggest a service_code from the name (kebab-case) the first time
   // an admin types a name — Hormozi rule: the form should do the obvious
@@ -86,6 +91,44 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
         tier_concierge: fromCents(tp.concierge) || 0,
       });
       setCodeTouched(true);
+      setBundleDiscountPct(Number((service as any).bundle_discount_pct) || 0);
+
+      // When editing a package, hydrate its children from service_package_items
+      if (service.service_type === 'package' && service.id) {
+        (async () => {
+          try {
+            const { data, error } = await supabase
+              .from('service_package_items')
+              .select('id, child_service_id, child_service_code, child_service_name, quantity, sort_order')
+              .eq('package_id', service.id)
+              .order('sort_order');
+            if (error) throw error;
+            // We need the child base_price to render the live preview — pull
+            // it from services_enhanced since the row only stores denormalized
+            // name + code. Map by id.
+            const childIds = (data || []).map((r: any) => r.child_service_id);
+            const { data: priceRows } = await supabase
+              .from('services_enhanced')
+              .select('id, base_price')
+              .in('id', childIds);
+            const priceById = new Map((priceRows || []).map((r: any) => [r.id, r.base_price]));
+            setPackageChildren(
+              (data || []).map((r: any) => ({
+                child_service_id: r.child_service_id,
+                child_service_code: r.child_service_code,
+                child_service_name: r.child_service_name,
+                child_base_cents: priceById.get(r.child_service_id) || 0,
+                quantity: r.quantity,
+                sort_order: r.sort_order,
+              }))
+            );
+          } catch (e) {
+            console.warn('[ServiceForm] failed to load package children:', e);
+          }
+        })();
+      } else {
+        setPackageChildren([]);
+      }
     }
   }, [service]);
 
@@ -103,17 +146,38 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
       if (formData.tier_vip > 0) tierPricing.vip = formData.tier_vip;
       if (formData.tier_concierge > 0) tierPricing.concierge = formData.tier_concierge;
 
+      // Package math: if this is a package, derive base_price + tier_pricing
+      // from the children + bundle_discount_pct. The Tier Pricing inputs
+      // become OVERRIDES — when a tier is 0 and we have children, we fall
+      // back to computed bundle * tier-discount fraction.
+      let effectiveBasePrice = formData.base_price;
+      let effectiveTierPricing: Record<string, number> = { ...tierPricing };
+      if (formData.service_type === 'package' && packageChildren.length > 0) {
+        const subtotalCents = packageChildren.reduce((s, c) => s + (c.child_base_cents * c.quantity), 0);
+        const bundleCents = Math.max(0, Math.round(subtotalCents * (1 - bundleDiscountPct / 100)));
+        const bundleDollars = bundleCents / 100;
+        effectiveBasePrice = bundleDollars;
+        // Auto-fill any tier the admin didn't override
+        if (!effectiveTierPricing.none || effectiveTierPricing.none === 0) effectiveTierPricing.none = bundleDollars;
+      }
+
       const serviceData = {
         name: formData.name,
         service_code: formData.service_code || null,
         description: formData.description,
         service_type: formData.service_type,
         category: formData.category,
-        base_price: formData.base_price,        // dollars; hook converts
-        tier_pricing: tierPricing,              // dollars; hook converts
+        base_price: effectiveBasePrice,         // dollars; hook converts
+        tier_pricing: effectiveTierPricing,     // dollars; hook converts
         duration_minutes: formData.duration_minutes,
         is_active: formData.is_active,
         requires_lab_order: formData.requires_lab_order,
+        bundle_discount_pct: formData.service_type === 'package' ? bundleDiscountPct : null,
+        // PACKAGE CHILDREN — the hook detects this special field and writes
+        // children to service_package_items in a second step AFTER the
+        // parent row is created/updated. Drops `_package_children` before
+        // inserting into services_enhanced.
+        _package_children: formData.service_type === 'package' ? packageChildren : null,
         // NOTE: staff_assignments + add_ons handled via their own write paths
         // after the parent service row is created — they no longer ride along
         // the insert payload (which caused "column does not exist" errors).
@@ -313,6 +377,21 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
                 />
                 <Label htmlFor="requires_lab_order">Requires a doctor's lab order at booking</Label>
               </div>
+
+              {/*
+                Package Builder — only visible when this service IS a package.
+                Computes the bundle price live and saves to service_package_items
+                after the parent row is created/updated (via the _package_children
+                pseudo-field in serviceData; the hook intercepts it).
+              */}
+              {formData.service_type === 'package' && (
+                <PackageBuilder
+                  initialChildren={packageChildren}
+                  discountPct={bundleDiscountPct}
+                  onDiscountPctChange={setBundleDiscountPct}
+                  onChange={setPackageChildren}
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>

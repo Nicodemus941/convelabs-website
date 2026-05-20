@@ -143,20 +143,31 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
     // wins for the canonical 'mobile', 'in-office', etc. so the partner
     // expander, ICONS, and surcharge logic continue to work unchanged.
     .filter(d => !VISIT_TYPES.some(v => v.id === d.service_code))
-    .map(d => ({
-      id: d.service_code,
-      name: d.name,
-      subtitle: d.description ? d.description.substring(0, 60) : 'Custom service',
-      price: typeof d.tier_pricing?.none === 'number' ? Math.round(d.tier_pricing.none / 100) : null,
-      description: d.description || '',
-      icon: FlaskConical,
-      gradient: 'from-slate-500/10 to-slate-600/5',
-      borderColor: 'border-slate-200 hover:border-slate-400',
-      selectedBorder: 'border-slate-500 ring-2 ring-slate-500/20',
-      iconBg: 'bg-slate-500/10',
-      iconColor: 'text-slate-600',
-      priceColor: 'text-slate-700',
-    }));
+    .map(d => {
+      // For packages: build a short "2× Wellness · 1× Lipid" preview line.
+      // For non-packages: fall back to the description.
+      let subtitleLine = d.description ? d.description.substring(0, 60) : 'Custom service';
+      if (d.is_package && d.package_items && d.package_items.length > 0) {
+        subtitleLine = d.package_items
+          .map(p => `${p.quantity > 1 ? `${p.quantity}× ` : ''}${p.child_service_name.replace(/^QA\s+/, '').replace(/\s+Add-on$/i, '')}`)
+          .join(' + ')
+          .substring(0, 80);
+      }
+      return {
+        id: d.service_code,
+        name: d.name,
+        subtitle: subtitleLine,
+        price: typeof d.tier_pricing?.none === 'number' ? Math.round(d.tier_pricing.none / 100) : null,
+        description: d.description || '',
+        icon: d.is_package ? Handshake : FlaskConical,
+        gradient: d.is_package ? 'from-purple-500/10 to-purple-600/5' : 'from-slate-500/10 to-slate-600/5',
+        borderColor: d.is_package ? 'border-purple-200 hover:border-purple-400' : 'border-slate-200 hover:border-slate-400',
+        selectedBorder: d.is_package ? 'border-purple-500 ring-2 ring-purple-500/20' : 'border-slate-500 ring-2 ring-slate-500/20',
+        iconBg: d.is_package ? 'bg-purple-500/10' : 'bg-slate-500/10',
+        iconColor: d.is_package ? 'text-purple-600' : 'text-slate-600',
+        priceColor: d.is_package ? 'text-purple-700' : 'text-slate-700',
+      };
+    });
 
   const VISIT_TYPES_WITH_DYNAMIC = [...VISIT_TYPES, ...dynamicCards];
 
