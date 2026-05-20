@@ -230,7 +230,11 @@ Deno.serve(async (req) => {
       // clearing invoice_status left rows stuck in the cascade. The DB
       // trigger trg_clear_invoice_status_when_paid is the primary defense;
       // this filter is the second line of defense for legacy rows.
-      .not('payment_status', 'in', '("paid","succeeded")');
+      .not('payment_status', 'in', '("paid","succeeded","completed","org_billed")')
+      // Hormozi zero-double-bill guardrail — never dun a row that was pre-paid
+      // via a linked lab_request. The trigger on appointments + back-fill UPDATE
+      // (migration appointments_prepaid_lab_request_guardrail) keeps this in sync.
+      .is('prepaid_at', null);
     const sentAppts = (sentApptsRaw || []).filter((a: any) => {
       if (!a.is_vip) return true;  // non-VIPs always in scope
       // VIPs only when visit is within 24h
@@ -326,7 +330,11 @@ Deno.serve(async (req) => {
       // clearing invoice_status left rows stuck in the cascade. The DB
       // trigger trg_clear_invoice_status_when_paid is the primary defense;
       // this filter is the second line of defense for legacy rows.
-      .not('payment_status', 'in', '("paid","succeeded")');
+      .not('payment_status', 'in', '("paid","succeeded","completed","org_billed")')
+      // Hormozi zero-double-bill guardrail — never dun a row that was pre-paid
+      // via a linked lab_request. The trigger on appointments + back-fill UPDATE
+      // (migration appointments_prepaid_lab_request_guardrail) keeps this in sync.
+      .is('prepaid_at', null);
     const remindedAppts = (remindedApptsRaw || []).filter((a: any) => {
       if (!a.is_vip) return true;
       const hoursUntil = (getApptTimeMs(a) - now) / (1000 * 60 * 60);
@@ -418,7 +426,11 @@ Deno.serve(async (req) => {
       // clearing invoice_status left rows stuck in the cascade. The DB
       // trigger trg_clear_invoice_status_when_paid is the primary defense;
       // this filter is the second line of defense for legacy rows.
-      .not('payment_status', 'in', '("paid","succeeded")');
+      .not('payment_status', 'in', '("paid","succeeded","completed","org_billed")')
+      // Hormozi zero-double-bill guardrail — never dun a row that was pre-paid
+      // via a linked lab_request. The trigger on appointments + back-fill UPDATE
+      // (migration appointments_prepaid_lab_request_guardrail) keeps this in sync.
+      .is('prepaid_at', null);
 
     for (const appt of (warningAppts || [])) {
       const apptTimeMs = getApptTimeMs(appt);

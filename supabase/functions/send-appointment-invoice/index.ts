@@ -59,13 +59,56 @@ Deno.serve(async (req) => {
     // is marked org-billed we route to the org's Stripe customer + email.
     const { data: appt, error: apptErr } = await supabase
       .from('appointments')
-      .select('id, billed_to, organization_id, patient_name, patient_email, patient_phone, patient_name_masked, org_reference_id, family_group_id, total_amount, tip_amount, service_type')
+      .select('id, billed_to, organization_id, patient_name, patient_email, patient_phone, patient_name_masked, org_reference_id, family_group_id, total_amount, tip_amount, service_type, prepaid_at, prepaid_source_lab_request_id, payment_status, invoice_status, lab_request_id, status')
       .eq('id', appointmentId)
       .maybeSingle();
     if (apptErr || !appt) {
       return new Response(
         JSON.stringify({ error: `Appointment ${appointmentId} not found` }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ─── HORMOZI ZERO-DOUBLE-BILL GUARDRAILS ─────────────────────────────
+    // No invoice ever fires when the appointment is already settled.
+    // 2026-05-20: Elite Medical Concierge's John Struck etc. were getting
+    // chase invoices even though the org had pre-paid via the lab-request
+    // checkout. Five hard refusals here:
+    //   1. prepaid_at present (org paid via lab-request)
+    //   2. payment_status already paid/succeeded/completed
+    //   3. invoice_status already 'paid'
+    //   4. appointment cancelled
+    //   5. total_amount <= 0 (waived / org-covered)
+    if (appt.prepaid_at) {
+      console.log(`[invoice-gate] appointment ${appointmentId} is prepaid via lab_request ${appt.prepaid_source_lab_request_id} (paid ${appt.prepaid_at}). Refusing to send invoice.`);
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: 'prepaid_via_lab_request', prepaid_at: appt.prepaid_at, lab_request_id: appt.prepaid_source_lab_request_id }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (['paid', 'completed', 'succeeded'].includes(String(appt.payment_status || ''))) {
+      console.log(`[invoice-gate] appointment ${appointmentId} payment_status=${appt.payment_status}. Refusing to send invoice.`);
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: 'already_paid', payment_status: appt.payment_status }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (appt.invoice_status === 'paid') {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: 'invoice_already_paid' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (appt.status === 'cancelled') {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: 'cancelled' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if ((appt.total_amount || 0) <= 0) {
+      return new Response(
+        JSON.stringify({ ok: true, skipped: true, reason: 'zero_balance' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 

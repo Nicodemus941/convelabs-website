@@ -109,6 +109,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   // in this booking is FREE (Founding-50 perk).
   const [isFoundingMember, setIsFoundingMember] = useState<boolean>(false);
   const [referralCredits, setReferralCredits] = useState<Array<{ id: string; amount_cents: number; description: string | null }>>([]);
+  // Matched lab_request from AutoLinkPreview — bound into the insert payload
+  // so the DB trigger can stamp prepaid_at when the org already paid. Without
+  // this binding the appointment lands un-linked, the prepaid trigger doesn't
+  // fire, and the invoice flow double-bills the org. (Fix 2026-05-20.)
+  const [matchedLabRequest, setMatchedLabRequest] = useState<{
+    id: string;
+    organization_id: string | null;
+    providerPaymentStatus: string | null;
+    billedTo: string | null;
+  } | null>(null);
   const [referralModalOpen, setReferralModalOpen] = useState(false);
   const [redeemReferralIds, setRedeemReferralIds] = useState<string[]>([]);
 
@@ -807,6 +817,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       const duration = durationMap[serviceType] || 60;
 
       // Build appointment payload
+      // If AutoLinkPreview found a matching lab_request for this patient AND
+      // the org already paid via lab-request checkout, the appointment should
+      // be marked prepaid + org_billed at INSERT time. The DB trigger
+      // trg_sync_prepaid_from_lab_request (migration
+      // appointments_prepaid_lab_request_guardrail) handles this when we
+      // pass lab_request_id. We ALSO force payment_status=org_billed +
+      // invoice_status=not_required on the client side so the post-insert
+      // invoice block doesn't try to fire before the trigger sees it.
+      const prepaidViaLabRequest = !!matchedLabRequest && matchedLabRequest.providerPaymentStatus === 'completed';
+
       const appointmentPayload: any = {
         appointment_date: appointmentDate,
         appointment_time: time,
@@ -835,12 +855,20 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // to the admin — dashboard showed "invoice sent" while Stripe had no
         // invoice. Now we stamp intent markers and let the edge-fn callback
         // flip to 'sent' only on confirmed success.
-        invoice_status: isWaived
+        invoice_status: prepaidViaLabRequest
+          ? 'paid'
+          : isWaived
           ? 'not_required'
           : billingEmail ? 'pending_send' : 'missing_email',
         invoice_sent_at: null,
-        invoice_due_at: isWaived ? null : invoiceDueAt,
-        payment_status: isWaived ? 'completed' : 'pending',
+        invoice_due_at: (prepaidViaLabRequest || isWaived) ? null : invoiceDueAt,
+        payment_status: prepaidViaLabRequest
+          ? 'org_billed'
+          : isWaived ? 'completed' : 'pending',
+        // Link to the lab_request so the DB trigger can stamp prepaid_at +
+        // suppress the invoice flow. The auto-attach of any lab order PDF
+        // can also rely on this link.
+        ...(matchedLabRequest ? { lab_request_id: matchedLabRequest.id } : {}),
         gate_code: gateCode || null,
         lab_destination: labDestination.trim() || null,
         phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
@@ -959,7 +987,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       // Send Stripe invoice (non-blocking) — flip invoice_status to 'sent'
       // ONLY on confirmed success from the edge fn. On failure, stamp a
       // diagnostic status so admin can see the row isn't actually invoiced.
-      if (newAppt && !isWaived && billingEmail) {
+      if (newAppt && !isWaived && billingEmail && !prepaidViaLabRequest) {
         (async () => {
           try {
             const { data, error } = await supabase.functions.invoke('send-appointment-invoice', {
@@ -1919,7 +1947,12 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 patient from a provider's office, the DB trigger will
                 auto-link it on submit. Show that here so admin sees the
                 expected attribution before clicking Schedule. */}
-            <AutoLinkPreview patientEmail={patientEmail} patientPhone={patientPhone} patientName={patientName} />
+            <AutoLinkPreview
+              patientEmail={patientEmail}
+              patientPhone={patientPhone}
+              patientName={patientName}
+              onMatch={(m) => setMatchedLabRequest(m ? { id: m.id, organization_id: m.organization_id, providerPaymentStatus: m.providerPaymentStatus, billedTo: m.billedTo } : null)}
+            />
 
             {submitError && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
@@ -1999,18 +2032,45 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 // submit. Prevents the Kandace Bennett gap (manual booking → no link →
 // false "no lab order" alert).
 // ──────────────────────────────────────────────────────────────────
+/**
+ * AutoLinkPreview — now also EMITS the matched row upward so the parent
+ * modal can include lab_request_id (+ prepaid flags) in the appointment
+ * insert. Without that the trigger-based prepaid detection can't fire
+ * because the appointment is never linked.
+ *
+ * Pre-fix this component was display-only; the comment claimed "DB
+ * trigger will make on submit" but no such trigger existed. Result: Elite
+ * Medical Concierge prepaid orders went un-linked, the appointment got a
+ * fresh invoice, and the org was double-billed. (2026-05-20 audit.)
+ */
+interface AutoLinkMatch {
+  id: string;
+  organization_id: string | null;
+  orgName: string;
+  createdAt: string;
+  hasFile: boolean;
+  /** When 'completed', the org has already paid via lab-request checkout. */
+  providerPaymentStatus: string | null;
+  providerPaidAt: string | null;
+  billedTo: string | null;
+}
+
 const AutoLinkPreview: React.FC<{
   patientEmail: string;
   patientPhone: string;
   patientName: string;
-}> = ({ patientEmail, patientPhone, patientName }) => {
-  const [match, setMatch] = React.useState<{ orgName: string; createdAt: string; hasFile: boolean } | null>(null);
+  onMatch?: (m: AutoLinkMatch | null) => void;
+}> = ({ patientEmail, patientPhone, patientName, onMatch }) => {
+  const [match, setMatch] = React.useState<AutoLinkMatch | null>(null);
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       const phoneDigits = (patientPhone || '').replace(/\D/g, '');
       const last10 = phoneDigits.slice(-10);
-      if (!patientEmail && !last10 && !patientName) return;
+      if (!patientEmail && !last10 && !patientName) {
+        if (!cancelled) { setMatch(null); onMatch?.(null); }
+        return;
+      }
       try {
         const filters: string[] = [];
         if (patientEmail) filters.push(`patient_email.ilike.${patientEmail}`);
@@ -2019,7 +2079,7 @@ const AutoLinkPreview: React.FC<{
         if (filters.length === 0) return;
         const { data } = await supabase
           .from('patient_lab_requests' as any)
-          .select('id, organization_id, lab_order_file_path, created_at, patient_email, patient_phone, patient_name, status, organizations(name)')
+          .select('id, organization_id, lab_order_file_path, created_at, patient_email, patient_phone, patient_name, status, provider_payment_status, provider_paid_at, billed_to, organizations(name)')
           .or(filters.join(','))
           .in('status', ['pending_schedule', 'expired'] as any)
           .is('appointment_id', null)
@@ -2029,11 +2089,21 @@ const AutoLinkPreview: React.FC<{
         if (cancelled) return;
         const row = (data as any[])?.[0];
         if (row) {
-          setMatch({
+          const m: AutoLinkMatch = {
+            id: row.id,
+            organization_id: row.organization_id || null,
             orgName: row.organizations?.name || 'a provider\'s office',
             createdAt: row.created_at,
             hasFile: !!row.lab_order_file_path,
-          });
+            providerPaymentStatus: row.provider_payment_status || null,
+            providerPaidAt: row.provider_paid_at || null,
+            billedTo: row.billed_to || null,
+          };
+          setMatch(m);
+          onMatch?.(m);
+        } else {
+          setMatch(null);
+          onMatch?.(null);
         }
       } catch { /* non-fatal */ }
     })();
@@ -2042,17 +2112,21 @@ const AutoLinkPreview: React.FC<{
 
   if (!match) return null;
   const created = new Date(match.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const isPrepaid = match.providerPaymentStatus === 'completed';
   return (
-    <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-3 text-sm">
-      <p className="font-bold text-emerald-900 flex items-center gap-1.5">
-        ✨ Will auto-link to {match.orgName}'s lab order
+    <div className={`border-2 rounded-lg p-3 text-sm ${isPrepaid ? 'bg-purple-50 border-purple-300' : 'bg-emerald-50 border-emerald-300'}`}>
+      <p className={`font-bold flex items-center gap-1.5 ${isPrepaid ? 'text-purple-900' : 'text-emerald-900'}`}>
+        {isPrepaid ? '💰' : '✨'} {isPrepaid ? `Already paid by ${match.orgName} — no invoice will fire` : `Will auto-link to ${match.orgName}'s lab order`}
       </p>
-      <p className="text-xs text-emerald-800 mt-1">
+      <p className={`text-xs mt-1 ${isPrepaid ? 'text-purple-800' : 'text-emerald-800'}`}>
         {match.orgName} submitted a lab order for this patient on {created}.
-        {match.hasFile ? ' The PDF will auto-attach to this appointment.' : ' No PDF on file yet — admin will need to attach one separately.'}
+        {match.hasFile ? ' The PDF will auto-attach.' : ' No PDF on file yet — admin will need to attach one separately.'}
+        {isPrepaid && match.providerPaidAt ? ` Paid by org on ${new Date(match.providerPaidAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.` : ''}
       </p>
-      <p className="text-[11px] text-emerald-700 mt-1 italic">
-        No action required — the system links it the moment you click Schedule.
+      <p className={`text-[11px] mt-1 italic ${isPrepaid ? 'text-purple-700' : 'text-emerald-700'}`}>
+        {isPrepaid
+          ? 'This appointment will be marked prepaid on save — no chase invoices, no double-billing.'
+          : 'The system links it the moment you click Schedule.'}
       </p>
     </div>
   );
