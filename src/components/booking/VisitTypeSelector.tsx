@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Home, Building2, Heart, Check, FlaskConical, Syringe, Handshake } from 'lucide-react';
 import { BookingFormValues } from '@/types/appointmentTypes';
+import { useServiceCatalog } from '@/hooks/useServiceCatalog';
 
 interface VisitTypeSelectorProps {
   onNext: () => void;
@@ -133,6 +134,32 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
   const [selectedPartner, setSelectedPartner] = useState('');
   const [showPartnerSelect, setShowPartnerSelect] = useState(false);
 
+  // Pull admin-created services from services_enhanced and surface them as
+  // additional visit-type cards alongside the legacy hardcoded options.
+  // Falls back gracefully when the RPC isn't reachable (legacy still works).
+  const { services: dynamicServices } = useServiceCatalog();
+  const dynamicCards = dynamicServices
+    // Drop entries whose service_code collides with a hardcoded id — legacy
+    // wins for the canonical 'mobile', 'in-office', etc. so the partner
+    // expander, ICONS, and surcharge logic continue to work unchanged.
+    .filter(d => !VISIT_TYPES.some(v => v.id === d.service_code))
+    .map(d => ({
+      id: d.service_code,
+      name: d.name,
+      subtitle: d.description ? d.description.substring(0, 60) : 'Custom service',
+      price: typeof d.tier_pricing?.none === 'number' ? Math.round(d.tier_pricing.none / 100) : null,
+      description: d.description || '',
+      icon: FlaskConical,
+      gradient: 'from-slate-500/10 to-slate-600/5',
+      borderColor: 'border-slate-200 hover:border-slate-400',
+      selectedBorder: 'border-slate-500 ring-2 ring-slate-500/20',
+      iconBg: 'bg-slate-500/10',
+      iconColor: 'text-slate-600',
+      priceColor: 'text-slate-700',
+    }));
+
+  const VISIT_TYPES_WITH_DYNAMIC = [...VISIT_TYPES, ...dynamicCards];
+
   const handleSelect = (typeId: string) => {
     if (typeId === 'provider-partner') {
       setShowPartnerSelect(true);
@@ -161,7 +188,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {VISIT_TYPES.map((type) => {
+        {VISIT_TYPES_WITH_DYNAMIC.map((type) => {
           const Icon = type.icon;
           const isSelected = selectedType === type.id || (type.id === 'provider-partner' && selectedType?.startsWith('partner-'));
           const isPartnerCardExpanded = type.id === 'provider-partner' && (isSelected || showPartnerSelect);

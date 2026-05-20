@@ -555,7 +555,35 @@ Deno.serve(async (req) => {
     const membership = await verifyMembership(patientDetails?.email);
     const serverTier = membership.tier;
     const serverIsFounding = membership.isFounding;
-    const pricing = TIER_PRICING[serviceType];
+    // Resolve pricing: hardcoded TIER_PRICING (legacy revenue services) FIRST,
+    // then fall back to admin-created services in services_enhanced. This lets
+    // admins ship new services from the UI without a code change.
+    let pricing: Record<MemberTier, number> | null = TIER_PRICING[serviceType] || null;
+    if (!pricing && serviceType) {
+      try {
+        const { data: svcRow } = await supabaseClient
+          .from('services_enhanced')
+          .select('tier_pricing, base_price, is_active, archived_at')
+          .eq('service_code', serviceType)
+          .maybeSingle();
+        const isLive = svcRow && (svcRow as any).is_active && !(svcRow as any).archived_at;
+        if (isLive) {
+          const tp: any = (svcRow as any).tier_pricing || {};
+          // Cents → dollars to match TIER_PRICING shape
+          const c2d = (v: any) => (Number(v) || 0) / 100;
+          const noneDollars = c2d(tp.none) || c2d((svcRow as any).base_price);
+          pricing = {
+            none:      noneDollars,
+            member:    c2d(tp.member)    || noneDollars,
+            vip:       c2d(tp.vip)       || c2d(tp.member) || noneDollars,
+            concierge: c2d(tp.concierge) || c2d(tp.vip) || c2d(tp.member) || noneDollars,
+          } as Record<MemberTier, number>;
+          console.log(`[db-pricing-fallback] resolved ${serviceType} from services_enhanced: ${JSON.stringify(pricing)}`);
+        }
+      } catch (e: any) {
+        console.warn('[db-pricing-fallback] lookup failed:', e?.message);
+      }
+    }
 
     if (pricing && serverTier !== 'none') {
       const baseTierPrice = pricing[clientMemberTier as MemberTier] ?? pricing['none'];

@@ -47,23 +47,85 @@ export function useEnhancedServices() {
     }
   };
 
+  /**
+   * Sanitize the form payload before inserting/updating services_enhanced.
+   *
+   * Two bugs the form was tripping (2026-05-20):
+   *   1. `staff_assignments` and `add_ons` fields were leaking into the
+   *      Postgres INSERT — those are nested resources, not columns. Insert
+   *      failed with `column does not exist`, and the catch fired a generic
+   *      "Failed to create service" toast that gave admin no clue what
+   *      actually broke.
+   *   2. `base_price` is `INTEGER cents` in the DB but the form binds it
+   *      as a dollar amount (step="0.01"). An admin entering $55.00 saved
+   *      55 cents; an admin entering $55.50 was rejected (integer column
+   *      can't hold decimals). Now we round to cents at write time.
+   *
+   * Also normalizes tier_pricing — if the form omits it, derive from
+   * base_price so the booking flow always has at least the "none" tier.
+   */
+  const sanitizeServicePayload = (raw: any): any => {
+    const {
+      // Strip nested-resource fields that aren't columns
+      staff_assignments: _sa,
+      add_ons: _ao,
+      sub_services: _ss,
+      parent_service: _ps,
+      // Strip server-managed fields if the form ever surfaced them
+      id: _id,
+      created_at: _ca,
+      updated_at: _ua,
+      // Pull pricing out so we can normalize units
+      base_price,
+      tier_pricing,
+      ...rest
+    } = raw || {};
+    // Dollars → cents (round to avoid floating-point drift)
+    const baseCents = base_price == null
+      ? 0
+      : Math.round(Number(base_price) * 100);
+    // Tier pricing — accept either a {none,member,vip,concierge} dollar
+    // map or a pre-cents map. Detect by max value (>= 1000 implies cents).
+    let tierPricingCents: Record<string, number> | null = null;
+    if (tier_pricing && typeof tier_pricing === 'object') {
+      const vals = Object.values(tier_pricing).map((v: any) => Number(v) || 0);
+      const looksLikeCents = vals.length > 0 && vals.every(v => v >= 1000 || v === 0);
+      tierPricingCents = {};
+      for (const [k, v] of Object.entries(tier_pricing)) {
+        const n = Number(v) || 0;
+        tierPricingCents[k] = looksLikeCents ? Math.round(n) : Math.round(n * 100);
+      }
+    } else if (baseCents > 0) {
+      // Default: just the "none" tier set to base price
+      tierPricingCents = { none: baseCents };
+    }
+    return {
+      ...rest,
+      base_price: baseCents,
+      ...(tierPricingCents ? { tier_pricing: tierPricingCents } : {}),
+    };
+  };
+
   const createService = async (serviceData: Partial<ServiceEnhanced>) => {
     try {
       setIsLoading(true);
+      const payload = sanitizeServicePayload(serviceData);
       const { data, error } = await supabase
         .from('services_enhanced')
-        .insert(serviceData as any)
+        .insert(payload as any)
         .select()
         .single();
 
       if (error) throw error;
-      
-      toast.success('Service created successfully');
+
+      toast.success(`Service created: ${(data as any)?.name || 'OK'}`);
       fetchServices();
       return data;
     } catch (err: any) {
       console.error('Error creating service:', err);
-      toast.error('Failed to create service');
+      // Surface the actual DB error so admin can debug instead of seeing
+      // a generic "Failed to create service" toast with no context.
+      toast.error(`Couldn't create service: ${err?.message || 'unknown error'}`, { duration: 10000 });
       throw err;
     } finally {
       setIsLoading(false);
@@ -73,21 +135,22 @@ export function useEnhancedServices() {
   const updateService = async (id: string, updates: Partial<ServiceEnhanced>) => {
     try {
       setIsLoading(true);
+      const payload = sanitizeServicePayload(updates);
       const { data, error } = await supabase
         .from('services_enhanced')
-        .update(updates)
+        .update(payload)
         .eq('id', id)
         .select()
         .single();
 
       if (error) throw error;
-      
-      toast.success('Service updated successfully');
+
+      toast.success(`Service updated: ${(data as any)?.name || 'OK'}`);
       fetchServices();
       return data;
     } catch (err: any) {
       console.error('Error updating service:', err);
-      toast.error('Failed to update service');
+      toast.error(`Couldn't update service: ${err?.message || 'unknown error'}`, { duration: 10000 });
       throw err;
     } finally {
       setIsLoading(false);

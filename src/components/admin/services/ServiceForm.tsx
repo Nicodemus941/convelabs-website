@@ -20,54 +20,105 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<{
     name: string;
+    service_code: string;        // stable slug used by booking flow & server pricing
     description: string;
     service_type: 'individual' | 'package' | 'add_on';
     category: string;
-    base_price: number;
+    base_price: number;          // DOLLARS in the UI; converted to cents by useEnhancedServices
     duration_minutes: number;
     is_active: boolean;
     requires_lab_order: boolean;
+    tier_none: number;
+    tier_member: number;
+    tier_vip: number;
+    tier_concierge: number;
   }>({
     name: '',
+    service_code: '',
     description: '',
     service_type: 'individual',
-    category: '',
+    category: 'lab_draw',
     base_price: 0,
     duration_minutes: 30,
     is_active: true,
-    requires_lab_order: false
+    requires_lab_order: false,
+    tier_none: 0,
+    tier_member: 0,
+    tier_vip: 0,
+    tier_concierge: 0,
   });
 
   const [staffAssignments, setStaffAssignments] = useState([]);
   const [addOns, setAddOns] = useState([]);
 
+  // Auto-suggest a service_code from the name (kebab-case) the first time
+  // an admin types a name — Hormozi rule: the form should do the obvious
+  // work for the user. They can still override before saving.
+  const [codeTouched, setCodeTouched] = useState(false);
+  useEffect(() => {
+    if (codeTouched || service) return;
+    const slug = (formData.name || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 50);
+    setFormData(prev => ({ ...prev, service_code: slug }));
+  }, [formData.name, codeTouched, service]);
+
   useEffect(() => {
     if (service) {
+      const tp = (service as any).tier_pricing || {};
+      const fromCents = (c: number | string | undefined) => (Number(c) || 0) / 100;
+      const basePriceDollars = (service.base_price || 0) / 100;
       setFormData({
         name: service.name || '',
+        service_code: (service as any).service_code || '',
         description: service.description || '',
         service_type: service.service_type || 'individual',
-        category: service.category || '',
-        base_price: service.base_price || 0,
+        category: service.category || 'lab_draw',
+        base_price: basePriceDollars,
         duration_minutes: service.duration_minutes || 30,
         is_active: service.is_active ?? true,
-        requires_lab_order: service.requires_lab_order || false
+        requires_lab_order: service.requires_lab_order || false,
+        tier_none: fromCents(tp.none) || basePriceDollars,
+        tier_member: fromCents(tp.member) || 0,
+        tier_vip: fromCents(tp.vip) || 0,
+        tier_concierge: fromCents(tp.concierge) || 0,
       });
+      setCodeTouched(true);
     }
   }, [service]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
+
     try {
+      // Build the tier_pricing map in DOLLARS — the hook converts to cents.
+      // Any tier left at 0 is omitted so the server falls back to base_price.
+      const tierPricing: Record<string, number> = {};
+      if (formData.tier_none > 0) tierPricing.none = formData.tier_none;
+      else if (formData.base_price > 0) tierPricing.none = formData.base_price;
+      if (formData.tier_member > 0) tierPricing.member = formData.tier_member;
+      if (formData.tier_vip > 0) tierPricing.vip = formData.tier_vip;
+      if (formData.tier_concierge > 0) tierPricing.concierge = formData.tier_concierge;
+
       const serviceData = {
-        ...formData,
-        base_price: formData.base_price,
-        staff_assignments: staffAssignments,
-        add_ons: addOns
+        name: formData.name,
+        service_code: formData.service_code || null,
+        description: formData.description,
+        service_type: formData.service_type,
+        category: formData.category,
+        base_price: formData.base_price,        // dollars; hook converts
+        tier_pricing: tierPricing,              // dollars; hook converts
+        duration_minutes: formData.duration_minutes,
+        is_active: formData.is_active,
+        requires_lab_order: formData.requires_lab_order,
+        // NOTE: staff_assignments + add_ons handled via their own write paths
+        // after the parent service row is created — they no longer ride along
+        // the insert payload (which caused "column does not exist" errors).
       };
-      
+
       await onSubmit(serviceData);
     } catch (error) {
       console.error('Error submitting service:', error);
@@ -142,7 +193,24 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
                   value={formData.description}
                   onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
+                  placeholder="Patient-visible description shown on the booking page"
                 />
+              </div>
+
+              <div>
+                <Label htmlFor="service_code">
+                  Service Code <span className="text-xs text-muted-foreground">(stable slug used by booking flow)</span>
+                </Label>
+                <Input
+                  id="service_code"
+                  name="service_code"
+                  value={formData.service_code}
+                  onChange={(e) => { setCodeTouched(true); setFormData(prev => ({ ...prev, service_code: e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 50) })); }}
+                  placeholder="auto-fills from name — e.g. mobile, in-office, partner-acme"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Must match the key the booking flow + server pricing recognize. Avoid changing after first booking.
+                </p>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -153,13 +221,17 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
                     name="base_price"
                     type="number"
                     step="0.01"
+                    min="0"
                     value={formData.base_price}
                     onChange={(e) => setFormData(prev => ({
                       ...prev,
-                      base_price: Number(e.target.value)
+                      base_price: Number(e.target.value),
+                      // Mirror into the "Pay-as-you-go" tier if it hasn't been customized yet
+                      tier_none: prev.tier_none === 0 || prev.tier_none === prev.base_price ? Number(e.target.value) : prev.tier_none,
                     }))}
                     required
                   />
+                  <p className="text-xs text-muted-foreground mt-1">In dollars. Saved as cents.</p>
                 </div>
 
                 <div>
@@ -168,6 +240,8 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
                     id="duration_minutes"
                     name="duration_minutes"
                     type="number"
+                    min="5"
+                    step="5"
                     value={formData.duration_minutes}
                     onChange={(e) => setFormData(prev => ({ ...prev, duration_minutes: Number(e.target.value) }))}
                     required
@@ -180,8 +254,64 @@ const ServiceForm: React.FC<ServiceFormProps> = ({ service, onSubmit }) => {
                     checked={formData.is_active}
                     onCheckedChange={(value) => setFormData(prev => ({ ...prev, is_active: value }))}
                   />
-                  <Label htmlFor="is_active">Active</Label>
+                  <Label htmlFor="is_active">Active (visible on booking page)</Label>
                 </div>
+              </div>
+
+              {/*
+                Tier pricing — leave any tier at 0 to fall back to base_price.
+                Hormozi rule: members ALWAYS see a discount vs. pay-as-you-go.
+                The booking flow + server enforce min(claimed_tier, actual_tier)
+                so client-claimed tier never charges MORE than the real one.
+              */}
+              <div>
+                <Label className="text-base">Tier Pricing</Label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Per-membership-tier rates. Leave any tier at 0 to use Base Price for that tier.
+                </p>
+                <div className="grid grid-cols-4 gap-3">
+                  <div>
+                    <Label htmlFor="tier_none" className="text-xs uppercase tracking-wide">Pay-as-you-go ($)</Label>
+                    <Input
+                      id="tier_none" type="number" step="0.01" min="0"
+                      value={formData.tier_none}
+                      onChange={(e) => setFormData(prev => ({ ...prev, tier_none: Number(e.target.value) }))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="tier_member" className="text-xs uppercase tracking-wide">Member ($)</Label>
+                    <Input
+                      id="tier_member" type="number" step="0.01" min="0"
+                      value={formData.tier_member}
+                      onChange={(e) => setFormData(prev => ({ ...prev, tier_member: Number(e.target.value) }))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="tier_vip" className="text-xs uppercase tracking-wide">VIP ($)</Label>
+                    <Input
+                      id="tier_vip" type="number" step="0.01" min="0"
+                      value={formData.tier_vip}
+                      onChange={(e) => setFormData(prev => ({ ...prev, tier_vip: Number(e.target.value) }))}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="tier_concierge" className="text-xs uppercase tracking-wide">Concierge ($)</Label>
+                    <Input
+                      id="tier_concierge" type="number" step="0.01" min="0"
+                      value={formData.tier_concierge}
+                      onChange={(e) => setFormData(prev => ({ ...prev, tier_concierge: Number(e.target.value) }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="requires_lab_order"
+                  checked={formData.requires_lab_order}
+                  onCheckedChange={(value) => setFormData(prev => ({ ...prev, requires_lab_order: value }))}
+                />
+                <Label htmlFor="requires_lab_order">Requires a doctor's lab order at booking</Label>
               </div>
             </CardContent>
           </Card>
