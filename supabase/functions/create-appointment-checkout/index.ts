@@ -138,6 +138,15 @@ Deno.serve(async (req) => {
       // Promo code entered at checkout (optional). Server validates via
       // public.validate_promo_code RPC so the client cannot forge discounts.
       promoCode = null,
+      // Reschedule carry-over — when the patient clicked Reschedule on an
+      // existing appointment, BookingFlow forwards the OLD appointment id.
+      // Stamped in Stripe metadata so the success webhook can cancel the
+      // OLD appointment AFTER the new charge clears. (2026-05-20 fix —
+      // line 881 was referencing an undeclared `body` variable that
+      // ReferenceError'd EVERY in-office checkout with a non-empty
+      // rescheduleFromId field. Patients saw "spinning button" + a generic
+      // 500 error because the toast message read "body is not defined".)
+      rescheduleFromId: clientRescheduleFromId = null,
     } = await req.json();
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
@@ -878,7 +887,7 @@ Deno.serve(async (req) => {
     // appointment id. We stamp it in Stripe metadata so the success webhook
     // can cancel the OLD appointment AFTER this new charge clears. Patient
     // trust ceremony: never left with zero appointments.
-    const rescheduleFromId = String((body as any)?.rescheduleFromId || '').trim();
+    const rescheduleFromId = String(clientRescheduleFromId || '').trim();
     // Store all appointment data in metadata for the webhook
     const metadata: Record<string, string> = {
       type: 'appointment_payment',
