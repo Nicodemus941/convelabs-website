@@ -86,6 +86,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // VisitType → Date/Time → Checkout in 3 clicks instead of 8.
   const [prefillFastPath, setPrefillFastPath] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  // Inline checkout-error banner state — surfaces server errors directly in
+  // CheckoutStep so patients see the failure even if their browser hides
+  // toasts (some iOS content blockers). Cleared on retry or new field edit.
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [bookingComplete, setBookingComplete] = useState(false);
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
   const [availableServices, setAvailableServices] = useState([]);
@@ -401,6 +405,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     let data: any = null;
     try {
       setIsProcessing(true);
+      setCheckoutError(null); // clear any prior banner before retrying
       data = methods.getValues();
       // Resolve labels referenced inside pricingBreakdown / surcharges.
       // These were referenced but never declared in scope (memberLabel,
@@ -802,6 +807,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         const msg = result.error && !result.error.includes('non-2xx')
           ? result.error
           : "We hit a hiccup creating your booking. Please try again in a moment, or call (941) 527-9169 to book by phone.";
+        // Inline banner backstop (some mobile browsers hide toasts).
+        setCheckoutError(msg);
         toast.error(msg, {
           duration: 9000,
           action: { label: 'Call (941) 527-9169', onClick: () => { window.location.href = 'tel:+19415279169'; } },
@@ -819,6 +826,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // Page-went-blank guard: if Stripe URL is missing AND for any
         // reason the toast doesn't render (rare, but iOS content blockers
         // can hide them), notify the owner so we hear about it in real time.
+        setCheckoutError("We couldn't reach Stripe. Please try again — or call (941) 527-9169 to book by phone.");
         toast.error("We couldn't reach Stripe. Please try again — or call (941) 527-9169 to book by phone.", {
           duration: 9000,
           action: { label: 'Call', onClick: () => { window.location.href = 'tel:+19415279169'; } },
@@ -836,6 +844,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     } catch (error) {
       console.error('Checkout error:', error);
       const msg = (error as Error).message || 'unknown error';
+      // Inline banner (always visible) AND toast (when browser allows it).
+      // Inline banner is the primary surface; toast is the nice-to-have nudge.
+      setCheckoutError(`${msg}. Please try again — or call (941) 527-9169 if it keeps happening.`);
       toast.error(`Checkout failed: ${msg}. Please try again — or call (941) 527-9169 if it keeps happening.`, {
         duration: 10000,
         action: { label: 'Call', onClick: () => { window.location.href = 'tel:+19415279169'; } },
@@ -1094,6 +1105,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   onBack={handleBack}
                   onCheckout={handleCheckout}
                   isProcessing={isProcessing}
+                  checkoutError={checkoutError}
+                  onClearCheckoutError={() => setCheckoutError(null)}
                   onMemberTierDetected={setMemberTier}
                   onFoundingMemberDetected={setIsFoundingMember}
                   onBundledSubscription={setBundledSubscription}

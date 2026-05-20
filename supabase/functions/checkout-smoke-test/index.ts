@@ -193,11 +193,34 @@ async function sendSMS(body: string): Promise<{ ok: boolean; sid: string | null 
 async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   const url = `${SUPABASE_URL}/functions/v1/create-appointment-checkout`;
-  // Use a far-future date + an unusual time so we never collide with a real
-  // booking. Smoke test sessions are abandoned (Stripe expires unused in 24h)
-  // so no actual appointment is ever created, but the availability check
-  // runs server-side and rejects if a real visit is in this slot.
+
+  // FIX 2026-05-20: smoke was hardcoded to 11:23 AM on a far-future date,
+  // which was consistently 409-blocked. The smoke treated 409 as "success"
+  // (endpoint alive), so the FULL happy path was never exercised. That
+  // masked the `body is not defined` ReferenceError at line 881 of
+  // create-appointment-checkout — a 500 that broke EVERY real checkout
+  // for an unknown period of time.
+  //
+  // New approach: query get-slot-availability first to find an actually-
+  // bookable slot, then use that slot for the checkout test. Only HTTP
+  // 200 + a Stripe Checkout URL counts as success. Slot conflicts are
+  // surfaced as real failures (something blocked every slot we tried).
   const farFuture = new Date(Date.now() + 365 * 86400000 + 14 * 86400000).toISOString().split('T')[0];
+
+  let appointmentTime = '11:00 AM';
+  try {
+    const slotResp = await fetch(`${SUPABASE_URL}/functions/v1/get-slot-availability`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${SERVICE_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: farFuture, lab_destination: 'ups', service_type: 'specialty-kit' }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (slotResp.ok) {
+      const slotData = await slotResp.json();
+      const firstOpen = (slotData.slots || []).find((s: any) => s.available);
+      if (firstOpen?.time) appointmentTime = firstOpen.time;
+    }
+  } catch { /* fall back to the default 11:00 AM */ }
 
   const payload = {
     serviceType: 'specialty-kit',
@@ -205,7 +228,7 @@ async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
     amount: 18500, // $185 base
     tipAmount: 0,
     appointmentDate: farFuture,
-    appointmentTime: '11:23 AM',
+    appointmentTime,
     memberTier: 'none',
     patientDetails: {
       firstName: 'SmokeTest', lastName: 'Patient',
@@ -233,25 +256,20 @@ async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
     });
     const body = await resp.text().catch(() => '');
     if (!resp.ok) {
-      // 409 slot_unavailable is NOT a failure — it proves the endpoint is
-      // alive (auth + payload validation + availability query all worked).
-      // Only treat it as success if the body confirms the slot_unavailable
-      // error code so we don't mask other 409s.
-      if (resp.status === 409 && body.includes('slot_unavailable')) {
-        results.push({
-          step: 'appointment_checkout_post',
-          ok: true,
-          details: { note: 'slot_unavailable returned — endpoint healthy, just hit a busy slot', far_future_date: farFuture },
-        });
-        return results;
-      }
-      // Specifically detect the Stripe metadata cap error
+      // STRICT: any non-2xx is a failure now. The previous "409 = healthy"
+      // tolerance was masking real 500s further down the function (the
+      // body-is-not-defined ReferenceError that broke every real checkout).
+      // If a slot conflict happens, the smoke chose the wrong slot — that's
+      // also a signal worth alerting on (capacity is tighter than expected).
       const isMetadataCap = body.includes('up to 50 keys');
+      const is409Conflict = resp.status === 409 && body.includes('slot_unavailable');
       results.push({
         step: 'appointment_checkout_post',
         ok: false,
         error: isMetadataCap
           ? `STRIPE METADATA CAP HIT: ${body.substring(0, 200)}`
+          : is409Conflict
+          ? `SMOKE PICKED A BUSY SLOT (${appointmentTime} on ${farFuture}): ${body.substring(0, 200)}`
           : `HTTP ${resp.status}: ${body.substring(0, 200)}`,
       });
       return results;

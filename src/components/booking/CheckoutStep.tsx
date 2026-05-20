@@ -67,9 +67,17 @@ interface CheckoutStepProps {
     agreementId: string;
     memberTierAfter: 'member' | 'vip' | 'concierge';
   } | null) => void;
+  /**
+   * Inline error banner — toast fallback for mobile browsers that hide toasts
+   * (some iOS content blockers). Parent (BookingFlow) sets this whenever
+   * createAppointmentCheckoutSession returns an error. Cleared when the
+   * checkout is retried or the patient edits the form.
+   */
+  checkoutError?: string | null;
+  onClearCheckoutError?: () => void;
 }
 
-const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected, onFoundingMemberDetected, onBundledSubscription }) => {
+const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProcessing, onMemberTierDetected, onFoundingMemberDetected, onBundledSubscription, checkoutError, onClearCheckoutError }) => {
   const { user } = useAuth();
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
@@ -999,6 +1007,35 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             </FormItem>
           )}
         />
+
+        {/*
+          Inline error banner — fallback for mobile browsers that hide toasts.
+          Set by BookingFlow when checkout returns an error. Visible above the
+          Pay button so patients see the issue without scrolling. Clears when
+          they edit the form or retry. (Added 2026-05-20 to make the previous
+          "spinning button + invisible toast" failure mode loud and clear.)
+        */}
+        {checkoutError && (
+          <div role="alert" className="bg-red-50 border-2 border-red-300 rounded-lg p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-900">Checkout didn't go through</p>
+              <p className="text-sm text-red-800 mt-0.5 break-words">{checkoutError}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onClearCheckoutError?.()}
+                  className="text-xs font-semibold text-red-700 underline underline-offset-2"
+                >
+                  Dismiss
+                </button>
+                <a href="tel:+19415279169" className="text-xs font-semibold text-red-700 underline underline-offset-2">
+                  Or call (941) 527-9169
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex justify-between">
