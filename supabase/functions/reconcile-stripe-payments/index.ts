@@ -180,7 +180,11 @@ Deno.serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const hours = Math.min(168, Math.max(6, parseInt(url.searchParams.get('hours') || '48', 10)));
+    // 2026-05-21: widened the max window from 168 (7d) to 2160 (90d) so the
+    // ad-hoc owner-triggered "find every missing QB log entry" pass can
+    // actually cover the full cohort-audit horizon. Cron-default stays at
+    // 48h because that's the SLA Stripe gives for retrying webhook deliveries.
+    const hours = Math.min(2160, Math.max(6, parseInt(url.searchParams.get('hours') || '48', 10)));
     const sinceTs = Math.floor((Date.now() - hours * 60 * 60 * 1000) / 1000);
 
     console.log(`[reconcile] scanning Stripe sessions since ${new Date(sinceTs * 1000).toISOString()}`);
