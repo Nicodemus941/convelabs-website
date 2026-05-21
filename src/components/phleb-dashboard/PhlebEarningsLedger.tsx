@@ -77,8 +77,19 @@ const PhlebEarningsLedger: React.FC = () => {
   const [loading, setLoading] = useState(true);
   // Track which button is spinning ('week' | 'all' | null) so they don't both spin.
   const [sweeping, setSweeping] = useState<'week' | 'all' | null>(null);
-  const [rows, setRows] = useState<Array<ApptRow & { take: Take; paid_cents: number; owed_cents: number }>>([]);
+  const [rows, setRows] = useState<Array<ApptRow & { take: Take; paid_cents: number; owed_cents: number; tier?: string }>>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Bank-arrivals card data (Stripe payouts on the phleb's Connect account)
+  const [bankPayouts, setBankPayouts] = useState<{
+    today_total_cents: number;
+    today_count: number;
+    month_total_cents: number;
+    pending_total_cents: number;
+    next_arrival_date: string | null;
+    payouts: Array<{ id: string; amount_cents: number; status: string; arrival_date: string | null; failure_message: string | null }>;
+    schedule: { interval?: string; delay_days?: number } | null;
+  } | null>(null);
+  const [bankLoading, setBankLoading] = useState(false);
   // Inline error/result banner so the user always sees what happened —
   // toasts disappear before the user can read them, especially on mobile.
   const [sweepResult, setSweepResult] = useState<{ kind: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -326,6 +337,21 @@ const PhlebEarningsLedger: React.FC = () => {
           paidMap.set(p.appointment_id, cur);
         }
 
+        // Per-patient tier lookup so the earnings KPI strip can split
+        // "earned from Members / VIPs / Concierge / Pay-as-you-go". Most
+        // appointments carry patient_id; for those without, default to 'none'.
+        const patientIds = Array.from(new Set(apptList.map(a => (a as any).patient_id).filter(Boolean)));
+        const tierMap = new Map<string, string>();
+        if (patientIds.length > 0) {
+          const { data: tps } = await supabase
+            .from('tenant_patients')
+            .select('id, membership_tier')
+            .in('id', patientIds);
+          for (const tp of (tps as any[]) || []) {
+            if (tp?.id) tierMap.set(tp.id, tp.membership_tier || 'none');
+          }
+        }
+
         const decorated = apptList.map((a) => {
           const pm = paidMap.get(a.id);
           return {
@@ -335,6 +361,7 @@ const PhlebEarningsLedger: React.FC = () => {
             owed_cents: pm?.owed || 0,
             last_payment_at: pm?.lastPaymentAt || null,
             last_payout_status: pm?.lastStatus || null,
+            tier: tierMap.get((a as any).patient_id) || 'none',
           };
         });
 
@@ -365,6 +392,65 @@ const PhlebEarningsLedger: React.FC = () => {
       }
     })();
   }, [user?.id, refreshKey]);
+
+  // Fetch the phleb's actual Stripe Connect bank payouts. This is the
+  // "what cleared in your bank today" data — Stripe is the source of truth
+  // because the bank arrival date depends on the Connect payout schedule
+  // (delay_days), not just when the transfer fired. Refresh on the same
+  // realtime cadence as the rest of the ledger.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setBankLoading(true);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+        const resp = await fetch(`${import.meta.env.VITE_SUPABASE_URL || 'https://yluyonhrxxtyuiyrdixl.supabase.co'}/functions/v1/get-phleb-bank-payouts`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        const j = await resp.json();
+        if (cancelled) return;
+        if (j?.ok) {
+          setBankPayouts({
+            today_total_cents: j.today_total_cents || 0,
+            today_count: j.today_count || 0,
+            month_total_cents: j.month_total_cents || 0,
+            pending_total_cents: j.pending_total_cents || 0,
+            next_arrival_date: j.next_arrival_date || null,
+            payouts: j.payouts || [],
+            schedule: j.schedule || null,
+          });
+        }
+      } catch (e) {
+        console.warn('[bank-payouts] fetch failed:', e);
+      } finally {
+        if (!cancelled) setBankLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, refreshKey]);
+
+  // Per-tier earnings rollup. Buckets the rows' take_cents by membership
+  // tier of the patient (none / member / vip / concierge). Drives the
+  // "earned from VIPs" KPI cards above the ledger.
+  const tierBreakdown = useMemo(() => {
+    const buckets: Record<string, { cents: number; count: number }> = {
+      none: { cents: 0, count: 0 },
+      member: { cents: 0, count: 0 },
+      vip: { cents: 0, count: 0 },
+      concierge: { cents: 0, count: 0 },
+    };
+    for (const r of rows) {
+      const t = (r as any).tier || 'none';
+      const bucket = buckets[t] || buckets.none;
+      bucket.cents += r.take?.take_cents || 0;
+      bucket.count += 1;
+    }
+    return buckets;
+  }, [rows]);
 
   // Realtime subscription: whenever staff_payouts for this phleb changes
   // (Stripe webhook flips a row to succeeded, or the sweep cron settles a
@@ -551,6 +637,106 @@ const PhlebEarningsLedger: React.FC = () => {
               {reconciling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               {reconciling ? 'Scanning Stripe…' : 'Cross-check with Stripe (mark already-paid as paid)'}
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────
+          "What cleared in your bank" — Stripe is the source of truth.
+          Hero card if there's a bank arrival TODAY, otherwise a small
+          summary. The delay_days hint helps phleb predict next arrival.
+      ──────────────────────────────────────────────────────────────── */}
+      {bankPayouts && (bankPayouts.today_total_cents > 0 || bankPayouts.month_total_cents > 0 || bankPayouts.pending_total_cents > 0) && (
+        <Card className={bankPayouts.today_total_cents > 0 ? 'border-2 border-emerald-400 shadow-md bg-gradient-to-br from-emerald-50 to-emerald-100/40' : ''}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <DollarSign className={`h-4 w-4 ${bankPayouts.today_total_cents > 0 ? 'text-emerald-700' : 'text-gray-500'}`} />
+              {bankPayouts.today_total_cents > 0 ? '🎉 In your bank today' : 'Stripe → Bank arrivals'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2">
+            {bankPayouts.today_total_cents > 0 ? (
+              <>
+                <div className="text-3xl font-bold text-emerald-700">
+                  ${(bankPayouts.today_total_cents / 100).toFixed(2)}
+                </div>
+                <div className="text-sm text-emerald-900/80">
+                  {bankPayouts.today_count} payout{bankPayouts.today_count === 1 ? '' : 's'} arrived today
+                </div>
+              </>
+            ) : (
+              <div className="text-2xl font-semibold">${(bankPayouts.month_total_cents / 100).toFixed(2)}<span className="text-sm font-normal text-gray-500"> this month</span></div>
+            )}
+            {bankPayouts.pending_total_cents > 0 && (
+              <div className="text-xs text-gray-600 flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <strong>${(bankPayouts.pending_total_cents / 100).toFixed(2)}</strong> in transit to your bank
+                {bankPayouts.next_arrival_date && <> · expected <strong>{format(parseISO(bankPayouts.next_arrival_date + 'T12:00:00'), 'EEE MMM d')}</strong></>}
+              </div>
+            )}
+            {bankPayouts.schedule && (
+              <div className="text-[11px] text-gray-500">
+                Your payout schedule: {bankPayouts.schedule.interval || 'standard'}
+                {typeof bankPayouts.schedule.delay_days === 'number' && <> · T+{bankPayouts.schedule.delay_days} day{bankPayouts.schedule.delay_days === 1 ? '' : 's'} to bank</>}
+              </div>
+            )}
+            {bankPayouts.payouts.length > 0 && (
+              <details className="mt-2">
+                <summary className="text-xs font-semibold cursor-pointer text-gray-600 hover:text-gray-900">Recent payouts ({bankPayouts.payouts.length})</summary>
+                <div className="mt-1 space-y-1 max-h-48 overflow-y-auto">
+                  {bankPayouts.payouts.map(p => (
+                    <div key={p.id} className="text-[11px] flex justify-between items-center bg-white/60 rounded px-2 py-1">
+                      <span className="text-gray-700">
+                        {p.arrival_date ? format(parseISO(p.arrival_date + 'T12:00:00'), 'MMM d') : '—'}
+                        {' · '}
+                        <span className={
+                          p.status === 'paid' ? 'text-emerald-700 font-semibold'
+                          : p.status === 'failed' || p.status === 'canceled' ? 'text-red-700 font-semibold'
+                          : 'text-amber-700'
+                        }>{p.status}</span>
+                        {p.failure_message ? <span className="text-red-600 ml-1">— {p.failure_message}</span> : null}
+                      </span>
+                      <span className="font-mono font-semibold">${(p.amount_cents / 100).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────
+          Per-tier earnings breakdown. Hormozi pattern: every recurring
+          revenue line is its own KPI. Lets the phleb see which patient
+          segment is paying their bills — useful for shift planning and
+          for the owner when deciding whether to nudge tier upgrades.
+      ──────────────────────────────────────────────────────────────── */}
+      {rows.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-[#B91C1C]" /> Earnings by patient tier · last 90 days
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {[
+                { key: 'concierge', label: 'Concierge', color: 'bg-purple-50 border-purple-200 text-purple-900' },
+                { key: 'vip',       label: 'VIP',       color: 'bg-amber-50 border-amber-200 text-amber-900' },
+                { key: 'member',    label: 'Member',    color: 'bg-emerald-50 border-emerald-200 text-emerald-900' },
+                { key: 'none',      label: 'Pay-as-you-go', color: 'bg-gray-50 border-gray-200 text-gray-800' },
+              ].map(({ key, label, color }) => {
+                const b = tierBreakdown[key] || { cents: 0, count: 0 };
+                return (
+                  <div key={key} className={`rounded-lg border p-2 ${color}`}>
+                    <div className="text-[10px] uppercase tracking-wide opacity-70">{label}</div>
+                    <div className="text-lg font-bold font-mono">${(b.cents / 100).toFixed(0)}</div>
+                    <div className="text-[11px] opacity-80">{b.count} visit{b.count === 1 ? '' : 's'}</div>
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
       )}
