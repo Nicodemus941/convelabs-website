@@ -11,6 +11,7 @@ import DataHealthCard from './DataHealthCard';
 import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
 import AcquisitionByChannel from './AcquisitionByChannel';
 import RevenueTypeSplit from './RevenueTypeSplit';
+import MoneyFlowCard from './MoneyFlowCard';
 import Level0Tracker from './Level0Tracker';
 import BreakEvenTracker from './BreakEvenTracker';
 import LabOrderFunnelCard from './LabOrderFunnelCard';
@@ -386,6 +387,12 @@ const HormoziDashboard: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* ─── MONEY FLOW (CFO Layer #1: "Where is the money this month?") ─ */}
+      <section className="mb-6">
+        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Money Flow</h2>
+        <MoneyFlowCard days={30} />
+      </section>
 
       {/* ─── REVENUE SPLIT (I3: Profit First bucketing by revenue type) ─ */}
       <section className="mb-6">
