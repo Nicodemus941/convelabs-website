@@ -469,7 +469,7 @@ const PhlebEarningsLedger: React.FC = () => {
       staffIdLocal = (sp as any)?.id || null;
       if (!staffIdLocal) return;
       channel = supabase
-        .channel(`phleb-earnings-${staffIdLocal}`)
+        .channel(`phleb-earnings-ledger-${staffIdLocal}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_payouts', filter: `staff_id=eq.${staffIdLocal}` },
           () => setRefreshKey(k => k + 1))
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${staffIdLocal}` },

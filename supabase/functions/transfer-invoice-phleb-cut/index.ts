@@ -29,10 +29,29 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
+// KILL SWITCH (2026-05-21): disabled to stop double-transfer leak.
+// Root cause: this fn AND reconcile-stripe-payments both fire transfers
+// for invoice-paid appointments. Stripe accepts both because idempotency
+// keys differ → phleb's Connect account double-paid. See chat log for
+// affected appointments (Joyce Linton, Blake Hutton, Juanita Sevor,
+// Amanda Wahrer, etc.).
+//
+// reconcile-stripe-payments now owns transfer creation for invoice-paid.
+// Re-enable only after: (a) idempotency key wired here, (b) explicit
+// guard against reconciler having already settled the appointment.
+const KILL_SWITCH = true;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'method_not_allowed' }), { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+  if (KILL_SWITCH) {
+    return new Response(JSON.stringify({
+      ok: true,
+      skipped: true,
+      reason: 'transfer-invoice-phleb-cut disabled 2026-05-21 to prevent double-transfer. reconcile-stripe-payments handles invoice-paid transfers.',
+    }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
   try {
     const { appointment_id } = await req.json().catch(() => ({}));

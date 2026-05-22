@@ -292,7 +292,7 @@ const PhlebEarningsCard: React.FC = () => {
     // toast so the phleb sees the lost $X. Hormozi rule: invisible costs are
     // tolerated; visible costs get fixed.
     const ch = supabase
-      .channel(`phleb-earnings-${staffId}`)
+      .channel(`phleb-earnings-card-${staffId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, async (payload: any) => {
         try {
           const newRow = payload.new || {};
