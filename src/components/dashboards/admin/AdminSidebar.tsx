@@ -149,6 +149,11 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
     let mounted = true;
     const recount = async () => {
       try {
+        // BUG FIX 2026-05-21: badge was counting 24 ghost rows (merged orgs,
+        // welcomed orgs, unreachable_no_email orgs) that the InboxTab itself
+        // filters out — so the badge inflated and never matched what you
+        // saw when you opened the tab. Mirror the InboxTab refresh query
+        // EXACTLY so the number on the badge equals the rows you'll see.
         const [{ count: insC }, { count: orgC }] = await Promise.all([
           supabase.from('pending_insurance_changes' as any)
             .select('id', { count: 'exact', head: true })
@@ -156,6 +161,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
           supabase.from('organizations')
             .select('id', { count: 'exact', head: true })
             .eq('discovered_from_lab_order', true as any)
+            .eq('is_active', true)
+            .or('outreach_status.is.null,outreach_status.in.(pending,untouched,contacted)')
             .or('manager_email.is.null,contact_email.is.null'),
         ]);
         if (mounted) setInboxCount((insC || 0) + (orgC || 0));
