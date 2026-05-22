@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     // Load appointment + check it's a real visit needing the request
     const { data: appt } = await admin
       .from('appointments')
-      .select('id, patient_id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, lab_order_file_path, status, service_type, organization_id')
+      .select('id, patient_id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, lab_order_file_path, status, service_type, organization_id, family_group_id, companion_role')
       .eq('id', appointmentId)
       .maybeSingle();
     if (!appt) {
@@ -128,6 +128,29 @@ Deno.serve(async (req) => {
       if (Object.keys(updates).length > 0) {
         await admin.from('appointments').update(updates).eq('id', appt.id);
         console.log(`[request-lab-order] backfilled appt ${appt.id} contact from tenant_patients: ${Object.keys(updates).join(', ')}`);
+      }
+    }
+
+    // Companion fallback: if this is a non-primary row in a family bundle
+    // and we still have no contact, walk up to the primary appointment in
+    // the same family_group_id and use ITS contact. The primary is the
+    // single point of contact for the whole bundle — the patient who
+    // booked. We never SMS a companion at a contact they didn't provide.
+    // Lauren Van Pelt bundle 2026-05-22 was the case that surfaced this:
+    // James (Spouse, no email/phone) was silently skipped by the auto cron.
+    const isCompanion = (appt.companion_role && String(appt.companion_role).toLowerCase() !== 'primary' && String(appt.companion_role) !== '');
+    if ((!patientEmail || !patientPhone) && isCompanion && appt.family_group_id) {
+      const { data: primary } = await admin
+        .from('appointments')
+        .select('patient_email, patient_phone, patient_name')
+        .eq('id', appt.family_group_id)
+        .maybeSingle();
+      const pEmail = (primary as any)?.patient_email ? String((primary as any).patient_email).toLowerCase().trim() : null;
+      const pPhone = (primary as any)?.patient_phone ? String((primary as any).patient_phone).trim() : null;
+      if (!patientEmail && pEmail) patientEmail = pEmail;
+      if (!patientPhone && pPhone) patientPhone = pPhone;
+      if (patientEmail || patientPhone) {
+        console.log(`[request-lab-order] companion ${appt.id} resolved contact via primary ${appt.family_group_id}: email=${!!patientEmail} phone=${!!patientPhone}`);
       }
     }
 

@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
     // because hours-until calculation is timezone-aware.
     const { data: appts } = await admin
       .from('appointments')
-      .select('id, patient_name, patient_phone, patient_email, appointment_date, appointment_time, lab_order_file_path, lab_request_id, organization_id, status, service_type, family_group_id')
+      .select('id, patient_name, patient_phone, patient_email, appointment_date, appointment_time, lab_order_file_path, lab_request_id, organization_id, status, service_type, family_group_id, companion_role')
       .gte('appointment_date', today)
       .lte('appointment_date', in3Days)
       .not('status', 'in', '(cancelled,completed,no_show)');
@@ -161,6 +161,20 @@ Deno.serve(async (req) => {
     const skipped: any[] = [];
 
     for (const appt of appts as ApptRow[]) {
+      // Bundle anchoring: only fire the request on the PRIMARY appointment.
+      // The upload page (loadAppointmentSummary in submit-appointment-lab-order)
+      // already pulls all family_group siblings and renders one upload slot
+      // per member, so one SMS to the primary covers the whole bundle.
+      // Without this guard, a 2-person bundle would send TWO SMS texts and
+      // companions with NULL contact would silently fail.
+      const companionRole = (appt as any).companion_role;
+      const isCompanionRow = appt.family_group_id && appt.family_group_id !== appt.id
+        && companionRole && String(companionRole).toLowerCase() !== 'primary' && String(companionRole) !== '';
+      if (isCompanionRow) {
+        skipped.push({ id: appt.id, reason: 'companion_handled_via_primary' });
+        continue;
+      }
+
       // Already has a lab order? Skip. Now checks THREE sources:
       // 1. appointments.lab_order_file_path
       // 2. appointment_lab_orders normalized table

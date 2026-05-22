@@ -26,6 +26,7 @@ import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import RequestLabOrderButton from './RequestLabOrderButton';
 import LabOrderRequestStatus from './LabOrderRequestStatus';
 import AppointmentEarningPill from './AppointmentEarningPill';
+import BundleEarningsBreakdown from './BundleEarningsBreakdown';
 import { getLabHoursStatus, logMileage, type LabRow } from '@/lib/labStatus';
 import PatientStatusChip from '@/components/shared/PatientStatusChip';
 import TubePredictionPanel from './TubePredictionPanel';
@@ -695,6 +696,18 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   </p>
                 )}
               </div>
+
+              {/* Bundle Earnings Breakdown — only for family-group visits.
+                  Replaces the v3 "Base + Companion fee" mental model with
+                  the v4 "Charged / Business keeps / Your take" breakdown
+                  per the per-body floor rule. */}
+              {(appointment as any).family_group_id && (
+                <BundleEarningsBreakdown
+                  appointmentId={appointment.id}
+                  patientName={appointment.patient_name}
+                  companionNames={companionNames.map(c => c.name)}
+                />
+              )}
 
               {/* ═══ Specimen Delivery — WHERE to drop the samples ═══ */}
               {/* Show for ALL service types. Even in-office and partner visits
