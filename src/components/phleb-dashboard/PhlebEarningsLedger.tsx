@@ -774,12 +774,30 @@ const PhlebEarningsLedger: React.FC = () => {
             (() => {
               type Group<T> = { key: string; label: string; total: number; rows: any[]; sub?: Group<T>[] };
               const yearMap = new Map<string, { months: Map<string, { days: Map<string, any[]> }> }>();
+              // Bug fix 2026-05-21: appointment_date is a timestamptz where some
+              // rows are stored as 00:00:00+00 — midnight UTC = 8 PM ET PREVIOUS
+              // day. parseISO + format-in-local-tz pushed those rows into the
+              // wrong day bucket (today's $169.70 hid under yesterday). Fix:
+              // grab the YYYY-MM-DD slice of appointment_date directly — it's a
+              // CALENDAR date, not an instant. For last_payment_at (a real
+              // payment instant) we DO convert to ET before slicing.
+              const toEtDay = (iso: string): string => {
+                // last_payment_at is a real moment; project to ET wall-clock.
+                try {
+                  const d = new Date(iso);
+                  // Use Intl with America/New_York to render the calendar day in ET.
+                  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+                } catch { return String(iso).substring(0, 10); }
+              };
               for (const r of rows) {
-                const ref = r.last_payment_at || r.appointment_date;
-                const d = parseISO(ref);
-                const y = format(d, 'yyyy');
-                const m = format(d, 'yyyy-MM');
-                const day = format(d, 'yyyy-MM-dd');
+                // Prefer the appointment's calendar date (literal YYYY-MM-DD slice,
+                // no TZ math). Only when there's a real payment instant DO we
+                // project it into ET — payments do happen at a precise moment.
+                const day = r.last_payment_at
+                  ? toEtDay(r.last_payment_at)
+                  : String(r.appointment_date).substring(0, 10);
+                const y = day.substring(0, 4);
+                const m = day.substring(0, 7);
                 if (!yearMap.has(y)) yearMap.set(y, { months: new Map() });
                 const yr = yearMap.get(y)!;
                 if (!yr.months.has(m)) yr.months.set(m, { days: new Map() });
