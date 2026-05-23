@@ -93,11 +93,34 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
       if (familyId) {
         const { data } = await supabase
           .from('appointments')
-          .select('id, lab_order_file_path, patient_name, patient_dob, fasting_required, companion_role')
+          .select('id, lab_order_file_path, patient_name, patient_id, patient_email, fasting_required, companion_role')
           .eq('family_group_id', familyId)
           .neq('id', appointment.id)
           .neq('status', 'cancelled');
         siblings = (data || []) as any[];
+
+        // DOB lives on tenant_patients (the appointments table has no
+        // patient_dob column — the parent hook synthesizes it via this same
+        // join). Batch-fetch sibling DOBs in one query so the NIIMBOT
+        // labels render the right value per companion. Fall back to
+        // patient_lab_requests for any sibling whose tenant_patient row is
+        // missing a date_of_birth (same fallback chain the hook uses).
+        const patientIds = siblings.map((s: any) => s.patient_id).filter(Boolean);
+        const sibDobById = new Map<string, string>();
+        if (patientIds.length > 0) {
+          const { data: tps } = await supabase
+            .from('tenant_patients')
+            .select('id, date_of_birth')
+            .in('id', patientIds);
+          for (const tp of (tps as any[] || [])) {
+            if (tp?.date_of_birth) sibDobById.set(tp.id, tp.date_of_birth);
+          }
+        }
+        for (const s of siblings) {
+          if (s.patient_id && sibDobById.has(s.patient_id)) {
+            s._dob = sibDobById.get(s.patient_id);
+          }
+        }
       }
 
       if (cancelled) return;
@@ -123,7 +146,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         const n = String(s.patient_name || '').trim();
         if (!n) continue;
         sibNames.add(n.toLowerCase());
-        companions.push({ name: n, dob: s.patient_dob || null, fasting: !!s.fasting_required, source: 'sibling' });
+        companions.push({ name: n, dob: (s as any)._dob || null, fasting: !!s.fasting_required, source: 'sibling' });
       }
       for (const p of bookingAdds) {
         const first = String((p as any)?.firstName || '').trim();
