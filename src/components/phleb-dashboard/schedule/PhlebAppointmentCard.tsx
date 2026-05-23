@@ -81,7 +81,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   // companion that wasn't given their own appointment row — Lisa Marie
   // Jusas case 2026-05-13 (Brian Jusas was charged $75 + tipped + drawn,
   // but his name never appeared on her phleb card).
-  const [companionNames, setCompanionNames] = useState<Array<{ name: string; relationship?: string | null; fasting?: boolean; source: 'sibling' | 'booking' }>>([]);
+  const [companionNames, setCompanionNames] = useState<Array<{ name: string; dob?: string | null; relationship?: string | null; fasting?: boolean; source: 'sibling' | 'booking' }>>([]);
   useEffect(() => {
     let cancelled = false;
     const familyId = (appointment as any).family_group_id;
@@ -93,7 +93,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
       if (familyId) {
         const { data } = await supabase
           .from('appointments')
-          .select('id, lab_order_file_path, patient_name, fasting_required, companion_role')
+          .select('id, lab_order_file_path, patient_name, patient_dob, fasting_required, companion_role')
           .eq('family_group_id', familyId)
           .neq('id', appointment.id)
           .neq('status', 'cancelled');
@@ -118,12 +118,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
       // Build the companion-names list — siblings first, then de-duped
       // pricing_breakdown additional_patients.
       const sibNames = new Set<string>();
-      const companions: Array<{ name: string; relationship?: string | null; fasting?: boolean; source: 'sibling' | 'booking' }> = [];
+      const companions: Array<{ name: string; dob?: string | null; relationship?: string | null; fasting?: boolean; source: 'sibling' | 'booking' }> = [];
       for (const s of siblings) {
         const n = String(s.patient_name || '').trim();
         if (!n) continue;
         sibNames.add(n.toLowerCase());
-        companions.push({ name: n, fasting: !!s.fasting_required, source: 'sibling' });
+        companions.push({ name: n, dob: s.patient_dob || null, fasting: !!s.fasting_required, source: 'sibling' });
       }
       for (const p of bookingAdds) {
         const first = String((p as any)?.firstName || '').trim();
@@ -131,8 +131,11 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         const fullName = [first, last].filter(Boolean).join(' ').trim();
         if (!fullName) continue;
         if (sibNames.has(fullName.toLowerCase())) continue;
+        // pricing_breakdown.additional_patients may carry dob as "dob" or "dateOfBirth"
+        const dob = (p as any)?.dob || (p as any)?.dateOfBirth || (p as any)?.patient_dob || null;
         companions.push({
           name: fullName,
+          dob: dob || null,
           relationship: (p as any)?.relationship || null,
           fasting: !!(p as any)?.fastingRequired,
           source: 'booking',
@@ -1208,6 +1211,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         appointmentId={appointment.id}
         patientName={appointment.patient_name}
         patientDob={appointment.patient_dob}
+        companions={companionNames.map(c => ({ name: c.name, dob: c.dob || null }))}
         existingCollectionAt={(appointment as any).collection_at || null}
         onMarked={() => { /* parent will refetch on next update */ }}
       />

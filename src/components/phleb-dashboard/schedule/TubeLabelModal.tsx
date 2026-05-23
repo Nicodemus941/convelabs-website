@@ -1,9 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Copy, Printer, Check, Loader2, User, Calendar, Clock, FileText } from 'lucide-react';
+import { Copy, Printer, Check, Loader2, User, Calendar, Clock, FileText, Users } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import { format } from 'date-fns';
@@ -15,15 +13,20 @@ import { format } from 'date-fns';
  * blood tubes AFTER collection. The NIIMBOT app accepts text fields directly —
  * the phleb types patient name, DOB, collection time/date, then prints.
  *
- * This modal pre-formats the 4 fields NIIMBOT wants, with one-tap copy
- * buttons per field so the phleb can paste into the NIIMBOT app without
- * retyping. Also stamps `appointments.collection_at` the moment they hit
- * "Mark collection time" — giving us a real timestamp for HIPAA chain of
- * custody AND distinguishing drawn-but-not-delivered from still-scheduled.
+ * Bundle awareness (2026-05-21): when a visit has companions (family bundle),
+ * render ONE tappable label per patient (primary + each companion) so the
+ * phleb prints one label per body without re-typing. Each label is its own
+ * copy button — tap → paste into NIIMBOT → print → next patient.
  *
- * If the phleb allows geolocation, we also stash the draw location in
- * `collection_location` for audit.
+ * Collection-time stamp applies to the PRIMARY appointment row only (the
+ * bundle is settled at the primary level). Companion appointment rows can
+ * be stamped independently later if needed.
  */
+
+interface CompanionPatient {
+  name: string;
+  dob: string | null;
+}
 
 interface Props {
   open: boolean;
@@ -31,17 +34,36 @@ interface Props {
   appointmentId: string;
   patientName: string;
   patientDob: string | null;
+  companions?: CompanionPatient[];
   existingCollectionAt: string | null;
   onMarked?: () => void;
 }
 
-const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patientName, patientDob, existingCollectionAt, onMarked }) => {
+// "John Doe" → "Doe, John". "Mary Jane Smith" → "Smith, Mary Jane".
+const formatLastFirst = (full: string): string => {
+  const trimmed = (full || '').trim();
+  if (!trimmed) return '—';
+  const parts = trimmed.split(/\s+/);
+  if (parts.length < 2) return trimmed;
+  const last = parts[parts.length - 1];
+  const first = parts.slice(0, -1).join(' ');
+  return `${last}, ${first}`;
+};
+
+const formatDob = (dob: string | null): string => {
+  if (!dob) return '—';
+  try { return format(new Date(dob + 'T00:00:00'), 'MM/dd/yyyy'); } catch { return dob; }
+};
+
+const TubeLabelModal: React.FC<Props> = ({
+  open, onClose, appointmentId, patientName, patientDob, companions = [],
+  existingCollectionAt, onMarked,
+}) => {
   const [now, setNow] = useState<Date>(new Date());
   const [marking, setMarking] = useState(false);
   const [markedAt, setMarkedAt] = useState<Date | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
-  // Restore previously-marked time so reopening the modal doesn't lose state
   useEffect(() => {
     if (open && existingCollectionAt) {
       try { setMarkedAt(new Date(existingCollectionAt)); } catch { /* ignore */ }
@@ -50,87 +72,64 @@ const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patient
     }
   }, [open, existingCollectionAt]);
 
-  // Keep "now" ticking while modal is open so the time field is accurate at mark-time
   useEffect(() => {
     if (!open) return;
-    const t = setInterval(() => setNow(new Date()), 30_000); // every 30s
+    const t = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(t);
   }, [open]);
 
-  const displayDob = patientDob ? (() => {
-    try {
-      return format(new Date(patientDob + 'T00:00:00'), 'MM/dd/yyyy');
-    } catch {
-      return patientDob;
-    }
-  })() : '—';
-
   const displayDate = (d: Date) => format(d, 'MM/dd/yyyy');
   const displayTime = (d: Date) => format(d, 'HH:mm');
-
   const usedTime = markedAt || now;
 
-  // "John Doe" → "Doe, John". "Mary Jane Smith" → "Smith, Mary Jane".
-  // Single-word names → returned as-is (no comma).
-  const formatLastFirst = (full: string): string => {
-    const trimmed = (full || '').trim();
-    if (!trimmed) return '—';
-    const parts = trimmed.split(/\s+/);
-    if (parts.length < 2) return trimmed;
-    const last = parts[parts.length - 1];
-    const first = parts.slice(0, -1).join(' ');
-    return `${last}, ${first}`;
-  };
-  const lastFirstName = formatLastFirst(patientName);
+  // Build the patient list — primary first, then any companions.
+  const patients = useMemo(() => {
+    const list: CompanionPatient[] = [{ name: patientName, dob: patientDob }];
+    for (const c of (companions || [])) {
+      const n = (c?.name || '').trim();
+      if (!n) continue;
+      // Don't duplicate primary if it somehow landed in companions list
+      if (n.toLowerCase() === (patientName || '').trim().toLowerCase()) continue;
+      list.push({ name: n, dob: c.dob || null });
+    }
+    return list;
+  }, [patientName, patientDob, companions]);
 
-  // Single-click label payload: 3 lines, ordered exactly the way the
-  // phleb wants to read it on a tube — surname-first for chart matching.
-  const labelText = [
-    lastFirstName,
-    displayDob,
+  const labelTextFor = (p: CompanionPatient): string => [
+    formatLastFirst(p.name),
+    formatDob(p.dob),
     `${displayTime(usedTime)} ${displayDate(usedTime)}`,
   ].join('\n');
 
-  const copyLabel = useCallback(async () => {
+  const copyLabelAt = useCallback(async (idx: number) => {
     try {
-      await navigator.clipboard.writeText(labelText);
-      setCopied('all');
-      toast.success('Label copied — paste into NIIMBOT');
-      setTimeout(() => setCopied((c) => (c === 'all' ? null : c)), 2000);
+      await navigator.clipboard.writeText(labelTextFor(patients[idx]));
+      setCopiedIdx(idx);
+      const first = patients[idx].name.split(' ')[0];
+      toast.success(`${first}'s label copied — paste into NIIMBOT`);
+      setTimeout(() => setCopiedIdx((c) => (c === idx ? null : c)), 2000);
     } catch {
       toast.error('Copy failed — long-press to select manually');
     }
-  }, [labelText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [patients, usedTime]);
 
   const markCollection = async () => {
     setMarking(true);
     const stampAt = new Date();
     let location: { lat: number; lng: number; accuracy: number } | null = null;
-
-    // Best-effort geolocation — don't block if denied
     try {
       const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
         if (!navigator.geolocation) return reject('no_geo');
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: false,
-          timeout: 5000,
-          maximumAge: 60_000,
-        });
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 5000, maximumAge: 60_000 });
       });
-      location = {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
-      };
-    } catch { /* ignore — geo opt-in */ }
+      location = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+    } catch { /* opt-in */ }
 
     try {
       const { error } = await supabase
         .from('appointments')
-        .update({
-          collection_at: stampAt.toISOString(),
-          ...(location ? { collection_location: location } : {}),
-        })
+        .update({ collection_at: stampAt.toISOString(), ...(location ? { collection_location: location } : {}) })
         .eq('id', appointmentId);
       if (error) throw error;
       setMarkedAt(stampAt);
@@ -143,6 +142,8 @@ const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patient
     }
   };
 
+  const isBundle = patients.length > 1;
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !marking && onClose()}>
       <DialogContent className="max-w-md w-[95vw] p-4 sm:p-5 max-h-[90vh] overflow-y-auto">
@@ -150,52 +151,70 @@ const TubeLabelModal: React.FC<Props> = ({ open, onClose, appointmentId, patient
           <DialogTitle className="flex items-center gap-2">
             <Printer className="h-5 w-5 text-[#B91C1C]" />
             Tube Label — NIIMBOT
+            {isBundle && (
+              <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                <Users className="h-3 w-3" /> Bundle · {patients.length}
+              </span>
+            )}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3">
           <p className="text-xs text-gray-600">
-            Tap the label below to copy all 3 lines, then paste into the NIIMBOT app and print. Collection time defaults to now —
-            hit <strong>Mark collection time</strong> when you finish the draw to lock the timestamp.
+            {isBundle
+              ? `Tap each label below to copy that patient's 3 lines, then paste into NIIMBOT and print. Repeat for all ${patients.length} patients. Collection time defaults to now — hit Mark collection time when you finish.`
+              : 'Tap the label below to copy all 3 lines, then paste into the NIIMBOT app and print. Collection time defaults to now — hit Mark collection time when you finish the draw to lock the timestamp.'}
           </p>
 
-          {/* Single-click label preview — entire block is the copy target */}
-          <button
-            type="button"
-            onClick={copyLabel}
-            className="w-full text-left border-2 rounded-xl bg-white hover:bg-gray-50 active:bg-gray-100 transition overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/40"
-            style={{ borderColor: copied === 'all' ? '#10b981' : '#e5e7eb' }}
-            title="Tap to copy all 3 lines"
-          >
-            <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
-              <span className="flex items-center gap-1.5">
-                <FileText className="h-3 w-3" /> NIIMBOT label preview
-              </span>
-              <span className="flex items-center gap-1 text-[10px] normal-case tracking-normal">
-                {copied === 'all' ? (
-                  <><Check className="h-3.5 w-3.5 text-emerald-600" /> <span className="text-emerald-700 font-bold">Copied</span></>
-                ) : (
-                  <><Copy className="h-3.5 w-3.5 text-gray-500" /> <span className="text-gray-600">Tap to copy</span></>
-                )}
-              </span>
-            </div>
-            <div className="p-4 font-mono">
-              <div className="flex items-center gap-2 mb-1">
-                <User className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
-                <span className="text-base font-bold text-gray-900 truncate">{lastFirstName}</span>
-              </div>
-              <div className="flex items-center gap-2 mb-1">
-                <Calendar className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
-                <span className="text-sm font-semibold text-gray-800">{displayDob}</span>
-                <span className="text-[10px] uppercase text-gray-400 ml-1">DOB</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
-                <span className="text-sm font-semibold text-gray-800">{displayTime(usedTime)} {displayDate(usedTime)}</span>
-                <span className="text-[10px] uppercase text-gray-400 ml-1">collected</span>
-              </div>
-            </div>
-          </button>
+          {/* One label card per patient */}
+          {patients.map((p, idx) => {
+            const isCopied = copiedIdx === idx;
+            const lastFirst = formatLastFirst(p.name);
+            const dobStr = formatDob(p.dob);
+            return (
+              <button
+                key={`${p.name}-${idx}`}
+                type="button"
+                onClick={() => copyLabelAt(idx)}
+                className="w-full text-left border-2 rounded-xl bg-white hover:bg-gray-50 active:bg-gray-100 transition overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/40"
+                style={{ borderColor: isCopied ? '#10b981' : '#e5e7eb' }}
+                title={`Tap to copy ${p.name}'s label`}
+              >
+                <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+                  <span className="flex items-center gap-1.5">
+                    <FileText className="h-3 w-3" />
+                    {isBundle ? `Patient ${idx + 1} of ${patients.length}` : 'NIIMBOT label preview'}
+                  </span>
+                  <span className="flex items-center gap-1 text-[10px] normal-case tracking-normal">
+                    {isCopied ? (
+                      <><Check className="h-3.5 w-3.5 text-emerald-600" /> <span className="text-emerald-700 font-bold">Copied</span></>
+                    ) : (
+                      <><Copy className="h-3.5 w-3.5 text-gray-500" /> <span className="text-gray-600">Tap to copy</span></>
+                    )}
+                  </span>
+                </div>
+                <div className="p-4 font-mono">
+                  <div className="flex items-center gap-2 mb-1">
+                    <User className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                    <span className="text-base font-bold text-gray-900 truncate">{lastFirst}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <Calendar className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                    <span className="text-sm font-semibold text-gray-800">{dobStr}</span>
+                    <span className="text-[10px] uppercase text-gray-400 ml-1">DOB</span>
+                    {dobStr === '—' && (
+                      <span className="text-[10px] text-amber-700 ml-1">add DOB in NIIMBOT</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                    <span className="text-sm font-semibold text-gray-800">{displayTime(usedTime)} {displayDate(usedTime)}</span>
+                    <span className="text-[10px] uppercase text-gray-400 ml-1">collected</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
 
           {markedAt ? (
             <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 text-xs text-emerald-800">
