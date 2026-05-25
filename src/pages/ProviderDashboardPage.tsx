@@ -15,6 +15,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { Loader2, Building2, Users, CheckCircle2, Clock, AlertCircle, FileText, MapPin, LogOut } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 
@@ -135,6 +136,11 @@ const ProviderDashboardPage: React.FC = () => {
   }
 
   return (
+    <>
+      <Helmet>
+        <title>{org?.name ? `${org.name} — Provider Dashboard | ConveLabs` : 'Provider Dashboard | ConveLabs'}</title>
+        <meta name="robots" content="noindex,nofollow" />
+      </Helmet>
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b border-gray-200">
@@ -231,6 +237,7 @@ const ProviderDashboardPage: React.FC = () => {
         </p>
       </main>
     </div>
+    </>
   );
 };
 

@@ -127,13 +127,26 @@ const TubeLabelModal: React.FC<Props> = ({
     } catch { /* opt-in */ }
 
     try {
-      const { error } = await supabase
-        .from('appointments')
-        .update({ collection_at: stampAt.toISOString(), ...(location ? { collection_location: location } : {}) })
-        .eq('id', appointmentId);
+      // N1 fix 2026-05-25: also flip status to 'specimen_delivered' so the
+      // visit stops appearing as "in_progress" forever. Phlebs were tapping
+      // Mark Collection then forgetting to flip status separately, leaving
+      // 10+ stale-status rows visible across dashboards. Single-step
+      // collection now closes the workflow loop.
+      //
+      // We use 'specimen_delivered' (not 'completed') so the visit still
+      // shows in the phleb's day view until they confirm specimen handoff.
+      // The auto-close-to-completed step can be wired to the SpecimenDelivery
+      // confirmation modal later.
+      const updates: Record<string, any> = {
+        collection_at: stampAt.toISOString(),
+        status: 'specimen_delivered',
+        updated_at: stampAt.toISOString(),
+        ...(location ? { collection_location: location } : {}),
+      };
+      const { error } = await supabase.from('appointments').update(updates).eq('id', appointmentId);
       if (error) throw error;
       setMarkedAt(stampAt);
-      toast.success(`Collection time stamped: ${displayTime(stampAt)}`);
+      toast.success(`Collection stamped: ${displayTime(stampAt)} · Status → Specimen Delivered`);
       onMarked?.();
     } catch (e: any) {
       toast.error(e.message || 'Failed to stamp collection time');

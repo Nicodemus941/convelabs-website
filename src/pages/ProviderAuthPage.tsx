@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://yluyonhrxxtyuiyrdixl.supabase.co';
@@ -55,6 +56,11 @@ const ProviderAuthPage: React.FC = () => {
   }, [token, navigate]);
 
   return (
+    <>
+      <Helmet>
+        <title>Provider Sign-In | ConveLabs Provider Portal</title>
+        <meta name="robots" content="noindex,nofollow" />
+      </Helmet>
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white p-4">
       <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
         {status === 'validating' && (
@@ -81,6 +87,7 @@ const ProviderAuthPage: React.FC = () => {
         )}
       </div>
     </div>
+    </>
   );
 };
 
