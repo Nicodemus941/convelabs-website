@@ -28,6 +28,8 @@ const PartnerWithUs = lazy(() => import('../pages/PartnerWithUs'));
 const PartnerWithUsThanks = lazy(() => import('../pages/PartnerWithUsThanks'));
 const BookNow = lazy(() => import('../pages/BookNow'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
+const ProviderAuthPage = lazy(() => import('../pages/ProviderAuthPage'));
+const ProviderDashboardPage = lazy(() => import('../pages/ProviderDashboardPage'));
 const PatientLabRequestPage = lazy(() => import('../pages/PatientLabRequestPage'));
 const AppointmentLabOrderUploadPage = lazy(() => import('../pages/AppointmentLabOrderUploadPage'));
 const AppointmentConfirmPage = lazy(() => import('../pages/AppointmentConfirmPage'));
@@ -80,6 +82,11 @@ export const routes = [
   <Route key="corporate-invite" path="/corporate-invite/:token" element={<CorporateInviteAccept />} />,
   <Route key="login" path="/login" element={<Login />} />,
   <Route key="provider" path="/provider" element={<ProviderLogin />} />,
+  // Partner Portal MVP (2026-05-25) — magic-link auth + patient dashboard
+  <Route key="provider-auth" path="/provider/auth/:token" element={<ProviderAuthPage />} />,
+  <Route key="provider-dashboard" path="/provider/dashboard" element={<ProviderDashboardPage />} />,
+  // /provider/login fallback for expired sessions just redirects to /provider
+  <Route key="provider-login-redirect" path="/provider/login" element={<Navigate to="/provider" replace />} />,
   <Route key="lab-request" path="/lab-request/:token" element={<PatientLabRequestPage />} />,
   <Route key="insurance-update" path="/insurance/update/:token" element={<InsuranceUpdatePage />} />,
   // No-auth-wall lab order upload from an existing scheduled appointment.
