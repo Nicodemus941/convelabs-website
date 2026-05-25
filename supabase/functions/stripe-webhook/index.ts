@@ -1706,6 +1706,22 @@ async function handleAppointmentPayment(session: any) {
           .update({ family_group_id: familyGroupId, companion_role: 'primary' })
           .eq('id', appointment.id);
 
+        // Resolve primary's tenant_id once for the loop — we'll use it to
+        // auto-create tenant_patients rows for any companion we can't match
+        // by email. Q1 fix (2026-05-25): the booking flow only ever stored
+        // companion NAMES, never canonical patient records, which broke lab
+        // order requests, history, NIIMBOT labels, and provider portal
+        // patient panels. From now on every companion gets a real
+        // tenant_patient row at booking time.
+        let _primaryTenantIdForCompanions: string | null = null;
+        if (patientId) {
+          try {
+            const { data: primaryTp } = await supabaseClient
+              .from('tenant_patients').select('tenant_id').eq('id', patientId).maybeSingle();
+            _primaryTenantIdForCompanions = (primaryTp as any)?.tenant_id || null;
+          } catch { /* non-blocking */ }
+        }
+
         for (let i = 0; i < companions.length; i++) {
           const c = companions[i] || {};
           const cName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || `Patient ${i + 2}`;
@@ -1720,6 +1736,37 @@ async function handleAppointmentPayment(session: any) {
                 .maybeSingle();
               if (tp) cPatientId = (tp as any).id;
             } catch { /* non-blocking */ }
+          }
+
+          // Q1 — Auto-create tenant_patient for companion when no email match.
+          // Companions typically don't have their own email (the primary booked
+          // for them), so this is the common path. We leave email + phone
+          // NULL on the companion's tenant_patient record to avoid colliding
+          // with the primary's (tenant_id, email) unique index. Runtime
+          // notification paths (request-appointment-lab-order, etc.) already
+          // walk up to the primary's contact when a companion has no contact.
+          if (!cPatientId && _primaryTenantIdForCompanions && cName) {
+            try {
+              const firstNamePart = cName.split(' ')[0] || cName;
+              const lastNamePart = cName.split(' ').slice(1).join(' ') || '(companion — confirm last name)';
+              const { data: newTp } = await supabaseClient
+                .from('tenant_patients')
+                .insert({
+                  tenant_id: _primaryTenantIdForCompanions,
+                  first_name: firstNamePart,
+                  last_name: lastNamePart,
+                  email: null, // Inherit from primary at notification time
+                  phone: null, // Same
+                  date_of_birth: c.dob || c.dateOfBirth || null,
+                  patient_notes: `Auto-created at booking ${new Date().toISOString().substring(0,10)} as companion of primary appt ${appointment.id}. Contact inherits from primary at runtime; DOB collect on next visit if missing.`,
+                  is_active: true,
+                })
+                .select('id')
+                .single();
+              if (newTp) cPatientId = (newTp as any).id;
+            } catch (e: any) {
+              console.warn(`[companion-tenant-patient-create] failed for ${cName}:`, e?.message);
+            }
           }
           const { error: cErr } = await supabaseClient.from('appointments').insert([{
             appointment_date: appointmentDate,
