@@ -48,10 +48,16 @@ const Home = () => {
         <link rel="dns-prefetch" href="https://fonts.gstatic.com" />
         <link rel="canonical" href="https://convelabs.com/" />
 
-        <title>Mobile Phlebotomy Trusted by NFL Athletes | Better Than the Lab | ConveLabs FL</title>
+        {/* Title rewrite 2026-05-25: removed marketing phrases ("NFL Athletes",
+            "Better Than the Lab") which burned 30+ chars of title-tag real
+            estate on zero-volume queries. New title leads with high-intent
+            keyword ("Mobile Phlebotomist Orlando") + concrete benefit
+            ("At-Home Blood Draws") + city qualifier. Same length, 10x
+            stronger search-intent match. */}
+        <title>Mobile Phlebotomist Orlando | At-Home Blood Draws Central FL | ConveLabs</title>
         <meta
           name="description"
-          content="Licensed mobile phlebotomist trusted by NFL athletes and fitness influencers (@morellifit, 1M+). One-try blood draws at your home, office, or hotel. Same-day service across Central Florida. On-time or your visit is free. In-office from $55, mobile from $150."
+          content="Licensed mobile phlebotomy in Orlando, Lake Mary, Winter Park, and Central Florida. A phlebotomist comes to your home or office. Specimens delivered same-day to Quest, LabCorp, or AdventHealth. Same-day appointments. In-office from $55, mobile from $150. On-time or your visit is free."
         />
         <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 
@@ -66,28 +72,28 @@ const Home = () => {
 
         {/* Open Graph */}
         <meta property="og:type" content="website" />
-        <meta property="og:title" content="Mobile Phlebotomy Trusted by NFL Athletes | ConveLabs" />
+        <meta property="og:title" content="Mobile Phlebotomist Orlando | At-Home Blood Draws | ConveLabs" />
         <meta
           property="og:description"
-          content='"Better than what I got in the NFL." — Licensed mobile phlebotomist. Same-day appointments across Central Florida. On-time or your visit is free.'
+          content="A licensed phlebotomist at your home or office. Specimens delivered same-day to Quest, LabCorp, or AdventHealth. Same-day appointments across Central Florida — on-time or your visit is free."
         />
         <meta property="og:image" content="https://www.convelabs.com/og-image.png" />
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
-        <meta property="og:image:alt" content="ConveLabs — Mobile Phlebotomy Trusted by NFL Athletes" />
+        <meta property="og:image:alt" content="ConveLabs — Mobile Phlebotomist serving Central Florida" />
         <meta property="og:url" content="https://convelabs.com/" />
         <meta property="og:site_name" content="ConveLabs" />
         <meta property="og:locale" content="en_US" />
 
         {/* Twitter */}
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Mobile Phlebotomy Trusted by NFL Athletes | ConveLabs" />
+        <meta name="twitter:title" content="Mobile Phlebotomist Orlando | At-Home Blood Draws | ConveLabs" />
         <meta
           name="twitter:description"
-          content='"Better than what I got in the NFL." — Licensed mobile phlebotomist. Same-day appointments. Central Florida.'
+          content="A licensed phlebotomist at your home or office. Specimens delivered same-day to Quest, LabCorp, or AdventHealth. Same-day across Central Florida."
         />
         <meta name="twitter:image" content="https://www.convelabs.com/og-image.png" />
-        <meta name="twitter:image:alt" content="ConveLabs — Mobile Phlebotomy Trusted by NFL Athletes" />
+        <meta name="twitter:image:alt" content="ConveLabs — Mobile Phlebotomist serving Central Florida" />
 
         {/* Schema: MedicalBusiness */}
         <script type="application/ld+json">

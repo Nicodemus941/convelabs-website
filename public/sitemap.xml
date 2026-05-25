@@ -1,64 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <!-- Main Pages -->
-  <url><loc>https://www.convelabs.com/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
-  <url><loc>https://www.convelabs.com/book-now</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
-  <url><loc>https://www.convelabs.com/pricing</loc><changefreq>weekly</changefreq><priority>0.9</priority></url>
-  <url><loc>https://www.convelabs.com/about</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/contact</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/faq</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+<!--
+  ConveLabs sitemap. Updated 2026-05-25 per YC SEO audit:
+  - Added <lastmod> on every URL (Google deprecated changefreq attention years ago)
+  - Removed 9 location "shortcut" URLs (e.g. /orlando) — they 301 to /locations/orlando
+    and don't need separate indexing. Was a doorway-page risk.
+  - Dropped 6 low-volume location pages from sitemap (still routable, just deindexed):
+    celebration, isleworth, bay-hill, golden-oak, heathrow-golf, yacht-mobile-lab
+  - Consolidated service variations: kept /concierge-phlebotomy as canonical.
+    /luxury-mobile-phlebotomy and /executive-health-orlando now 301 to it.
+  - Removed /sales-funnel (internal page leak — should have been noindex)
+  - Kept 4 canonical location pages (Orlando, Winter Park, Windermere, Doctor Phillips)
+    + Lake Nona as a 5th covering growing-market suburbs
 
-  <!-- Services -->
-  <url><loc>https://www.convelabs.com/luxury-mobile-phlebotomy</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://www.convelabs.com/concierge-phlebotomy</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://www.convelabs.com/executive-health-orlando</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://www.convelabs.com/lab-testing</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/vs-labcorp</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/nationwide-mobile-phlebotomy-network</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/guarantee</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  Result: 48 URLs → 24 URLs. Higher density of indexable signal.
+  Maintainer: regenerate lastmod via build script on every Vercel deploy.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Main pages -->
+  <url><loc>https://www.convelabs.com/</loc><lastmod>2026-05-25</lastmod><priority>1.0</priority></url>
+  <url><loc>https://www.convelabs.com/book-now</loc><lastmod>2026-05-25</lastmod><priority>0.9</priority></url>
+  <url><loc>https://www.convelabs.com/pricing</loc><lastmod>2026-05-25</lastmod><priority>0.9</priority></url>
+  <url><loc>https://www.convelabs.com/about</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/contact</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/faq</loc><lastmod>2026-05-25</lastmod><priority>0.6</priority></url>
+
+  <!-- Services (consolidated) -->
+  <url><loc>https://www.convelabs.com/concierge-phlebotomy</loc><lastmod>2026-05-25</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.convelabs.com/lab-testing</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/vs-labcorp</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/guarantee</loc><lastmod>2026-05-25</lastmod><priority>0.5</priority></url>
+  <url><loc>https://www.convelabs.com/nationwide-mobile-phlebotomy-network</loc><lastmod>2026-05-25</lastmod><priority>0.5</priority></url>
 
   <!-- Membership -->
-  <url><loc>https://www.convelabs.com/membership</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://www.convelabs.com/membership/individual</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/membership/family</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/membership</loc><lastmod>2026-05-25</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.convelabs.com/membership/individual</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/membership/family</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
 
-  <!-- Locations -->
-  <url><loc>https://www.convelabs.com/locations/orlando</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://www.convelabs.com/locations/winter-park</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/locations/windermere</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/locations/doctor-phillips</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/locations/celebration</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/locations/isleworth</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/locations/bay-hill</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/locations/golden-oak</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/locations/lake-nona</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/locations/heathrow-golf</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/locations/yacht-mobile-lab</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+  <!-- Locations — 5 canonical city/area pages. Others are still routable
+       (existing backlinks won't break) but no longer indexed. -->
+  <url><loc>https://www.convelabs.com/locations/orlando</loc><lastmod>2026-05-25</lastmod><priority>0.9</priority></url>
+  <url><loc>https://www.convelabs.com/locations/winter-park</loc><lastmod>2026-05-25</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.convelabs.com/locations/windermere</loc><lastmod>2026-05-25</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.convelabs.com/locations/doctor-phillips</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://www.convelabs.com/locations/lake-nona</loc><lastmod>2026-05-25</lastmod><priority>0.7</priority></url>
 
-  <!-- Location Shortcuts -->
-  <url><loc>https://www.convelabs.com/orlando</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/winter-park</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/windermere</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/doctor-phillips</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/celebration</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/isleworth</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/bay-hill</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/golden-oak</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-  <url><loc>https://www.convelabs.com/lake-nona</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
-
-  <!-- Business -->
-  <url><loc>https://www.convelabs.com/b2b</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/corporate</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://www.convelabs.com/sales-funnel</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <!-- Partner / corporate (cold-email leads click through to /partner-with-us) -->
+  <url><loc>https://www.convelabs.com/partner-with-us</loc><lastmod>2026-05-25</lastmod><priority>0.8</priority></url>
+  <url><loc>https://www.convelabs.com/b2b</loc><lastmod>2026-05-25</lastmod><priority>0.6</priority></url>
+  <url><loc>https://www.convelabs.com/corporate</loc><lastmod>2026-05-25</lastmod><priority>0.6</priority></url>
 
   <!-- Blog -->
-  <url><loc>https://www.convelabs.com/blog</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
-
-  <!-- Auth -->
-  <url><loc>https://www.convelabs.com/login</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
-  <url><loc>https://www.convelabs.com/signup</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://www.convelabs.com/blog</loc><lastmod>2026-05-25</lastmod><priority>0.6</priority></url>
 
   <!-- Legal -->
-  <url><loc>https://www.convelabs.com/privacy-policy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
-  <url><loc>https://www.convelabs.com/terms-of-service</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>https://www.convelabs.com/privacy-policy</loc><lastmod>2026-05-25</lastmod><priority>0.3</priority></url>
+  <url><loc>https://www.convelabs.com/terms-of-service</loc><lastmod>2026-05-25</lastmod><priority>0.3</priority></url>
 </urlset>

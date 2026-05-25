@@ -15,6 +15,23 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/luxury-mobile-phlebotomy",
+      "destination": "/concierge-phlebotomy",
+      "permanent": true
+    },
+    {
+      "source": "/executive-health-orlando",
+      "destination": "/concierge-phlebotomy",
+      "permanent": true
+    },
+    {
+      "source": "/sales-funnel",
+      "destination": "/",
+      "permanent": true
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
