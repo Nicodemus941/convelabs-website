@@ -54,6 +54,17 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
   const [tier, setTier] = useState<Tier>(defaultTier);
   const [personalNote, setPersonalNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Bug fix 2026-05-25 (Nicolas Chaillan case): admin needs to be able to
+  // override the email per-invite (e.g. send to a patient's personal
+  // address instead of their work address on file). Editable input
+  // initialized from the prop. Overriding here does NOT mutate the
+  // canonical tenant_patients.email — it just changes where THIS invite
+  // gets sent.
+  const [emailOverride, setEmailOverride] = useState<string>(patientEmail || '');
+  useEffect(() => { if (open) setEmailOverride(patientEmail || ''); }, [open, patientEmail]);
+  const effectiveEmail = emailOverride.trim() || patientEmail;
+  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(effectiveEmail);
+  const emailWasChanged = emailOverride.trim().toLowerCase() !== (patientEmail || '').trim().toLowerCase();
 
   // Proxy / delegate — so admin can register a patient whose boss/assistant pays
   const [delegateExpanded, setDelegateExpanded] = useState(false);
@@ -96,7 +107,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
-          patient_email: patientEmail,
+          patient_email: effectiveEmail,
           patient_name: patientName,
           tier,
           personal_note: personalNote.trim() || null,
@@ -106,7 +117,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
       if (!resp.ok) throw new Error(j.error || 'Send failed');
       // Audit row
       await supabase.from('membership_offers_sent').insert({
-        patient_email: patientEmail.toLowerCase(),
+        patient_email: effectiveEmail.toLowerCase(),
         patient_name: patientName,
         tier, personal_note: personalNote.trim() || null,
       });
@@ -125,13 +136,13 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
     // this is the "Suzanne pays for AJ" pattern. Delegate email receives the
     // Stripe invoice and the card of record. Patient stays clinical-comms only.
     const useDelegateBilling = delegateExpanded && delegateName.trim() && delegateEmail.trim();
-    const invoiceEmail = useDelegateBilling ? delegateEmail.trim() : patientEmail;
+    const invoiceEmail = useDelegateBilling ? delegateEmail.trim() : effectiveEmail;
     const invoiceName = useDelegateBilling ? delegateName.trim() : patientName;
 
     if (!confirm(
       useDelegateBilling
-        ? `Send ${delegateName.split(' ')[0]} a Stripe invoice for ${patientName}'s ${TIER_META[tier].label} ($${TIER_META[tier].price})?\n\nInvoice goes to: ${delegateEmail}\nMembership activates on: ${patientEmail}`
-        : `Send ${patientName} a Stripe invoice for ${TIER_META[tier].label} ($${TIER_META[tier].price})?`
+        ? `Send ${delegateName.split(' ')[0]} a Stripe invoice for ${patientName}'s ${TIER_META[tier].label} ($${TIER_META[tier].price})?\n\nInvoice goes to: ${delegateEmail}\nMembership activates on: ${effectiveEmail}`
+        : `Send ${patientName} a Stripe invoice for ${TIER_META[tier].label} ($${TIER_META[tier].price})?\n\nInvoice email: ${effectiveEmail}`
     )) return;
 
     setSubmitting(true);
@@ -142,7 +153,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({
-          patient_email: patientEmail,      // clinical comms email (always patient's)
+          patient_email: effectiveEmail,    // clinical comms email — admin can override per-invite
           patient_name: patientName,
           tier,
           billing_email: useDelegateBilling ? delegateEmail : null,
@@ -155,13 +166,13 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
       // If delegate info present, create the patient_delegates authorization row
       if (useDelegateBilling) {
         const user = (await supabase.auth.getUser()).data.user;
-        const consent_text = `On ${new Date().toISOString()}, ConveLabs admin (${user?.email}) registered ${patientName} for a ${TIER_META[tier].label} membership, with ${delegateName} (${delegateEmail}) designated as the billing contact and authorized delegate. The patient will receive clinical notifications at ${patientEmail}; the delegate will receive receipts and invoices.`;
+        const consent_text = `On ${new Date().toISOString()}, ConveLabs admin (${user?.email}) registered ${patientName} for a ${TIER_META[tier].label} membership, with ${delegateName} (${delegateEmail}) designated as the billing contact and authorized delegate. The patient will receive clinical notifications at ${effectiveEmail}; the delegate will receive receipts and invoices.`;
         await supabase.from('patient_delegates').insert({
           delegate_email: delegateEmail.toLowerCase(),
           delegate_name: delegateName,
           delegate_phone: delegatePhone || null,
           relationship: delegateRel,
-          patient_email: patientEmail.toLowerCase(),
+          patient_email: effectiveEmail.toLowerCase(),
           patient_name: patientName,
           can_book: true,
           can_pay: delegatePayCard,
@@ -196,7 +207,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
             <Sparkles className="h-5 w-5 text-[#B91C1C]" /> Membership for {firstName}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            {patientEmail}
+            {patientName}
           </DialogDescription>
         </DialogHeader>
 
@@ -224,6 +235,35 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
           </div>
         ) : (
           <>
+            {/* Send-to email — editable per-invite (bug fix 2026-05-25).
+                Admin may need to send to a different address than what's on
+                the patient record (e.g. work vs personal). Overriding here
+                does NOT modify tenant_patients.email. */}
+            <div>
+              <Label className="text-xs flex items-center justify-between">
+                <span>Send to email *</span>
+                {emailWasChanged && (
+                  <span className="text-[10px] text-amber-700 font-semibold">⚠ Overriding patient's on-file email</span>
+                )}
+              </Label>
+              <Input
+                type="email"
+                value={emailOverride}
+                onChange={e => setEmailOverride(e.target.value)}
+                placeholder={patientEmail || 'patient@email.com'}
+                className={!emailLooksValid ? 'border-red-300 focus-visible:ring-red-200' : ''}
+              />
+              {!emailLooksValid && (
+                <p className="text-[10px] text-red-600 mt-0.5">Email format looks off — fix before sending.</p>
+              )}
+              {emailWasChanged && emailLooksValid && (
+                <p className="text-[10px] text-gray-500 mt-0.5">
+                  This invite goes to <strong>{effectiveEmail}</strong>. On-file email
+                  (<span className="font-mono">{patientEmail}</span>) is unchanged.
+                </p>
+              )}
+            </div>
+
             {/* Tabs */}
             <div className="flex gap-1 border-b">
               <button
@@ -363,11 +403,11 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
             <div className="flex items-center justify-between pt-2 border-t">
               <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
               {tab === 'offer' ? (
-                <Button onClick={sendOffer} disabled={submitting} className="bg-[#B91C1C] hover:bg-[#991B1B] gap-1.5">
+                <Button onClick={sendOffer} disabled={submitting || !emailLooksValid} className="bg-[#B91C1C] hover:bg-[#991B1B] gap-1.5" title={!emailLooksValid ? 'Fix the email address first' : ''}>
                   {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : <><Send className="h-4 w-4" /> Send {firstName}'s offer</>}
                 </Button>
               ) : (
-                <Button onClick={registerWithInvoice} disabled={submitting} className="bg-[#B91C1C] hover:bg-[#991B1B] gap-1.5">
+                <Button onClick={registerWithInvoice} disabled={submitting || !emailLooksValid} className="bg-[#B91C1C] hover:bg-[#991B1B] gap-1.5" title={!emailLooksValid ? 'Fix the email address first' : ''}>
                   {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : <><DollarSign className="h-4 w-4" /> Send Stripe invoice</>}
                 </Button>
               )}
