@@ -40,7 +40,14 @@ export const createCheckoutSession = async (
         supernovaAddOnId,
         amount,
         isPartnershipPurchase: metadata?.isUpgrade ? false : true, // Don't treat upgrades as partnership purchases
-        guestCheckoutEmail: isGuestCheckout ? 'guest@placeholder.com' : undefined,
+        // BUG FIX 2026-05-25: prefer the metadata-supplied prefill_email when the
+        // recipient is logged out (e.g. clicked a /join?email=... invite link from
+        // their inbox). Previously this hardcoded 'guest@placeholder.com', which
+        // locked Stripe Checkout to that placeholder, made Stripe webhooks misattribute
+        // the payment, and stranded the recipient's tenant_patients tier mirror.
+        guestCheckoutEmail: isGuestCheckout
+          ? (metadata?.prefill_email || 'guest@placeholder.com')
+          : undefined,
         isGuestCheckout,
         isUpgrade: metadata?.isUpgrade === 'true' // Pass the upgrade flag to the edge function
       },
