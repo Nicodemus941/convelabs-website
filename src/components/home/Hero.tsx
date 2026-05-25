@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Shield, PlayCircle } from "lucide-react";
+import { ArrowRight, Shield, Stethoscope } from "lucide-react";
 import { motion, type Variants } from "framer-motion";
 import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 import { supabase } from "@/integrations/supabase/client";
@@ -41,8 +41,13 @@ const Hero = () => {
     window.location.href = GHS_BOOKING_PAGE;
   };
 
-  const scrollToReviews = () => {
-    const el = document.getElementById('testimonials');
+  // YC critique 2026-05-25: secondary CTA should be a forward step toward
+  // purchase, not lateral scrolling. Swapped from "Watch Reviews" to
+  // "How It Works" — scrolls to the value-stack section that explains the
+  // product. Reviews are still accessible further down, but the conversion
+  // path is now: book OR understand the product. Both push toward a yes.
+  const scrollToHowItWorks = () => {
+    const el = document.getElementById('how-it-works');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
@@ -137,13 +142,13 @@ const Hero = () => {
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button
-                onClick={scrollToReviews}
+                onClick={scrollToHowItWorks}
                 size="lg"
                 variant="outline"
                 className="h-14 px-8 font-semibold text-lg rounded-xl border-2 border-white/30 bg-white/10 backdrop-blur-sm text-white hover:bg-white hover:text-gray-900 w-full sm:w-auto"
               >
-                <PlayCircle className="mr-2 h-5 w-5" />
-                Watch Reviews
+                <Stethoscope className="mr-2 h-5 w-5" />
+                How It Works
               </Button>
             </motion.div>
 
@@ -158,9 +163,9 @@ const Hero = () => {
                 <span className="text-white/70">(164 reviews)</span>
               </span>
               <span className="text-white/40">·</span>
-              <span>🏈 Trusted by NFL athletes</span>
+              <span>🏈 Trusted by NFL LB Deiontrez Mount</span>
               <span className="text-white/40">·</span>
-              <span>💪 Endorsed by <span className="font-semibold text-white">@morellifit</span> <span className="text-white/60">(1M+)</span></span>
+              <span>💪 Featured by fitness influencer <span className="font-semibold text-white">@morellifit</span></span>
               <span className="text-white/40">·</span>
               <span>🛡️ HIPAA Compliant</span>
               <span className="text-white/40">·</span>
@@ -175,7 +180,7 @@ const Hero = () => {
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400"></span>
                 </span>
                 <span className="text-sm font-semibold text-green-100">
-                  Same-day appointments available
+                  Same-day appointments — Central Florida
                 </span>
               </div>
             </motion.div>
