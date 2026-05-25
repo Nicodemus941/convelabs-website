@@ -152,10 +152,14 @@ const Hero = () => {
               </Button>
             </motion.div>
 
-            {/* Compact credibility stripe */}
+            {/* Credibility stripe — Hormozi 3-anchor rule. NFL athlete +
+                @morellifit moved to the Meet Your Phlebotomist section below
+                where they have full context (Mount's teams, Morelli's brands).
+                Hero stripe keeps the 3 most universally trust-building
+                signals for a cold stranger landing from Google. */}
             <motion.div
               variants={itemVariants}
-              className="flex flex-wrap justify-center gap-x-5 gap-y-2 text-sm text-white/80"
+              className="flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-sm text-white/80"
             >
               <span className="flex items-center gap-1.5">
                 <span className="text-yellow-400">⭐</span>
@@ -163,13 +167,9 @@ const Hero = () => {
                 <span className="text-white/70">(164 reviews)</span>
               </span>
               <span className="text-white/40">·</span>
-              <span>🏈 Trusted by NFL LB Deiontrez Mount</span>
-              <span className="text-white/40">·</span>
-              <span>💪 Featured by fitness influencer <span className="font-semibold text-white">@morellifit</span></span>
+              <span className="font-semibold text-white">{visitCount.toLocaleString()}+ home visits</span>
               <span className="text-white/40">·</span>
               <span>🛡️ HIPAA Compliant</span>
-              <span className="text-white/40">·</span>
-              <span className="text-white">{visitCount.toLocaleString()}+ home visits</span>
             </motion.div>
 
             {/* Live urgency badge */}
