@@ -194,7 +194,7 @@ const PartnerWithUs: React.FC = () => {
                   Partner with ConveLabs — your patients, our collection
                 </h1>
                 <p className="text-sm sm:text-base md:text-lg text-gray-600 max-w-2xl mx-auto leading-relaxed">
-                  Join the providers sending their patients to the concierge phlebotomy team that handles Aristotle Education, ND Wellness, The Restoration Place, Kristen Blake Wellness, and more.
+                  Built for concierge MDs, functional medicine clinics, and longevity practices across Central Florida that don't want their patients chasing labs.
                 </p>
               </div>
 
@@ -395,10 +395,10 @@ const PartnerWithUs: React.FC = () => {
 
               <div className="mt-8 sm:mt-10 text-center">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-2">
-                  Providers who already trust us
+                  Trusted across Central Florida
                 </p>
                 <p className="text-xs sm:text-sm text-gray-700 leading-relaxed max-w-3xl mx-auto">
-                  Aristotle Education · Clinical Associates of Orlando · Elite Medical Concierge · Dr. Jason Littleton · Natura Integrative and Functional Medicine · ND Wellness · The Restoration Place · Kristen Blake Wellness
+                  100+ mobile draws this quarter for concierge MDs, functional medicine clinics, and longevity practices in Orlando, Lake Mary, Winter Park, Windermere, and Doctor Phillips.
                 </p>
               </div>
             </div>
