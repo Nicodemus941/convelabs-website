@@ -21,6 +21,7 @@ const SERVICE_COLORS: Record<string, string> = {
 
 const SuperAdminDashboard = () => {
   const [loading, setLoading] = useState(true);
+  const [phlebPayoutsDisabled, setPhlebPayoutsDisabled] = useState(false);
   const [stats, setStats] = useState({
     totalAppointments: 0, thisWeekAppointments: 0, completedToday: 0,
     revenueMTD: 0, totalPatients: 0, newPatientsMonth: 0,
@@ -66,7 +67,10 @@ const SuperAdminDashboard = () => {
         supabase.from('tenant_patients').select('*', { count: 'exact', head: true }).gte('created_at', monthStartStr),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).in('invoice_status', ['sent', 'reminded']).eq('is_vip', false),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'cancelled').gte('appointment_date', monthStartStr),
-        supabase.from('appointments').select('total_amount, tip_amount, service_type, appointment_date').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
+        // 2026-05-26: added booking_source — the "Online vs Manual" card was
+        // showing 0/0 because this SELECT didn't include it. The filter at
+        // line 90-91 hit undefined for every row.
+        supabase.from('appointments').select('total_amount, tip_amount, service_type, appointment_date, booking_source').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
         supabase.from('appointments').select('*').order('appointment_date', { ascending: false }).order('appointment_time', { ascending: true }).limit(10),
         supabase.from('appointments').select('service_type').gte('appointment_date', monthStartStr).not('status', 'eq', 'cancelled'),
         supabase.from('appointments').select('patient_email').eq('status', 'completed'),
@@ -104,6 +108,18 @@ const SuperAdminDashboard = () => {
         avgRevenue: Math.round(revenueMTD / completedCount),
         repeatRate, onlineBookings, manualBookings,
       });
+
+      // Read kill-switch flag so Profit First card reflects current cash flow
+      // model (kill-switch ON = 100% to business, NO phleb cut).
+      try {
+        const { data: ks } = await supabase
+          .from('system_settings' as any)
+          .select('value')
+          .eq('key', 'phleb_connect_payouts_disabled')
+          .maybeSingle();
+        const raw = (ks as any)?.value;
+        setPhlebPayoutsDisabled(raw === true || raw === 'true' || String(raw).toLowerCase() === 'true');
+      } catch { /* default false */ }
 
       setRecentAppointments(recent || []);
 
@@ -241,9 +257,14 @@ const SuperAdminDashboard = () => {
         </Card>
         <Card className="shadow-sm border-l-4 border-l-amber-500">
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Revenue per Patient</p>
-            <p className="text-2xl font-bold">{loading ? '—' : `$${stats.totalPatients > 0 ? Math.round(stats.revenueMTD / stats.totalPatients) : 0}`}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">LTV indicator (MTD)</p>
+            <p className="text-xs text-muted-foreground mb-1">Revenue per Visit</p>
+            {/* 2026-05-26: Was "Revenue per Patient" using totalPatients (510)
+                as denominator — but only ~17% of those ever booked. The
+                resulting $24/patient was misleading. Switched to per-visit
+                (revenueMTD / completedMonth) which is the actual unit
+                economic — what you take in for each draw performed. */}
+            <p className="text-2xl font-bold">{loading ? '—' : `$${stats.completedMonth > 0 ? Math.round(stats.revenueMTD / stats.completedMonth) : 0}`}</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Per completed visit (MTD)</p>
           </CardContent>
         </Card>
       </div>
@@ -289,13 +310,27 @@ const SuperAdminDashboard = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { label: "Owner's Pay", pct: 25, color: 'bg-[#B91C1C]' },
-                { label: 'Profit', pct: 15, color: 'bg-emerald-500' },
-                { label: 'Operating Expenses', pct: 30, color: 'bg-blue-500' },
-                { label: 'Phlebotomist Pay', pct: 30, color: 'bg-purple-500' },
-              ].map(({ label, pct, color }) => {
+            <div className={`grid grid-cols-2 ${phlebPayoutsDisabled ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-4`}>
+              {/* 2026-05-26: Profit First splits now respond to the kill-switch
+                  flag. When phleb payouts are disabled (current state: owner is
+                  the phleb), the 30% Phlebotomist Pay bucket is redistributed
+                  to Owner's Pay (now 40%) + Profit (now 25%) — same ratio the
+                  owner actually pockets. Card hides the phleb bucket entirely.
+                  When kill-switch flips back ON for franchisees etc., the
+                  full 4-bucket Hormozi split returns. */}
+              {(phlebPayoutsDisabled
+                ? [
+                    { label: "Owner's Pay", pct: 40, color: 'bg-[#B91C1C]' },
+                    { label: 'Profit',       pct: 25, color: 'bg-emerald-500' },
+                    { label: 'Operating Expenses', pct: 35, color: 'bg-blue-500' },
+                  ]
+                : [
+                    { label: "Owner's Pay", pct: 25, color: 'bg-[#B91C1C]' },
+                    { label: 'Profit',       pct: 15, color: 'bg-emerald-500' },
+                    { label: 'Operating Expenses', pct: 30, color: 'bg-blue-500' },
+                    { label: 'Phlebotomist Pay',   pct: 30, color: 'bg-purple-500' },
+                  ]
+              ).map(({ label, pct, color }) => {
                 const amount = (stats.revenueMTD * pct) / 100;
                 return (
                   <div key={label} className="text-center">
