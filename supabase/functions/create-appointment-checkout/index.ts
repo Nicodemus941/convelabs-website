@@ -585,16 +585,37 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (pricing && serverTier !== 'none') {
+    // 2026-05-25: bundled-subscription safety net. When the patient is
+    // signing up for a membership AS PART OF this checkout (subscribeToMembership
+    // in payload), they're not yet an active member server-side — verifyMembership
+    // returns 'none'. Pre-fix, the price-correction below was skipped entirely
+    // for these patients, so if the client UI failed to apply the discount
+    // (state bug, race, or malicious tamper), they'd be billed the full
+    // non-member price on the visit while still being charged the membership
+    // fee on top. Now the effective-tier-for-pricing also considers the
+    // bundled plan name, applying the correction either way.
+    let bundledTier: MemberTier = 'none';
+    if (subscribeToMembership?.planName) {
+      const planLower = String(subscribeToMembership.planName).toLowerCase();
+      if (planLower.includes('concierge')) bundledTier = 'concierge';
+      else if (planLower.includes('vip')) bundledTier = 'vip';
+      else if (planLower.includes('regular') || planLower.includes('member') || planLower.includes('essential')) bundledTier = 'member';
+    }
+    // Server-verified active membership wins; else fall back to bundled tier
+    // (becoming a member RIGHT NOW); else 'none'.
+    const effectiveTier: MemberTier = serverTier !== 'none' ? serverTier : bundledTier;
+
+    if (pricing && effectiveTier !== 'none') {
       const baseTierPrice = pricing[clientMemberTier as MemberTier] ?? pricing['none'];
-      const serverTierPrice = pricing[serverTier];
-      // If server tier gives a lower price than what client applied, discount the difference
+      const serverTierPrice = pricing[effectiveTier];
+      // If effective tier gives a lower price than what client applied, discount the difference
       if (serverTierPrice < baseTierPrice) {
         priceCorrection = (baseTierPrice - serverTierPrice) * 100; // cents
         amount = Math.max(0, amount - priceCorrection);
+        const source = serverTier !== 'none' ? 'server-verified' : 'bundled-subscription';
         console.warn(
-          `[member-discount-correction] ${patientDetails.email} serviceType=${serviceType} ` +
-          `clientTier=${clientMemberTier} serverTier=${serverTier} ` +
+          `[price-correction:${source}] ${patientDetails.email} serviceType=${serviceType} ` +
+          `clientTier=${clientMemberTier} effectiveTier=${effectiveTier} ` +
           `client=$${clientAmount / 100} server=$${amount / 100} saved=$${priceCorrection / 100}`
         );
       }
@@ -611,19 +632,25 @@ Deno.serve(async (req) => {
       const additionalArr: any[] = Array.isArray((pricingBreakdown as any)?.additional)
         ? (pricingBreakdown as any).additional : [];
       const additionalCount = additionalArr.length;
+      // 2026-05-25: extended to use effectiveTier so bundled Concierge signups
+      // also get the 2 free family slots applied server-side on the FIRST visit
+      // (not just renewals). Bundled VIP signups inherit founding status from
+      // the seat-claim that runs in stripe-webhook AFTER payment, so the family
+      // slot waiver here defers to existing-member case (founding=true required).
       let perPatientCents = 7500; // $75 non-member default
-      if (serverTier === 'concierge') perPatientCents = 3500;
-      else if (serverTier === 'vip') perPatientCents = 4500;
-      else if (serverTier === 'member') perPatientCents = 5500;
-      const freeSlots = serverTier === 'concierge' ? 2
-        : (serverIsFounding && serverTier === 'vip') ? 1
+      if (effectiveTier === 'concierge') perPatientCents = 3500;
+      else if (effectiveTier === 'vip') perPatientCents = 4500;
+      else if (effectiveTier === 'member') perPatientCents = 5500;
+      const freeSlots = effectiveTier === 'concierge' ? 2
+        : (serverIsFounding && effectiveTier === 'vip') ? 1
         : 0;
       if (additionalCount > 0 && freeSlots > 0) {
         const slotsToWaive = Math.min(additionalCount, freeSlots);
         const waiverCents = slotsToWaive * perPatientCents;
         amount = Math.max(0, amount - waiverCents);
+        const source = serverTier !== 'none' ? 'server-verified' : 'bundled-subscription';
         console.warn(
-          `[founding-perk-server-waive] ${patientDetails.email} tier=${serverTier} ` +
+          `[founding-perk-server-waive:${source}] ${patientDetails.email} tier=${effectiveTier} ` +
           `founding=${serverIsFounding} additionalCount=${additionalCount} ` +
           `freeSlots=${freeSlots} waived=$${waiverCents / 100} new_amount=$${amount / 100}`
         );
