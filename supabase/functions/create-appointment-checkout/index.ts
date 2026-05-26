@@ -555,11 +555,19 @@ Deno.serve(async (req) => {
     const membership = await verifyMembership(patientDetails?.email);
     const serverTier = membership.tier;
     const serverIsFounding = membership.isFounding;
-    // Resolve pricing: hardcoded TIER_PRICING (legacy revenue services) FIRST,
-    // then fall back to admin-created services in services_enhanced. This lets
-    // admins ship new services from the UI without a code change.
-    let pricing: Record<MemberTier, number> | null = TIER_PRICING[serviceType] || null;
-    if (!pricing && serviceType) {
+    // 2026-05-26: services_enhanced is now the source of truth for pricing.
+    // Admin Services modal edits flow through to patient checkout in real
+    // time. TIER_PRICING in this file is kept as the last-resort fallback
+    // for safety (if DB row is missing, malformed, or zeroed out, the
+    // hardcoded values protect against $0 charges from misconfiguration).
+    //
+    // Validation guard: any tier price <= 0 OR tier price > none price
+    // is treated as misconfiguration → fall back to TIER_PRICING for that
+    // service entirely. Prevents owner from accidentally setting tier
+    // prices that are MORE expensive than non-member (would surprise
+    // patients) or $0 (would let everyone through for free).
+    let pricing: Record<MemberTier, number> | null = null;
+    if (serviceType) {
       try {
         const { data: svcRow } = await supabaseClient
           .from('services_enhanced')
@@ -569,19 +577,38 @@ Deno.serve(async (req) => {
         const isLive = svcRow && (svcRow as any).is_active && !(svcRow as any).archived_at;
         if (isLive) {
           const tp: any = (svcRow as any).tier_pricing || {};
-          // Cents → dollars to match TIER_PRICING shape
+          // Cents → dollars
           const c2d = (v: any) => (Number(v) || 0) / 100;
           const noneDollars = c2d(tp.none) || c2d((svcRow as any).base_price);
-          pricing = {
-            none:      noneDollars,
-            member:    c2d(tp.member)    || noneDollars,
-            vip:       c2d(tp.vip)       || c2d(tp.member) || noneDollars,
-            concierge: c2d(tp.concierge) || c2d(tp.vip) || c2d(tp.member) || noneDollars,
-          } as Record<MemberTier, number>;
-          console.log(`[db-pricing-fallback] resolved ${serviceType} from services_enhanced: ${JSON.stringify(pricing)}`);
+          const memberDollars = c2d(tp.member) || noneDollars;
+          const vipDollars = c2d(tp.vip) || memberDollars;
+          const conciergeDollars = c2d(tp.concierge) || vipDollars;
+          // Validation guard: refuse $0 base + refuse tier > none
+          const allValid =
+            noneDollars > 0 &&
+            memberDollars > 0 && memberDollars <= noneDollars &&
+            vipDollars > 0 && vipDollars <= memberDollars &&
+            conciergeDollars > 0 && conciergeDollars <= vipDollars;
+          if (allValid) {
+            pricing = {
+              none: noneDollars, member: memberDollars,
+              vip: vipDollars, concierge: conciergeDollars,
+            } as Record<MemberTier, number>;
+            console.log(`[db-pricing] ${serviceType} from services_enhanced: ${JSON.stringify(pricing)}`);
+          } else {
+            console.warn(`[db-pricing] ${serviceType} services_enhanced row failed validation (none=${noneDollars}, member=${memberDollars}, vip=${vipDollars}, concierge=${conciergeDollars}) — falling back to TIER_PRICING`);
+          }
         }
       } catch (e: any) {
-        console.warn('[db-pricing-fallback] lookup failed:', e?.message);
+        console.warn('[db-pricing] lookup failed (falling back to TIER_PRICING):', e?.message);
+      }
+    }
+    // Fallback to hardcoded TIER_PRICING (safety net for any service with no
+    // DB row, archived row, or row that failed validation).
+    if (!pricing) {
+      pricing = TIER_PRICING[serviceType] || null;
+      if (pricing) {
+        console.log(`[hardcoded-pricing-fallback] ${serviceType} from TIER_PRICING constant: ${JSON.stringify(pricing)}`);
       }
     }
 
