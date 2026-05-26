@@ -1304,11 +1304,22 @@ Deno.serve(async (req) => {
       console.warn(`[metadata-cap-guard] approaching cap: ${metadataKeyCount}/50 keys for service ${serviceType}`);
     }
 
+    // 2026-05-25: enable Stripe's native "Add promotion code" input when the
+    // patient is bundling a membership signup with this visit. This lets
+    // admin-issued / patient-targeted codes (e.g. HOSKINS24) work on the
+    // bundled /book-now flow, not just the bare /pricing membership signup.
+    // We gate to subscription-mode only because payment-mode visit-only
+    // checkouts already accept promo codes via the in-app form (handled by
+    // validate_promo_code RPC earlier in this function — patient sees the
+    // discount before Stripe).
+    const allowStripePromo = sessionMode === 'subscription';
+
     const session = await stripe.checkout.sessions.create({
       mode: sessionMode,
       customer: customerId,
       line_items: lineItems,
       metadata,
+      ...(allowStripePromo ? { allow_promotion_codes: true } : {}),
       ...(sessionMode === 'payment' ? {
         payment_intent_data: {
           metadata,
