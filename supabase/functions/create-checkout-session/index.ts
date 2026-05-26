@@ -321,11 +321,18 @@ Deno.serve(async (req) => {
         console.log(`Added ${selectedAddOn.name} add-on to checkout with price: ${addOnPrice}`);
       }
 
-      // Create the session configuration with our line items
+      // Create the session configuration with our line items.
+      // 2026-05-25: enabled allow_promotion_codes so patients can enter
+      // ConveLabs-issued Stripe coupons (e.g. CONCIERGE25) at the Stripe
+      // Checkout itself. Previously the membership signup flow had no
+      // discount input anywhere — neither on /pricing nor at Stripe —
+      // so patients who expected a discount (per founding pricing copy
+      // or admin-issued codes) hit a flat unit_amount with no recourse.
       let sessionConfig = {
         payment_method_types: ['card'],
         line_items: lineItems,
         mode: mode,
+        allow_promotion_codes: true,
         success_url: successUrl,
         cancel_url: cancelUrl,
         customer: stripeCustomer,
