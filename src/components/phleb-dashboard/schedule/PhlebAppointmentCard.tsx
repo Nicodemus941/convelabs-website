@@ -1096,14 +1096,22 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       workflow still needs chain-of-custody tracking regardless of
                       where the draw happened (Isabella Millians case 2026-04-21:
                       partner-naturamed visit, sample needed delivery to LabCorp). */}
+                  {/* BUG FIX 2026-05-25 (Tanner Dietel case): the N1 auto-flip
+                      on TubeLabelModal collection-stamping moves status from
+                      'in_progress' → 'specimen_delivered' immediately, which
+                      previously disabled this button. The chain-of-custody
+                      modal (lab dest, signature, delivery timestamp) needs to
+                      remain reachable after status='specimen_delivered' until
+                      the delivered_at stamp lands. Once delivered_at is set,
+                      the button locks. */}
                   <Button
                     size="sm"
                     className={`h-16 flex flex-col gap-1 ${
-                      appointment.status === 'in_progress'
+                      (appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))
                         ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
-                    disabled={appointment.status !== 'in_progress'}
+                    disabled={!(appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))}
                     onClick={(e) => { e.stopPropagation(); setShowSpecimenDelivery(true); }}
                   >
                     <Package className="h-4 w-4" />
