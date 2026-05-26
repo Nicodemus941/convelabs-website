@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
 /**
@@ -18,7 +19,16 @@ import { supabase } from '@/integrations/supabase/client';
  * actual phleb_payouts aggregate for real gross margin.
  */
 
-const ASSUMED_PHLEB_COST_PER_VISIT = 55; // dollars
+// 2026-05-26 — replaced hardcoded ASSUMED_PHLEB_COST_PER_VISIT with a
+// system_settings-aware lookup. Two modes:
+//   Kill-switch ON  (phleb_connect_payouts_disabled=true): owner is the
+//     phleb, 100% of revenue is business. Labor COGS effectively $0 — the
+//     phleb_payouts rows are tracking_only ledger entries, not real money
+//     out. Margin reflects the actual business cash flow.
+//   Kill-switch OFF: pull actual labor cost from staff_payouts.amount_cents
+//     where status='transferred' OR 'manual_owed' (real expected outflow).
+//
+// Supplies stays a per-visit estimate — that's still a real cash cost.
 const ASSUMED_SUPPLIES_PER_VISIT = 10;   // dollars
 const TARGET_GROSS_MARGIN_PCT = 53;       // strategic target
 
@@ -81,9 +91,36 @@ const daysBetween = (from: Date, to: Date): number =>
   Math.floor((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
 
 export const useHormoziData = () => {
+  const queryClient = useQueryClient();
+
+  // 2026-05-26 — Realtime invalidation. Subscribe to postgres_changes on the
+  // tables that drive every metric (revenue, visits, members, errors). Each
+  // INSERT/UPDATE invalidates the dashboard query — react-query refetches
+  // within ~1 second of the event. Replaces the prior "wait up to 2 min for
+  // staleTime to expire" behavior. staleTime stays at 2 min as the
+  // background guard against subscription drops, but in normal operation
+  // numbers update live as payments land.
+  useEffect(() => {
+    const tablesToWatch = [
+      'stripe_qb_sync_log',  // revenue
+      'appointments',        // visits, retention, channels
+      'user_memberships',    // active subscriptions
+      'staff_payouts',       // labor COGS (when kill-switch off)
+      'post_visit_sequences',// stuck-sequence count
+      'error_logs',          // unresolved errors
+    ];
+    const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hormozi-dashboard'] });
+    const channel = supabase.channel('hormozi-dashboard-realtime');
+    for (const table of tablesToWatch) {
+      channel.on('postgres_changes' as any, { event: '*', schema: 'public', table }, invalidate);
+    }
+    channel.subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [queryClient]);
+
   return useQuery<HormoziKPIs>({
     queryKey: ['hormozi-dashboard'],
-    staleTime: 2 * 60 * 1000, // 2 min — the dashboard should feel live but not thrash
+    staleTime: 2 * 60 * 1000, // 2 min background guard; realtime listener triggers refetch sooner
     queryFn: async () => {
       const now = new Date();
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -151,8 +188,37 @@ export const useHormoziData = () => {
         ? mtdAppts.reduce((s: number, a: any) => s + (Number(a.total_amount) || 0), 0) / visits_mtd
         : 0;
 
+      // Read kill-switch flag to know whether labor COGS is real ($0 under
+      // owner-operator mode) or pulled from staff_payouts (transferred mode).
+      let phlebPayoutsDisabled = false;
+      try {
+        const { data: ks } = await supabase
+          .from('system_settings' as any)
+          .select('value')
+          .eq('key', 'phleb_connect_payouts_disabled')
+          .maybeSingle();
+        const raw = (ks as any)?.value;
+        phlebPayoutsDisabled = raw === true || raw === 'true' || String(raw).toLowerCase() === 'true';
+      } catch { /* default to false */ }
+
+      let actual_phleb_cost_mtd = 0;
+      if (!phlebPayoutsDisabled) {
+        // Sum actual phleb payouts for visits this month (real cash out)
+        const { data: payouts } = await supabase
+          .from('staff_payouts' as any)
+          .select('amount_cents, created_at, status, payout_mode')
+          .gte('created_at', startOfMonth)
+          .in('status', ['succeeded', 'manual_owed']);
+        actual_phleb_cost_mtd = ((payouts as any[] | null) || [])
+          .filter((p) => p.payout_mode !== 'tracking_only')
+          .reduce((s, p) => s + (p.amount_cents || 0), 0) / 100;
+      }
+      // else: owner is the phleb → labor COGS is $0; tracking_only rows in
+      // staff_payouts are visibility-only, not cash out.
+
       const estimated_cogs =
-        visits_mtd * (ASSUMED_PHLEB_COST_PER_VISIT + ASSUMED_SUPPLIES_PER_VISIT)
+        actual_phleb_cost_mtd
+        + (visits_mtd * ASSUMED_SUPPLIES_PER_VISIT)
         + stripe_fees_mtd;
       const estimated_gross_profit = revenue_mtd - estimated_cogs;
       const estimated_gross_margin_pct = revenue_mtd > 0
