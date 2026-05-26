@@ -342,12 +342,18 @@ export async function getAvailableSlotsForDate(
     'clermont', 'montverde', 'deltona', 'geneva', 'tavares',
     'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola',
     'daytona beach', 'deland', 'debary', 'orange city',
+    // Added 2026-05-25 — St. Cloud was missing despite being further from
+    // Orlando phleb base than Kissimmee. Joshua Hoskins case (3004 Ella Way
+    // 34771) was checking out with $0 travel surcharge.
+    'st cloud', 'st. cloud', 'saint cloud',
   ];
   // Zip fallback for free-text addresses that fail the city substring match.
   // Kept in sync with get_busy_slots() RPC + src/lib/bookingBuffer.ts.
   const EXTENDED_ZIPS = new Set([
     '32827','32832','34747',
     '34741','34742','34743','34744','34745','34746','34758','34759',
+    // St. Cloud (added 2026-05-25)
+    '34769','34770','34771','34772',
     '32771','32772','32773',
     '32726','32727','32736',
     '34711','34712','34713','34714','34715',

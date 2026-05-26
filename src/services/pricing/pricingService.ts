@@ -120,6 +120,9 @@ export const EXTENDED_AREA_CITIES = [
   'clermont', 'montverde', 'deltona', 'geneva', 'tavares',
   'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola',
   'daytona beach', 'deland', 'debary', 'orange city',
+  // Added 2026-05-25 — St. Cloud is further from Orlando phleb base than
+  // Kissimmee (which has been on this list since launch). Was missing.
+  'st cloud', 'st. cloud', 'saint cloud',
 ];
 
 export const DEFAULT_APPOINTMENT_DURATION = 60;
