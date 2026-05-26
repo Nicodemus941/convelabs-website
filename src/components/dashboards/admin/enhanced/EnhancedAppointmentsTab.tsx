@@ -369,8 +369,11 @@ const EnhancedAppointmentsTab = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-muted-foreground">Revenue</p>
+                {/* 2026-05-26: removed /100 — appointments.total_amount is
+                    stored in DOLLARS, not cents. Previously $2,780 displayed
+                    as $27.80, making the page look broken. */}
                 <p className="text-2xl font-bold text-green-600">
-                  ${(stats.revenue / 100).toFixed(2)}
+                  ${stats.revenue.toFixed(2)}
                 </p>
               </div>
               <DollarSign className="h-8 w-8 text-green-600" />

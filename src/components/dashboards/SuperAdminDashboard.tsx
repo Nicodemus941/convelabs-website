@@ -34,6 +34,19 @@ const SuperAdminDashboard = () => {
 
   useEffect(() => {
     fetchAll();
+    // 2026-05-26: realtime subscriptions to mirror the Hormozi Dashboard so
+    // BOTH owner-facing dashboards stay in sync within ~1s of any payment,
+    // booking, membership, or refund event. Unique channel name per mount
+    // avoids the StrictMode collision that bit the Hormozi page.
+    const channelName = `super-admin-dashboard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const channel = supabase.channel(channelName);
+    const tables = ['stripe_qb_sync_log', 'appointments', 'user_memberships', 'tenant_patients'];
+    for (const t of tables) {
+      channel.on('postgres_changes' as any, { event: '*', schema: 'public', table: t }, () => fetchAll());
+    }
+    channel.subscribe();
+    return () => { supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchAll = async () => {
@@ -77,7 +90,18 @@ const SuperAdminDashboard = () => {
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed').gte('appointment_date', monthStartStr),
       ]);
 
-      const revenueMTD = revenueAppts?.reduce((s, a) => s + (a.total_amount || 0), 0) || 0;
+      // 2026-05-26: revenueMTD now reads from stripe_qb_sync_log to match the
+      // Hormozi Dashboard's source of truth. The two dashboards previously
+      // diverged ($11,987 here vs $10,601 there) because this one summed
+      // appointments.total_amount (counts each visit even when paid via a
+      // bundle) while Hormozi sums actual Stripe charges. Unifying so they
+      // never disagree.
+      const { data: syncRows } = await supabase
+        .from('stripe_qb_sync_log' as any)
+        .select('amount_gross_cents')
+        .gte('charge_date', monthStartStr);
+      const revenueMTD = ((syncRows as any[] | null) || [])
+        .reduce((s, r: any) => s + (r.amount_gross_cents || 0), 0) / 100;
       const completedCount = revenueAppts?.length || 1;
 
       // Calculate repeat rate from ALL completed appointments (patients with 2+ visits / total unique patients)

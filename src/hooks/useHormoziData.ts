@@ -110,7 +110,15 @@ export const useHormoziData = () => {
       'error_logs',          // unresolved errors
     ];
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hormozi-dashboard'] });
-    const channel = supabase.channel('hormozi-dashboard-realtime');
+    // 2026-05-26 hotfix: unique channel name per mount. Previously used the
+    // literal 'hormozi-dashboard-realtime' which collided with the same
+    // singleton channel across React StrictMode double-mounts (and after
+    // navigation re-mounts). The collision threw:
+    //   "cannot add `postgres_changes` callbacks ... after `subscribe()`"
+    // Adding a per-mount suffix gives every useEffect its own channel; the
+    // cleanup removes it cleanly.
+    const channelName = `hormozi-dashboard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const channel = supabase.channel(channelName);
     for (const table of tablesToWatch) {
       channel.on('postgres_changes' as any, { event: '*', schema: 'public', table }, invalidate);
     }
