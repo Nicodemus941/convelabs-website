@@ -138,10 +138,26 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
   // additional visit-type cards alongside the legacy hardcoded options.
   // Falls back gracefully when the RPC isn't reachable (legacy still works).
   const { services: dynamicServices } = useServiceCatalog();
+
+  // Build a price lookup from services_enhanced. Admin price edits land
+  // here and need to flow to the front-end cards immediately.
+  const dynamicPriceByCode = new Map<string, number>();
+  for (const d of dynamicServices) {
+    const noneCents = typeof d.tier_pricing?.none === 'number' ? d.tier_pricing.none : 0;
+    if (noneCents > 0) {
+      dynamicPriceByCode.set(d.service_code, Math.round(noneCents / 100));
+    }
+  }
+
+  // Override hardcoded VISIT_TYPES prices with live DB prices when present.
+  const VISIT_TYPES_SYNCED = VISIT_TYPES.map(v => {
+    const dbPrice = dynamicPriceByCode.get(v.id);
+    return dbPrice && dbPrice > 0 ? { ...v, price: dbPrice } : v;
+  });
+
   const dynamicCards = dynamicServices
     // Drop entries whose service_code collides with a hardcoded id — legacy
-    // wins for the canonical 'mobile', 'in-office', etc. so the partner
-    // expander, ICONS, and surcharge logic continue to work unchanged.
+    // card wins for layout/iconography; price already merged above.
     .filter(d => !VISIT_TYPES.some(v => v.id === d.service_code))
     .map(d => {
       // For packages: build a short "2× Wellness · 1× Lipid" preview line.
@@ -169,7 +185,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
       };
     });
 
-  const VISIT_TYPES_WITH_DYNAMIC = [...VISIT_TYPES, ...dynamicCards];
+  const VISIT_TYPES_WITH_DYNAMIC = [...VISIT_TYPES_SYNCED, ...dynamicCards];
 
   const handleSelect = (typeId: string) => {
     if (typeId === 'provider-partner') {
@@ -264,7 +280,9 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
                     <Check className="h-4 w-4" /> Which practice is yours?
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {PROVIDER_PARTNERS.map((partner) => {
+                    {PROVIDER_PARTNERS.map((partnerRaw) => {
+                      const dbPrice = dynamicPriceByCode.get(`partner-${partnerRaw.id}`);
+                      const partner = dbPrice && dbPrice > 0 ? { ...partnerRaw, price: dbPrice } : partnerRaw;
                       const isPicked = selectedPartner === partner.id || selectedType === `partner-${partner.id}`;
                       return (
                         <button
