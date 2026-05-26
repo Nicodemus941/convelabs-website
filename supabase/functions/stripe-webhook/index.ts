@@ -1303,8 +1303,23 @@ async function handleAppointmentPayment(session: any) {
         }
       }
 
-      // Log to webhook_logs
-      await supabaseClient.from('webhook_logs').update({ status: 'success' }).eq('stripe_session_id', checkoutSessionId).catch(() => {});
+      // Log to webhook_logs.
+      // BUG FIX 2026-05-26 (Joshua Hoskins case): the old line was
+      //   await supabaseClient.from('webhook_logs').update(...).eq(...).catch(() => {});
+      // Supabase's PostgrestFilterBuilder returned by .eq() is a thenable but
+      // NOT a Promise — calling .catch on it throws "catch is not a function"
+      // synchronously. Result: handleAppointmentPayment(membership branch)
+      // exploded at the END of every membership signup, AFTER user_memberships
+      // had been written but BEFORE the 'success' return. Stripe saw the 500,
+      // retried 3x (each time hitting the same throw), eventually gave up.
+      // Joshua paid $399 on 2026-05-26 14:47 UTC and his user_memberships row
+      // was never created — manual SQL backfill required to make him a
+      // recognized Concierge member.
+      try {
+        await supabaseClient.from('webhook_logs').update({ status: 'success' }).eq('stripe_session_id', checkoutSessionId);
+      } catch (logErr: any) {
+        console.warn('[membership-signup] webhook_logs update failed (non-blocking):', logErr?.message || logErr);
+      }
       return { id: 'membership', success: true };
     }
 
