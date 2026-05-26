@@ -84,7 +84,13 @@ const SuperAdminDashboard = () => {
         // showing 0/0 because this SELECT didn't include it. The filter at
         // line 90-91 hit undefined for every row.
         supabase.from('appointments').select('total_amount, tip_amount, service_type, appointment_date, booking_source').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
-        supabase.from('appointments').select('*').order('appointment_date', { ascending: false }).order('appointment_time', { ascending: true }).limit(10),
+        // 2026-05-26: was ordering by appointment_date DESC which surfaced
+        // future-dated bundle visits (e.g. Lawrence Carpenter's 8 prepaid
+        // Mobile draws) at the top and buried today's actual activity.
+        // Recent Activity should reflect what JUST HAPPENED, so sort by
+        // created_at (when the row was inserted, regardless of when the
+        // appointment is scheduled for).
+        supabase.from('appointments').select('*').order('created_at', { ascending: false }).limit(10),
         supabase.from('appointments').select('service_type').gte('appointment_date', monthStartStr).not('status', 'eq', 'cancelled'),
         supabase.from('appointments').select('patient_email').eq('status', 'completed'),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed').gte('appointment_date', monthStartStr),
