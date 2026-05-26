@@ -870,6 +870,13 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                       );
                     } else {
                       setPromoStatus('invalid');
+                      // BUG FIX 2026-05-25 (Joshua Hoskins case): the generic
+                      // "Invalid promo code" message confused patients with
+                      // membership-signup codes (HOSKINS24, etc.). Those codes
+                      // live in Stripe and only apply at the payment page AFTER
+                      // adding the membership bundle. Now we surface a clear
+                      // hint when validation fails with no specific reason —
+                      // points patients to the right place.
                       setPromoMessage(
                         data?.reason === 'email_not_authorized'
                           ? 'This code is not available on this account. Make sure your email is correct.'
@@ -881,7 +888,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                           ? 'You\'ve already used this code.'
                           : data?.reason === 'not_first_time'
                           ? 'WELCOME25 is for new patients only. VIP membership saves more on every visit.'
-                          : 'Invalid promo code.'
+                          : 'This code can\'t be applied here. If it\'s a membership signup code (e.g. one we texted you for Concierge), add the membership above first — then enter it on the secure payment page after you press Pay.'
                       );
                     }
                   } catch (e: any) {
