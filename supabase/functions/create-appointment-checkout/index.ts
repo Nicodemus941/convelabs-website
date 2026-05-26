@@ -1118,8 +1118,29 @@ Deno.serve(async (req) => {
     // Stripe Connect account, route the phleb's portion of every charge
     // (base + 100% of tip + companion add-on) directly to their account.
     // Refunds auto-reverse the transfer. Only applies in 'payment' mode.
+    //
+    // 2026-05-25 KILL-SWITCH: when system_settings.phleb_connect_payouts_disabled
+    // is true, skip this entire block. Full charge lands in platform balance.
+    // Phleb dashboard still shows tracked earnings via DB trigger
+    // (trg_appointments_phleb_earnings_tracking) — see migration
+    // 20260525_phleb_payouts_kill_switch.sql.
+    let PHLEB_PAYOUTS_DISABLED = false;
+    try {
+      const { data: ssRow } = await supabaseClient
+        .from('system_settings' as any)
+        .select('value')
+        .eq('key', 'phleb_connect_payouts_disabled')
+        .maybeSingle();
+      const raw = (ssRow as any)?.value;
+      PHLEB_PAYOUTS_DISABLED = raw === true || raw === 'true' || String(raw).toLowerCase() === 'true';
+    } catch (e: any) {
+      console.warn('[connect-killswitch] system_settings lookup failed (defaulting to enabled):', e?.message || e);
+    }
     let connectTransfer: { destination: string; amount: number } | null = null;
-    if (sessionMode === 'payment') {
+    if (sessionMode === 'payment' && PHLEB_PAYOUTS_DISABLED) {
+      console.log('[connect-disabled] system_settings.phleb_connect_payouts_disabled=true — skipping transfer_data, full charge to platform');
+    }
+    if (sessionMode === 'payment' && !PHLEB_PAYOUTS_DISABLED) {
       try {
         // Resolution order — audited 2026-05-19, the prior `length === 1`
         // gate silently STOPPED paying ANY phleb the moment a 2nd Connect
