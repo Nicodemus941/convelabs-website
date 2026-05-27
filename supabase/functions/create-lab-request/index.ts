@@ -161,8 +161,14 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: userResp } = await admin.auth.getUser(token);
     const user = userResp?.user;
-    if (!user || user.user_metadata?.role !== 'provider') {
-      return new Response(JSON.stringify({ error: 'Not a provider' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // Allow both the original 'provider' role and the more common
+    // 'office_manager' / 'clinical_coordinator' roles that clinic staff
+    // (e.g. Littleton's Lara Kiessling) are assigned during onboarding.
+    // Without this, legitimate clinic staff submissions returned 403
+    // silently and the patient never received SMS/email (2026-05-27).
+    const allowedRoles = new Set(['provider', 'office_manager', 'clinical_coordinator', 'org_admin']);
+    if (!user || !allowedRoles.has(String(user.user_metadata?.role || ''))) {
+      return new Response(JSON.stringify({ error: 'Not a provider or clinic staff' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const body = await req.json();
@@ -196,7 +202,13 @@ Deno.serve(async (req) => {
     if (!organization_id || !patient_name || !draw_by_date) {
       return new Response(JSON.stringify({ error: 'organization_id, patient_name, draw_by_date required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
-    if (user.user_metadata.org_id !== organization_id) {
+    // Read org affiliation from EITHER `org_id` (legacy 'provider' role
+    // metadata key) OR `organization_id` (onboarding-flow key used for
+    // 'office_manager' / 'clinical_coordinator'). Both keys are present
+    // in production data — the original strict check on `org_id` alone
+    // 403'd every clinic-staff submission.
+    const userOrgId = user.user_metadata?.org_id || user.user_metadata?.organization_id;
+    if (userOrgId !== organization_id) {
       return new Response(JSON.stringify({ error: 'Cannot create lab request for another org' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     if (!patient_email && !patient_phone) {

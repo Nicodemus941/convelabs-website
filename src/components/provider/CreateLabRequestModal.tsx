@@ -261,7 +261,14 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
         }),
       });
       const j = await resp.json();
-      if (!resp.ok) throw new Error(j.error || 'Failed to create request');
+      if (!resp.ok) {
+        // Surface auth/permission errors distinctly so clinic staff know
+        // to contact ConveLabs vs. a transient retry.
+        if (resp.status === 403) {
+          throw new Error(`Permission denied: ${j.error || 'your account needs to be linked to this clinic'}. Contact ConveLabs support.`);
+        }
+        throw new Error(j.error || 'Failed to create request');
+      }
 
       // Provider-pays "pay now" flow — redirect provider to Stripe
       if (j.provider_pay_now && j.provider_checkout_url) {
@@ -269,7 +276,21 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
         return;
       }
 
-      toast.success(`${patientFirstName}'s booking link is on its way · we'll ping you when they schedule`);
+      // Detailed confirmation toast — clinic staff explicitly asked for
+      // a clearer signal that the patient was actually contacted
+      // (2026-05-27, Littleton case where the only signal was a generic
+      // success toast and they couldn't tell if the SMS/email fired).
+      const channels: string[] = [];
+      if (patientEmail.trim()) channels.push(`email (${patientEmail.trim()})`);
+      if (patientPhone.trim()) channels.push(`SMS (${patientPhone.trim()})`);
+      const channelLine = channels.length > 0 ? channels.join(' + ') : 'no contact provided';
+      toast.success(
+        `✓ Booking invitation sent to ${patientFirstName}`,
+        {
+          description: `Delivered to ${channelLine}. We'll notify you when they schedule.`,
+          duration: 8000,
+        }
+      );
       reset();
       onCreated();
       onClose();
