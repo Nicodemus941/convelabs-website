@@ -555,6 +555,11 @@ Deno.serve(async (req) => {
       : '';
     const smsCoverPart = coveredByOrg ? ` ${org.name} is covering this visit — no payment needed at booking.` : '';
 
+    // Per-channel delivery state — reported back to the client so the
+    // provider modal toast can honestly show what was/wasn't sent.
+    let emailSent = false; let emailError: string | null = null;
+    let smsSent = false;   let smsError: string | null = null;
+
     // ── EMAIL ────────────────────────────────────────────────────────────
     if (patient_email && MAILGUN_API_KEY) {
       const panelChips = detectedPanels.slice(0, 8).map((p: any) =>
@@ -612,42 +617,119 @@ Deno.serve(async (req) => {
       fd.append('subject', `${providerDisplayName} ordered your bloodwork — ${daysLeft}d to book`);
       fd.append('html', html);
       fd.append('o:tracking-clicks', 'no');
-      await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
-        method: 'POST',
-        headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
-        body: fd,
-      });
+      // Check response + log to email_send_log so the admin email-inbox view
+      // and reconciliation queries can see provider-portal sends. Without
+      // this, every provider-portal email was invisible to admin reporting
+      // and we couldn't tell Mailgun failures from successes (2026-05-27).
+      try {
+        const mgResp = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+          body: fd,
+        });
+        const mgBody = await mgResp.text();
+        let mgId: string | null = null;
+        try { mgId = JSON.parse(mgBody)?.id || null; } catch { /* non-JSON body, leave null */ }
+        emailSent = mgResp.ok;
+        emailError = mgResp.ok ? null : `Mailgun ${mgResp.status}: ${mgBody.slice(0, 200)}`;
+        await admin.from('email_send_log').insert({
+          to_email: patient_email,
+          subject: `${providerDisplayName} ordered your bloodwork — ${daysLeft}d to book`,
+          email_type: 'provider_portal_lab_invite',
+          status: mgResp.ok ? 'sent' : 'failed',
+          mailgun_id: mgId,
+          organization_id,
+          campaign_tag: 'lab_request_invite',
+          appointment_id: null,
+          last_error: emailError,
+          sent_at: new Date().toISOString(),
+        });
+      } catch (e: any) {
+        emailSent = false;
+        emailError = `Mailgun fetch threw: ${e?.message || e}`;
+        console.warn('[create-lab-request] email send failed:', emailError);
+        await admin.from('email_send_log').insert({
+          to_email: patient_email, subject: 'lab invite', email_type: 'provider_portal_lab_invite',
+          status: 'failed', organization_id, campaign_tag: 'lab_request_invite',
+          last_error: emailError, sent_at: new Date().toISOString(),
+        });
+      }
     }
 
     // ── SMS ──────────────────────────────────────────────────────────────
     // Authentic, warm, professional. Frames the patient's appointment as
     // exclusive: "your private booking link." No "Reply 1/2/3" friction.
     if (patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+      const drawShort = fmtDate(draw_by_date).replace(',', '');
+      const nextShort = next_doctor_appt_date ? fmtDate(next_doctor_appt_date).replace(',', '') : '';
+      const fastingPart = fasting ? ' Fasting required — no food 12h before.' : '';
+      const nextVisitPart = nextShort ? ` to have results ready for your ${nextShort} visit` : '';
+      const smsBody = `Hi ${patientFirstName} — this is ConveLabs. ${org.name} has ordered your bloodwork through us.${smsCoverPart}${fastingPart} Please schedule before ${drawShort}${nextVisitPart}. Your private booking link: ${patientUrl} · We look forward to serving you.`;
       try {
-        const drawShort = fmtDate(draw_by_date).replace(',', '');
-        const nextShort = next_doctor_appt_date ? fmtDate(next_doctor_appt_date).replace(',', '') : '';
-        const fastingPart = fasting ? ' Fasting required — no food 12h before.' : '';
-        const nextVisitPart = nextShort ? ` to have results ready for your ${nextShort} visit` : '';
-        const smsBody = `Hi ${patientFirstName} — this is ConveLabs. ${org.name} has ordered your bloodwork through us.${smsCoverPart}${fastingPart} Please schedule before ${drawShort}${nextVisitPart}. Your private booking link: ${patientUrl} · We look forward to serving you.`;
         const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
         const fd = new URLSearchParams({ To: normalizePhone(patient_phone), From: TWILIO_FROM, Body: smsBody });
-        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+        const twResp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
           method: 'POST',
           headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
           body: fd.toString(),
         });
-      } catch (e) { console.warn('SMS send failed:', e); }
+        const twBody = await twResp.text();
+        let twSid: string | null = null;
+        try { twSid = JSON.parse(twBody)?.sid || null; } catch { /* non-JSON */ }
+        smsSent = twResp.ok;
+        smsError = twResp.ok ? null : `Twilio ${twResp.status}: ${twBody.slice(0, 200)}`;
+        // Log to sms_notifications so the admin SMS inbox + audit queries
+        // can see provider-portal sends. Pre-2026-05-27 this row was never
+        // inserted and SMS was invisible to all reporting.
+        await admin.from('sms_notifications').insert({
+          phone_number: normalizePhone(patient_phone),
+          notification_type: 'provider_portal_lab_invite',
+          message_content: smsBody,
+          delivery_status: twResp.ok ? 'sent' : 'failed',
+          twilio_message_sid: twSid,
+          appointment_id: null,
+          sent_at: new Date().toISOString(),
+          metadata: { lab_request_id: inserted.id, organization_id, error: smsError },
+        });
+      } catch (e: any) {
+        smsSent = false;
+        smsError = `Twilio fetch threw: ${e?.message || e}`;
+        console.warn('[create-lab-request] SMS send failed:', smsError);
+        await admin.from('sms_notifications').insert({
+          phone_number: normalizePhone(patient_phone),
+          notification_type: 'provider_portal_lab_invite',
+          message_content: smsBody, delivery_status: 'failed',
+          sent_at: new Date().toISOString(),
+          metadata: { lab_request_id: inserted.id, organization_id, error: smsError },
+        });
+      }
     }
 
-    await admin.from('patient_lab_requests').update({
-      patient_notified_at: new Date().toISOString(),
-    }).eq('id', inserted.id);
+    // Only stamp notified_at if at least one channel actually succeeded.
+    // Pre-fix this was stamped unconditionally — providers could not tell
+    // a successful send apart from a silent Mailgun/Twilio failure.
+    const anyChannelSucceeded = emailSent || smsSent;
+    if (anyChannelSucceeded) {
+      await admin.from('patient_lab_requests').update({
+        patient_notified_at: new Date().toISOString(),
+      }).eq('id', inserted.id);
+    }
 
     return new Response(JSON.stringify({
       success: true,
       request_id: inserted.id,
       access_token: accessToken,
       patient_url: patientUrl,
+      // Per-channel delivery so the provider modal can show an honest
+      // "delivered to email + SMS" or "email failed, SMS delivered" toast.
+      delivery: {
+        email_attempted: !!patient_email,
+        email_sent: emailSent,
+        email_error: emailError,
+        sms_attempted: !!patient_phone,
+        sms_sent: smsSent,
+        sms_error: smsError,
+      },
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('create-lab-request error:', error);

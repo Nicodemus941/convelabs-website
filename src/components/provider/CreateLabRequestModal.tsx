@@ -276,21 +276,36 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
         return;
       }
 
-      // Detailed confirmation toast — clinic staff explicitly asked for
-      // a clearer signal that the patient was actually contacted
+      // Detailed delivery report — use the server's per-channel result so
+      // a Mailgun/Twilio failure isn't silently reported as success
       // (2026-05-27, Littleton case where the only signal was a generic
-      // success toast and they couldn't tell if the SMS/email fired).
-      const channels: string[] = [];
-      if (patientEmail.trim()) channels.push(`email (${patientEmail.trim()})`);
-      if (patientPhone.trim()) channels.push(`SMS (${patientPhone.trim()})`);
-      const channelLine = channels.length > 0 ? channels.join(' + ') : 'no contact provided';
-      toast.success(
-        `✓ Booking invitation sent to ${patientFirstName}`,
-        {
-          description: `Delivered to ${channelLine}. We'll notify you when they schedule.`,
+      // success toast and clinic staff couldn't tell if the SMS/email
+      // actually fired).
+      const delivery = j.delivery || {};
+      const delivered: string[] = [];
+      const failed: string[] = [];
+      if (delivery.email_attempted) {
+        (delivery.email_sent ? delivered : failed).push(`email (${patientEmail.trim()})`);
+      }
+      if (delivery.sms_attempted) {
+        (delivery.sms_sent ? delivered : failed).push(`SMS (${patientPhone.trim()})`);
+      }
+      if (delivered.length > 0 && failed.length === 0) {
+        toast.success(`✓ Booking invitation sent to ${patientFirstName}`, {
+          description: `Delivered to ${delivered.join(' + ')}. We'll notify you when they schedule.`,
           duration: 8000,
-        }
-      );
+        });
+      } else if (delivered.length > 0 && failed.length > 0) {
+        toast.warning(`Partial delivery for ${patientFirstName}`, {
+          description: `Sent: ${delivered.join(', ')} · Failed: ${failed.join(', ')}. Verify contact info or contact ConveLabs support.`,
+          duration: 12000,
+        });
+      } else {
+        toast.error(`Delivery failed for ${patientFirstName}`, {
+          description: `Neither email nor SMS could be sent (${failed.join(', ')}). Patient will NOT receive a booking link. Check contact details and try again.`,
+          duration: 14000,
+        });
+      }
       reset();
       onCreated();
       onClose();
