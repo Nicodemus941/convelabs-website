@@ -612,12 +612,18 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       else if (planNameLower.includes('vip')) tier = 'vip';
       else if (planNameLower.includes('individual') || planNameLower.includes('regular') || planNameLower.includes('family') || planNameLower.includes('essential')) tier = 'member';
 
+      // NOTE: tenant_patients.membership_plan_id FKs to tenant_membership_plans
+      // (NOT the membership_plans table we just read planId from). Writing
+      // planId here throws a 23503 FK violation and the whole tier-mirror
+      // update silently fails — that's how Nicholas Chaillan's tenant_patients
+      // row stayed at tier=null/status=none after a successful $399 concierge
+      // signup (2026-05-28). Skip the plan_id write; tier+status+dates are
+      // what the UI actually reads.
       const { error: tpErr } = await supabaseClient
         .from('tenant_patients')
         .update({
           membership_tier: tier,
           membership_status: 'active',
-          membership_plan_id: planId,
           membership_start_date: new Date().toISOString(),
           membership_end_date: nextRenewal.toISOString(),
           membership_activated_at: new Date().toISOString(),
@@ -812,17 +818,29 @@ async function handleSubscriptionUpdate(subscription: any) {
   try {
     const subscriptionId = subscription.id;
     const status = subscription.status;
+    // 2026-05-28: Nicholas Chaillan signup crashed with "Invalid time
+    // value" because `current_period_end` was undefined on the
+    // subscription.created/updated event that fired first. Coerce
+    // safely to ISO; null → skip the next_renewal update entirely.
     const nextRenewalTimestamp = subscription.current_period_end;
-    const nextRenewal = new Date(nextRenewalTimestamp * 1000).toISOString();
+    let nextRenewal: string | null = null;
+    if (typeof nextRenewalTimestamp === 'number' && Number.isFinite(nextRenewalTimestamp) && nextRenewalTimestamp > 0) {
+      try { nextRenewal = new Date(nextRenewalTimestamp * 1000).toISOString(); }
+      catch (e) { console.warn(`[handleSubscriptionUpdate] bad current_period_end=${nextRenewalTimestamp}:`, e); }
+    } else {
+      console.warn(`[handleSubscriptionUpdate] subscription ${subscriptionId} missing current_period_end — skipping next_renewal write`);
+    }
 
-    // Update the user membership
+    // Update the user membership — only write next_renewal when we have
+    // a valid ISO string (avoid clobbering a good value with null).
+    const updatePayload: Record<string, any> = {
+      status: status,
+      updated_at: new Date().toISOString(),
+    };
+    if (nextRenewal) updatePayload.next_renewal = nextRenewal;
     const { data, error } = await supabaseClient
       .from('user_memberships')
-      .update({
-        status: status,
-        next_renewal: nextRenewal,
-        updated_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('stripe_subscription_id', subscriptionId)
       .select('id, user_id, stripe_customer_id, stripe_subscription_id, founding_member, founding_locked_rate_cents')
       .single();
