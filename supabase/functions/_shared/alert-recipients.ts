@@ -85,6 +85,23 @@ export async function sendOwnerAlert(
         },
         body: fd.toString(),
       });
+      const respBody = await r.text();
+      let twSid: string | null = null;
+      try { twSid = JSON.parse(respBody)?.sid || null; } catch { /* non-JSON */ }
+      // 2026-05-28: log every owner-tier SMS to sms_notifications so the
+      // admin inbox + audits can see what brief / alert was sent and when.
+      // Prior to this, sendOwnerAlert fired Twilio raw with no DB trace.
+      try {
+        await admin.from('sms_notifications').insert({
+          phone_number: To,
+          notification_type: 'owner_alert',
+          message_content: body,
+          delivery_status: r.ok ? 'sent' : 'failed',
+          twilio_message_sid: twSid,
+          sent_at: new Date().toISOString(),
+          metadata: { error: r.ok ? null : `Twilio ${r.status}: ${respBody.slice(0, 160)}` },
+        });
+      } catch (logErr) { /* non-blocking */ }
       if (r.ok) {
         sent++;
       } else {
