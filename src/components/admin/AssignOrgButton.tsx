@@ -144,7 +144,49 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
         }, { onConflict: 'appointment_id,organization_id' });
         if (error) throw error;
       }
-      toast.success(`Linked ${role === 'primary' ? 'as primary' : 'as CC'}`);
+
+      // Fan out to family-group siblings — when admin assigns the primary
+      // to an org, the same org should apply to every companion sharing
+      // the same lab order. Owner case 2026-05-29: Susan Barnes assigned
+      // to Littleton but Mike/Ethan/Rhema stayed orphaned. Skip if this
+      // appointment isn't part of a family group.
+      let siblingsTouched = 0;
+      try {
+        const { data: anchor } = await supabase
+          .from('appointments')
+          .select('id, family_group_id')
+          .eq('id', appointmentId)
+          .maybeSingle();
+        const fgId = (anchor as any)?.family_group_id;
+        if (fgId) {
+          const { data: siblings } = await supabase
+            .from('appointments')
+            .select('id')
+            .eq('family_group_id', fgId)
+            .neq('id', appointmentId);
+          for (const s of (siblings || [])) {
+            if (role === 'primary') {
+              await supabase.rpc('admin_assign_appointment_org' as any, {
+                p_appointment_id: (s as any).id, p_org_id: orgId,
+              });
+            } else {
+              await supabase.from('appointment_organizations').upsert({
+                appointment_id: (s as any).id,
+                organization_id: orgId,
+                role: 'cc',
+              }, { onConflict: 'appointment_id,organization_id' });
+            }
+            siblingsTouched++;
+          }
+        }
+      } catch (e) {
+        console.warn('[assign-org] sibling propagation failed (non-blocking):', e);
+      }
+
+      const baseMsg = `Linked ${role === 'primary' ? 'as primary' : 'as CC'}`;
+      toast.success(siblingsTouched > 0
+        ? `${baseMsg} (+${siblingsTouched} companion${siblingsTouched === 1 ? '' : 's'})`
+        : baseMsg);
       await load();
       onAssigned?.();
     } catch (e: any) {

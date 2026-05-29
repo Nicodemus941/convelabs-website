@@ -125,11 +125,41 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, currentOrgId, variant
   const assign = async (org: OrgSummary | null) => {
     setSaving(org?.id || 'clear');
     try {
+      // Read the appointment's family_group_id so we can propagate the org
+      // assignment to every sibling on the same family booking. Otherwise
+      // a primary like Susan Barnes gets assigned to Littleton but her 3
+      // companions (sharing the SAME lab order + same org) stay orphaned —
+      // owner case reported 2026-05-29.
+      const { data: appt } = await supabase
+        .from('appointments')
+        .select('id, family_group_id')
+        .eq('id', appointmentId)
+        .maybeSingle();
+      const familyGroupId = (appt as any)?.family_group_id || null;
+
+      const orgId = org?.id || null;
+      const updatePayload = { organization_id: orgId, updated_at: new Date().toISOString() };
+
+      // Update target appointment.
       const { error } = await supabase.from('appointments')
-        .update({ organization_id: org?.id || null, updated_at: new Date().toISOString() })
-        .eq('id', appointmentId);
+        .update(updatePayload).eq('id', appointmentId);
       if (error) throw error;
-      toast.success(org ? `Linked to ${org.name}` : 'Organization cleared');
+
+      // Fan out to siblings on the same family group (if any).
+      let siblingsUpdated = 0;
+      if (familyGroupId) {
+        const { data: sibs } = await supabase.from('appointments')
+          .update(updatePayload)
+          .eq('family_group_id', familyGroupId)
+          .neq('id', appointmentId)
+          .select('id');
+        siblingsUpdated = (sibs || []).length;
+      }
+
+      const baseMsg = org ? `Linked to ${org.name}` : 'Organization cleared';
+      toast.success(siblingsUpdated > 0
+        ? `${baseMsg} (+${siblingsUpdated} companion${siblingsUpdated === 1 ? '' : 's'})`
+        : baseMsg);
       setCurrentName(org?.name || null);
       onAssigned?.(org?.id || null, org?.name || null);
       setOpen(false);
