@@ -272,9 +272,50 @@ Deno.serve(async (req) => {
       await admin.from('organizations').update({
         outreach_status: 'pending',
         outreach_note: null,
+        next_attempt_at: null,
+        last_attempt_outcome: null,
       }).eq('id', organizationId);
       await logAction(admin, organizationId, 'reopened', actor, null, null);
       return new Response(JSON.stringify({ ok: true }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Log a call attempt + schedule the next callback. Snoozes the org
+    // from the action-items inbox until next_attempt_at fires.
+    // Body: { action: 'log_attempt', outcome: 'left_voicemail'|'no_answer'|'busy'|'refused'|'other', note?, snooze_days? }
+    if (action === 'log_attempt') {
+      const outcome = String(body.outcome || 'other').toLowerCase();
+      const allowedOutcomes = new Set(['left_voicemail', 'no_answer', 'busy', 'refused', 'other']);
+      if (!allowedOutcomes.has(outcome)) {
+        return new Response(JSON.stringify({ ok: false, error: 'invalid_outcome' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const note = String(body.note || '').substring(0, 500) || null;
+      const snoozeDays = Math.max(1, Math.min(14, Number(body.snooze_days) || 1));
+      const nextAttempt = new Date(Date.now() + snoozeDays * 24 * 60 * 60 * 1000).toISOString();
+
+      const composedNote = [
+        outcome === 'left_voicemail' ? 'Left voicemail' :
+        outcome === 'no_answer'      ? 'No answer' :
+        outcome === 'busy'           ? 'Line busy' :
+        outcome === 'refused'        ? 'Declined to share' :
+                                       'Other outcome',
+        note ? `· ${note}` : '',
+        `· retry ${nextAttempt.substring(0, 10)}`,
+      ].join(' ').trim();
+
+      const { error: upErr } = await admin.from('organizations').update({
+        outreach_status: 'attempt_logged',
+        outreach_note: composedNote,
+        outreached_at: new Date().toISOString(),
+        next_attempt_at: nextAttempt,
+        last_attempt_outcome: outcome,
+      }).eq('id', organizationId);
+      if (upErr) throw upErr;
+      await logAction(admin, organizationId, `attempt_${outcome}`, actor, composedNote, null);
+      return new Response(JSON.stringify({ ok: true, next_attempt_at: nextAttempt }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

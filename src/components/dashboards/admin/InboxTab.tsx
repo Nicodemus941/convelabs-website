@@ -106,7 +106,11 @@ const InboxTab: React.FC = () => {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      // Pending insurance — admin sees ALL open rows
+      // Pending insurance — admin sees ALL open rows EXCEPT those where the
+      // patient's chart already has an insurance provider on file (admin's
+      // task — "confirm insurance with patient" — is fulfilled the moment a
+      // valid card is attached, regardless of whether it matches the OCR
+      // proposal). 2026-05-29 rule per owner.
       const { data: insurance } = await supabase
         .from('pending_insurance_changes' as any)
         .select(`
@@ -114,15 +118,22 @@ const InboxTab: React.FC = () => {
           current_provider, current_member_id, current_group_number,
           proposed_provider, proposed_member_id, proposed_group_number,
           status, created_at,
-          tenant_patients!inner(first_name, last_name, email)
+          tenant_patients!inner(first_name, last_name, email, insurance_provider, insurance_member_id)
         `)
         .eq('status', 'open')
         .order('created_at', { ascending: false });
-      const ins = (insurance as any[] || []).map(r => ({
-        ...r,
-        patient_name: [r.tenant_patients?.first_name, r.tenant_patients?.last_name].filter(Boolean).join(' ') || 'Patient',
-        patient_email: r.tenant_patients?.email || null,
-      }));
+      const ins = (insurance as any[] || [])
+        .filter(r => {
+          // Hide row when patient chart already has insurance attached.
+          const prov = String(r.tenant_patients?.insurance_provider || '').trim();
+          const mid = String(r.tenant_patients?.insurance_member_id || '').trim();
+          return !(prov && mid);
+        })
+        .map(r => ({
+          ...r,
+          patient_name: [r.tenant_patients?.first_name, r.tenant_patients?.last_name].filter(Boolean).join(' ') || 'Patient',
+          patient_email: r.tenant_patients?.email || null,
+        }));
       setInsuranceQ(ins);
 
       // Discovered orgs awaiting admin action.
@@ -136,25 +147,30 @@ const InboxTab: React.FC = () => {
           id, name, contact_email, contact_phone, manager_email, npi,
           ordering_physician, address_street, address_city, address_state,
           address_zip, office_phone, outreach_status, outreach_note,
-          referral_count, first_discovered_at, last_referral_at
+          referral_count, first_discovered_at, last_referral_at,
+          next_attempt_at, last_attempt_outcome
         `)
         .eq('discovered_from_lab_order', true as any)
         .eq('is_active', true)
-        .or('outreach_status.is.null,outreach_status.in.(pending,untouched,contacted)')
+        .or('outreach_status.is.null,outreach_status.in.(pending,untouched,contacted,attempt_logged)')
         .or('manager_email.is.null,contact_email.is.null')
+        .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`)
         .order('referral_count', { ascending: false, nullsFirst: false })
         .order('first_discovered_at', { ascending: false })
         .limit(50);
 
       // Enrich each org with the most-recent patient who referred them
-      // (so admin sees "Discovered from Sarah Lee's lab order"). One query
-      // for all orgs, then map back.
+      // (so admin sees "Discovered from Sarah Lee's lab order"). Also pull
+      // the status of that latest appointment so we can hide orgs whose
+      // referring visit is already completed/cancelled — admin's reason to
+      // chase them down (collect info for an upcoming draw) no longer
+      // applies. 2026-05-29 rule per owner.
       const orgIds = ((orgs as any[]) || []).map(o => o.id);
-      const lastPatientByOrg = new Map<string, { name: string; date: string }>();
+      const lastPatientByOrg = new Map<string, { name: string; date: string; status: string | null }>();
       if (orgIds.length > 0) {
         const { data: lastAppts } = await supabase
           .from('appointments')
-          .select('organization_id, patient_name, appointment_date, created_at')
+          .select('organization_id, patient_name, appointment_date, status, created_at')
           .in('organization_id', orgIds)
           .order('created_at', { ascending: false });
         for (const a of (lastAppts as any[] || [])) {
@@ -162,15 +178,23 @@ const InboxTab: React.FC = () => {
             lastPatientByOrg.set(a.organization_id, {
               name: a.patient_name || 'Unknown',
               date: a.appointment_date,
+              status: a.status || null,
             });
           }
         }
       }
-      const enriched = ((orgs as any[]) || []).map(o => ({
-        ...o,
-        last_patient_name: lastPatientByOrg.get(o.id)?.name || null,
-        last_appointment_date: lastPatientByOrg.get(o.id)?.date || null,
-      }));
+      const TERMINAL_STATUSES = new Set(['completed', 'specimen_delivered', 'cancelled', 'no_show', 'rescheduled']);
+      const enriched = ((orgs as any[]) || [])
+        .map(o => ({
+          ...o,
+          last_patient_name: lastPatientByOrg.get(o.id)?.name || null,
+          last_appointment_date: lastPatientByOrg.get(o.id)?.date || null,
+          last_appointment_status: lastPatientByOrg.get(o.id)?.status || null,
+        }))
+        // Drop orgs whose referring appointment is past the action-needed window.
+        // Orgs with NO referring appointment yet (just discovered, never used)
+        // stay in the list — they're still actionable for the next patient.
+        .filter(o => !(o.last_appointment_status && TERMINAL_STATUSES.has(o.last_appointment_status)));
       setOrgsQ(enriched as any);
 
       // Pre-seed inline edit state
@@ -345,6 +369,35 @@ const InboxTab: React.FC = () => {
       refresh();
     } catch (e: any) {
       toast.error(e?.message || 'Save+welcome failed');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Admin tried to reach the org but didn't get what they needed (vm /
+  // no answer / busy). Logs the outcome + snoozes the org for 1 day so
+  // it re-surfaces tomorrow at the same time. Used in lieu of marking
+  // unreachable when the admin expects to try again. 2026-05-29 owner rule.
+  const logCallAttempt = async (
+    orgId: string,
+    outcome: 'left_voicemail' | 'no_answer' | 'busy',
+    note: string | null = null,
+  ) => {
+    setBusy(orgId);
+    try {
+      const { data, error } = await supabase.functions.invoke('org-outreach-action', {
+        body: { organizationId: orgId, action: 'log_attempt', outcome, note, snooze_days: 1 },
+      });
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'log failed');
+      const labelMap: Record<string, string> = {
+        left_voicemail: 'Left voicemail',
+        no_answer: 'No answer',
+        busy: 'Line busy',
+      };
+      toast.success(`${labelMap[outcome]} — will re-surface tomorrow`);
+      refresh();
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not log attempt');
     } finally {
       setBusy(null);
     }
@@ -724,6 +777,18 @@ const InboxTab: React.FC = () => {
                       </div>
                     ) : (
                       <div className="flex flex-wrap gap-2 justify-end pt-1">
+                        <Button size="sm" variant="ghost" className="text-xs h-8 text-gray-500 hover:text-amber-700"
+                          onClick={() => logCallAttempt(org.id, 'left_voicemail')}
+                          disabled={busy === org.id}
+                          title="Logs voicemail and re-surfaces this org tomorrow at the same time">
+                          Left voicemail · retry tomorrow
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-xs h-8 text-gray-500 hover:text-amber-700"
+                          onClick={() => logCallAttempt(org.id, 'no_answer')}
+                          disabled={busy === org.id}
+                          title="Logs no answer and re-surfaces this org tomorrow">
+                          No answer · retry tomorrow
+                        </Button>
                         <Button size="sm" variant="ghost" className="text-xs h-8 text-gray-500 hover:text-red-700"
                           onClick={() => { setUnreachableOrgId(org.id); setUnreachableReason('Refused to share email'); setUnreachableNote(''); }}
                           disabled={busy === org.id}>
