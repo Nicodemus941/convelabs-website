@@ -1729,6 +1729,39 @@ async function handleAppointmentPayment(session: any) {
     //   - the SpecimenDeliveryModal renders one row per patient
     //   - per-patient confirmation/reminder/specimen emails route correctly
     //   - org reports count visit-units accurately (3 patients = 3 lines)
+    //
+    // RELIABILITY (2026-05-29): companion failures below used to only
+    // console.warn and vanish — that's exactly how the Susan Barnes 4-patient
+    // booking lost 3 siblings silently. Every failure now ALSO writes an
+    // unresolved error_logs row so it surfaces in admin Action Items instead
+    // of via a customer complaint. Logging is best-effort and can never break
+    // the webhook (its own try/catch swallows any insert error).
+    const logCompanionFailure = async (
+      action: string,
+      cName: string,
+      msg: string,
+      extra: Record<string, unknown> = {},
+    ) => {
+      try {
+        await supabaseClient.from('error_logs').insert({
+          error_type: 'companion_creation_failure',
+          component: 'stripe-webhook',
+          action,
+          error_message: `${cName}: ${msg || 'unknown error'}`.slice(0, 1000),
+          payload: {
+            primary_appointment_id: appointment?.id || null,
+            family_group_id: appointment?.id || null,
+            companion_name: cName,
+            stripe_session_id: session?.id || null,
+            ...extra,
+          },
+          resolved: false,
+        });
+      } catch (_logErr) {
+        // never let error-logging break the webhook
+      }
+    };
+
     try {
       const companions = Array.isArray(pendingBreakdown?.additional_patients)
         ? pendingBreakdown.additional_patients
@@ -1799,6 +1832,10 @@ async function handleAppointmentPayment(session: any) {
               if (newTp) cPatientId = (newTp as any).id;
             } catch (e: any) {
               console.warn(`[companion-tenant-patient-create] failed for ${cName}:`, e?.message);
+              await logCompanionFailure('create_companion_tenant_patient', cName, e?.message, {
+                dob: c.dob || c.dateOfBirth || null,
+                note: 'companion tenant_patient stub failed; appointment row may still create with null patient_id',
+              });
             }
           }
           const { error: cErr } = await supabaseClient.from('appointments').insert([{
@@ -1854,6 +1891,12 @@ async function handleAppointmentPayment(session: any) {
           }]);
           if (cErr) {
             console.warn(`[companion-row] insert failed for ${cName}:`, cErr.message);
+            await logCompanionFailure('create_companion_appointment', cName, cErr.message, {
+              email: c.email || null,
+              relationship: c.relationship || 'companion',
+              companion_index: i + 2,
+              note: 'companion appointment row did NOT create — phleb PWA + specimen delivery will be missing this patient until backfilled',
+            });
           } else {
             console.log(`[companion-row] created for ${cName} (fasting=${!!c.fastingRequired}) under group ${familyGroupId}`);
           }
@@ -1861,6 +1904,9 @@ async function handleAppointmentPayment(session: any) {
       }
     } catch (e: any) {
       console.error('[companion-row] non-blocking error:', e?.message || e);
+      await logCompanionFailure('companion_loop_fatal', 'family_group', e?.message || String(e), {
+        note: 'companion-creation loop threw before completing — some or all companions may be missing for this booking',
+      });
     }
 
     // ─── BUNDLED MEMBERSHIP ACTIVATION ───────────────────────────────────
