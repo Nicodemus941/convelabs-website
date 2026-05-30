@@ -120,6 +120,27 @@ Deno.serve(async (req) => {
     let cancellations = 0;
     let skippedRelaxed = 0;
 
+    // ── ORG-BILLED GUARDRAIL (added 2026-05-30) ───────────────────
+    // Partner orgs that bill the ORGANIZATION (not the patient) must NEVER
+    // enter the dunning/auto-cancel cascade. The org pays at order time from
+    // their provider dashboard — the patient owes nothing, so chasing them
+    // for "non-payment" is wrong and cancelling their slot is harmful.
+    //
+    // Root cause this fixes: an Elite Medical Concierge visit (org-billed)
+    // was created with payment_status='pending' instead of 'org_billed',
+    // so the existing payment_status NOT IN (...) filter missed it and the
+    // cron auto-cancelled it. This guard keys off the ORGANIZATION'S billing
+    // mode (default_billed_to='org'), which is authoritative regardless of
+    // how the appointment row's payment_status was stamped.
+    const { data: orgBilledRows } = await supabase
+      .from('organizations')
+      .select('id')
+      .eq('default_billed_to', 'org');
+    const orgBilledIds = new Set<string>((orgBilledRows || []).map((o: any) => o.id));
+    const isOrgBilled = (appt: any): boolean =>
+      appt?.payment_status === 'org_billed' ||
+      (appt?.organization_id && orgBilledIds.has(appt.organization_id));
+
     // ── Helper: resolve patient contact info ──────────────────────
     const getContact = (appt: any) => {
       let name = appt.patient_name || '';
@@ -268,6 +289,7 @@ Deno.serve(async (req) => {
     const sentApptsDedup = dedupeRecurringGroups(sentAppts || []);
 
     for (const appt of sentApptsDedup) {
+      if (isOrgBilled(appt)) { console.log(`Skipping reminder for appt ${appt.id} — org-billed partner, patient owes nothing`); continue; }
       const tier = getApptTier(appt.appointment_date, appt.appointment_time);
       const thresholdHours = REMINDER_THRESHOLDS[tier];
       const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
@@ -342,6 +364,7 @@ Deno.serve(async (req) => {
     });
 
     for (const appt of (remindedAppts || [])) {
+      if (isOrgBilled(appt)) { console.log(`Skipping final-warning for appt ${appt.id} — org-billed partner, patient owes nothing`); continue; }
       // Use time since the REMINDER was sent, not since original invoice.
       // This prevents the tier-shift bug where a relaxed→urgent transition
       // would immediately satisfy thresholds based on invoice age.
@@ -433,6 +456,9 @@ Deno.serve(async (req) => {
       .is('prepaid_at', null);
 
     for (const appt of (warningAppts || [])) {
+      // ORG-BILLED HARD GUARDRAIL: never cancel a partner-org-billed visit.
+      // The org pays at order time; the patient owes nothing.
+      if (isOrgBilled(appt)) { console.log(`Skipping CANCEL for appt ${appt.id} — org-billed partner, patient owes nothing`); skippedRelaxed++; continue; }
       const apptTimeMs = getApptTimeMs(appt);
       const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
 
