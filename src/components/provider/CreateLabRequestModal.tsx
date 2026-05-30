@@ -518,8 +518,8 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                     onClick={() => setProviderPayMethod('invoice')}
                     className={`text-left p-2 rounded border-2 transition ${providerPayMethod === 'invoice' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}
                   >
-                    <div className="text-xs font-semibold">Monthly invoice</div>
-                    <div className="text-[10px] text-gray-500">We bill your org on the 1st</div>
+                    <div className="text-xs font-semibold">Invoice my org</div>
+                    <div className="text-[10px] text-gray-500">Stripe invoice emailed now · net-30</div>
                   </button>
                   <button
                     type="button"

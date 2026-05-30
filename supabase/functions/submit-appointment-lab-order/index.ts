@@ -47,16 +47,21 @@ async function loadRequestRow(admin: any, token: string) {
     .eq('access_token', token)
     .maybeSingle();
   if (!row) return { ok: false as const, code: 'token_not_found' };
-  if (row.status === 'uploaded') return { ok: false as const, code: 'already_uploaded' };
   if (row.status === 'cancelled') return { ok: false as const, code: 'cancelled' };
   if (new Date(row.expires_at) < new Date()) return { ok: false as const, code: 'expired' };
-  return { ok: true as const, row };
+  // NOTE (2026-05-30): 'uploaded' is intentionally NOT a hard block anymore.
+  // Patients must be able to upload AND update their lab order for an
+  // upcoming visit (e.g. the provider sent a corrected order). The page
+  // renders with the already-on-file state and re-upload is allowed as long
+  // as the appointment itself is still upcoming. The POST path guards
+  // against re-upload on completed/cancelled appointments.
+  return { ok: true as const, row, alreadyUploaded: row.status === 'uploaded' };
 }
 
 async function loadAppointmentSummary(admin: any, appointmentId: string) {
   const { data: appt } = await admin
     .from('appointments')
-    .select('id, patient_id, patient_name, patient_email, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id, family_group_id')
+    .select('id, patient_id, patient_name, patient_email, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id, family_group_id, lab_order_file_path')
     .eq('id', appointmentId)
     .maybeSingle();
   if (!appt) return null;
@@ -129,6 +134,10 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
     fasting_required: appt.fasting_required,
     org_name: orgName,
     family_group_id: appt.family_group_id,
+    // Whether THIS appointment (the token's primary) already has an order on
+    // file. Lets the single-patient page show an "already uploaded — replace?"
+    // state instead of a bare upload prompt. (Item 4: patient can update.)
+    already_uploaded: !!(appt as any).lab_order_file_path,
     family_members: familyMembers,
     insurance_on_file: insuranceOnFile,
     insurance_provider: insuranceProvider,
@@ -222,6 +231,32 @@ Deno.serve(async (req) => {
         });
       }
       effectiveAppointmentId = targetAppointmentId;
+    }
+
+    // Guard: patients may upload/update a lab order only while the visit is
+    // still upcoming. Once the appointment is completed or cancelled the
+    // order is locked — a corrected order at that point has to go through
+    // ConveLabs admin, not the self-serve link. (Backs the loadRequestRow
+    // note that re-upload is allowed "as long as the appointment is upcoming".)
+    {
+      const { data: apptStatusRow } = await admin
+        .from('appointments')
+        .select('status')
+        .eq('id', effectiveAppointmentId)
+        .maybeSingle();
+      const apptStatus = String((apptStatusRow as any)?.status || '').toLowerCase();
+      if (apptStatus === 'completed') {
+        return new Response(JSON.stringify({
+          error: 'appointment_completed',
+          message: 'This visit is already complete, so the lab order can no longer be changed here. Please contact ConveLabs if it needs to be updated.',
+        }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      if (apptStatus === 'cancelled') {
+        return new Response(JSON.stringify({
+          error: 'appointment_cancelled',
+          message: 'This appointment was cancelled, so a lab order can no longer be attached.',
+        }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
     }
 
     const bytes = decodeB64ToUint8(fileB64);

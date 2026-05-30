@@ -800,10 +800,20 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       const orgInvoiceDollars = orgCoversPatient
         ? (selectedOrg.org_invoice_price_cents ?? selectedOrg.locked_price_cents ?? 0) / 100
         : 0;
-      if (orgCoversPatient && discountType === 'waive' && orgInvoiceDollars > 0) {
-        // Patient owes $0 (waive), but the org gets invoiced the partner rate.
-        finalPrice = orgInvoiceDollars;
-        discountNote += (discountNote ? ' | ' : '') + `Patient pays $0; org billed $${orgInvoiceDollars.toFixed(2)}`;
+      // Distance / timing surcharges apply to the ORG invoice too. When an org
+      // agrees to cover a patient who lives in an extended-area zone (or the
+      // visit is weekend/after-hours/same-day), the org owes the partner rate
+      // PLUS the surcharge — same as a self-pay patient would. Previously we
+      // billed the flat org rate and silently ate the distance fee.
+      const orgInvoiceWithSurcharge = orgInvoiceDollars > 0 ? orgInvoiceDollars + surchargeTotal : 0;
+      if (orgCoversPatient && discountType === 'waive' && orgInvoiceWithSurcharge > 0) {
+        // Patient owes $0 (waive), but the org gets invoiced the partner rate
+        // plus any extended-area / weekend / after-hours / same-day surcharge.
+        finalPrice = orgInvoiceWithSurcharge;
+        discountNote += (discountNote ? ' | ' : '') + `Patient pays $0; org billed $${orgInvoiceWithSurcharge.toFixed(2)}`;
+        if (surchargeTotal > 0) {
+          discountNote += ` (incl. $${surchargeTotal.toFixed(2)} ${surchargeItems.join(', ')})`;
+        }
       }
       const isWaived = finalPrice === 0;
       const invoiceDueAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();

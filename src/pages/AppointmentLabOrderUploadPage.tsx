@@ -45,6 +45,7 @@ interface ApptSummary {
   fasting_required: boolean | null;
   org_name: string | null;
   family_group_id?: string | null;
+  already_uploaded?: boolean;
   family_members?: FamilyMember[];
   insurance_on_file?: boolean;
   insurance_provider?: string | null;
@@ -359,6 +360,21 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                         className="hidden"
                         onChange={onMemberChange(m.appointment_id)}
                       />
+                      {isDone && !isActive && (
+                        <button
+                          type="button"
+                          onClick={() => memberFileRefs.current[m.appointment_id]?.click()}
+                          disabled={uploading}
+                          className="text-[11px] text-gray-500 underline hover:text-[#B91C1C] disabled:opacity-40"
+                        >
+                          Replace {m.patient_first_name}'s order
+                        </button>
+                      )}
+                      {isActive && isDone && (
+                        <div className="flex items-center gap-2 text-blue-700 text-xs">
+                          <Loader2 className="h-4 w-4 animate-spin" /> Replacing {m.patient_first_name}'s order…
+                        </div>
+                      )}
                       {!isDone && (
                         <button
                           type="button"
@@ -398,6 +414,17 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                   onChange={onChange}
                 />
 
+                {summary?.already_uploaded && !uploading && (
+                  <div className="mb-3 border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <CheckCircle2 className="h-4 w-4" /> A lab order is already on file for this visit
+                    </div>
+                    <p className="mt-1 text-[11px] text-emerald-900/70">
+                      You're all set. If your doctor sent a <strong>corrected or updated</strong> order, upload it below to replace it.
+                    </p>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
@@ -416,7 +443,7 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                   ) : (
                     <>
                       <FileUp className="h-10 w-10 text-[#B91C1C] mx-auto mb-3" />
-                      <p className="text-base font-bold text-gray-900">Tap to upload</p>
+                      <p className="text-base font-bold text-gray-900">{summary?.already_uploaded ? 'Tap to upload a new order' : 'Tap to upload'}</p>
                       <p className="text-xs text-gray-600 mt-1">📷 Take a photo · 📄 Choose PDF / JPG / PNG</p>
                     </>
                   )}

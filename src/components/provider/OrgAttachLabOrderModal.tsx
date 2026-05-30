@@ -60,6 +60,7 @@ const OrgAttachLabOrderModal: React.FC<Props> = ({ open, onClose, appointment, o
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const [ocr, setOcr] = useState<OcrResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -67,6 +68,7 @@ const OrgAttachLabOrderModal: React.FC<Props> = ({ open, onClose, appointment, o
     setPhase('idle');
     setErrMsg(null);
     setOcr(null);
+    setReplaceExisting(false);
   };
 
   const handleClose = () => {
@@ -103,6 +105,7 @@ const OrgAttachLabOrderModal: React.FC<Props> = ({ open, onClose, appointment, o
       const fd = new FormData();
       fd.append('appointment_id', appointment.id);
       fd.append('file', file);
+      if (replaceExisting) fd.append('replace', 'true');
 
       // Invoke via supabase.functions so JWT is auto-attached.
       const { data, error } = await supabase.functions.invoke('attach-lab-order-to-appointment', {
@@ -167,11 +170,24 @@ const OrgAttachLabOrderModal: React.FC<Props> = ({ open, onClose, appointment, o
         </DialogHeader>
 
         {appointment.has_existing_lab_order && phase === 'idle' && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 flex items-start gap-2">
-            <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <div>
-              <strong>This appointment already has a lab order on file.</strong> Uploading another one will <em>add</em> to it (the existing order stays). Use this if your patient needs additional panels drawn.
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 space-y-2">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <div>
+                <strong>This appointment already has a lab order on file.</strong> By default, uploading another one <em>adds</em> to it (the existing order stays) — use this if your patient needs additional panels drawn.
+              </div>
             </div>
+            <label className="flex items-start gap-2 cursor-pointer pl-6">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-3.5 w-3.5 accent-[#B91C1C]"
+                checked={replaceExisting}
+                onChange={(e) => setReplaceExisting(e.target.checked)}
+              />
+              <span>
+                <strong>Replace the existing order instead.</strong> Check this if the order was wrong or has changed — the previous file is set aside and only this new one is used for the draw.
+              </span>
+            </label>
           </div>
         )}
 

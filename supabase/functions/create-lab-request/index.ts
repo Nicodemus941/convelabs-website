@@ -186,7 +186,17 @@ Deno.serve(async (req) => {
       // and the patient is blocked from booking. (2026-05-07: Michael Percopo
       // case.) Provider modal must collect this from their EMR.
       patient_dob,
+      // How the org wants to pay when it covers the visit:
+      //   'invoice'  → issue a Stripe invoice (net-30) at order time, notify
+      //                the patient immediately (no payment gate). Default —
+      //                matches the admin ScheduleAppointmentModal flow and the
+      //                owner's "auto Stripe invoice at order time" decision.
+      //   'pay_now'  → redirect the provider to Stripe Checkout to pay by card
+      //                now; patient is notified only after payment completes.
+      provider_pay_method,
     } = body || {};
+    const payMethodClean: 'invoice' | 'pay_now' =
+      provider_pay_method === 'pay_now' ? 'pay_now' : 'invoice';
     // Normalize: accept both 'YYYY-MM-DD' and ISO strings; reject anything
     // else so a malformed value can't slip into the date column.
     const dobClean: string | null = (() => {
@@ -216,7 +226,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: org } = await admin.from('organizations')
-      .select('id, name, contact_name, default_billed_to, member_stacking_rule, locked_price_cents, org_invoice_price_cents, show_patient_name_on_appointment, auto_fulfill_lab_orders, auto_fulfill_service_type')
+      .select('id, name, contact_name, default_billed_to, member_stacking_rule, locked_price_cents, org_invoice_price_cents, show_patient_name_on_appointment, auto_fulfill_lab_orders, auto_fulfill_service_type, billing_email, contact_email')
       .eq('id', organization_id).eq('is_active', true).maybeSingle();
     if (!org) return new Response(JSON.stringify({ error: 'Org not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
@@ -453,8 +463,12 @@ Deno.serve(async (req) => {
       let stripeUrl: string | null = null;
       try {
         // Find or create a Stripe customer for this org so future invoices
-        // group under one customer record.
-        const orgEmail = (user.email || '').toLowerCase() || null;
+        // group under one customer record. Prefer the org's billing inbox so
+        // the invoice reliably reaches whoever pays (Elite's billing_email),
+        // NOT the individual staffer who happened to place the order.
+        const orgEmail = (
+          (org.billing_email || org.contact_email || user.email || '') as string
+        ).toLowerCase() || null;
         let customerId: string | null = null;
         if (orgEmail) {
           const found = await stripe.customers.list({ email: orgEmail, limit: 5 });
@@ -470,6 +484,60 @@ Deno.serve(async (req) => {
           }
         }
 
+        // ── INVOICE-AT-ORDER-TIME (default) ──────────────────────────────
+        // The owner's chosen mechanism: when the org orders a draw, issue a
+        // Stripe invoice (net-30) immediately and let the patient book right
+        // away. No synchronous pay-now gate — Elite (and every trusted
+        // partner) is invoiced on order, mirroring the admin
+        // ScheduleAppointmentModal → send-appointment-invoice behavior.
+        // Org-billed visits are never auto-cancelled for non-payment
+        // (dunning guardrail), so notifying the patient immediately is safe.
+        if (payMethodClean === 'invoice') {
+          let invoiceId: string | null = null;
+          if (customerId && orgChargeCents > 0) {
+            await stripe.invoiceItems.create({
+              customer: customerId,
+              amount: orgChargeCents,
+              currency: 'usd',
+              description: `Mobile Blood Draw — ${patient_name} (covered by ${org.name})`,
+            });
+            const invoice = await stripe.invoices.create({
+              customer: customerId,
+              collection_method: 'send_invoice',
+              days_until_due: 30,
+              auto_advance: true,
+              metadata: {
+                lab_request_id: inserted.id,
+                organization_id,
+                patient_name,
+                org_pays: 'true',
+                convelabs_flow: 'lab_request_org_invoice',
+              },
+            });
+            try {
+              const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
+              await stripe.invoices.sendInvoice(finalized.id);
+              invoiceId = finalized.id;
+            } catch (finErr: any) {
+              console.warn('[create-lab-request] invoice finalize/send failed (left as draft):', finErr?.message);
+              invoiceId = invoice.id;
+            }
+          } else {
+            console.warn('[create-lab-request] org-invoice skipped — no customer or charge=0 for', org.name);
+          }
+
+          await admin.from('patient_lab_requests').update({
+            provider_payment_status: invoiceId ? 'invoiced' : 'invoice_skipped',
+            provider_stripe_session_id: invoiceId,
+            provider_payment_cents: orgChargeCents,
+            billed_to: 'org',
+            // Patient is notified immediately — NOT gated on payment. Status
+            // stays at its insert default (pending_schedule) so the public
+            // lab-request page is live right away.
+          }).eq('id', inserted.id);
+          // Fall through (do NOT return early) → the normal patient-notify
+          // path below fires the booking SMS/email with covered=true.
+        } else {
         const session = await stripe.checkout.sessions.create({
           mode: 'payment',
           customer: customerId || undefined,
@@ -533,6 +601,7 @@ Deno.serve(async (req) => {
           amount_cents: orgChargeCents,
           message: 'Lab request created. Redirecting to Stripe to collect organization payment. Patient will be notified once payment completes.',
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        } // end pay_now branch
       } catch (stripeErr: any) {
         console.error('[create-lab-request] Stripe session create failed:', stripeErr?.message);
         // If Stripe fails, fall through to the normal patient-notify path
