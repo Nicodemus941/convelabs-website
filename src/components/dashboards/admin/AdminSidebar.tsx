@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
   CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
-  Crown, GraduationCap, Inbox, Bell,
+  Crown, GraduationCap, Inbox, Bell, Wallet,
 } from 'lucide-react';
 import { getUnreadReleaseCount } from '@/data/releaseNotes';
 
@@ -39,6 +39,8 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'What\'s New', icon: Sparkles, path: `${basePath}/new-updates`, releaseBadge: true },
         { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
         { name: 'Hormozi Dashboard', icon: TrendingUp, path: `${basePath}/hormozi`, ownerOnly: true },
+        { name: 'Frank (CFO)', icon: Briefcase, path: `${basePath}/frank`, ownerOnly: true },
+        { name: 'Expenses', icon: Wallet, path: `${basePath}/expenses`, ownerOnly: true },
         { name: 'Upgrades & ROI', icon: Crown, path: `${basePath}/upgrades`, ownerOnly: true },
         { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
         { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },

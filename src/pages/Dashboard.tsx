@@ -45,6 +45,8 @@ const NewUpdatesTab = lazyWithRetry(() => import("@/components/dashboards/admin/
 import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
 import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
 import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
+import FrankCFO from "@/components/dashboards/admin/FrankCFO";
+import ExpensesManager from "@/components/dashboards/admin/ExpensesManager";
 import HormoziDashboard from "@/components/dashboards/admin/hormozi/HormoziDashboard";
 import UpgradesTab from "@/components/dashboards/admin/UpgradesTab";
 import TrainingTab from "@/components/dashboards/admin/TrainingTab";
@@ -169,7 +171,7 @@ const Dashboard = () => {
     // Owner-only tabs — visible to the platform owner alone, hidden from
     // operational super_admins (e.g. Naquala). UI sidebar already filters
     // these out via ownerOnly flag; this is the URL-typing guard.
-    const OWNER_ONLY_TABS = new Set(["hormozi", "upgrades"]);
+    const OWNER_ONLY_TABS = new Set(["hormozi", "upgrades", "frank", "expenses"]);
     const PLATFORM_OWNER_EMAIL = "nicodemmebaptiste@convelabs.com";
     const isPlatformOwner = (user.email || "").toLowerCase() === PLATFORM_OWNER_EMAIL.toLowerCase();
     if (OWNER_ONLY_TABS.has(adminTab) && !isPlatformOwner) {
@@ -208,12 +210,14 @@ const Dashboard = () => {
           {adminTab === "operations" && <OperationsPanel />}
           {adminTab === "ai-assistant" && <AIOpsAssistant />}
           {adminTab === "hormozi" && <HormoziDashboard />}
+          {adminTab === "frank" && <FrankCFO />}
+          {adminTab === "expenses" && <ExpensesManager />}
           {adminTab === "upgrades" && <UpgradesTab />}
           {adminTab === "training" && <TrainingTab />}
           {adminTab === "chatbot" && <ChatbotTab />}
           {adminTab === "provider-acquisition" && <ProviderAcquisitionTab />}
           {adminTab === "scripts" && <ScriptsTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "new-updates", "organizations", "operations", "ai-assistant", "hormozi", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
+          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "new-updates", "organizations", "operations", "ai-assistant", "hormozi", "frank", "expenses", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
         </AdminLayout>
