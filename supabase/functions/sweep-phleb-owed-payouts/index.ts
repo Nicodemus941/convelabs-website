@@ -58,6 +58,15 @@ async function sweepForStaff(admin: any, staffId: string, stripeAcct: string) {
   if (totalCents <= 0) return { ok: true, swept_count: 0, total_cents: 0 };
   const today = new Date().toISOString().substring(0, 10);
   const transferGroup = `phleb_sweep_${staffId}_${today}`;
+  // Idempotency key reflects the EXACT set of owed rows + total being paid (not
+  // just staff+date). A date-only key broke when a second sweep ran the same
+  // day for a different amount (new owed visits) — Stripe rejects key reuse
+  // with different params. Same-set retry stays idempotent; double-pay of the
+  // same rows is already prevented by the manual_owed → succeeded flip below.
+  const sortedIds = rows.map(r => r.id).slice().sort();
+  let idemHash = 5381;
+  for (const ch of sortedIds.join(',')) idemHash = ((idemHash << 5) + idemHash + ch.charCodeAt(0)) >>> 0;
+  const idempotencyKey = `phleb_sweep_${staffId}_${today}_${totalCents}_${idemHash.toString(16)}`;
   const transfer = await stripe.transfers.create({
     amount: totalCents,
     currency: 'usd',
@@ -65,7 +74,7 @@ async function sweepForStaff(admin: any, staffId: string, stripeAcct: string) {
     transfer_group: transferGroup,
     description: `Phleb sweep: ${rows.length} owed visits, ${today}`,
     metadata: { staff_id: staffId, row_count: String(rows.length), sweep_date: today, source: 'sweep-phleb-owed-payouts' },
-  }, { idempotencyKey: transferGroup });
+  }, { idempotencyKey });
   await admin.from('staff_payouts').update({
     status: 'succeeded',
     stripe_transfer_id: transfer.id,
@@ -214,7 +223,22 @@ Deno.serve(async (req) => {
 
     // Fire ONE Stripe Connect transfer for the full owed total
     const today = new Date().toISOString().substring(0, 10);
+    // transfer_group stays date-scoped so reconciliation can group a day's
+    // sweeps (reconcile-phleb-payouts-from-stripe relies on this).
     const transferGroup = `phleb_sweep_${staffId}_${today}`;
+    // The IDEMPOTENCY KEY must reflect the EXACT content of THIS transfer, not
+    // just staff+date. Earlier the key was the date-scoped transfer_group, so a
+    // second sweep later the same day (new owed visits accrued → different
+    // amount) reused the key with different params and Stripe rejected it:
+    // "Keys for idempotent requests can only be used with the same parameters".
+    // Keying off the sorted set of paid row ids + total means a genuine network
+    // retry of the SAME request stays idempotent, while a new/changed set of
+    // owed rows gets its own key. (Double-paying the same rows is already
+    // prevented by the manual_owed → succeeded status flip below.)
+    const sortedIds = rows.map(r => r.id).slice().sort();
+    let idemHash = 5381;
+    for (const ch of sortedIds.join(',')) idemHash = ((idemHash << 5) + idemHash + ch.charCodeAt(0)) >>> 0;
+    const idempotencyKey = `phleb_sweep_${staffId}_${today}_${totalCents}_${idemHash.toString(16)}`;
     let transfer: any;
     try {
       transfer = await stripe.transfers.create({
@@ -230,7 +254,7 @@ Deno.serve(async (req) => {
           source: 'sweep-phleb-owed-payouts',
         },
       }, {
-        idempotencyKey: transferGroup,
+        idempotencyKey,
       });
     } catch (e: any) {
       console.error('[sweep] stripe transfer failed:', e?.message);
