@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageCircle, X, Send, Loader2, Sparkles, Heart, Building2, Link as LinkIcon, Phone, ExternalLink, Crown } from 'lucide-react';
+import { trackEvent } from '@/lib/posthog';
 
 /**
  * ChatbotWidget — "Ask Nico" landing-page assistant.
@@ -77,6 +78,9 @@ const ChatbotWidget: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [hookPicked, setHookPicked] = useState<boolean>(false);
   const [hasUnread, setHasUnread] = useState(false);
+  // Proactive greeting bubble — a friendly speech bubble that pops next to the
+  // launcher on first visit to invite engagement (vs. waiting for a click).
+  const [showGreeting, setShowGreeting] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const visitorId = useMemo(() => getOrCreateVisitorId(), []);
@@ -90,20 +94,47 @@ const ChatbotWidget: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, sending]);
 
-  // Show the "unread" dot after 15s on landing page if user hasn't opened it (first visit only)
+  // Proactive engagement on first visit (only if they've never opened it):
+  //   • 10s → pop a greeting speech-bubble inviting a chat
+  //   • 15s → also light the unread dot
+  // Both are suppressed once the visitor has seen/opened the widget.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const seen = window.localStorage.getItem(LS_SEEN_WELCOME_KEY);
     if (seen) return;
-    const t = setTimeout(() => setHasUnread(true), 15000);
-    return () => clearTimeout(t);
+    const tGreeting = setTimeout(() => {
+      setShowGreeting(true);
+      trackEvent('chatbot_greeting_shown', { path: window.location.pathname });
+    }, 10000);
+    const tDot = setTimeout(() => setHasUnread(true), 15000);
+    return () => { clearTimeout(tGreeting); clearTimeout(tDot); };
   }, []);
 
-  const toggleOpen = () => {
-    setOpen(o => !o);
-    setHasUnread(false);
+  const dismissGreeting = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setShowGreeting(false);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(LS_SEEN_WELCOME_KEY, '1');
+    }
+  };
+
+  const toggleOpen = () => {
+    const willOpen = !open;
+    setOpen(willOpen);
+    setHasUnread(false);
+    setShowGreeting(false);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LS_SEEN_WELCOME_KEY, '1');
+    }
+    // Fire an "opened" funnel event so we can separate opens from messages
+    // sent vs. leads captured (PostHog → no-op if VITE_POSTHOG_KEY unset).
+    if (willOpen) {
+      trackEvent('chatbot_opened', {
+        path: typeof window !== 'undefined' ? window.location.pathname : null,
+        visitor_id: visitorId,
+        conversation_id: conversationId,
+        had_greeting: showGreeting,
+      });
     }
   };
 
@@ -188,6 +219,28 @@ const ChatbotWidget: React.FC = () => {
 
   return (
     <>
+      {/* Proactive greeting speech-bubble — invites first-time visitors to chat */}
+      {!open && showGreeting && (
+        <div className="fixed bottom-24 right-5 z-[9998] w-[260px] max-w-[80vw] bg-white rounded-2xl rounded-br-md shadow-2xl border border-gray-200 p-3.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <button
+            onClick={dismissGreeting}
+            aria-label="Dismiss"
+            className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gray-900 text-white flex items-center justify-center shadow hover:bg-gray-700"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={toggleOpen} className="text-left w-full">
+            <p className="text-sm font-semibold text-gray-900 leading-snug">👋 Need labs drawn at home?</p>
+            <p className="text-xs text-gray-600 mt-1 leading-snug">
+              Ask me anything — booking, pricing, or how it works. Same-day visits available.
+            </p>
+            <span className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-conve-red">
+              <MessageCircle className="h-3.5 w-3.5" /> Chat with Nico
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Floating bubble */}
       {!open && (
         <button
