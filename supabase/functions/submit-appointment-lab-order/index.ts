@@ -86,6 +86,43 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
       );
     } catch { /* non-blocking */ }
   }
+  // ── Client-bill / prepaid detection ──────────────────────────────────
+  // When the order is for a prepaid lab (Evexia / Access Medical Labs / Ulta
+  // Lab Tests) OR marked "Client Bill", the lab won't bill the patient's
+  // insurance — so the upload page must NOT ask for it. Derive from the lab
+  // order row's persisted flag, its detected lab company, and the
+  // appointment's lab_destination (covers dropdown-selected prepaid labs that
+  // were never OCR'd).
+  const isPrepaidLabName = (raw?: string | null): boolean => {
+    if (!raw) return false;
+    const s = String(raw).toLowerCase();
+    return /\bevexia\b/.test(s)
+      || /access\s*medical\s*lab(orator(y|ies))?s?/.test(s)
+      || /\bult[ar]\s*lab(\s*tests)?\b/.test(s);
+  };
+  const isClientBillText = (raw?: string | null): boolean =>
+    !!raw && (/\bclient[\s-]*bill(ed|ing)?\b/i.test(raw) || /\bbill\s*(to\s*)?client\b/i.test(raw));
+  let clientBilled = isPrepaidLabName(appt.lab_destination) || isClientBillText(appt.lab_destination);
+  let billType: string | null = null;
+  try {
+    const { data: alo } = await admin
+      .from('appointment_lab_orders')
+      .select('is_client_billed, bill_type, delivery_lab_name')
+      .eq('appointment_id', appointmentId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (alo) {
+      billType = (alo as any).bill_type || null;
+      if ((alo as any).is_client_billed === true
+        || billType === 'client_bill'
+        || isPrepaidLabName((alo as any).delivery_lab_name)) {
+        clientBilled = true;
+      }
+    }
+  } catch { /* non-blocking */ }
+
   let orgName: string | null = null;
   if (appt.organization_id) {
     const { data: org } = await admin
@@ -142,6 +179,10 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
     insurance_on_file: insuranceOnFile,
     insurance_provider: insuranceProvider,
     insurance_member_id: insuranceMemberId,
+    // When true, the order is prepaid (Client Bill) — the upload page hides
+    // the insurance prompt and shows a "no insurance needed" note instead.
+    client_billed: clientBilled,
+    bill_type: billType,
   };
 }
 

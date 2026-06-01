@@ -218,6 +218,35 @@ interface OcrExtraction {
     phone?: string | null;
     sex?: string | null;
   } | null;
+  // Billing designation on the order. Drives whether we collect patient
+  // insurance. 'client_bill' / prepaid labs (Evexia / Access Medical Labs /
+  // Ulta Lab Tests) mean the test is already paid for — the lab will NOT bill
+  // the patient's insurance, so we must not require it. Mirrors the shared
+  // frontend helper src/lib/clientBillLabs.ts — keep the two in sync.
+  billType?: 'client_bill' | 'insurance' | 'self_pay' | null;
+  labCompany?: string | null;   // destination lab company (Quest / LabCorp / Evexia / Access Medical Labs / Ulta Lab Tests / Genova / ...)
+}
+
+// ─── Client-bill / prepaid detection (server mirror of clientBillLabs.ts) ───
+// Cannot import the src/ helper into a Deno function, so the logic lives here
+// too. If you change one, change both.
+function ocrNormalizeLabCompany(raw?: string | null): string | null {
+  if (!raw) return null;
+  const s = String(raw).toLowerCase();
+  if (/\bevexia\b/.test(s)) return 'evexia';
+  if (/access\s*medical\s*lab(orator(y|ies))?s?/.test(s)) return 'access-medical-labs';
+  if (/\bult[ar]\s*lab(\s*tests)?\b/.test(s)) return 'ulta-lab-tests';
+  return null;
+}
+function ocrIsClientBillText(text?: string | null): boolean {
+  if (!text) return false;
+  return /\bclient[\s-]*bill(ed|ing)?\b/i.test(text) || /\bbill\s*(to\s*)?client\b/i.test(text);
+}
+function ocrDeriveClientBilled(r: { billType?: string | null; labCompany?: string | null; text?: string | null }): boolean {
+  if (r.billType === 'client_bill') return true;
+  if (ocrNormalizeLabCompany(r.labCompany)) return true;
+  if (ocrIsClientBillText(r.text)) return true;
+  return false;
 }
 
 async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<OcrExtraction | { error: string }> {
@@ -269,12 +298,14 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
             '   - phone: patient\'s phone if listed (NOT practice phone, NOT lab phone)',
             '   - sex: patient\'s sex/gender if shown (M, F, or other)',
             '   If the form genuinely has no patient block (rare), return patient: null.',
+            '6. The BILLING designation. Look for how the order will be paid: a checkbox or label such as "Client Bill" / "Bill Client" / "Client Billed", "Bill Insurance" / "Third Party", or "Patient Bill" / "Self-Pay" / "Cash". Return billType as EXACTLY one of: "client_bill" (the ordering practice/lab is billed directly — patient insurance is NOT used), "insurance" (bill the patient\'s insurance), "self_pay" (patient pays cash), or null if not indicated.',
+            '7. The DESTINATION LAB COMPANY — the laboratory that will RUN the tests (NOT the ordering practice). Common values: "Quest", "LabCorp", "Genova", "Evexia", "Access Medical Labs", "Ulta Lab Tests", "AdventHealth". Return labCompany as the lab name, or null if not shown. NOTE: Evexia, Access Medical Labs, and Ulta Lab Tests are prepaid functional-medicine labs — orders for them are always client-billed.',
             '',
             'Reply ONLY with valid JSON in this exact shape, no prose:',
-            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}}',
+            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}, "billType": "client_bill", "labCompany": "Access Medical Labs"}',
             '',
-            'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null. If patient demographics are absent (rare), set "patient": null.',
-            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null, "patient": null}',
+            'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null. If patient demographics are absent (rare), set "patient": null. If billing is not indicated, set "billType": null. If the destination lab is not shown, set "labCompany": null.',
+            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null, "patient": null, "billType": null, "labCompany": null}',
           ].join('\n'),
         },
       ],
@@ -307,7 +338,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
     const content = json?.content?.[0]?.text || '';
     // Claude may wrap JSON in prose or code blocks — extract the JSON object
     const match = content.match(/\{[\s\S]*\}/);
-    if (!match) return { text: content, panels: [], insurance: null, practice: null, patient: null };
+    if (!match) return { text: content, panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null };
     try {
       const parsed = JSON.parse(match[0]);
       const text = String(parsed.text || '').substring(0, 8000);
@@ -361,9 +392,14 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
         // Treat all-null as null
         if (Object.values(patient).every(v => !v)) patient = null;
       }
-      return { text, panels, insurance, practice, patient };
+      // Billing designation + destination lab company
+      const rawBill = parsed.billType ? String(parsed.billType).trim().toLowerCase() : null;
+      const billType: OcrExtraction['billType'] =
+        rawBill === 'client_bill' || rawBill === 'insurance' || rawBill === 'self_pay' ? rawBill : null;
+      const labCompany = parsed.labCompany ? String(parsed.labCompany).trim().substring(0, 80) || null : null;
+      return { text, panels, insurance, practice, patient, billType, labCompany };
     } catch {
-      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null, patient: null };
+      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null };
     }
   } catch (e: any) {
     console.error('[ocr] request exception', e);
@@ -522,6 +558,21 @@ Deno.serve(async (req) => {
       FASTING_PANELS.some(fp => p.toLowerCase().includes(fp.toLowerCase()))
     );
 
+    // ─── CLIENT-BILL / PREPAID DETECTION ──────────────────────────────
+    // Evexia / Access Medical Labs / Ulta Lab Tests are prepaid functional-
+    // medicine labs, OR the order is explicitly marked "Client Bill". In any
+    // of these cases the lab won't bill the patient's insurance, so the
+    // patient-facing surfaces must NOT ask for it.
+    const clientBilled = ocrDeriveClientBilled({
+      billType: result.billType,
+      labCompany: result.labCompany,
+      text: result.text,
+    });
+    // Normalize bill_type for storage: if we know it's prepaid by lab company
+    // but Claude didn't tag billType, record 'client_bill'.
+    const storedBillType: string | null =
+      result.billType || (clientBilled ? 'client_bill' : null);
+
     // Persist the OCR result. Row-scoped if we came via labOrderId; otherwise
     // the legacy appointment-level columns.
     const insuranceUpdate = result.insurance
@@ -540,6 +591,12 @@ Deno.serve(async (req) => {
         ocr_fasting_required: fastingDetected,
         ocr_completed_at: new Date().toISOString(),
         ...insuranceUpdate,
+        // Client-bill / prepaid flags — drive the "no insurance needed" UI.
+        // Only write a POSITIVE signal; never downgrade an existing client_bill
+        // (e.g. admin/patient already declared it) on an inconclusive scan.
+        ...(clientBilled ? { bill_type: storedBillType, is_client_billed: true }
+            : storedBillType ? { bill_type: storedBillType } : {}),
+        ...(result.labCompany ? { delivery_lab_name: result.labCompany } : {}),
       }).eq('id', labOrderRowId);
 
       // ─── MIRROR TO PARENT APPOINTMENT ─────────────────────────────
@@ -1010,6 +1067,11 @@ Deno.serve(async (req) => {
       provider: (result as any).provider || null,          // org-match info
       fullText: result.text || '',                          // create-lab-request stores in lab_order_full_text
       textPreview: result.text.substring(0, 300),
+      // Client-bill / prepaid signals — the booking client uses `clientBilled`
+      // to drop the insurance requirement live on upload.
+      billType: storedBillType,
+      labCompany: result.labCompany || null,
+      clientBilled,
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (e: any) {
     console.error('[ocr] unhandled', e);

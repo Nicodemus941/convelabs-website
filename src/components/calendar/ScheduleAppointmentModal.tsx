@@ -366,6 +366,12 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   // Phleb dashboard now surfaces this prominently; manual appointments
   // without it show a "Check with office" warning to the phleb.
   const [labDestination, setLabDestination] = useState('');
+  // Client-bill / prepaid order — when set, the order is already paid for
+  // (prepaid lab or "Client Bill" requisition) and the lab won't bill the
+  // patient's insurance. Patient-facing surfaces read this to stop asking
+  // for insurance. Persisted as a "(Client Bill)" marker on lab_destination
+  // (no dedicated column) which submit-appointment-lab-order detects.
+  const [clientBillOrder, setClientBillOrder] = useState(false);
 
   const resetForm = () => {
     setStep(1);
@@ -391,6 +397,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setOrgEmail('');
     setOverrideSlot(false);
     setGateCode('');
+    setLabDestination('');
+    setClientBillOrder(false);
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -880,9 +888,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // can also rely on this link.
         ...(matchedLabRequest ? { lab_request_id: matchedLabRequest.id } : {}),
         gate_code: gateCode || null,
-        lab_destination: labDestination.trim() || null,
+        // Stamp a "(Client Bill)" marker on the destination when the admin flags
+        // the order as prepaid — submit-appointment-lab-order detects it and
+        // hides the insurance prompt for the patient.
+        lab_destination: ((): string | null => {
+          const d = labDestination.trim();
+          if (!d) return clientBillOrder ? 'Client Bill' : null;
+          return clientBillOrder && !/client[\s-]*bill/i.test(d) ? `${d} (Client Bill)` : d;
+        })(),
         phlebotomist_id: '91c76708-8c5b-4068-92c6-323805a3b164',
-        notes: [notes, gateCode ? `Gate: ${gateCode}` : '', labDestination ? `Lab: ${labDestination}` : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
+        notes: [notes, gateCode ? `Gate: ${gateCode}` : '', labDestination ? `Lab: ${labDestination}` : '', clientBillOrder ? 'Client Bill (no insurance needed)' : '', discountNote, orgBilling ? `Org: ${orgName}` : '', invoiceMemo ? `Memo: ${invoiceMemo}` : ''].filter(Boolean).join(' | ') || null,
         // Partner linkage (if admin picked an org from the dropdown)
         ...(selectedOrg ? {
           organization_id: selectedOrg.id,
@@ -1421,10 +1436,28 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                 <option value="Quest Diagnostics - Winter Park" />
                 <option value="AdventHealth Lab" />
                 <option value="Orlando Health Lab" />
+                <option value="Evexia Diagnostics" />
+                <option value="Access Medical Labs" />
+                <option value="Ulta Lab Tests" />
               </datalist>
               <p className="text-xs text-muted-foreground mt-1">
                 Visible to the phleb on their appointment card. Leave blank if patient brings their own requisition.
               </p>
+              {/* Client Bill / prepaid — when set, the patient is NOT asked for
+                  insurance (Evexia / Access Medical Labs / Ulta Lab Tests and
+                  any "Client Bill" requisition are already paid for). */}
+              <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300"
+                  checked={clientBillOrder}
+                  onChange={e => setClientBillOrder(e.target.checked)}
+                />
+                <span className="text-xs">
+                  <span className="font-medium">Client Bill / prepaid order — no insurance needed</span>
+                  <span className="block text-muted-foreground">Check for Evexia, Access Medical Labs, Ulta Lab Tests, or any order marked "Client Bill." Patient won't be asked for insurance.</span>
+                </span>
+              </label>
             </div>
             <div>
               <Label>Notes</Label>

@@ -12,6 +12,7 @@ import LabDestinationSelector from './LabDestinationSelector';
 import LabOrderPrepModal from './LabOrderPrepModal';
 import ServiceAutoSwitchModal from './ServiceAutoSwitchModal';
 import { analyzePrepRequirements, type PrepAnalysis } from '@/lib/phlebHelpers';
+import { isPrepaidLabValue } from '@/lib/clientBillLabs';
 
 interface LabOrderUploadStepProps {
   onNext: () => void;
@@ -49,10 +50,20 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   const isTherapeutic = visitType === 'therapeutic';
   const [hasInsuranceOnFile, setHasInsuranceOnFile] = useState(false);
 
+  // ── Client-bill / prepaid detection ──────────────────────────────────
+  // When the order is for a prepaid lab (Evexia / Access Medical Labs / Ulta
+  // Lab Tests) OR the patient declares it's "Client Bill" OR the lab-order OCR
+  // detects it, the lab won't bill the patient's insurance — so we drop the
+  // insurance requirement entirely. Signals: selected destination + the
+  // self-declared / OCR-set form flag.
+  const clientBilledFlag = watch('labOrder.clientBilled');
+  const isClientBilled = isPrepaidLabValue(labDestination) || !!clientBilledFlag;
+  const effectiveInsuranceRequired = isInsuranceRequired && !isClientBilled;
+
   // Check if patient already has insurance card on file
   React.useEffect(() => {
     const email = getValues('patientDetails.email');
-    if (email && isInsuranceRequired) {
+    if (email && effectiveInsuranceRequired) {
       supabase.from('tenant_patients').select('insurance_card_path, insurance_provider')
         .ilike('email', email).maybeSingle()
         .then(({ data }) => {
@@ -149,6 +160,14 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       // Stash on form so the confirmation email / day-before SMS can use it too
       setValue('labOrder.ocrPanels' as any, panels);
       setValue('labOrder.ocrText' as any, text);
+
+      // ── Client-bill / prepaid auto-detect ──────────────────────────
+      // If the OCR read a prepaid lab (Evexia / Access Medical Labs / Ulta)
+      // or a "Client Bill" designation, drop the insurance requirement live.
+      if ((data as any).clientBilled === true) {
+        setValue('labOrder.clientBilled', true);
+        toast.success('Prepaid lab order detected — no insurance needed.');
+      }
 
       // ── Layer 2: service-vs-OCR mismatch auto-switch ──────────────
       // `fastingDetected` is set by the OCR edge fn (true if any fasting
@@ -392,7 +411,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   };
 
   const hasLabOrder = selectedFiles.length > 0 || (mode === 'fax' && faxNumber.length >= 10) || mode === 'skip';
-  const hasInsurance = !isInsuranceRequired || selectedInsuranceFile !== null || hasInsuranceOnFile;
+  const hasInsurance = !effectiveInsuranceRequired || selectedInsuranceFile !== null || hasInsuranceOnFile;
   const hasLabDest = !needsLabDestination || (labDestination && labDestination.length > 0);
   const canProceed = hasLabOrder && hasInsurance && hasLabDest;
 
@@ -500,8 +519,44 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
           )}
         </div>
 
-        {/* Insurance Upload (for Mobile & Senior) */}
-        {isInsuranceRequired && (
+        {/* Client-bill / prepaid self-declaration — lets the patient tell us
+            the order is already paid for so we don't ask for insurance.
+            Shown only for visit types that would otherwise require insurance,
+            and only when a prepaid lab isn't already selected (which implies
+            it on its own). */}
+        {isInsuranceRequired && !isPrepaidLabValue(labDestination) && (
+          <div className="border-t pt-5">
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                checked={!!clientBilledFlag}
+                onChange={(e) => setValue('labOrder.clientBilled', e.target.checked)}
+              />
+              <span className="text-sm">
+                <span className="font-medium">My lab order is prepaid / says "Client Bill"</span>
+                <span className="block text-xs text-muted-foreground mt-0.5">
+                  Check this if your order is for Evexia, Access Medical Labs, or Ulta Lab Tests, or is marked "Client Bill." These are already paid for — no insurance needed.
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* Insurance not needed — prepaid / client-bill order */}
+        {isInsuranceRequired && isClientBilled && (
+          <div className="border-t pt-5">
+            <div className="flex items-start gap-2 text-sm p-3 rounded-md bg-green-50 border border-green-200 text-green-800">
+              <CheckCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <span>
+                <strong>No insurance needed.</strong> This lab order is prepaid (Client Bill), so the lab won't bill your insurance — you can skip that step.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Insurance Upload (for Mobile & Senior, unless prepaid/client-bill) */}
+        {effectiveInsuranceRequired && (
           <div className="space-y-3 border-t pt-5">
             <div className="flex items-center gap-2">
               <Shield className="h-4 w-4 text-muted-foreground" />

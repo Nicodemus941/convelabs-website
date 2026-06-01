@@ -79,6 +79,8 @@ export interface BookingFormValues {
     hasFile?: boolean;
     labDestination?: string;
     hasInsuranceFile?: boolean;
+    /** Order is prepaid / "Client Bill" (Evexia, Access Medical Labs, Ulta Lab Tests, or order marked Client Bill) — no patient insurance needed. */
+    clientBilled?: boolean;
   };
   termsAccepted?: boolean;
 }
@@ -140,6 +142,7 @@ export const bookingFormSchema = z.object({
     hasFile: z.boolean().optional(),
     labDestination: z.string().optional(),
     hasInsuranceFile: z.boolean().optional(),
+    clientBilled: z.boolean().optional(),
   }).optional(),
   termsAccepted: z.boolean().optional()
 });

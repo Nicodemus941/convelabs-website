@@ -4,6 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { FormField, FormItem, FormControl, FormMessage } from '@/components/ui/form';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { FlaskConical, AlertTriangle } from 'lucide-react';
+import { PREPAID_LABS } from '@/lib/clientBillLabs';
 
 const LAB_DESTINATIONS = [
   { value: 'labcorp', label: 'LabCorp' },
@@ -11,6 +12,9 @@ const LAB_DESTINATIONS = [
   { value: 'adventhealth', label: 'AdventHealth' },
   { value: 'orlando-health', label: 'Orlando Health' },
   { value: 'genova', label: 'Genova Diagnostics (ships)' },
+  // Prepaid / direct-client-bill functional-medicine labs. Picking one of
+  // these signals the order is already paid for — no patient insurance needed.
+  ...PREPAID_LABS,
 ];
 
 const SHIPPING_DESTINATIONS = [

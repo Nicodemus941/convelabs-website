@@ -50,6 +50,9 @@ interface ApptSummary {
   insurance_on_file?: boolean;
   insurance_provider?: string | null;
   insurance_member_id?: string | null;
+  /** Order is prepaid / "Client Bill" — no patient insurance needed. */
+  client_billed?: boolean;
+  bill_type?: string | null;
 }
 
 const AppointmentLabOrderUploadPage: React.FC = () => {
@@ -270,7 +273,7 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
             <ul className="text-xs text-gray-700 mt-3 space-y-0.5 list-disc list-inside">
               <li>Wear a short-sleeve shirt</li>
               <li>Drink water tonight (helps the draw)</li>
-              <li>Have a photo ID + insurance card ready</li>
+              <li>{summary?.client_billed ? 'Have a photo ID ready (this order is prepaid — no insurance needed)' : 'Have a photo ID + insurance card ready'}</li>
             </ul>
           </div>
           {/* Hormozi auto-magic-link CTA — patient is one tap away from
@@ -468,6 +471,19 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
              * the chart already has it — every extra ask is a churn
              * lever even for a 30-second action.
              */}
+            {summary?.client_billed ? (
+              <div className="mt-6 pt-4 border-t border-gray-100">
+                <p className="text-[12px] font-semibold text-gray-900 mb-1">📋 Insurance</p>
+                <div className="border-2 border-emerald-300 bg-emerald-50/60 rounded-lg p-3 text-sm text-emerald-800">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="h-4 w-4" /> No insurance needed
+                  </div>
+                  <p className="mt-1 text-[11px] text-emerald-900/80 leading-relaxed">
+                    This order is prepaid ("Client Bill"){summary?.lab_destination ? ` through ${summary.lab_destination}` : ''} — the lab won't bill your insurance, so there's nothing to upload here.
+                  </p>
+                </div>
+              </div>
+            ) : (
             <div className="mt-6 pt-4 border-t border-gray-100">
               <p className="text-[12px] font-semibold text-gray-900 mb-1">📋 Insurance card</p>
               <input
@@ -544,6 +560,7 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
                 </>
               )}
             </div>
+            )}
 
             <div className="mt-4 pt-3 border-t border-gray-100">
               <p className="text-[12px] text-gray-600 leading-relaxed">
