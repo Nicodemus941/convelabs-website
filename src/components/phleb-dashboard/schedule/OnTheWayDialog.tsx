@@ -53,15 +53,23 @@ const OnTheWayDialog: React.FC<OnTheWayDialogProps> = ({
         });
       const geo = await captureGeo();
 
-      const { error: statusError } = await supabase
+      const { data: updatedRows, error: statusError } = await supabase
         .from('appointments')
         .update({
           status: 'en_route',
           ...(geo ? { delivery_location: { ...geo, captured_at: new Date().toISOString() } } : {}),
         })
-        .eq('id', appointmentId);
+        .eq('id', appointmentId)
+        .select('id');
 
       if (statusError) throw statusError;
+      // Defense-in-depth: a permission/RLS issue makes the UPDATE a silent
+      // no-op (0 rows, no error). Without this guard the SMS would still fire
+      // and the card would never advance off "On the Way" — the exact bug
+      // reported for Carolyn Alvarez. Surface it instead of pretending success.
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error("Couldn't update the visit to 'On the way' — you may not have permission on this appointment. Refresh and retry, or contact admin.");
+      }
 
       // Pull the appointment's view_token for the tracking link
       const { data: apptRow } = await supabase
@@ -120,9 +128,9 @@ const OnTheWayDialog: React.FC<OnTheWayDialogProps> = ({
 
       onStatusUpdated();
       onOpenChange(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error:', err);
-      toast.error('Failed to update status');
+      toast.error(err?.message || 'Failed to update status');
     } finally {
       setIsSending(false);
     }

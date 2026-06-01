@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
@@ -67,13 +67,29 @@ export interface PhlebAppointment {
   companion_role: string | null;
 }
 
+// ── In-memory schedule cache (module scope) ───────────────────────────────
+// Survives component unmount/remount within the same running app session so
+// that navigating away from the dashboard and back shows the last-loaded
+// schedule INSTANTLY — no empty state, no loading spinner, no re-fetch flash.
+// The cold-start (hard reload / PWA relaunch) still does one honest load.
+// Keyed by user id so a different phleb logging in doesn't see stale rows.
+let scheduleMemCache: { userId: string; rows: PhlebAppointment[]; dates: string[]; at: number } | null = null;
+
 export function usePhlebotomistAppointments() {
   const { user } = useAuth();
-  const [appointments, setAppointments] = useState<PhlebAppointment[]>([]);
+  // Depend on the STABLE user id, not the user object. `onAuthStateChange`
+  // (token refresh on tab-focus, etc.) hands us a brand-new user object on
+  // every auth event; keying off `user.id` keeps callbacks/effects stable so
+  // returning to the dashboard doesn't trigger a fresh non-silent reload.
+  const userId = user?.id;
+  const userRole = user?.role;
+  const seeded = scheduleMemCache && scheduleMemCache.userId === userId ? scheduleMemCache : null;
+  const [appointments, setAppointments] = useState<PhlebAppointment[]>(() => seeded?.rows ?? []);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [lastCacheAt, setLastCacheAt] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [monthDates, setMonthDates] = useState<Set<string>>(new Set());
+  // Only show the loading spinner on a true cold load (no cached rows yet).
+  const [isLoading, setIsLoading] = useState(() => !seeded);
+  const [monthDates, setMonthDates] = useState<Set<string>>(() => new Set(seeded?.dates ?? []));
   // Fetch all appointments for the current month for this phlebotomist.
   // `silent=true` skips the isLoading toggle so background refetches
   // (realtime push, visibility-change resume) don't flash the loading
@@ -81,7 +97,7 @@ export function usePhlebotomistAppointments() {
   // Owner-confirmed Hormozi UX rule: foreground = honest loading,
   // background = invisible.
   const fetchMonthAppointments = useCallback(async (targetMonth?: Date, opts?: { silent?: boolean }) => {
-    if (!user) return;
+    if (!userId) return;
     if (!opts?.silent) setIsLoading(true);
 
     // When targetMonth is passed (user navigated to a specific month),
@@ -112,7 +128,7 @@ export function usePhlebotomistAppointments() {
 
     try {
       // phlebotomist_id stores the auth user ID (not staff_profiles.id)
-      const isPhlebRole = user.role === 'phlebotomist';
+      const isPhlebRole = userRole === 'phlebotomist';
 
       let query = supabase
         .from('appointments')
@@ -353,6 +369,10 @@ export function usePhlebotomistAppointments() {
 
       setAppointments(enriched);
 
+      // Seed the in-memory cache so a remount (navigate away → back) renders
+      // this exact schedule instantly without a spinner or refetch flash.
+      scheduleMemCache = { userId, rows: enriched, dates: Array.from(dates), at: Date.now() };
+
       // Mirror into IndexedDB for offline mode
       cacheAppointments(enriched).catch(() => { /* non-blocking */ });
     } catch (err) {
@@ -373,7 +393,7 @@ export function usePhlebotomistAppointments() {
     } finally {
       setIsLoading(false);
     }
-  }, [user]);
+  }, [userId, userRole]);
 
   const updateStatus = useCallback(async (appointmentId: string, newStatus: AppointmentStatus) => {
     try {
@@ -439,9 +459,16 @@ export function usePhlebotomistAppointments() {
     });
   }, [appointments]);
 
+  // Initial load. If we already have an in-memory cache for this user (i.e.
+  // the phleb navigated away and came back), refresh SILENTLY in the
+  // background so the schedule stays on screen with no spinner. Only a true
+  // cold load (no cache) shows the honest loading state. This effect is now
+  // stable across token refreshes because it keys off userId, not the
+  // ever-changing user object.
   useEffect(() => {
-    fetchMonthAppointments();
-  }, [fetchMonthAppointments]);
+    const haveCache = !!(scheduleMemCache && scheduleMemCache.userId === userId);
+    fetchMonthAppointments(undefined, { silent: haveCache });
+  }, [fetchMonthAppointments, userId]);
 
   // Visibility / focus resume — silent background refetch when the
   // phleb returns to the PWA after navigating away. Previously this
@@ -476,18 +503,33 @@ export function usePhlebotomistAppointments() {
   // within seconds. Falls back gracefully if realtime is unavailable.
   // Realtime fetches go through the silent path too — same scroll/UX
   // preservation as the visibility resume above.
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!user?.id) return;
+    if (!userId) return;
+    // Debounce realtime-driven refetches. The fetch itself performs a few
+    // idempotent repair writes (address sync, etc.) which echo back through
+    // this same channel; without debouncing, a single load could cascade into
+    // a burst of silent refetches. Collapsing them into one refresh per ~3s
+    // window keeps the schedule stable while still reflecting real changes.
+    const scheduleSilentRefetch = () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      realtimeDebounceRef.current = setTimeout(() => {
+        fetchMonthAppointments(undefined, { silent: true });
+      }, 3000);
+    };
     const channel = supabase
-      .channel(`appts-phleb-${user.id}`)
+      .channel(`appts-phleb-${userId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${user.id}` },
-        () => { fetchMonthAppointments(undefined, { silent: true }); },
+        { event: '*', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${userId}` },
+        () => { scheduleSilentRefetch(); },
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [user?.id, fetchMonthAppointments]);
+    return () => {
+      if (realtimeDebounceRef.current) clearTimeout(realtimeDebounceRef.current);
+      supabase.removeChannel(channel);
+    };
+  }, [userId, fetchMonthAppointments]);
 
   // Online/offline status subscription — used by the offline banner
   useEffect(() => {
