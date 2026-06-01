@@ -54,7 +54,7 @@ We cover most of Central Florida - if unsure about a specific area, encourage th
 ❌ We DO NOT accept insurance. We operate on a self-pay/membership model. However, patients can often submit receipts to their insurance for potential reimbursement.
 
 **Booking:**
-🔗 https://app.mobilephlebotomyapp.com/book/convelabs
+🔗 https://convelabs.com/book-now
 This is the ONLY way to schedule appointments. Always provide this link when asked about booking.
 
 **Lab Orders:**
