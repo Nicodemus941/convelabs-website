@@ -67,13 +67,52 @@ export interface PhlebAppointment {
   companion_role: string | null;
 }
 
-// ── In-memory schedule cache (module scope) ───────────────────────────────
-// Survives component unmount/remount within the same running app session so
-// that navigating away from the dashboard and back shows the last-loaded
-// schedule INSTANTLY — no empty state, no loading spinner, no re-fetch flash.
-// The cold-start (hard reload / PWA relaunch) still does one honest load.
-// Keyed by user id so a different phleb logging in doesn't see stale rows.
-let scheduleMemCache: { userId: string; rows: PhlebAppointment[]; dates: string[]; at: number } | null = null;
+// ── Schedule cache ─────────────────────────────────────────────────────────
+// Two layers so the phleb NEVER stares at a loading spinner once they've
+// loaded their schedule even once:
+//   1. In-memory (module scope) — instant across unmount/remount within the
+//      same running app session (tab switches, navigate away → back).
+//   2. localStorage snapshot — SYNCHRONOUS, so it survives a full PWA relaunch
+//      / hard reload / cold open and seeds the very first render with the last
+//      schedule. (IndexedDB is async and can't seed the first frame, so the
+//      spinner would still flash on cold open — localStorage fixes that.)
+// Both keyed by user id so a different phleb on a shared device never sees
+// the prior user's rows once auth resolves.
+type ScheduleSnapshot = { userId: string; rows: PhlebAppointment[]; dates: string[]; at: number };
+let scheduleMemCache: ScheduleSnapshot | null = null;
+
+const SCHEDULE_LS_KEY = 'phleb-schedule-snapshot-v1';
+
+function readScheduleSnapshot(): ScheduleSnapshot | null {
+  if (scheduleMemCache) return scheduleMemCache;
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(SCHEDULE_LS_KEY) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.userId === 'string' && Array.isArray(parsed.rows)) {
+      return parsed as ScheduleSnapshot;
+    }
+  } catch { /* corrupt / unavailable — ignore */ }
+  return null;
+}
+
+function writeScheduleSnapshot(snap: ScheduleSnapshot) {
+  scheduleMemCache = snap;
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(SCHEDULE_LS_KEY, JSON.stringify(snap));
+  } catch { /* quota exceeded / private mode — in-memory cache still works */ }
+}
+
+// Pick the seed to render on first paint. Before auth resolves, userId is
+// undefined — we optimistically seed from whatever snapshot we have (same
+// device = same phleb in the overwhelming majority of cases). Once userId is
+// known we only trust a snapshot that matches it.
+function pickScheduleSeed(userId: string | undefined): ScheduleSnapshot | null {
+  const snap = readScheduleSnapshot();
+  if (!snap) return null;
+  if (userId && snap.userId !== userId) return null;
+  return snap;
+}
 
 export function usePhlebotomistAppointments() {
   const { user } = useAuth();
@@ -83,13 +122,14 @@ export function usePhlebotomistAppointments() {
   // returning to the dashboard doesn't trigger a fresh non-silent reload.
   const userId = user?.id;
   const userRole = user?.role;
-  const seeded = scheduleMemCache && scheduleMemCache.userId === userId ? scheduleMemCache : null;
-  const [appointments, setAppointments] = useState<PhlebAppointment[]>(() => seeded?.rows ?? []);
+  // Seed first render from the persistent snapshot so even a cold PWA open
+  // shows the last schedule with NO loading spinner.
+  const [appointments, setAppointments] = useState<PhlebAppointment[]>(() => pickScheduleSeed(userId)?.rows ?? []);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [lastCacheAt, setLastCacheAt] = useState<number | null>(null);
-  // Only show the loading spinner on a true cold load (no cached rows yet).
-  const [isLoading, setIsLoading] = useState(() => !seeded);
-  const [monthDates, setMonthDates] = useState<Set<string>>(() => new Set(seeded?.dates ?? []));
+  // Only show the loading spinner on a true first-ever load (no snapshot yet).
+  const [isLoading, setIsLoading] = useState(() => !pickScheduleSeed(userId));
+  const [monthDates, setMonthDates] = useState<Set<string>>(() => new Set(pickScheduleSeed(userId)?.dates ?? []));
   // Fetch all appointments for the current month for this phlebotomist.
   // `silent=true` skips the isLoading toggle so background refetches
   // (realtime push, visibility-change resume) don't flash the loading
@@ -369,9 +409,10 @@ export function usePhlebotomistAppointments() {
 
       setAppointments(enriched);
 
-      // Seed the in-memory cache so a remount (navigate away → back) renders
-      // this exact schedule instantly without a spinner or refetch flash.
-      scheduleMemCache = { userId, rows: enriched, dates: Array.from(dates), at: Date.now() };
+      // Persist the snapshot (in-memory + localStorage) so any subsequent
+      // mount — tab switch, navigate-back, OR a full cold PWA relaunch —
+      // renders this exact schedule instantly with no spinner.
+      writeScheduleSnapshot({ userId, rows: enriched, dates: Array.from(dates), at: Date.now() });
 
       // Mirror into IndexedDB for offline mode
       cacheAppointments(enriched).catch(() => { /* non-blocking */ });
@@ -466,8 +507,18 @@ export function usePhlebotomistAppointments() {
   // stable across token refreshes because it keys off userId, not the
   // ever-changing user object.
   useEffect(() => {
-    const haveCache = !!(scheduleMemCache && scheduleMemCache.userId === userId);
-    fetchMonthAppointments(undefined, { silent: haveCache });
+    if (!userId) return; // wait for auth to resolve
+    // Silent (no spinner) whenever we already have a snapshot for THIS user —
+    // covers cold PWA opens via the localStorage layer. A first-ever load, or
+    // a different phleb on a shared device, falls through to an honest load.
+    const snap = readScheduleSnapshot();
+    const haveValidSeed = !!snap && snap.userId === userId;
+    if (snap && snap.userId !== userId) {
+      // Shared-device user switch: drop the other phleb's optimistic rows.
+      setAppointments([]);
+      setMonthDates(new Set());
+    }
+    fetchMonthAppointments(undefined, { silent: haveValidSeed });
   }, [fetchMonthAppointments, userId]);
 
   // Visibility / focus resume — silent background refetch when the
