@@ -17,6 +17,7 @@ import { BookingFormValues } from '@/types/appointmentTypes';
 import { Form, FormField, FormItem, FormControl, FormMessage } from '@/components/ui/form';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { isZipServed } from '@/data/serviceZipCodes';
+import { milesFromBase, SERVICE_RADIUS_MILES } from '@/lib/serviceArea';
 import { AlertTriangle } from 'lucide-react';
 
 interface LocationSelectionStepProps {
@@ -31,13 +32,21 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
   const { control, watch, setValue } = useFormContext<BookingFormValues>();
   const locationType = watch('locationDetails.locationType');
 
-  // Service-area gate: once a full 5-digit ZIP is entered, check it against
-  // the served list. Out-of-area → soft gate (block the auto-booking, route
+  // Service-area gate — we cover a fixed radius (SERVICE_RADIUS_MILES) around
+  // the Orlando base. Out-of-area → soft gate (block the auto-booking, route
   // to a "request a visit" path) so we never silently take a paid booking we
   // can't fulfill (the April Inganna / Edgewater case).
+  //   • Preferred: exact distance from the address autocomplete's coordinates.
+  //   • Fallback (manual ZIP, no coords): the served-ZIP list.
   const zipRaw = watch('locationDetails.zipCode') || '';
   const zipDigits = (zipRaw.match(/\d{5}/) || [])[0];
-  const outOfArea = !!zipDigits && !isZipServed(zipDigits);
+  const lat = watch('locationDetails.lat');
+  const lng = watch('locationDetails.lng');
+  const hasCoords = typeof lat === 'number' && typeof lng === 'number';
+  const distanceMiles = hasCoords ? milesFromBase(lat as number, lng as number) : null;
+  const outOfArea = hasCoords
+    ? (distanceMiles as number) > SERVICE_RADIUS_MILES
+    : (!!zipDigits && !isZipServed(zipDigits));
 
   return (
     <Card className="shadow-sm">
@@ -92,6 +101,11 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
                           if (place.city) setValue('locationDetails.city', place.city);
                           if (place.state) setValue('locationDetails.state', place.state);
                           if (place.zipCode) setValue('locationDetails.zipCode', place.zipCode);
+                          // Capture coordinates for the exact service-radius check.
+                          if (typeof place.lat === 'number' && typeof place.lng === 'number') {
+                            setValue('locationDetails.lat', place.lat);
+                            setValue('locationDetails.lng', place.lng);
+                          }
                         }}
                         placeholder="Start typing your address..."
                       />
@@ -148,9 +162,17 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
                       <FormItem className="space-y-2">
                         <label className="text-sm font-medium">ZIP</label>
                         <FormControl>
-                          <Input 
-                            {...field} 
-                            placeholder="32801" 
+                          <Input
+                            {...field}
+                            placeholder="32801"
+                            onChange={(e) => {
+                              field.onChange(e);
+                              // ZIP edited by hand → drop any stale coordinates
+                              // from a previously-selected address so the gate
+                              // re-evaluates against the new ZIP.
+                              setValue('locationDetails.lat', undefined as any);
+                              setValue('locationDetails.lng', undefined as any);
+                            }}
                           />
                         </FormControl>
                         {fieldState.error && (
@@ -209,7 +231,10 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
               <div className="flex items-start gap-2.5">
                 <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
                 <div className="text-sm text-amber-900">
-                  <p className="font-semibold">That ZIP ({zipDigits}) is outside our standard service area.</p>
+                  <p className="font-semibold">
+                    That address is outside our {SERVICE_RADIUS_MILES}-mile service area
+                    {distanceMiles != null ? ` (about ${Math.round(distanceMiles)} miles away)` : ` (ZIP ${zipDigits})`}.
+                  </p>
                   <p className="mt-1 text-amber-800">
                     We may still be able to reach you — but we need to confirm before booking. Please request a visit and we'll get right back to you:
                   </p>

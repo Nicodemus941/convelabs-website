@@ -55,6 +55,10 @@ export interface BookingFormValues {
     locationType?: string;
     aptUnit?: string;
     gateCode?: string;
+    // Captured from the address autocomplete (Google Places) — used for the
+    // exact service-radius check.
+    lat?: number;
+    lng?: number;
   };
   patientDetails: {
     firstName: string;
@@ -115,6 +119,8 @@ export const bookingFormSchema = z.object({
     locationType: z.string().optional(),
     aptUnit: z.string().optional(),
     gateCode: z.string().optional(),
+    lat: z.number().optional(),
+    lng: z.number().optional(),
   }),
   patientDetails: z.object({
     firstName: z.string().min(1, "First name is required"),
