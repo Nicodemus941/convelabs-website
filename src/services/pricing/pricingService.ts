@@ -116,15 +116,20 @@ function getAdditionalPatientPrice(visitType: string, tier: MembershipTier = 'no
   return TIER_PRICING['additional']?.[tier] ?? 75;
 }
 
-// Cities that incur extended area surcharge
+// City fallback for the travel fee (used only when no ZIP is available — ZIP
+// is the primary, county-accurate signal via isTravelFeeZip).
+//
+// Owner standard 2026-06: the travel fee applies to EXACTLY the Lake, Volusia,
+// and Polk service towns. Core counties (Orange / Seminole / Osceola — incl.
+// Kissimmee, St. Cloud, Celebration, Sanford, Geneva, Lake Nona) carry NO
+// travel fee. Leesburg / Tavares / Groveland are no longer served at all.
 export const EXTENDED_AREA_CITIES = [
-  'lake nona', 'celebration', 'kissimmee', 'sanford', 'eustis',
-  'clermont', 'montverde', 'deltona', 'geneva', 'tavares',
-  'mount dora', 'leesburg', 'groveland', 'mascotte', 'minneola',
-  'daytona beach', 'deland', 'debary', 'orange city',
-  // Added 2026-05-25 — St. Cloud is further from Orlando phleb base than
-  // Kissimmee (which has been on this list since launch). Was missing.
-  'st cloud', 'st. cloud', 'saint cloud',
+  // Lake County (served towns)
+  'clermont', 'minneola', 'montverde', 'mount dora', 'eustis', 'mascotte',
+  // Volusia County (in-radius)
+  'deltona', 'debary', 'orange city', 'deland', 'lake helen',
+  // Polk County (in-radius)
+  'davenport', 'champions gate', 'haines city',
 ];
 
 export const DEFAULT_APPOINTMENT_DURATION = 60;

@@ -46,12 +46,15 @@ export const OSCEOLA_ZIPS = [
 export const LAKE_ZIPS = [
   // Clermont / Minneola / Montverde
   "34711", "34714", "34715", "34756",
-  // Leesburg / Fruitland Park / Lady Lake / The Villages (Lake portion)
-  "34748", "34749", "34788", "34731", "32159", "32162", "32163",
-  // Mount Dora / Eustis / Tavares / Sorrento / Umatilla
-  "32757", "32726", "32727", "32778", "32776", "32784",
-  // Groveland / Mascotte / Howey / Astatula
-  "34736", "34753", "34737", "34705",
+  // Fruitland Park / Lady Lake / The Villages (Lake portion)
+  "34731", "32159", "32162", "32163",
+  // Mount Dora / Eustis / Sorrento / Umatilla
+  "32757", "32726", "32727", "32776", "32784",
+  // Mascotte / Howey / Astatula
+  "34753", "34737", "34705",
+  // NOTE: Leesburg (34748/34749/34788), Tavares (32778), and Groveland (34736)
+  // were removed from coverage 2026-06 (owner). See EXCLUDED_ZIPS below — they
+  // fall within the 39-mile radius, so the gate must exclude them explicitly.
 ];
 
 export const VOLUSIA_ZIPS = [
@@ -99,6 +102,10 @@ export const SERVICE_ZIP_CODES = [
 // Travel-fee counties — visits here carry the Extended Service Area surcharge.
 const TRAVEL_FEE_ZIP_SET = new Set([...LAKE_ZIPS, ...VOLUSIA_ZIPS, ...POLK_ZIPS]);
 
+// ZIPs we explicitly DO NOT serve even though they fall within the 39-mile
+// radius (owner exclusions 2026-06): Leesburg, Tavares, Groveland.
+export const EXCLUDED_ZIPS = new Set(['34748', '34749', '34788', '32778', '34736']);
+
 // Deduplicate at module load
 const uniqueZips = [...new Set(SERVICE_ZIP_CODES)];
 
@@ -108,9 +115,16 @@ function first5(zip: string | null | undefined): string | null {
   return m ? m[0] : null;
 }
 
+/** True for ZIPs we deliberately do not serve (within radius but excluded). */
+export function isZipExcluded(zip: string | null | undefined): boolean {
+  const z = first5(zip);
+  return z ? EXCLUDED_ZIPS.has(z) : false;
+}
+
 export function isZipServed(zip: string | null | undefined): boolean {
   const z = first5(zip);
-  return z ? uniqueZips.includes(z) : false;
+  if (!z || EXCLUDED_ZIPS.has(z)) return false;
+  return uniqueZips.includes(z);
 }
 
 /** True when a ZIP is in a travel-fee county (Lake, Volusia, or Polk). */

@@ -16,7 +16,7 @@ import {
 import { BookingFormValues } from '@/types/appointmentTypes';
 import { Form, FormField, FormItem, FormControl, FormMessage } from '@/components/ui/form';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
-import { isZipServed } from '@/data/serviceZipCodes';
+import { isZipServed, isZipExcluded } from '@/data/serviceZipCodes';
 import { milesFromBase, SERVICE_RADIUS_MILES } from '@/lib/serviceArea';
 import { AlertTriangle } from 'lucide-react';
 
@@ -44,9 +44,12 @@ const LocationSelectionStep: React.FC<LocationSelectionStepProps> = ({
   const lng = watch('locationDetails.lng');
   const hasCoords = typeof lat === 'number' && typeof lng === 'number';
   const distanceMiles = hasCoords ? milesFromBase(lat as number, lng as number) : null;
-  const outOfArea = hasCoords
-    ? (distanceMiles as number) > SERVICE_RADIUS_MILES
-    : (!!zipDigits && !isZipServed(zipDigits));
+  // Excluded ZIPs (e.g. Leesburg/Tavares/Groveland) are out even if within the
+  // radius, so check exclusion first regardless of how the distance resolves.
+  const outOfArea = (!!zipDigits && isZipExcluded(zipDigits))
+    || (hasCoords
+      ? (distanceMiles as number) > SERVICE_RADIUS_MILES
+      : (!!zipDigits && !isZipServed(zipDigits)));
 
   return (
     <Card className="shadow-sm">
