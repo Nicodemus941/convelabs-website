@@ -526,9 +526,23 @@ const AdminCalendar: React.FC = () => {
   const allEvents = [...calendarEvents, ...blockEvents, ...blockLabelEvents];
 
   const handleEventClick = (info: any) => {
-    // Don't open detail modal for block events
+    // Block events: clicking offers to REMOVE the block (this is how you
+    // unblock a slot/date — previously clicking just showed a toast with no
+    // way to delete it).
     if (info.event.extendedProps.isBlock) {
-      toast.info(info.event.title);
+      const rawId = String(info.event.id || '');
+      const blockId = rawId.replace(/^block-(label-)?/, '');
+      if (!blockId) { toast.info(info.event.title); return; }
+      const ok = window.confirm(`${info.event.title}\n\nRemove this block? Slots in this window will become bookable again.`);
+      if (!ok) return;
+      supabase.from('time_blocks' as any).delete().eq('id', blockId).then(({ error }) => {
+        if (error) {
+          toast.error(`Couldn't remove block: ${error.message}`);
+        } else {
+          toast.success('Block removed — slots reopened.');
+          fetchTimeBlocks();
+        }
+      });
       return;
     }
     const appt = info.event.extendedProps.appointment;
