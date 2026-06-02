@@ -449,6 +449,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // Pricing-drift smoke caught Mary Rienzi (Clermont, $250 charged
       // vs $175 expected, refunded $75 via pyr_1TRaRvAPnMg8iHarG6WoO5pt).
       const locationCity = data.locationDetails?.city || '';
+      const locationZip = data.locationDetails?.zipCode || '';
 
       // Hormozi specialty-kit bundle: if service is `specialty-kit*` and
       // the patient configured kit counts via SpecialtyKitBundleCard, route
@@ -467,7 +468,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const breakdown = calculateTotal(visitType, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
-        extendedArea: isExtendedArea(locationCity),
+        extendedArea: isExtendedArea(locationCity, locationZip),
         ...(specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
       }, tipAmount, isSpecialtyKit ? 0 : additionalPatientCount, memberTier, isFoundingMember);
 
@@ -596,7 +597,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         final_subtotal: finalSubtotal,
         total: parseFloat((finalSubtotal + tipAmount).toFixed(2)),
         location_city: locationCity,
-        location_extended_area: isExtendedArea(locationCity),
+        location_extended_area: isExtendedArea(locationCity, locationZip),
         captured_at: new Date().toISOString(),
         captured_by: 'online_booking_v1',
       };

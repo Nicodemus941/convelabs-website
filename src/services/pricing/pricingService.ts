@@ -1,3 +1,5 @@
+import { isTravelFeeZip } from '@/data/serviceZipCodes';
+
 export interface ServiceOption {
   id: string;
   name: string;
@@ -137,8 +139,21 @@ export const VISIT_DURATIONS: Record<string, number> = {
   'specialty-kit-genova': 80,
 };
 
-export function isExtendedArea(city: string): boolean {
-  return EXTENDED_AREA_CITIES.includes(city.toLowerCase().trim());
+/**
+ * Whether a visit incurs the Extended Service Area (travel) fee.
+ *
+ * Travel fee applies when EITHER:
+ *   • the ZIP is in a travel-fee county — Lake, Volusia, or Polk
+ *     (owner rule 2026-06), OR
+ *   • the city matches the legacy extended-area list (kept for back-compat /
+ *     manual entries without a ZIP).
+ *
+ * Pass the ZIP whenever available — it's county-accurate and resilient to
+ * city-name typos.
+ */
+export function isExtendedArea(city: string, zip?: string | null): boolean {
+  if (zip && isTravelFeeZip(zip)) return true;
+  return EXTENDED_AREA_CITIES.includes((city || '').toLowerCase().trim());
 }
 
 // Service catalog (non-member prices as base)

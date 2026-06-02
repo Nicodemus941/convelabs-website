@@ -10,11 +10,12 @@ const PriceEstimateBadge: React.FC = () => {
   const sameDay = watch('serviceDetails.sameDay');
   const weekend = watch('serviceDetails.weekend');
   const city = watch('locationDetails.city') || '';
+  const zip = watch('locationDetails.zipCode') || '';
   const additionalPatients = watch('additionalPatients') || [];
 
   if (!visitType) return null;
 
-  const breakdown = calculateTotal(visitType, { sameDay, weekend, extendedArea: isExtendedArea(city) }, 0, additionalPatients.length);
+  const breakdown = calculateTotal(visitType, { sameDay, weekend, extendedArea: isExtendedArea(city, zip) }, 0, additionalPatients.length);
 
   return (
     <div className="inline-flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-800 px-3 py-1 rounded-full text-sm font-medium">

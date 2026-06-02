@@ -731,7 +731,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       const memberSavings = detectedTier !== 'none' ? (listPrice - tierPrice) : 0;
 
       // Auto-detect surcharges — uses canonical extended-area helper.
-      const isInExtendedArea = isExtendedArea(city);
+      // Pass ZIP so the travel-fee counties (Lake/Volusia/Polk) are detected
+      // by county, not just by city name.
+      const isInExtendedArea = isExtendedArea(city, zipcode);
       const appointmentDay = date ? new Date(date + 'T12:00:00').getDay() : 1;
       const isWeekend = appointmentDay === 0 || appointmentDay === 6;
       const isAfterHours = time && (() => {

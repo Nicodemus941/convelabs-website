@@ -281,11 +281,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
   const serviceDetails = getValues('serviceDetails');
   const locationCity = getValues('locationDetails.city') || '';
+  const locationZip = getValues('locationDetails.zipCode') || '';
   const additionalPatients = watch('additionalPatients') || [];
   const termsAccepted = watch('termsAccepted');
 
   const service = getServiceById(serviceId);
-  const extendedArea = isExtendedArea(locationCity);
+  const extendedArea = isExtendedArea(locationCity, locationZip);
 
   // Hormozi specialty-kit bundle: when service is `specialty-kit*`, we
   // ignore the flat additionalPatientCount path and compute via the bundle
