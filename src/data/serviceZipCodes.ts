@@ -1,6 +1,6 @@
 // Central Florida ZIP codes served by ConveLabs
 // Covers Orange, Seminole, Osceola, Lake, Volusia (partial), Brevard (partial), Polk (partial)
-// EXCLUDED: New Smyrna Beach (32168, 32169, 32170), Titusville (32780, 32781, 32782, 32783, 32796), Haines City (33844, 33845)
+// EXCLUDED: New Smyrna Beach (32168, 32169, 32170), Titusville (32780, 32781, 32782, 32783, 32796), Haines City (33844, 33845), Edgewater (32132, 32141)
 
 export const SERVICE_ZIP_CODES = [
   // === ORANGE COUNTY ===
@@ -110,8 +110,6 @@ export const SERVICE_ZIP_CODES = [
   "32763",
   // Lake Helen / Cassadaga
   "32744",
-  // Edgewater
-  "32132", "32141",
   // Holly Hill
   "32117",
   // Pierson / Seville / Barberville
@@ -171,6 +169,14 @@ export const SERVICE_ZIP_CODES = [
 // Deduplicate at module load
 const uniqueZips = [...new Set(SERVICE_ZIP_CODES)];
 
-export function isZipServed(zip: string): boolean {
-  return uniqueZips.includes(zip.trim());
+export function isZipServed(zip: string | null | undefined): boolean {
+  if (!zip) return false;
+  // Normalize: take the first 5 digits (handles "32801-1234", " 32801 ", etc.)
+  const m = String(zip).match(/\d{5}/);
+  if (!m) return false;
+  return uniqueZips.includes(m[0]);
 }
+
+// Shared so the booking gate and the edge function agree on messaging.
+export const OUT_OF_AREA_MESSAGE =
+  "That address is outside our standard service area. Call (941) 527-9169 or email info@convelabs.com and we'll confirm whether we can reach you.";
