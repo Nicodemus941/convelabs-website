@@ -25,6 +25,8 @@ export interface AppointmentCheckoutParams {
     instructions?: string;
     aptUnit?: string;
     gateCode?: string;
+    lat?: number;
+    lng?: number;
   };
   serviceDetails?: {
     sameDay?: boolean;

@@ -685,6 +685,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           instructions: data.locationDetails.instructions,
           aptUnit: data.locationDetails.aptUnit,
           gateCode: data.locationDetails.gateCode,
+          // Coordinates for the server-side service-area guard.
+          lat: data.locationDetails.lat,
+          lng: data.locationDetails.lng,
         },
         serviceDetails: {
           sameDay: data.serviceDetails.sameDay,

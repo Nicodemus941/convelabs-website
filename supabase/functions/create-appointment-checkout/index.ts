@@ -147,6 +147,10 @@ Deno.serve(async (req) => {
       // rescheduleFromId field. Patients saw "spinning button" + a generic
       // 500 error because the toast message read "body is not defined".)
       rescheduleFromId: clientRescheduleFromId = null,
+      // Service-area override — only set by an admin/approved out-of-area
+      // request flow. Normal patient bookings never send this, so the radius
+      // guard below applies.
+      allowOutOfArea = false,
     } = await req.json();
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
@@ -169,6 +173,42 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: 'Missing required fields' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // ─── SERVER-SIDE: service-area guard (authoritative) ──────────────
+    // We serve a 39-mile radius around the 32810 base, MINUS explicit
+    // exclusions (Leesburg/Tavares/Groveland) that fall within the radius.
+    // The browser gate covers the normal path; this blocks any direct-API
+    // bypass so we never take a paid booking we can't fulfill (April Inganna /
+    // Edgewater case). Admin/approved out-of-area requests pass allowOutOfArea.
+    if (!allowOutOfArea) {
+      const SERVICE_BASE = { lat: 28.602, lng: -81.401 };
+      const SERVICE_RADIUS_MILES = 39;
+      const EXCLUDED_ZIPS = new Set(['34748', '34749', '34788', '32778', '34736']); // Leesburg, Tavares, Groveland
+      const milesBetween = (aLat: number, aLng: number, bLat: number, bLng: number): number => {
+        const R = 3958.8;
+        const toRad = (d: number) => (d * Math.PI) / 180;
+        const dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+        const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(h));
+      };
+      const zip5 = String(locationDetails?.zipCode || '').match(/\d{5}/)?.[0] || null;
+      const lat = typeof locationDetails?.lat === 'number' ? locationDetails.lat : null;
+      const lng = typeof locationDetails?.lng === 'number' ? locationDetails.lng : null;
+      const isExcluded = !!zip5 && EXCLUDED_ZIPS.has(zip5);
+      const tooFar = lat !== null && lng !== null
+        && milesBetween(SERVICE_BASE.lat, SERVICE_BASE.lng, lat, lng) > SERVICE_RADIUS_MILES;
+      // In-office visits happen at our location, so they're never out-of-area.
+      const isInOffice = serviceType === 'in-office';
+      if (!isInOffice && (isExcluded || tooFar)) {
+        return new Response(
+          JSON.stringify({
+            error: 'out_of_service_area',
+            message: "That address is outside our service area. Call (941) 527-9169 or email info@convelabs.com and we'll confirm whether we can reach you.",
+          }),
+          { status: 422, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // ─── SERVER-SIDE: fasting-service gate ────────────────────────────
