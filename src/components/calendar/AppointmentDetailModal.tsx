@@ -418,7 +418,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
           <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${paymentCfg.className}`}>
             <span>{paymentCfg.icon}</span>
-            {appt.total_amount > 0 ? `$${((appt.total_amount || 0) + (appt.tip_amount || 0)).toFixed(2)} ${paymentCfg.label.toLowerCase()}` : paymentCfg.label}
+            {appt.total_amount > 0 ? `$${(appt.total_amount || 0).toFixed(2)} ${paymentCfg.label.toLowerCase()}` : paymentCfg.label}
           </div>
           {/* Sprint 4: recurring-series badge + cancel-series button */}
           {appt.recurrence_group_id && appt.recurrence_total > 1 && (
@@ -807,11 +807,15 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
 
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Subtotal</span>
-            <span>${(appt.total_amount || 0).toFixed(2)}</span>
+            {/* total_amount is the grand total INCLUDING tip (set as
+                servicePrice + tip in stripe-webhook). Subtotal = pre-tip. */}
+            <span>${Math.max(0, (appt.total_amount || 0) - (appt.tip_amount || 0)).toFixed(2)}</span>
           </div>
           <div className="flex justify-between text-sm font-bold">
             <span>Total</span>
-            <span>${((appt.total_amount || 0) + (appt.tip_amount || 0)).toFixed(2)}</span>
+            {/* Use total_amount directly — it already includes the tip, so
+                adding tip_amount again double-counted it ($210 vs real $180). */}
+            <span>${(appt.total_amount || 0).toFixed(2)}</span>
           </div>
 
           {/* Stripe invoice id — admin/audit-only, hidden behind history toggle */}

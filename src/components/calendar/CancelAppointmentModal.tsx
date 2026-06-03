@@ -67,7 +67,9 @@ const CancelAppointmentModal: React.FC<CancelAppointmentModalProps> = ({
     ? format(new Date(dateStr + 'T12:00:00'), 'EEE, MMM d, yyyy')
     : '—';
   const timeStr = appt.appointment_time || '';
-  const total = (appt.total_amount || 0) + (appt.tip_amount || 0);
+  // total_amount already includes the tip (set as servicePrice + tip in
+  // stripe-webhook), so don't add tip_amount again — that double-counted it.
+  const total = (appt.total_amount || 0);
 
   const canNotify = !!(patientPhone || patientEmail);
 
