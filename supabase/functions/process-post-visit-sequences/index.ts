@@ -564,11 +564,29 @@ Deno.serve(async (req) => {
     formData.append('To', formattedPhone);
     formData.append('From', TWILIO_PHONE_NUMBER);
     formData.append('Body', body);
-    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-      method: 'POST',
-      headers: { 'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData,
-    });
+    let smsStatus = 'failed';
+    let smsSid: string | null = null;
+    try {
+      const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData,
+      });
+      if (r.ok) { smsStatus = 'sent'; try { smsSid = (await r.json())?.sid ?? null; } catch { /* body */ } }
+      else { console.warn('[post-visit] SMS failed', await r.text()); }
+    } catch (e) { console.warn('[post-visit] SMS error', e); }
+    // Log every post-visit SMS for the audit.
+    try {
+      await supabase.from('sms_notifications').insert({
+        notification_type: 'post_visit_sequence',
+        phone_number: formattedPhone,
+        message_content: String(body).substring(0, 1500),
+        sent_at: new Date().toISOString(),
+        delivery_status: smsStatus,
+        twilio_message_sid: smsSid,
+        metadata: { source: 'process-post-visit-sequences' },
+      });
+    } catch (logErr) { console.warn('[post-visit] SMS log failed (non-blocking):', logErr); }
   }
 
   // Helper: send email
@@ -580,10 +598,27 @@ Deno.serve(async (req) => {
     formData.append('to', to);
     formData.append('subject', subject);
     formData.append('html', html);
-    await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
-      method: 'POST',
-      headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
-      body: formData,
-    });
+    let emailStatus = 'failed';
+    let mgId: string | null = null;
+    try {
+      const r = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+        body: formData,
+      });
+      if (r.ok) { emailStatus = 'sent'; try { mgId = (await r.json())?.id ?? null; } catch { /* body */ } }
+      else { console.warn('[post-visit] email failed', await r.text()); }
+    } catch (e) { console.warn('[post-visit] email error', e); }
+    try {
+      await supabase.from('email_send_log').insert({
+        to_email: to,
+        email_type: 'post_visit_sequence',
+        subject,
+        sent_at: new Date().toISOString(),
+        status: emailStatus,
+        mailgun_id: mgId,
+        campaign_tag: 'post_visit',
+      });
+    } catch (logErr) { console.warn('[post-visit] email log failed (non-blocking):', logErr); }
   }
 });

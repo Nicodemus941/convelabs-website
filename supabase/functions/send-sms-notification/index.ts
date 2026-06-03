@@ -200,8 +200,20 @@ serve(async (req) => {
           status: 'sent',
         } as any);
       }
+      // Structured notification log — record EVERY SMS sent through the shared
+      // sender (on_the_way, etc.) so the SMS audit is complete.
+      await admin.from('sms_notifications').insert({
+        appointment_id: appointmentId || null,
+        notification_type: notificationType || 'custom',
+        phone_number: normalizedPhone,
+        message_content: String(message).substring(0, 1500),
+        sent_at: new Date().toISOString(),
+        delivery_status: 'sent',
+        twilio_message_sid: twilioResponse.sid || null,
+        metadata: { source: 'send-sms-notification' },
+      });
     } catch (logErr) {
-      console.warn('[send-sms] thread log failed (non-blocking):', logErr);
+      console.warn('[send-sms] log failed (non-blocking):', logErr);
     }
 
     return new Response(

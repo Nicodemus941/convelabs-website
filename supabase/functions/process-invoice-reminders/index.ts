@@ -184,14 +184,32 @@ Deno.serve(async (req) => {
       if (cleanPhone.length < 10) return;
       const formattedPhone = cleanPhone.startsWith('1') ? `+${cleanPhone}` : `+1${cleanPhone}`;
       const params = new URLSearchParams({ To: formattedPhone, From: TWILIO_PHONE, Body: body });
-      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: params,
-      });
+      let smsStatus = 'failed';
+      let smsSid: string | null = null;
+      try {
+        const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: params,
+        });
+        if (r.ok) { smsStatus = 'sent'; try { smsSid = (await r.json())?.sid ?? null; } catch { /* body */ } }
+        else { console.warn('[invoice-reminders] SMS failed', await r.text()); }
+      } catch (e) { console.warn('[invoice-reminders] SMS error', e); }
+      // Log every dunning SMS for the audit.
+      try {
+        await supabase.from('sms_notifications').insert({
+          notification_type: 'invoice_reminder',
+          phone_number: formattedPhone,
+          message_content: String(body).substring(0, 1500),
+          sent_at: new Date().toISOString(),
+          delivery_status: smsStatus,
+          twilio_message_sid: smsSid,
+          metadata: { source: 'process-invoice-reminders' },
+        });
+      } catch (logErr) { console.warn('[invoice-reminders] SMS log failed (non-blocking):', logErr); }
     };
 
     // ── Helper: Stripe pay link ───────────────────────────────────

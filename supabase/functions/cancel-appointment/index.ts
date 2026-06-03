@@ -134,6 +134,18 @@ Deno.serve(async (req) => {
         : `ConveLabs: Your ${apptHuman} appointment is cancelled — free of charge (24h+ notice). Need to rebook? https://www.convelabs.com/book-now — info@convelabs.com`;
       const smsResp = await sendSms(patientPhone, smsBody);
       if (!smsResp.ok) console.warn('[cancel-appointment] patient SMS failed:', smsResp.error);
+      // Log the cancellation SMS (success or failure) for the SMS audit.
+      try {
+        await admin.from('sms_notifications').insert({
+          appointment_id: (appt as any).id || null,
+          notification_type: 'appointment_cancellation',
+          phone_number: patientPhone,
+          message_content: smsBody,
+          sent_at: new Date().toISOString(),
+          delivery_status: smsResp.ok ? 'sent' : 'failed',
+          metadata: { source: 'cancel-appointment' },
+        });
+      } catch (logErr) { console.warn('[cancel-appointment] SMS log failed (non-blocking):', logErr); }
     }
 
     // ── PHLEB NOTIFICATION ─────────────────────────────────────────────
