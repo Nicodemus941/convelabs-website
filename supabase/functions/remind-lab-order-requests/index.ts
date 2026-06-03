@@ -69,8 +69,13 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    if (!shouldSendNow('post_visit')) {
-      return new Response(JSON.stringify({ ok: true, deferred: true, reason: 'quiet_hours' }), {
+    // Quiet-hours gate. shouldSendNow returns a SendDecision OBJECT — must read
+    // `.allow`. (Previously `!shouldSendNow(...)` tested truthiness of the object,
+    // which is always true, so the gate was dead and patient SMS could fire 9pm-8am ET.)
+    const gate = shouldSendNow('reminder');
+    if (!gate.allow) {
+      console.log(`[remind-lab-order-requests] deferred (${gate.reason}) until ${gate.nextAllowedAt}`);
+      return new Response(JSON.stringify({ ok: true, deferred: true, reason: gate.reason, next_allowed_at: gate.nextAllowedAt }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -147,6 +152,8 @@ Deno.serve(async (req) => {
 
       let smsSent = false;
       let emailSent = false;
+      let twilioSid: string | null = null;
+      let mailgunId: string | null = null;
 
       if (phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
         try {
@@ -157,6 +164,7 @@ Deno.serve(async (req) => {
             body: fd.toString(),
           });
           smsSent = tw.ok;
+          try { const tj = await tw.json(); twilioSid = tj?.sid || null; } catch { /* body parse non-blocking */ }
         } catch (e) { console.warn('[remind-cron] sms err:', e); }
       }
       if (email && MAILGUN_API_KEY) {
@@ -173,7 +181,39 @@ Deno.serve(async (req) => {
             body: fd,
           });
           emailSent = mg.ok;
+          try { const mj = await mg.json(); mailgunId = mj?.id || null; } catch { /* body parse non-blocking */ }
         } catch (e) { console.warn('[remind-cron] email err:', e); }
+      }
+
+      // ── AUDIT LOGGING — record every patient SMS + email sent here ──────
+      // Best-effort: logging never blocks or fails the reminder path.
+      if (phone) {
+        try {
+          await admin.from('sms_notifications').insert({
+            appointment_id: appt.id,
+            notification_type: `lab_order_reminder_${attempts + 1}`,
+            phone_number: normPhone(phone),
+            message_content: smsBody.substring(0, 1500),
+            sent_at: new Date().toISOString(),
+            delivery_status: smsSent ? 'sent' : 'failed',
+            twilio_message_sid: twilioSid,
+            metadata: { source: 'remind-lab-order-requests', attempt: attempts + 1, request_id: c.id },
+          });
+        } catch (logErr) { console.warn('[remind-cron] sms log failed (non-blocking):', logErr); }
+      }
+      if (email) {
+        try {
+          await admin.from('email_send_log').insert({
+            appointment_id: appt.id,
+            to_email: email,
+            email_type: `lab_order_reminder_${attempts + 1}`,
+            subject: emailSubject,
+            sent_at: new Date().toISOString(),
+            status: emailSent ? 'sent' : 'failed',
+            mailgun_id: mailgunId,
+            campaign_tag: 'lab_order_reminder',
+          });
+        } catch (logErr) { console.warn('[remind-cron] email log failed (non-blocking):', logErr); }
       }
 
       await admin.from('appointment_lab_order_requests')

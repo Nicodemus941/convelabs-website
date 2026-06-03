@@ -119,6 +119,9 @@ Deno.serve(async (req) => {
       const firstName = r.patient_name.split(' ')[0];
       const urgencyTag = daysLeft <= 2 ? '🔴 URGENT' : daysLeft <= 4 ? '🟡 Reminder' : 'Reminder';
 
+      let emailSent = false, smsSent = false;
+      let mailgunId: string | null = null, twilioSid: string | null = null;
+
       // Email
       if (r.patient_email && MAILGUN_API_KEY) {
         const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;">
@@ -137,23 +140,51 @@ Deno.serve(async (req) => {
           fd.append('subject', `${urgencyTag}: only ${daysLeft}d to book your bloodwork`);
           fd.append('html', html);
           fd.append('o:tracking-clicks', 'no');
-          await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+          const mg = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+          emailSent = mg.ok;
+          try { const mj = await mg.json(); mailgunId = mj?.id || null; } catch { /* non-blocking */ }
         } catch (e) { console.warn('reminder email failed:', e); }
+        // Audit log (best-effort) — no appointment yet, so appointment_id null.
+        try {
+          await admin.from('email_send_log').insert({
+            to_email: r.patient_email,
+            email_type: `lab_request_reminder_${reminderNum}`,
+            subject: `${urgencyTag}: only ${daysLeft}d to book your bloodwork`,
+            sent_at: nowIso,
+            status: emailSent ? 'sent' : 'failed',
+            mailgun_id: mailgunId,
+            campaign_tag: 'lab_request_reminder',
+            organization_id: r.organization_id || null,
+          });
+        } catch (logErr) { console.warn('reminder email log failed (non-blocking):', logErr); }
       }
 
       // SMS
       if (r.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+        const smsBody = `ConveLabs: ${daysLeft} day${daysLeft === 1 ? '' : 's'} left to book your bloodwork for ${org?.name || 'your provider'}. ${slots.length > 0 ? `Reply ${formatSlotsForSms(slots)}. ` : ''}Or tap: ${patientUrl}`;
         try {
-          const slotsLine = slots.length > 0 ? `Reply ${formatSlotsForSms(slots)}. ` : '';
-          const smsBody = `ConveLabs: ${daysLeft} day${daysLeft === 1 ? '' : 's'} left to book your bloodwork for ${org?.name || 'your provider'}. ${slotsLine}Or tap: ${patientUrl}`;
           const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
           const fd = new URLSearchParams({ To: normalizePhone(r.patient_phone), From: TWILIO_FROM, Body: smsBody });
-          await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+          const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
             method: 'POST',
             headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: fd.toString(),
           });
+          smsSent = tw.ok;
+          try { const tj = await tw.json(); twilioSid = tj?.sid || null; } catch { /* non-blocking */ }
         } catch (e) { console.warn('reminder SMS failed:', e); }
+        // Audit log (best-effort)
+        try {
+          await admin.from('sms_notifications').insert({
+            notification_type: `lab_request_reminder_${reminderNum}`,
+            phone_number: normalizePhone(r.patient_phone),
+            message_content: smsBody.substring(0, 1500),
+            sent_at: nowIso,
+            delivery_status: smsSent ? 'sent' : 'failed',
+            twilio_message_sid: twilioSid,
+            metadata: { source: 'remind-lab-request-patients', reminder_num: reminderNum, lab_request_id: r.id, organization_id: r.organization_id },
+          });
+        } catch (logErr) { console.warn('reminder SMS log failed (non-blocking):', logErr); }
       }
 
       await admin.from('patient_lab_requests').update({
