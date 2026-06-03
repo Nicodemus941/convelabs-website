@@ -7,6 +7,18 @@ import { cacheAppointments, readCachedAppointments, subscribeToOnlineStatus } fr
 
 export type AppointmentStatus = 'scheduled' | 'confirmed' | 'en_route' | 'arrived' | 'in_progress' | 'specimen_delivered' | 'completed' | 'cancelled';
 
+// Forward order of the visit workflow. Used to stop a stale background refetch
+// from rolling a status BACKWARD right after the phleb advanced it (e.g.
+// pressing Begin Job → in_progress, then a lagging-replica refetch reads the
+// old 'arrived' and reverts the buttons). Terminal states (cancelled/no_show)
+// rank highest so a real cancellation is never blocked.
+const STATUS_RANK: Record<string, number> = {
+  scheduled: 1, confirmed: 2, en_route: 3, arrived: 4,
+  in_progress: 5, specimen_delivered: 6, completed: 7,
+  cancelled: 99, no_show: 99,
+};
+const statusRank = (s?: string | null): number => STATUS_RANK[String(s || '')] ?? 0;
+
 export interface PhlebAppointment {
   id: string;
   appointment_date: string;
@@ -130,6 +142,9 @@ export function usePhlebotomistAppointments() {
   // Only show the loading spinner on a true first-ever load (no snapshot yet).
   const [isLoading, setIsLoading] = useState(() => !pickScheduleSeed(userId));
   const [monthDates, setMonthDates] = useState<Set<string>>(() => new Set(pickScheduleSeed(userId)?.dates ?? []));
+  // Forward-only status guard: records the status the phleb just set so a
+  // lagging-replica refetch can't roll it backward. { id -> {status, at} }.
+  const pendingStatusRef = useRef<Record<string, { status: AppointmentStatus; at: number }>>({});
   // Fetch all appointments for the current month for this phlebotomist.
   // `silent=true` skips the isLoading toggle so background refetches
   // (realtime push, visibility-change resume) don't flash the loading
@@ -407,6 +422,24 @@ export function usePhlebotomistAppointments() {
         })
       );
 
+      // Forward-only status guard: if the phleb just advanced an appointment
+      // (e.g. Begin Job → in_progress) and this refetch read a STALE earlier
+      // status from a lagging replica, keep the advanced status so the UI
+      // doesn't jump backward. Prune entries once the DB has caught up or aged
+      // out (60s).
+      const now = Date.now();
+      for (const row of enriched) {
+        const pending = pendingStatusRef.current[row.id];
+        if (!pending) continue;
+        if (now - pending.at > 60_000 || statusRank(row.status) >= statusRank(pending.status)) {
+          // DB caught up (or stale guard expired) — drop the override.
+          delete pendingStatusRef.current[row.id];
+        } else {
+          // Refetch is behind — keep the status the phleb already advanced to.
+          row.status = pending.status;
+        }
+      }
+
       setAppointments(enriched);
 
       // Persist the snapshot (in-memory + localStorage) so any subsequent
@@ -453,6 +486,10 @@ export function usePhlebotomistAppointments() {
       if (!data || data.length === 0) {
         throw new Error("Couldn't save status — your account may not have permission to update this visit. Refresh and retry, or contact admin.");
       }
+
+      // Record the advance so a stale background refetch can't roll it back
+      // (see the forward-only guard in fetchMonthAppointments).
+      pendingStatusRef.current[appointmentId] = { status: newStatus, at: Date.now() };
 
       setAppointments(prev =>
         prev.map(a => a.id === appointmentId ? { ...a, status: newStatus } : a)
