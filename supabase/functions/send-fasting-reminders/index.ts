@@ -164,17 +164,34 @@ Deno.serve(async (_req) => {
 
       // ── SMS ────────────────────────────────────────────────────────────
       if (a.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+        const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${apptTimeFriendly}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water).${urineSmsLine} Arriving at ${addrShort}. Reply HELP.`;
+        const toNum = normalizePhone(a.patient_phone);
+        let smsStatus = 'failed';
+        let smsSid: string | null = null;
         try {
-          const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${apptTimeFriendly}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water).${urineSmsLine} Arriving at ${addrShort}. Reply HELP.`;
           const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
-          const fd = new URLSearchParams({ To: normalizePhone(a.patient_phone), From: TWILIO_FROM, Body: smsBody });
+          const fd = new URLSearchParams({ To: toNum, From: TWILIO_FROM, Body: smsBody });
           const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
             method: 'POST',
             headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
             body: fd.toString(),
           });
-          if (!r.ok) console.warn('fasting SMS failed', a.id, await r.text());
+          if (r.ok) { smsStatus = 'sent'; try { smsSid = (await r.json())?.sid ?? null; } catch { /* body parse */ } }
+          else { console.warn('fasting SMS failed', a.id, await r.text()); }
         } catch (e) { console.warn('fasting SMS error', a.id, e); }
+        // Log EVERY send attempt (success or failure) so the SMS log is complete.
+        try {
+          await admin.from('sms_notifications').insert({
+            appointment_id: a.id,
+            notification_type: 'fasting_reminder',
+            phone_number: toNum,
+            message_content: smsBody,
+            sent_at: new Date().toISOString(),
+            delivery_status: smsStatus,
+            twilio_message_sid: smsSid,
+            metadata: { urine_required: urineNeeded, source: 'send-fasting-reminders' },
+          });
+        } catch (logErr) { console.warn('fasting SMS log insert failed (non-blocking)', a.id, logErr); }
       }
 
       // ── EMAIL ──────────────────────────────────────────────────────────
@@ -202,13 +219,31 @@ Deno.serve(async (_req) => {
     <p style="font-size:13px;color:#6b7280;">Running late or need to reschedule? Call/text (941) 527-9169.</p>
   </div>
 </div>`;
+          const subject = `Fasting reminder — draw tomorrow at ${apptTimeFriendly}`;
           const fd = new FormData();
           fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', a.patient_email);
-          fd.append('subject', `Fasting reminder — draw tomorrow at ${apptTimeFriendly}`);
+          fd.append('subject', subject);
           fd.append('html', html);
           fd.append('o:tracking-clicks', 'no');
-          await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+          let emailStatus = 'failed';
+          let mgId: string | null = null;
+          const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+          if (mgRes.ok) { emailStatus = 'sent'; try { mgId = (await mgRes.json())?.id ?? null; } catch { /* body parse */ } }
+          else { console.warn('fasting email failed', a.id, await mgRes.text()); }
+          // Log every reminder email.
+          try {
+            await admin.from('email_send_log').insert({
+              appointment_id: a.id,
+              to_email: a.patient_email,
+              email_type: 'fasting_reminder',
+              subject,
+              sent_at: new Date().toISOString(),
+              status: emailStatus,
+              mailgun_id: mgId,
+              campaign_tag: 'reminder',
+            });
+          } catch (logErr) { console.warn('fasting email log insert failed (non-blocking)', a.id, logErr); }
         } catch (e) { console.warn('fasting email error', a.id, e); }
       }
 

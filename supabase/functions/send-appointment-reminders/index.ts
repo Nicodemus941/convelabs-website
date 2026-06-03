@@ -154,12 +154,29 @@ Deno.serve(async (req) => {
               body: formData,
             });
 
+            let smsStatus = 'failed';
+            let smsSid: string | null = null;
             if (!smsRes.ok) {
               const err = await smsRes.text();
               console.error(`SMS failed for ${appt.id}:`, err);
             } else {
+              smsStatus = 'sent';
               console.log(`SMS reminder sent for appointment ${appt.id}`);
+              try { smsSid = (await smsRes.json())?.sid ?? null; } catch { /* body parse */ }
             }
+            // Log every appointment-reminder SMS (the email is logged below via logOrgEmail).
+            try {
+              await supabase.from('sms_notifications').insert({
+                appointment_id: appt.id,
+                notification_type: 'appointment_reminder',
+                phone_number: formattedPhone,
+                message_content: smsBody,
+                sent_at: new Date().toISOString(),
+                delivery_status: smsStatus,
+                twilio_message_sid: smsSid,
+                metadata: { source: 'send-appointment-reminders' },
+              });
+            } catch (logErr) { console.warn('appt reminder SMS log insert failed (non-blocking)', appt.id, logErr); }
           }
         }
 
