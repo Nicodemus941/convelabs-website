@@ -47,6 +47,7 @@ Deno.serve(async (req) => {
     const token: string = body?.token || '';
     const tipCentsRaw = Number(body?.tip_cents);
     const acceptTc = body?.accept_tc === true;
+    const embedded = body?.embedded === true; // V2: on-page Stripe Embedded Checkout
     if (!token) return json({ error: 'token_required' }, 400);
     if (!acceptTc) return json({ error: 'terms_required' }, 400);
 
@@ -83,19 +84,20 @@ Deno.serve(async (req) => {
 
     const totalCents = subtotalCents + tipCents;
 
-    // (4) Idempotency: reuse a recent live session for this token.
+    // (4) Idempotency: reuse a recent live session for this token (only when
+    //     the amount still matches — a changed tip needs a fresh session).
     if (tok.last_stripe_session_id && tok.last_session_created_at &&
         (Date.now() - new Date(tok.last_session_created_at).getTime()) < SESSION_REUSE_WINDOW_MS) {
       try {
         const prior = await stripe.checkout.sessions.retrieve(tok.last_stripe_session_id);
-        // Only reuse if it's still open AND the amount matches this request.
-        if (prior && prior.status === 'open' && prior.amount_total === totalCents && prior.url) {
-          return json({ ok: true, stripe_url: prior.url, reused: true });
+        if (prior && prior.status === 'open' && prior.amount_total === totalCents) {
+          if (embedded && (prior as any).client_secret) return json({ ok: true, client_secret: (prior as any).client_secret, reused: true });
+          if (!embedded && prior.url) return json({ ok: true, stripe_url: prior.url, reused: true });
         }
       } catch { /* fall through to create a fresh session */ }
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const sharedParams: any = {
       mode: 'payment',
       customer_email: a.patient_email || undefined,
       line_items: [{
@@ -106,9 +108,6 @@ Deno.serve(async (req) => {
         },
         quantity: 1,
       }],
-      payment_method_types: ['card', 'us_bank_account'],
-      success_url: `${SITE}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${SITE}/pay/${token}`,
       metadata: {
         appointment_id: a.id,
         tip_cents: String(tipCents),
@@ -116,7 +115,29 @@ Deno.serve(async (req) => {
         source: 'branded_checkout_v1',
         pay_token: token,
       },
-    });
+    };
+
+    let session: any;
+    if (embedded) {
+      // V2: on-page Embedded Checkout — card entry stays on convelabs.com.
+      // redirect_on_completion:'never' keeps the patient on our page; the
+      // frontend's onComplete handler shows success (DB is stamped by the
+      // same checkout.session.completed webhook). us_bank_account needs a
+      // redirect, so embedded is card-only.
+      session = await stripe.checkout.sessions.create({
+        ...sharedParams,
+        ui_mode: 'embedded',
+        redirect_on_completion: 'never',
+        payment_method_types: ['card'],
+      });
+    } else {
+      session = await stripe.checkout.sessions.create({
+        ...sharedParams,
+        payment_method_types: ['card', 'us_bank_account'],
+        success_url: `${SITE}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${SITE}/pay/${token}`,
+      });
+    }
 
     await admin.from('appointment_pay_tokens').update({
       last_stripe_session_id: session.id,
@@ -125,7 +146,9 @@ Deno.serve(async (req) => {
       accepted_tc_at: new Date().toISOString(),
     }).eq('id', tok.id);
 
-    return json({ ok: true, stripe_url: session.url });
+    return embedded
+      ? json({ ok: true, client_secret: session.client_secret })
+      : json({ ok: true, stripe_url: session.url });
   } catch (e: any) {
     console.error('[proceed-to-stripe-checkout] error:', e);
     return json({ error: e?.message || String(e) }, 500);

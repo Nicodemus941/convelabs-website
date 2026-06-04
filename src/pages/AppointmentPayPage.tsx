@@ -8,12 +8,18 @@
  * Token-only; no PHI in the URL.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { loadStripe } from '@stripe/stripe-js';
 
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+// Public Stripe key — safe to embed. Prefer env; fall back to the live key
+// so the build works even before VITE_STRIPE_PUBLISHABLE_KEY is set in Vercel.
+const STRIPE_PK = (import.meta as any).env?.VITE_STRIPE_PUBLISHABLE_KEY ||
+  'pk_live_51TLWYvAPnMg8iHarlnWKX7obn6WvawSBRFhLUs793yCO55JjSMn2y6zyldU2wJiOxVabqS8iOP3jpRmWD4QrJw2H00HQgI7pTr';
+const stripePromise = loadStripe(STRIPE_PK);
 
 const TIP_PRESETS = [0, 1000, 1500, 2500]; // cents: $0 / $10 / $15 / $25
 
@@ -45,6 +51,10 @@ const AppointmentPayPage: React.FC = () => {
   const [acceptTc, setAcceptTc] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paidInline, setPaidInline] = useState(false);
+  const checkoutRef = useRef<HTMLDivElement | null>(null);
+  const checkoutInstanceRef = useRef<any>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -70,6 +80,34 @@ const AppointmentPayPage: React.FC = () => {
     : tipCents;
   const total = subtotal + effectiveTip;
 
+  // Mount Stripe Embedded Checkout once we have a client secret (V2: card
+  // entry stays on this page — no redirect to Stripe).
+  useEffect(() => {
+    if (!clientSecret) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const stripe = await stripePromise;
+        if (!stripe || cancelled) return;
+        const checkout = await (stripe as any).initEmbeddedCheckout({
+          clientSecret,
+          onComplete: () => setPaidInline(true),
+        });
+        if (cancelled) { try { checkout.destroy(); } catch { /* */ } return; }
+        checkoutInstanceRef.current = checkout;
+        if (checkoutRef.current) checkout.mount(checkoutRef.current);
+      } catch {
+        setSubmitError('Could not load the payment form. Please refresh or call (941) 527-9169.');
+        setClientSecret(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      try { checkoutInstanceRef.current?.destroy(); } catch { /* */ }
+      checkoutInstanceRef.current = null;
+    };
+  }, [clientSecret]);
+
   async function handlePay() {
     if (!token || submitting || !acceptTc) return;
     setSubmitting(true); setSubmitError(null);
@@ -77,11 +115,11 @@ const AppointmentPayPage: React.FC = () => {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/proceed-to-stripe-checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ token, tip_cents: effectiveTip, accept_tc: true }),
+        body: JSON.stringify({ token, tip_cents: effectiveTip, accept_tc: true, embedded: true }),
       });
       const j = await res.json().catch(() => ({}));
-      if (res.ok && j.stripe_url) {
-        window.location.href = j.stripe_url;
+      if (res.ok && j.client_secret) {
+        setClientSecret(j.client_secret);
       } else if (j.error === 'tip_too_large') {
         setSubmitError('That tip is larger than we can accept — please lower it.');
       } else if (j.error === 'already_paid') {
@@ -99,6 +137,21 @@ const AppointmentPayPage: React.FC = () => {
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>;
+
+  if (paidInline) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full bg-white border rounded-2xl p-6 shadow-sm text-center">
+          <div className="bg-emerald-100 rounded-full w-16 h-16 mx-auto flex items-center justify-center mb-4">
+            <CheckCircle2 className="h-9 w-9 text-emerald-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment received ✓</h1>
+          <p className="text-sm text-gray-600">Thank you! A receipt is on its way to your email. See you at your appointment.</p>
+          <p className="text-xs text-gray-400 mt-4">Questions? info@convelabs.com · (941) 527-9169</p>
+        </div>
+      </div>
+    );
+  }
 
   const statusMsg: Record<string, { title: string; body: string }> = {
     paid: { title: 'This visit is paid ✓', body: 'Thanks! Nothing more to do. See you at your appointment.' },
@@ -150,6 +203,20 @@ const AppointmentPayPage: React.FC = () => {
               <div className="flex justify-between text-gray-700"><span>Visit total</span><span>{fmt(subtotal)}</span></div>
             </div>
 
+            {clientSecret ? (
+              /* V2: Stripe Embedded Checkout mounts here — card entry on-page */
+              <div>
+                <div className="flex justify-between items-center border-t border-b py-2 mb-3">
+                  <span className="text-sm font-semibold text-gray-900">Total</span>
+                  <span className="text-xl font-extrabold text-gray-900">{fmt(total)}</span>
+                </div>
+                <div ref={checkoutRef} className="min-h-[320px]" />
+                <p className="text-center text-[11px] text-gray-400 mt-3 flex items-center justify-center gap-1">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Secured by Stripe — your card never touches ConveLabs.
+                </p>
+              </div>
+            ) : (
+            <>
             {/* Tip */}
             <div>
               <p className="text-sm font-semibold text-gray-900 mb-2">Add a tip for {a.phleb_first_name || 'your phlebotomist'}? <span className="font-normal text-gray-400">(optional)</span></p>
@@ -211,12 +278,14 @@ const AppointmentPayPage: React.FC = () => {
               className="w-full bg-[#B91C1C] hover:bg-[#991B1B] disabled:opacity-50 text-white py-4 rounded-xl font-bold text-base flex items-center justify-center gap-2"
             >
               {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-              Pay {fmt(total)} securely with Stripe →
+              Continue to payment · {fmt(total)}
             </button>
 
             <p className="text-center text-[11px] text-gray-400 flex items-center justify-center gap-1">
               <ShieldCheck className="h-3.5 w-3.5" /> Powered by Stripe. Your card never touches ConveLabs.
             </p>
+            </>
+            )}
           </div>
         </div>
       </div>
