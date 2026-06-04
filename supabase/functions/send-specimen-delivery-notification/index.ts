@@ -265,6 +265,79 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── CAPTURED REFERRING PROVIDER (patient's own doctor) ────────
+    // Self-pay patients can opt in post-checkout ("keep my doctor in the
+    // loop") via ReferringProviderCapture → patient_referring_providers.
+    // Those doctors are NOT in `organizations`, so the org loop below misses
+    // them. Honor the promise made in the modal: if the patient consented and
+    // we have a practice email, send the doctor a delivery receipt now.
+    // Consent-gated (HIPAA minimum-necessary: first name + visit date +
+    // delivery confirmation only) and deduped via delivery_receipt_sent_at.
+    let referringProviderSent = 0;
+    try {
+      const { data: refProviders } = await supabase
+        .from('patient_referring_providers')
+        .select('id, provider_name, practice_name, practice_email, patient_name, patient_consent, delivery_receipt_sent_at')
+        .eq('appointment_id', apptId)
+        .eq('patient_consent', true)
+        .is('delivery_receipt_sent_at', null);
+      for (const rp of (refProviders || [])) {
+        const recipient = String((rp as any).practice_email || '').trim();
+        if (!recipient || !MAILGUN_API_KEY) continue;
+        const firstName = String((rp as any).patient_name || appt.patient_name || 'your patient').split(' ')[0];
+        const apptDateRp = appt.appointment_date
+          ? new Date(String(appt.appointment_date).substring(0, 10) + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' })
+          : 'recently';
+        const labLineRp = body.labName ? `<p style="margin:6px 0 0;"><strong>Delivered to:</strong> ${body.labName}</p>` : '';
+        const trackingRp = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${body.specimenId}</p>` : '';
+        const greet = (rp as any).provider_name || (rp as any).practice_name || 'Doctor';
+        const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#059669;color:white;padding:20px;border-radius:10px 10px 0 0;text-align:center;">
+    <h2 style="margin:0;font-size:20px;">Specimen Delivered ✓</h2>
+    <p style="margin:4px 0 0;opacity:0.9;font-size:13px;">Courtesy update at your patient's request</p>
+  </div>
+  <div style="background:white;border:1px solid #e5e7eb;padding:22px;border-radius:0 0 10px 10px;line-height:1.5;">
+    <p>Hi ${greet},</p>
+    <p>Your patient <strong>${firstName}</strong> used ConveLabs for their mobile blood draw and asked us to keep you in the loop. The specimen has been delivered to the lab.</p>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px;margin:14px 0;font-size:14px;">
+      <p style="margin:0;"><strong>Visit date:</strong> ${apptDateRp}</p>
+      ${labLineRp}
+      ${trackingRp}
+    </div>
+    <p style="font-size:13px;color:#6b7280;">Results will arrive through the destination lab's standard pipeline. We handle the at-home draw + chain-of-custody — no change to how you receive results.</p>
+    <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;border-top:1px solid #f3f4f6;padding-top:12px;">
+      Sent at the patient's request (first name + visit date only, per HIPAA minimum-necessary).<br/>
+      ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810 · (941) 527-9169
+    </p>
+  </div>
+</div>`;
+        const fd = new FormData();
+        fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
+        fd.append('to', recipient);
+        fd.append('subject', `Specimen delivered for your patient ${firstName}${body.labName ? ` · ${body.labName}` : ''}`);
+        fd.append('html', html);
+        fd.append('o:tracking-clicks', 'no');
+        fd.append('o:tag', 'specimen-delivery-referring-provider');
+        const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+          method: 'POST', headers: { Authorization: `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd,
+        });
+        try {
+          await supabase.from('email_send_log').insert({
+            appointment_id: apptId, to_email: recipient, email_type: 'specimen_delivered_referring_provider',
+            subject: `Specimen delivered for your patient ${firstName}`, sent_at: new Date().toISOString(),
+            status: mgRes.ok ? 'sent' : 'failed', campaign_tag: 'referring_provider_delivery_receipt',
+          });
+        } catch { /* non-blocking */ }
+        // Dedup stamp regardless of send result (avoid retry loops).
+        await supabase.from('patient_referring_providers')
+          .update({ delivery_receipt_sent_at: new Date().toISOString() })
+          .eq('id', (rp as any).id);
+        if (mgRes.ok) referringProviderSent++;
+      }
+    } catch (e: any) {
+      console.error('[specimen-notify] referring-provider receipt failed:', e?.message);
+    }
+
     const { data: links } = await supabase
       .from('appointment_organizations')
       .select('organization_id, role, notified_delivery_at')
@@ -279,6 +352,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         ok: true, orgs_skipped: true, reason: 'no_linked_orgs',
         patient_sms_sent: patientSmsSent, patient_email_sent: patientEmailSent,
+        referring_provider_sent: referringProviderSent,
       }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -386,6 +460,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       ok: true, sent, skipped, total_orgs: orgIds.size,
       patient_sms_sent: patientSmsSent, patient_email_sent: patientEmailSent,
+      referring_provider_sent: referringProviderSent,
     }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
