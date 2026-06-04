@@ -528,6 +528,44 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               {appt.is_vip && <span className="ml-1 text-[10px] opacity-70">(VIP-safe)</span>}
             </Button>
           )}
+
+          {/*
+            Branded pay link (/pay/:token) — patient reviews the visit, can add
+            a tip, accepts T&C, then pays via Stripe. Mints a fresh token
+            (revoking any prior one). Email send is gated server-side by
+            PAY_TOKEN_EMAIL_ENABLED; until that's on, the link is copied to the
+            clipboard for the admin to paste into a message.
+          */}
+          {!['paid', 'completed', 'succeeded'].includes(String(appt.payment_status)) &&
+           appt.status !== 'cancelled' &&
+           (appt.total_amount || 0) > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-8 gap-1.5 border-[#B91C1C]/30 text-[#B91C1C] hover:bg-red-50"
+              onClick={async () => {
+                try {
+                  const { data, error } = await supabase.functions.invoke('generate-appointment-pay-token', {
+                    body: { appointment_id: appt.id },
+                  });
+                  if (error) throw error;
+                  const url = (data as any)?.url;
+                  if (!url) throw new Error('No link returned');
+                  try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
+                  if ((data as any)?.emailed) {
+                    toast.success('Pay link emailed to patient (and copied to clipboard)');
+                  } else {
+                    toast.success('Pay link copied — paste it to the patient', { description: url, duration: 15000 });
+                  }
+                } catch (e: any) {
+                  toast.error(e?.message || 'Failed to create pay link');
+                }
+              }}
+            >
+              <Send className="h-3.5 w-3.5" />
+              Send Pay Link
+            </Button>
+          )}
         </div>
 
         {/* Patient name + contact */}
