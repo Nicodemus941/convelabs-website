@@ -837,6 +837,38 @@ async function handleSubscriptionUpdate(subscription: any) {
       console.warn(`[handleSubscriptionUpdate] subscription ${subscriptionId} missing current_period_end — skipping next_renewal write`);
     }
 
+    // ── ANNUAL CREDIT REFRESH ON RENEWAL ──────────────────────────
+    // Credit-bearing plans (Essential Care / Individual+1 / Family) promise
+    // N visit credits PER YEAR. handleSubscriptionUpdate previously only
+    // advanced next_renewal — so on year-2 renewal the patient kept their
+    // year-1 leftover (often 0) and never got the credits they paid for.
+    // Detect a genuine period roll-forward (new period_end > stored renewal
+    // by > 25 days) and reset credits_remaining = credits_per_year + bonus.
+    let renewalCreditReset: number | null = null;
+    if (nextRenewal && status === 'active') {
+      try {
+        const { data: existing } = await supabaseClient
+          .from('user_memberships')
+          .select('next_renewal, plan_id, bonus_credits')
+          .eq('stripe_subscription_id', subscriptionId)
+          .maybeSingle();
+        if (existing?.next_renewal && existing.plan_id) {
+          const advancedMs = new Date(nextRenewal).getTime() - new Date(existing.next_renewal).getTime();
+          if (advancedMs > 25 * 24 * 60 * 60 * 1000) {
+            const { data: plan } = await supabaseClient
+              .from('membership_plans').select('credits_per_year').eq('id', existing.plan_id).maybeSingle();
+            const cpy = Number((plan as any)?.credits_per_year || 0);
+            if (cpy > 0) {
+              renewalCreditReset = cpy + Number((existing as any).bonus_credits || 0);
+              console.log(`[renewal-credits] subscription ${subscriptionId} renewed → resetting credits_remaining to ${renewalCreditReset}`);
+            }
+          }
+        }
+      } catch (e: any) {
+        console.warn('[renewal-credits] check failed (non-blocking):', e?.message);
+      }
+    }
+
     // Update the user membership — only write next_renewal when we have
     // a valid ISO string (avoid clobbering a good value with null).
     const updatePayload: Record<string, any> = {
@@ -844,6 +876,7 @@ async function handleSubscriptionUpdate(subscription: any) {
       updated_at: new Date().toISOString(),
     };
     if (nextRenewal) updatePayload.next_renewal = nextRenewal;
+    if (renewalCreditReset !== null) updatePayload.credits_remaining = renewalCreditReset;
     const { data, error } = await supabaseClient
       .from('user_memberships')
       .update(updatePayload)
