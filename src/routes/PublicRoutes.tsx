@@ -34,6 +34,7 @@ const PatientLabRequestPage = lazy(() => import('../pages/PatientLabRequestPage'
 const AppointmentLabOrderUploadPage = lazy(() => import('../pages/AppointmentLabOrderUploadPage'));
 const AppointmentConfirmPage = lazy(() => import('../pages/AppointmentConfirmPage'));
 const AppointmentTrackPage = lazy(() => import('../pages/AppointmentTrackPage'));
+const AppointmentPayPage = lazy(() => import('../pages/AppointmentPayPage'));
 const ProviderClaimPage = lazy(() => import('../pages/ProviderClaimPage'));
 const JoinTier = lazy(() => import('../pages/JoinTier'));
 const CheckoutSuccessPage = lazy(() => import('../pages/CheckoutSuccessPage'));
@@ -97,6 +98,7 @@ export const routes = [
   <Route key="appt-confirm" path="/appt/:token/confirm" element={<AppointmentConfirmPage />} />,
   // Live "phleb is on the way" tracker; SMS fires when phleb taps OTW
   <Route key="appt-track" path="/appt/:token/track" element={<AppointmentTrackPage />} />,
+  <Route key="pay-token" path="/pay/:token" element={<AppointmentPayPage />} />,
   // /join (no token) handles the email-upsell direct-checkout: ?tier=vip&email=…
   // Must come BEFORE /join/:token so the typed query path takes precedence
   // when there's no token segment in the URL.

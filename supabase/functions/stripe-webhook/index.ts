@@ -88,8 +88,14 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Handle branded patient checkout (/pay/:token — invoice + tip).
+      // Set apart by metadata.source; no metadata.type so it must be routed
+      // BEFORE the legacy membership fallback below.
+      if (metadata.source === 'branded_checkout_v1' && metadata.appointment_id) {
+        await handleBrandedCheckoutPayment(session);
+      }
       // Handle appointment payments
-      if (metadata.type === 'appointment_payment') {
+      else if (metadata.type === 'appointment_payment') {
         await handleAppointmentPayment(session);
       }
       // Handle org paying upfront for a lab request (org_pays flow). The
@@ -1247,6 +1253,60 @@ async function handlePaymentFailure(invoice: any) {
 }
 
 // Handle appointment payments (one-time blood draw bookings)
+// Branded patient checkout (/pay/:token). The patient reviewed their invoice,
+// optionally added a tip, and paid via Stripe Checkout. Stamp the appointment
+// (tip + paid), mark the pay token consumed, and break the tip out onto the
+// staff_payouts row for reporting. The tip already flows to the phleb because
+// auto_reconcile_phleb_payout_v2 recomputes the payout from the new totals.
+async function handleBrandedCheckoutPayment(session: any) {
+  const metadata = session.metadata || {};
+  const apptId = metadata.appointment_id;
+  const tipCents = Math.max(0, parseInt(metadata.tip_cents || '0', 10) || 0);
+  const subtotalCents = Math.max(0, parseInt(metadata.subtotal_cents || '0', 10) || 0);
+  const payToken = metadata.pay_token || null;
+  const paidTotal = (session.amount_total ?? (subtotalCents + tipCents)) / 100;
+
+  // Load current row so we don't clobber an existing tip/total on replay.
+  const { data: appt } = await supabaseClient
+    .from('appointments')
+    .select('id, tip_amount, payment_status')
+    .eq('id', apptId)
+    .maybeSingle();
+  if (!appt) {
+    console.warn(`[branded-checkout] appointment ${apptId} not found`);
+    return;
+  }
+
+  // Idempotent: if already completed, just ensure the token is marked paid.
+  if (String(appt.payment_status) !== 'completed') {
+    await supabaseClient.from('appointments').update({
+      tip_amount: tipCents / 100,
+      total_amount: paidTotal,
+      payment_status: 'completed',
+      stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : (session.payment_intent?.id || null),
+    }).eq('id', apptId);
+  }
+
+  if (payToken) {
+    await supabaseClient.from('appointment_pay_tokens')
+      .update({ paid_at: new Date().toISOString(), selected_tip_cents: tipCents })
+      .eq('access_token', payToken);
+  }
+
+  // Break the tip out for reporting (auto_reconcile already folded it into
+  // the payout amount; this just populates the dedicated column).
+  if (tipCents > 0) {
+    try {
+      await supabaseClient.from('staff_payouts')
+        .update({ tip_cents: tipCents })
+        .eq('appointment_id', apptId)
+        .eq('status', 'manual_owed');
+    } catch (e) { console.warn('[branded-checkout] tip_cents stamp failed:', e); }
+  }
+
+  console.log(`[branded-checkout] appt ${apptId} paid $${paidTotal.toFixed(2)} (tip $${(tipCents/100).toFixed(2)})`);
+}
+
 async function handleAppointmentPayment(session: any) {
   try {
     const { metadata, id: checkoutSessionId, payment_intent } = session;
