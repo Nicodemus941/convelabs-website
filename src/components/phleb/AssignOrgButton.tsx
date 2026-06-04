@@ -112,14 +112,33 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, currentOrgId, variant
     setOrgsLoaded(true);
   };
 
+  // Forgiving search/sort: lowercase, "&"→"and", drop a leading "the ", strip
+  // punctuation, collapse whitespace. Without this, "center for natural and
+  // integrative medicine" failed to match stored "The Center for Natural &
+  // Integrative Medicine" (& vs and), and "The …" names sorted under T —
+  // beyond the render cap — so they never appeared in the list.
+  const norm = (s?: string | null) => (s || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normForSort = (s?: string | null) => norm(s).replace(/^the /, '');
+
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return orgs;
-    return orgs.filter(o =>
-      o.name.toLowerCase().includes(needle) ||
-      (o.contact_email || '').toLowerCase().includes(needle) ||
-      (o.contact_phone || '').replace(/\D/g, '').includes(needle.replace(/\D/g, ''))
-    );
+    const sorted = [...orgs].sort((a, b) => normForSort(a.name).localeCompare(normForSort(b.name)));
+    const needle = norm(q);
+    if (!needle) return sorted;
+    const tokens = needle.split(' ').filter(Boolean);
+    const digits = q.replace(/\D/g, '');
+    return sorted.filter(o => {
+      const hay = `${norm(o.name)} ${norm(o.contact_email)}`;
+      // Every typed token must appear (order-independent, &/the/punctuation-insensitive)…
+      const textMatch = tokens.every(t => hay.includes(t));
+      // …or it's a phone-number search.
+      const phoneMatch = digits.length >= 3 && (o.contact_phone || '').replace(/\D/g, '').includes(digits);
+      return textMatch || phoneMatch;
+    });
   }, [orgs, q]);
 
   const assign = async (org: OrgSummary | null) => {
@@ -409,7 +428,7 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, currentOrgId, variant
                 ) : filtered.length === 0 ? (
                   <div className="p-4 text-center text-xs text-gray-500">{orgs.length === 0 ? 'No organizations yet.' : 'No matches.'}</div>
                 ) : (
-                  filtered.slice(0, 80).map((o) => {
+                  filtered.slice(0, 500).map((o) => {
                     const isCurrent = o.id === currentOrgId;
                     return (
                       <button key={o.id} type="button"
