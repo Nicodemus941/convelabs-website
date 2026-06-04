@@ -192,6 +192,79 @@ Deno.serve(async (req) => {
       startingAfter = subs.data[subs.data.length - 1]?.id;
     }
 
+    // ── ONE-TIME MEMBERSHIP CHARGE SWEEP ───────────────────────────
+    // Memberships are sometimes paid as a single annual charge (a
+    // PaymentIntent, e.g. Brian Hammontree's $199 VIP) rather than a Stripe
+    // subscription — the subscription scan above can't see those. Scan recent
+    // succeeded charges whose amount matches a membership price, exclude any
+    // charge tied to an appointment (those are VISIT payments — this kills the
+    // $225 Essential-vs-mobile+surcharge collision), and flag genuine
+    // "paid a membership, has no membership row" cases for owner review.
+    // Flag-only (not auto-create): amount alone isn't proof of intent, so a
+    // human confirms before a membership is created (mirrors how we fixed Brian).
+    try {
+      const priceToTier = new Map<number, string>();
+      for (const p of planList) {
+        if (p.annual_price > 0) priceToTier.set(p.annual_price, `${p.name}`);
+      }
+      const sinceUnix = Math.floor((Date.now() - 14 * 24 * 60 * 60 * 1000) / 1000);
+      let chStartingAfter: string | undefined = undefined;
+      for (let page = 0; page < 4; page++) {
+        const charges = await stripe.charges.list({
+          limit: 100, created: { gte: sinceUnix },
+          ...(chStartingAfter ? { starting_after: chStartingAfter } : {}),
+        });
+        for (const ch of charges.data) {
+          if (ch.status !== 'succeeded' || !ch.paid || ch.refunded) continue;
+          const planName = priceToTier.get(ch.amount);
+          if (!planName) continue; // amount doesn't match any membership price
+          const pi = typeof ch.payment_intent === 'string' ? ch.payment_intent : ch.payment_intent?.id || null;
+          const email = (ch.billing_details?.email || (typeof ch.customer === 'string' ? null : (ch.customer as any)?.email) || '').toLowerCase() || null;
+          if (!email) continue;
+          if (/placeholder\.com$|example\.com$|@test\.|test@/.test(email)) continue;
+
+          // Exclude visit payments — a charge linked to an appointment is a
+          // visit, not a membership.
+          if (pi) {
+            const { data: appt } = await admin.from('appointments')
+              .select('id').eq('stripe_payment_intent_id', pi).maybeSingle();
+            if (appt) continue;
+          }
+
+          // Does this customer already have an active membership? (then fine)
+          const { data: tp } = await admin.from('tenant_patients')
+            .select('user_id').ilike('email', email).maybeSingle();
+          if (tp?.user_id) {
+            const { data: mem } = await admin.from('user_memberships')
+              .select('id').eq('user_id', tp.user_id).eq('status', 'active').maybeSingle();
+            if (mem) continue; // already a member — nothing to flag
+          }
+
+          // Dedup — don't re-flag the same charge every hour.
+          if (pi) {
+            const { data: prior } = await admin.from('error_logs' as any)
+              .select('id').eq('error_type', 'one_time_membership_no_record')
+              .filter('payload->>payment_intent', 'eq', pi).maybeSingle();
+            if (prior) continue;
+          }
+
+          flagged.push({ sub: pi || ch.id, email, amount: ch.amount, plan: planName, reason: 'one_time_membership_no_record' });
+          try {
+            await admin.from('error_logs' as any).insert({
+              error_type: 'one_time_membership_no_record', component: 'reconcile-memberships',
+              error_message: `One-time charge ${pi || ch.id} for $${(ch.amount / 100).toFixed(2)} (${planName}) by ${email} has no active membership — likely a membership payment that never created a record. Review + mirror.`,
+              user_email: email,
+              payload: { payment_intent: pi, charge: ch.id, amount_cents: ch.amount, plan: planName, email, one_time: true },
+            });
+          } catch { /* non-blocking */ }
+        }
+        if (!charges.has_more) break;
+        chStartingAfter = charges.data[charges.data.length - 1]?.id;
+      }
+    } catch (e: any) {
+      console.warn('[reconcile-memberships] one-time charge sweep failed (non-blocking):', e?.message);
+    }
+
     // Alert the owner about anything healed or unhealable.
     if (healed.length > 0 || flagged.length > 0) {
       const parts: string[] = [];
