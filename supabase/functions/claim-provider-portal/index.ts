@@ -104,21 +104,33 @@ Deno.serve(async (req) => {
         contact_name: provider_name || null,
         contact_email: practice_email.toLowerCase(),
         billing_email: practice_email.toLowerCase(),
-        support_phone: practice_phone || null,
+        contact_phone: practice_phone || null,
         portal_enabled: true, is_active: true,
         default_billed_to: 'patient',
         created_via: 'provider_acquisition_claim',
       }).select('id').single();
-      if (orgErr) return new Response(JSON.stringify({ error: 'Failed to create organization' }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      if (orgErr) {
+        console.error('[claim-provider-portal] org insert failed:', orgErr.message);
+        return new Response(JSON.stringify({ error: 'Failed to create organization', detail: orgErr.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
       orgId = newOrg.id;
     }
 
-    const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
-      practice_email.toLowerCase(),
-      { data: { role: 'provider', org_id: orgId, full_name: provider_name || practice_name }, redirectTo: `${PUBLIC_SITE_URL}/dashboard/provider` }
-    );
-    if (inviteErr && !/already registered|already been/i.test(inviteErr.message || '')) {
-      return new Response(JSON.stringify({ error: `Account invite failed: ${inviteErr.message}` }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    // Best-effort password-account invite. This must NOT block activation:
+    // Supabase Auth invite emails are rate-limited/unreliable, and the
+    // provider can always sign in via /provider (SMS OTP on the contact_phone
+    // we just saved, or an email recovery link). Previously a failed invite
+    // 500'd the whole activation, orphaning the org and stranding the provider.
+    try {
+      const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
+        practice_email.toLowerCase(),
+        { data: { role: 'provider', org_id: orgId, full_name: provider_name || practice_name }, redirectTo: `${PUBLIC_SITE_URL}/dashboard/provider` }
+      );
+      if (inviteErr && !/already registered|already been/i.test(inviteErr.message || '')) {
+        console.warn('[claim-provider-portal] invite non-fatal:', inviteErr.message || JSON.stringify(inviteErr));
+      }
+    } catch (e: any) {
+      console.warn('[claim-provider-portal] invite threw (non-fatal):', e?.message || String(e));
     }
 
     // Flipping status='converted' triggers on_provider_converted_backfill_appointments
