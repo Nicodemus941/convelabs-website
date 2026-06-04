@@ -1302,6 +1302,51 @@ async function handleBrandedCheckoutPayment(session: any) {
         .eq('appointment_id', apptId)
         .eq('status', 'manual_owed');
     } catch (e) { console.warn('[branded-checkout] tip_cents stamp failed:', e); }
+
+    // Phleb recognition: text the assigned phlebotomist that a tip came in.
+    // Staff notification (not patient-facing), so no quiet-hours gate.
+    try {
+      const { data: full } = await supabaseClient
+        .from('appointments')
+        .select('patient_name, phlebotomist_id')
+        .eq('id', apptId)
+        .maybeSingle();
+      const phlebId = (full as any)?.phlebotomist_id;
+      if (phlebId) {
+        const { data: sp } = await supabaseClient
+          .from('staff_profiles')
+          .select('phone, first_name')
+          .eq('user_id', phlebId)
+          .maybeSingle();
+        const phlebPhone = String((sp as any)?.phone || '').trim();
+        const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
+        const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
+        const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+        if (phlebPhone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+          const d = phlebPhone.replace(/\D/g, '');
+          const to = d.length === 10 ? `+1${d}` : (phlebPhone.startsWith('+') ? phlebPhone : `+${d}`);
+          const firstName = String((sp as any)?.first_name || 'there');
+          const patient = String((full as any)?.patient_name || 'A patient');
+          const body = `ConveLabs: 💵 ${firstName}, ${patient} left you a $${(tipCents / 100).toFixed(2)} tip on their visit — it's included in your next payout. Thank you!`;
+          const fd = new URLSearchParams({ To: to, From: TWILIO_FROM, Body: body });
+          const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+            method: 'POST',
+            headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: fd.toString(),
+          });
+          let sid: string | null = null;
+          try { sid = (await tw.json())?.sid || null; } catch { /* */ }
+          try {
+            await supabaseClient.from('sms_notifications').insert({
+              appointment_id: apptId, notification_type: 'phleb_tip_received',
+              phone_number: to, message_content: body.substring(0, 1500),
+              sent_at: new Date().toISOString(), delivery_status: tw.ok ? 'sent' : 'failed',
+              twilio_message_sid: sid, metadata: { source: 'branded_checkout', tip_cents: tipCents },
+            });
+          } catch { /* non-blocking */ }
+        }
+      }
+    } catch (e) { console.warn('[branded-checkout] phleb tip SMS failed:', e); }
   }
 
   console.log(`[branded-checkout] appt ${apptId} paid $${paidTotal.toFixed(2)} (tip $${(tipCents/100).toFixed(2)})`);
