@@ -12,6 +12,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
+import ReferringProviderCapture from '@/components/patient/ReferringProviderCapture';
 
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
@@ -53,6 +54,7 @@ const AppointmentPayPage: React.FC = () => {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [paidInline, setPaidInline] = useState(false);
+  const [providerOpen, setProviderOpen] = useState(true);
   const checkoutRef = useRef<HTMLDivElement | null>(null);
   const checkoutInstanceRef = useRef<any>(null);
 
@@ -139,6 +141,7 @@ const AppointmentPayPage: React.FC = () => {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>;
 
   if (paidInline) {
+    const firstName = data?.appointment?.patient_first_name || 'there';
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
         <div className="max-w-md w-full bg-white border rounded-2xl p-6 shadow-sm text-center">
@@ -149,6 +152,18 @@ const AppointmentPayPage: React.FC = () => {
           <p className="text-sm text-gray-600">Thank you! A receipt is on its way to your email. See you at your appointment.</p>
           <p className="text-xs text-gray-400 mt-4">Questions? info@convelabs.com · (941) 527-9169</p>
         </div>
+        {/* Keep the patient's doctor in the loop (was on /welcome in the
+            redirect flow; V2 stays on-page, so we surface it here). */}
+        {token && (
+          <ReferringProviderCapture
+            open={providerOpen}
+            onClose={() => setProviderOpen(false)}
+            payToken={token}
+            appointmentId=""
+            patientEmail=""
+            patientName={firstName}
+          />
+        )}
       </div>
     );
   }

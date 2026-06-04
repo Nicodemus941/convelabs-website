@@ -32,9 +32,15 @@ interface Props {
   appointmentId: string;
   patientEmail: string;
   patientName: string;
+  // Token mode (branded /pay/:token success screen): when set, submit via the
+  // token-based edge fn instead of the RPC (no PHI needed client-side).
+  payToken?: string;
 }
 
-const ReferringProviderCapture: React.FC<Props> = ({ open, onClose, appointmentId, patientEmail, patientName }) => {
+const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+
+const ReferringProviderCapture: React.FC<Props> = ({ open, onClose, appointmentId, patientEmail, patientName, payToken }) => {
   const [providerName, setProviderName] = useState('');
   const [practiceName, setPracticeName] = useState('');
   const [practicePhone, setPracticePhone] = useState('');
@@ -51,18 +57,37 @@ const ReferringProviderCapture: React.FC<Props> = ({ open, onClose, appointmentI
     if (!hasMinInfo) return;
     setSubmitting(true);
     try {
-      const { error } = await supabase.rpc('capture_referring_provider' as any, {
-        p_appointment_id: appointmentId,
-        p_patient_email: patientEmail.toLowerCase(),
-        p_patient_name: patientName,
-        p_provider_name: providerName.trim() || null,
-        p_practice_name: practiceName.trim() || null,
-        p_practice_phone: practicePhone.trim() || null,
-        p_practice_email: practiceEmail.trim().toLowerCase() || null,
-        p_practice_city: practiceCity.trim() || null,
-        p_consent: consent,
-      });
-      if (error) throw new Error(error.message);
+      if (payToken) {
+        // Token mode — branded /pay/:token success screen.
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/submit-referring-provider`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({
+            token: payToken,
+            provider_name: providerName.trim() || null,
+            practice_name: practiceName.trim() || null,
+            practice_phone: practicePhone.trim() || null,
+            practice_email: practiceEmail.trim().toLowerCase() || null,
+            practice_city: practiceCity.trim() || null,
+            consent,
+          }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok) throw new Error(j.error || 'Could not save');
+      } else {
+        const { error } = await supabase.rpc('capture_referring_provider' as any, {
+          p_appointment_id: appointmentId,
+          p_patient_email: patientEmail.toLowerCase(),
+          p_patient_name: patientName,
+          p_provider_name: providerName.trim() || null,
+          p_practice_name: practiceName.trim() || null,
+          p_practice_phone: practicePhone.trim() || null,
+          p_practice_email: practiceEmail.trim().toLowerCase() || null,
+          p_practice_city: practiceCity.trim() || null,
+          p_consent: consent,
+        });
+        if (error) throw new Error(error.message);
+      }
       setDone(true);
       toast.success('Got it — thanks for the intro');
     } catch (e: any) {
