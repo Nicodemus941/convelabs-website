@@ -38,12 +38,69 @@ const AppointmentConfirmPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [appt, setAppt] = useState<Appt | null>(null);
-  const [busy, setBusy] = useState<'confirm' | 'cancel' | null>(null);
+  const [busy, setBusy] = useState<'confirm' | 'cancel' | 'reschedule' | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState('Schedule conflict');
   const [cancelOther, setCancelOther] = useState('');
+  // Reschedule self-service
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rsDate, setRsDate] = useState<string>('');
+  const [rsSlots, setRsSlots] = useState<string[]>([]);
+  const [rsLoadingSlots, setRsLoadingSlots] = useState(false);
+  const [rsTime, setRsTime] = useState<string>('');
+  const [rsError, setRsError] = useState<string | null>(null);
+  const [rescheduled, setRescheduled] = useState<{ date: string; time: string } | null>(null);
+
+  const todayIso = new Date().toISOString().substring(0, 10);
+
+  async function loadSlots(date: string) {
+    if (!token || !date) return;
+    setRsLoadingSlots(true); setRsError(null); setRsTime(''); setRsSlots([]);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/appointment-self-service`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ action: 'available_slots', token, date }),
+      });
+      const j = await res.json();
+      if (res.ok && Array.isArray(j.slots)) {
+        setRsSlots(j.slots.filter((s: any) => s.available).map((s: any) => s.time));
+      } else {
+        setRsError('Could not load times for that day.');
+      }
+    } catch {
+      setRsError('Could not load times for that day.');
+    } finally {
+      setRsLoadingSlots(false);
+    }
+  }
+
+  async function handleReschedule() {
+    if (!token || busy || !rsDate || !rsTime) return;
+    setBusy('reschedule'); setRsError(null);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/appointment-self-service`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+        body: JSON.stringify({ action: 'reschedule', token, date: rsDate, time: rsTime }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (res.ok && j.ok) {
+        setRescheduled({ date: rsDate, time: rsTime });
+      } else if (j.error === 'slot_conflict') {
+        setRsError('Sorry, that time was just taken — please pick another.');
+        loadSlots(rsDate);
+      } else if (j.error === 'too_close') {
+        setRsError('Your visit is too soon to reschedule online. Please call (941) 527-9169.');
+      } else if (j.error === 'not_reschedulable') {
+        setRsError('This visit can no longer be rescheduled online. Please call (941) 527-9169.');
+      } else {
+        setRsError('Could not reschedule. Please call (941) 527-9169.');
+      }
+    } finally { setBusy(null); }
+  }
 
   useEffect(() => {
     if (!token) return;
@@ -131,6 +188,26 @@ const AppointmentConfirmPage: React.FC = () => {
     );
   }
 
+  if (rescheduled) {
+    const newLabel = new Date(rescheduled.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full bg-white border rounded-2xl p-6 shadow-sm text-center">
+          <div className="bg-emerald-100 rounded-full w-16 h-16 mx-auto flex items-center justify-center mb-4">
+            <Calendar className="h-9 w-9 text-emerald-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Rescheduled ✓</h1>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-3 text-left text-sm">
+            <p className="text-emerald-900"><strong>{newLabel} at {rescheduled.time}</strong></p>
+            {appt.address && <p className="text-emerald-800 mt-1 text-xs">{appt.address}</p>}
+          </div>
+          <p className="text-xs text-gray-500 mt-3">We'll send a reminder the night before.</p>
+          <p className="text-xs text-gray-400 mt-4">Need to change again? <a href="mailto:info@convelabs.com" className="text-[#B91C1C] underline">info@convelabs.com</a> · (941) 527-9169</p>
+        </div>
+      </div>
+    );
+  }
+
   if (confirmed) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -171,7 +248,7 @@ const AppointmentConfirmPage: React.FC = () => {
               {appt.service_name && <p className="text-gray-500 text-xs mt-1">{appt.service_name}</p>}
             </div>
 
-            {!showCancelForm ? (
+            {!showCancelForm && !showReschedule ? (
               <div className="space-y-2">
                 <button
                   type="button"
@@ -182,13 +259,18 @@ const AppointmentConfirmPage: React.FC = () => {
                   {busy === 'confirm' ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
                   Yes, I'll be there
                 </button>
-                <a
-                  href="mailto:info@convelabs.com?subject=Reschedule%20my%20appointment"
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReschedule(true);
+                    const t = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+                    setRsDate(t); loadSlots(t);
+                  }}
                   className="w-full bg-white border-2 border-gray-300 hover:border-[#B91C1C] text-gray-800 py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2"
                 >
                   <Calendar className="h-4 w-4" />
                   Need to reschedule
-                </a>
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowCancelForm(true)}
@@ -196,6 +278,54 @@ const AppointmentConfirmPage: React.FC = () => {
                 >
                   Cancel this visit
                 </button>
+              </div>
+            ) : showReschedule ? (
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-gray-900">Pick a new day & time</p>
+                <input
+                  type="date"
+                  value={rsDate}
+                  min={todayIso}
+                  onChange={(e) => { setRsDate(e.target.value); loadSlots(e.target.value); }}
+                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                />
+                {rsLoadingSlots ? (
+                  <div className="flex items-center justify-center py-6 text-gray-400"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                ) : rsSlots.length === 0 ? (
+                  <p className="text-xs text-gray-500 py-3 text-center">No open times that day — try another date.</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-1.5 max-h-52 overflow-y-auto">
+                    {rsSlots.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setRsTime(t)}
+                        className={`py-2 rounded-lg text-xs font-medium border ${rsTime === t ? 'bg-[#B91C1C] text-white border-[#B91C1C]' : 'bg-white text-gray-700 border-gray-200 hover:border-[#B91C1C]'}`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {rsError && <p className="text-xs text-red-600">{rsError}</p>}
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setShowReschedule(false); setRsError(null); setRsTime(''); }}
+                    className="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-xl font-semibold text-sm"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReschedule}
+                    disabled={!!busy || !rsTime}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                  >
+                    {busy === 'reschedule' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Move to this time
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
