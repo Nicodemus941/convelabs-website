@@ -89,14 +89,29 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, patientEmail, onAssig
   useEffect(() => { load(); }, [appointmentId, patientEmail]);
   useEffect(() => { if (open) load(); }, [open]);
 
+  // Normalize for forgiving search/sort: lowercase, "&"→"and", drop a leading
+  // "the ", strip punctuation, collapse whitespace. Without this, "center for
+  // natural and integrative medicine" failed to match the stored "The Center
+  // for Natural & Integrative Medicine" (& vs and), and "The …" names sorted
+  // under T instead of where admins look.
+  const norm = (s?: string | null) => (s || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normForSort = (s?: string | null) => norm(s).replace(/^the /, '');
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return allOrgs;
-    return allOrgs.filter(o =>
-      o.name?.toLowerCase().includes(q) ||
-      o.billing_email?.toLowerCase().includes(q) ||
-      o.contact_email?.toLowerCase().includes(q)
-    );
+    const sorted = [...allOrgs].sort((a, b) => normForSort(a.name).localeCompare(normForSort(b.name)));
+    const q = norm(search);
+    if (!q) return sorted;
+    const tokens = q.split(' ').filter(Boolean);
+    return sorted.filter(o => {
+      const hay = `${norm(o.name)} ${norm(o.billing_email)} ${norm(o.contact_email)}`;
+      // Every typed token must appear somewhere (order-independent, &/the/punctuation-insensitive).
+      return tokens.every(t => hay.includes(t));
+    });
   }, [allOrgs, search]);
 
   const linkedMap = useMemo(() => {
