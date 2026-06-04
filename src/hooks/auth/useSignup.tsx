@@ -65,7 +65,27 @@ export const useSignup = () => {
       
       console.log("Signup successful, user data:", data.user);
 
-      // Check if email confirmation is required (user exists but no session)
+      // ── EXISTING-ACCOUNT GUARD ──────────────────────────────────────────
+      // Supabase returns NO error for an already-registered email (enumeration
+      // protection): the returned user has an EMPTY identities array + no
+      // session. The old code mistook this for "email confirmation required"
+      // and told the user to check their inbox — but no email ever arrives,
+      // stranding returning customers (Brian Hammontree case). Detect it and
+      // email a real set-password link instead.
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        try {
+          await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/reset-password?redirect=${encodeURIComponent(desiredRedirect)}`,
+          });
+        } catch (e) { console.warn("reset email send failed (non-blocking):", e); }
+        toast({
+          title: "You already have an account",
+          description: `We found an account for ${email} and emailed you a secure link to sign in. Check your inbox, or use "Forgot password" on the login page.`,
+        });
+        return { success: false, error: { message: "already_registered" } };
+      }
+
+      // Genuine new user needing email confirmation (user exists, no session).
       if (data.user && !data.session) {
         console.log("Email confirmation required");
         toast({

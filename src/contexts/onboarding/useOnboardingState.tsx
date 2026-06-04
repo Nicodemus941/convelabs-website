@@ -49,17 +49,36 @@ export const useOnboardingState = (): OnboardingContextType => {
         return false;
       }
 
-      if (data) {
+      // ── EXISTING-ACCOUNT GUARD (the Brian Hammontree case) ──────────────
+      // Supabase returns NO error when the email already exists (enumeration
+      // protection). It returns a user with an EMPTY identities array and no
+      // session. Previously `if (data)` was always truthy → we showed
+      // "Account created!" and pushed the user into checkout with no session,
+      // which spun and silently dumped them back. Detect it and convert the
+      // dead-end into a one-click recovery: email a set-password link.
+      const alreadyRegistered = !!data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0;
+      if (alreadyRegistered) {
+        try {
+          await supabase.auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/reset-password?redirect=${encodeURIComponent('/pricing')}`,
+          });
+        } catch (e) { console.warn('reset email send failed (non-blocking):', e); }
+        toast.message('You already have an account', {
+          description: `We found an account for ${email} and just emailed you a secure link to set your password and continue. Check your inbox.`,
+          duration: 12000,
+        });
+        return false;
+      }
+
+      // Genuine new account.
+      if (data?.user) {
         toast.success('Account created successfully!');
-        
-        // Store user data for post-payment page
         localStorage.setItem('userFullName', fullName);
         localStorage.setItem('userEmail', email);
         localStorage.setItem('userMobile', mobileNumber);
-        
         return true;
       }
-      
+
       return false;
     } catch (error) {
       console.error('Error in account creation:', error);
