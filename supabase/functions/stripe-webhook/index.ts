@@ -1315,7 +1315,7 @@ async function handleBrandedCheckoutPayment(session: any) {
       if (phlebId) {
         const { data: sp } = await supabaseClient
           .from('staff_profiles')
-          .select('phone, first_name')
+          .select('phone')
           .eq('user_id', phlebId)
           .maybeSingle();
         const phlebPhone = String((sp as any)?.phone || '').trim();
@@ -1325,9 +1325,8 @@ async function handleBrandedCheckoutPayment(session: any) {
         if (phlebPhone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
           const d = phlebPhone.replace(/\D/g, '');
           const to = d.length === 10 ? `+1${d}` : (phlebPhone.startsWith('+') ? phlebPhone : `+${d}`);
-          const firstName = String((sp as any)?.first_name || 'there');
           const patient = String((full as any)?.patient_name || 'A patient');
-          const body = `ConveLabs: 💵 ${firstName}, ${patient} left you a $${(tipCents / 100).toFixed(2)} tip on their visit — it's included in your next payout. Thank you!`;
+          const body = `ConveLabs: 💵 ${patient} left you a $${(tipCents / 100).toFixed(2)} tip on their visit — it's included in your next payout. Thank you!`;
           const fd = new URLSearchParams({ To: to, From: TWILIO_FROM, Body: body });
           const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
             method: 'POST',

@@ -64,10 +64,14 @@ Deno.serve(async (req) => {
     // invoice tip is 0, so this is the service+surcharge amount due).
     const subtotalCents = Math.max(0, Math.round((Number(a.total_amount || 0) - Number(a.tip_amount || 0)) * 100));
 
+    // Phleb display name lives on the linked auth profile, not staff_profiles
+    // (which has no name column). Best-effort; null is fine for the page.
     let phlebName: string | null = null;
     if (a.phlebotomist_id) {
-      const { data: sp } = await admin.from('staff_profiles').select('first_name').eq('user_id', a.phlebotomist_id).maybeSingle();
-      phlebName = (sp as any)?.first_name || null;
+      try {
+        const { data: prof } = await admin.from('profiles').select('first_name').eq('id', a.phlebotomist_id).maybeSingle();
+        phlebName = (prof as any)?.first_name || null;
+      } catch { /* optional */ }
     }
 
     return json({
