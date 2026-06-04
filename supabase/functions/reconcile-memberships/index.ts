@@ -181,9 +181,10 @@ Deno.serve(async (req) => {
         healed.push({ sub: sub.id, email, tier, plan: plan.name });
         try {
           await admin.from('error_logs' as any).insert({
-            error_type: 'membership_auto_healed',
+            error_type: 'membership_auto_healed', component: 'reconcile-memberships',
             error_message: `Auto-created missing membership for ${email} (${plan.name}) from Stripe sub ${sub.id}`,
-            context: { sub: sub.id, email, tier },
+            user_email: email,
+            payload: { sub: sub.id, email, tier },
           });
         } catch { /* non-blocking */ }
       }
@@ -200,9 +201,10 @@ Deno.serve(async (req) => {
       for (const f of flagged) {
         try {
           await admin.from('error_logs' as any).insert({
-            error_type: 'membership_reconcile_unhealable',
+            error_type: 'membership_reconcile_unhealable', component: 'reconcile-memberships',
             error_message: `Stripe sub ${f.sub} has no local membership and could not auto-heal: ${f.reason}`,
-            context: f,
+            user_email: f.email || null,
+            payload: f,
           });
         } catch { /* non-blocking */ }
       }
