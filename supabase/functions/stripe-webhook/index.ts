@@ -2058,7 +2058,7 @@ async function handleAppointmentPayment(session: any) {
           // onConflict must match a UNIQUE constraint — user_id only has
           // a regular index. Use stripe_subscription_id which has
           // uniq_user_memberships_stripe_sub on it.
-          await supabaseClient.from('user_memberships').upsert({
+          const { data: bundledMembership } = await supabaseClient.from('user_memberships').upsert({
             user_id: memberUserId,
             plan_id: plan.id,
             status: 'active',
@@ -2067,13 +2067,45 @@ async function handleAppointmentPayment(session: any) {
             billing_frequency: 'annual',
             next_renewal: nextRenewal.toISOString(),
             is_primary_member: true,
-          }, { onConflict: 'stripe_subscription_id' });
+          }, { onConflict: 'stripe_subscription_id' }).select('id').single();
 
           // Stamp the appointment row with the new tier so the welcome flow
           // shows "your VIP rate is now active" instead of pay-as-you-go.
           await supabaseClient.from('appointments').update({
             member_status: tier,
           }).eq('id', appointment.id);
+
+          // ── MIRROR TIER TO tenant_patients ──────────────────────────
+          // Parity with handleMembershipSignup. Without this the chart stays
+          // tier='none', so the member savings banner, future-visit tier
+          // auto-detect, and dashboard badge never recognize the new member.
+          try {
+            const { error: tpErr } = await supabaseClient
+              .from('tenant_patients')
+              .update({
+                membership_tier: tier,
+                membership_status: 'active',
+                membership_start_date: new Date().toISOString(),
+                membership_end_date: nextRenewal.toISOString(),
+                membership_activated_at: new Date().toISOString(),
+              })
+              .eq('user_id', memberUserId);
+            if (tpErr) console.warn('[bundled-membership] tier-mirror failed (non-blocking):', tpErr.message);
+          } catch (e: any) { console.warn('[bundled-membership] tier-mirror threw:', e?.message); }
+
+          // ── FOUNDING-50 SEAT (VIP only) ─────────────────────────────
+          // Parity with handleMembershipSignup. Without this, VIP added at
+          // checkout never gets a founding seat number / rate-lock, and the
+          // server-side free-family-slot waiver (which checks serverIsFounding)
+          // silently gives them zero slots forever.
+          if (tier === 'vip' && bundledMembership?.id) {
+            try {
+              const { data: seatNumber, error: claimErr } = await supabaseClient
+                .rpc('claim_founding_seat' as any, { p_membership_id: bundledMembership.id });
+              if (claimErr) console.warn('[bundled-membership] founding claim error (non-blocking):', claimErr.message);
+              else if (seatNumber) console.log(`[bundled-membership] founding seat #${seatNumber} assigned to ${memberUserId}`);
+            } catch (e: any) { console.warn('[bundled-membership] founding claim threw:', e?.message); }
+          }
 
           console.log(`[bundled-membership] activated ${tier} for user ${memberUserId} via session ${session.id}`);
 
