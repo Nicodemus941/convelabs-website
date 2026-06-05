@@ -75,29 +75,44 @@ const MobilePhlebotomyCost = () => {
 
       <main className="flex-grow">
         {/* Hero */}
-        <section className="bg-gradient-to-br from-[#B91C1C] to-[#991B1B] text-white py-16 md:py-24">
-          <div className="mx-auto px-4 w-full text-center max-w-3xl">
-            <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-6">
-              <DollarSign className="h-10 w-10 text-white" />
+        <section className="bg-gradient-to-br from-[#B91C1C] to-[#991B1B] text-white py-16 md:py-24 overflow-hidden">
+          <div className="mx-auto px-4 w-full max-w-6xl grid md:grid-cols-2 gap-10 lg:gap-14 items-center">
+            {/* Copy */}
+            <div className="text-center md:text-left">
+              <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-5 mx-auto md:mx-0">
+                <DollarSign className="h-8 w-8 text-white" />
+              </div>
+              <h1 className="text-3xl md:text-5xl font-bold mb-4 leading-tight">
+                Mobile Phlebotomy Cost in Central Florida (2026)
+              </h1>
+              <p className="text-lg text-red-100 mb-8">
+                A transparent breakdown of what an at-home blood draw really costs — the visit
+                fee, what affects it, how insurance fits in, and how to pay less per draw.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center md:justify-start">
+                <Link to="/book-now">
+                  <Button size="lg" className="bg-white text-[#B91C1C] hover:bg-red-50 font-semibold w-full sm:w-auto">
+                    Get your exact price in 90 seconds
+                  </Button>
+                </Link>
+                <Link to="/pricing">
+                  <Button size="lg" variant="outline" className="bg-transparent border-2 border-white text-white hover:bg-white hover:text-[#B91C1C] w-full sm:w-auto">
+                    See full pricing
+                  </Button>
+                </Link>
+              </div>
             </div>
-            <h1 className="text-3xl md:text-5xl font-bold mb-4">
-              Mobile Phlebotomy Cost in Central Florida (2026)
-            </h1>
-            <p className="text-lg md:text-xl text-red-100 mb-8">
-              A transparent breakdown of what an at-home blood draw really costs — the visit
-              fee, what affects it, how insurance fits in, and how to pay less per draw.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Link to="/book-now">
-                <Button size="lg" className="bg-white text-[#B91C1C] hover:bg-red-50 font-semibold">
-                  Get your exact price in 90 seconds
-                </Button>
-              </Link>
-              <Link to="/pricing">
-                <Button size="lg" variant="outline" className="bg-transparent border-2 border-white text-white hover:bg-white hover:text-[#B91C1C]">
-                  See full pricing
-                </Button>
-              </Link>
+
+            {/* Photo (desktop) */}
+            <div className="hidden md:block">
+              <img
+                src="/lovable-uploads/c99a1186-df28-4627-b519-d8f2753e18c2.png"
+                alt="ConveLabs mobile phlebotomist performing an at-home blood draw in Central Florida"
+                width="1920"
+                height="1920"
+                loading="eager"
+                className="rounded-2xl shadow-2xl ring-1 ring-white/20 w-full object-cover max-h-[440px]"
+              />
             </div>
           </div>
         </section>
