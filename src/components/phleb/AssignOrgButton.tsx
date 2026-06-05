@@ -166,6 +166,7 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, currentOrgId, variant
 
       // Fan out to siblings on the same family group (if any).
       let siblingsUpdated = 0;
+      const affectedApptIds: string[] = [appointmentId];
       if (familyGroupId) {
         const { data: sibs } = await supabase.from('appointments')
           .update(updatePayload)
@@ -173,6 +174,27 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, currentOrgId, variant
           .neq('id', appointmentId)
           .select('id');
         siblingsUpdated = (sibs || []).length;
+        affectedApptIds.push(...((sibs as any[]) || []).map(s => s.id));
+      }
+
+      // Keep lab-order match status in sync so the phleb dashboard's
+      // "Matching provider…" pill resolves to "Linked" (and stops polling)
+      // instead of spinning forever. Only stamp rows OCR didn't already match.
+      // Best-effort: never fail the org assignment if this update errors.
+      if (orgId) {
+        try {
+          await supabase.from('appointment_lab_orders' as any)
+            .update({
+              org_match_status: 'matched',
+              org_match_organization_id: orgId,
+              org_match_reason: 'manual_phleb_assignment',
+            })
+            .in('appointment_id', affectedApptIds)
+            .is('deleted_at', null)
+            .or('org_match_status.is.null,org_match_status.eq.unmatched,org_match_status.eq.auto_created');
+        } catch (e) {
+          console.warn('[assign-org] lab-order stamp failed (non-blocking):', e);
+        }
       }
 
       const baseMsg = org ? `Linked to ${org.name}` : 'Organization cleared';

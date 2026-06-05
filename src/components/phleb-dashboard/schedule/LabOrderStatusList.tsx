@@ -19,6 +19,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 interface LabOrderRow {
   id: string;
+  appointment_id?: string | null;
   original_filename: string | null;
   ocr_status: string | null;
   ocr_completed_at: string | null;
@@ -28,6 +29,10 @@ interface LabOrderRow {
   org_match_organization_id: string | null;
   uploaded_at: string;
   matched_org_name?: string | null;
+  /** True when the row's own org_match_status is null but the appointment
+   *  itself has an organization linked (e.g. assigned manually via the
+   *  "Assign organization" picker, which doesn't stamp the lab-order row). */
+  appt_level_matched?: boolean;
 }
 
 interface Props {
@@ -62,10 +67,25 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
       if (!appointmentIds.includes(appointmentId)) appointmentIds.push(appointmentId);
     }
 
+    // The appointment(s) may already be linked to an org (e.g. assigned
+    // manually via the "Assign organization" picker, which sets
+    // appointments.organization_id but does NOT stamp the lab-order row's
+    // org_match_status). Pull that so we can show "Linked" and stop the
+    // "Matching provider…" spinner instead of polling forever.
+    const { data: apptOrgRows } = await supabase
+      .from('appointments')
+      .select('id, organization_id')
+      .in('id', appointmentIds);
+    const apptOrgMap: Record<string, string> = Object.fromEntries(
+      (apptOrgRows as any[] || [])
+        .filter(a => a.organization_id)
+        .map(a => [a.id, a.organization_id])
+    );
+
     const { data } = await supabase
       .from('appointment_lab_orders' as any)
       .select(`
-        id, original_filename, ocr_status, ocr_completed_at, ocr_detected_panels,
+        id, appointment_id, original_filename, ocr_status, ocr_completed_at, ocr_detected_panels,
         org_match_status, org_match_reason, org_match_organization_id, uploaded_at
       `)
       .in('appointment_id', appointmentIds)
@@ -73,10 +93,12 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
       .order('uploaded_at', { ascending: false });
 
     const baseRows = (data || []) as LabOrderRow[];
-    // Resolve matched org names in one query
-    const orgIds = baseRows
-      .map(r => r.org_match_organization_id)
-      .filter(Boolean) as string[];
+    // Resolve org names for BOTH the row-level match and the appointment-level
+    // org fallback, in one query.
+    const orgIds = Array.from(new Set([
+      ...baseRows.map(r => r.org_match_organization_id).filter(Boolean) as string[],
+      ...Object.values(apptOrgMap),
+    ]));
     let orgMap: Record<string, string> = {};
     if (orgIds.length > 0) {
       const { data: orgs } = await supabase
@@ -85,10 +107,18 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
         .in('id', orgIds);
       orgMap = Object.fromEntries((orgs || []).map((o: any) => [o.id, o.name]));
     }
-    setRows(baseRows.map(r => ({
-      ...r,
-      matched_org_name: r.org_match_organization_id ? orgMap[r.org_match_organization_id] : null,
-    })));
+    setRows(baseRows.map(r => {
+      const apptOrgId = r.appointment_id ? apptOrgMap[r.appointment_id] : undefined;
+      // Appointment-level fallback applies only when the row itself wasn't
+      // matched/auto-created/unmatched by OCR (status is null).
+      const apptLevelMatched = !r.org_match_status && !!apptOrgId;
+      const effectiveOrgId = r.org_match_organization_id || (apptLevelMatched ? apptOrgId : null);
+      return {
+        ...r,
+        appt_level_matched: apptLevelMatched,
+        matched_org_name: effectiveOrgId ? orgMap[effectiveOrgId] : null,
+      };
+    }));
     setLoading(false);
   };
 
@@ -104,7 +134,10 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
   useEffect(() => {
     const inFlight = rows.some(r =>
       r.ocr_status === 'pending' || r.ocr_status === 'running' ||
-      (r.ocr_status === 'complete' && !r.org_match_status)
+      // OCR done but no match yet — still in flight, UNLESS the appointment
+      // is already linked to an org (manual assignment), in which case it's
+      // resolved and we must NOT keep polling.
+      (r.ocr_status === 'complete' && !r.org_match_status && !r.appt_level_matched)
     );
     if (inFlight && !pollTimer.current) {
       pollTimer.current = window.setInterval(fetchRows, 3000);
@@ -124,7 +157,9 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
         const ocrRunning = row.ocr_status === 'pending' || row.ocr_status === 'running';
         const ocrFailed = row.ocr_status === 'failed';
         const ocrDone = row.ocr_status === 'complete';
-        const matched = row.org_match_status === 'matched';
+        // "matched" if OCR stamped it OR the appointment is linked to an org
+        // by other means (manual assignment via the Assign-organization picker).
+        const matched = row.org_match_status === 'matched' || row.appt_level_matched === true;
         const autoCreated = row.org_match_status === 'auto_created';
         const unmatched = row.org_match_status === 'unmatched';
 
