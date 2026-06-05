@@ -49,6 +49,7 @@ const ExecutiveHealthOrlando = lazy(() => import('../pages/ExecutiveHealthOrland
 const ConciergePhlebotomy = lazy(() => import('../pages/ConciergePhlebotomy'));
 const LabTestingServices = lazy(() => import('../pages/LabTestingServices'));
 const VSLabCorp = lazy(() => import('../pages/VSLabCorp'));
+const MobilePhlebotomyCost = lazy(() => import('../pages/MobilePhlebotomyCost'));
 const LocationPage = lazy(() => import('../pages/LocationPage'));
 const NationwideMobilePhlebotomy = lazy(() => import('../pages/NationwideMobilePhlebotomy'));
 const RateAppointment = lazy(() => import('../pages/RateAppointment'));
@@ -122,6 +123,7 @@ export const routes = [
   <Route key="concierge-phlebotomy" path="/concierge-phlebotomy" element={<ConciergePhlebotomy />} />,
   <Route key="lab-testing" path="/lab-testing" element={<LabTestingServices />} />,
   <Route key="vs-labcorp" path="/vs-labcorp" element={<VSLabCorp />} />,
+  <Route key="mobile-phlebotomy-cost" path="/mobile-phlebotomy-cost" element={<MobilePhlebotomyCost />} />,
   <Route key="nationwide" path="/nationwide-mobile-phlebotomy-network" element={<NationwideMobilePhlebotomy />} />,
 
   // Rating & Tracking
