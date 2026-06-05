@@ -5,6 +5,7 @@ import Header from '@/components/home/Header';
 import Footer from '@/components/home/Footer';
 import { Button } from '@/components/ui/button';
 import FAQSchema from '@/components/seo/FAQSchema';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import {
   DollarSign, Clock, MapPin, CheckCircle2, ShieldCheck, Stethoscope, Phone, Sparkles,
 } from 'lucide-react';
@@ -75,7 +76,7 @@ const MobilePhlebotomyCost = () => {
       <main className="flex-grow">
         {/* Hero */}
         <section className="bg-gradient-to-br from-[#B91C1C] to-[#991B1B] text-white py-16 md:py-24">
-          <div className="container mx-auto px-4 text-center max-w-3xl">
+          <div className="mx-auto px-4 w-full text-center max-w-3xl">
             <div className="w-20 h-20 bg-white/10 rounded-full flex items-center justify-center mx-auto mb-6">
               <DollarSign className="h-10 w-10 text-white" />
             </div>
@@ -93,7 +94,7 @@ const MobilePhlebotomyCost = () => {
                 </Button>
               </Link>
               <Link to="/pricing">
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10">
+                <Button size="lg" variant="outline" className="bg-transparent border-2 border-white text-white hover:bg-white hover:text-[#B91C1C]">
                   See full pricing
                 </Button>
               </Link>
@@ -103,7 +104,7 @@ const MobilePhlebotomyCost = () => {
 
         {/* Quick answer */}
         <section className="py-12 md:py-16">
-          <div className="container mx-auto px-4 max-w-3xl">
+          <div className="mx-auto px-4 w-full max-w-3xl">
             <div className="rounded-xl border border-gray-200 bg-gray-50 p-6 md:p-8">
               <h2 className="text-2xl font-bold text-gray-900 mb-3">
                 The short answer
@@ -121,7 +122,7 @@ const MobilePhlebotomyCost = () => {
 
         {/* Cost breakdown table */}
         <section className="pb-12 md:pb-16">
-          <div className="container mx-auto px-4 max-w-3xl">
+          <div className="mx-auto px-4 w-full max-w-3xl">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">What goes into the price</h2>
             <div className="overflow-hidden rounded-xl border border-gray-200">
               <table className="w-full text-left">
@@ -152,7 +153,7 @@ const MobilePhlebotomyCost = () => {
 
         {/* Factors */}
         <section className="pb-12 md:pb-16 bg-gray-50">
-          <div className="container mx-auto px-4 max-w-3xl py-12">
+          <div className="mx-auto px-4 w-full max-w-3xl py-12">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">What changes the cost</h2>
             <div className="grid sm:grid-cols-2 gap-4">
               {[
@@ -173,7 +174,7 @@ const MobilePhlebotomyCost = () => {
 
         {/* Insurance */}
         <section className="py-12 md:py-16">
-          <div className="container mx-auto px-4 max-w-3xl">
+          <div className="mx-auto px-4 w-full max-w-3xl">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">Insurance, Medicare, HSA & FSA</h2>
             <p className="text-gray-700 leading-relaxed mb-3">
               Insurance frequently covers the <strong>lab testing</strong> itself. Coverage of the
@@ -190,7 +191,7 @@ const MobilePhlebotomyCost = () => {
 
         {/* Why worth it */}
         <section className="pb-12 md:pb-16 bg-gray-50">
-          <div className="container mx-auto px-4 max-w-3xl py-12">
+          <div className="mx-auto px-4 w-full max-w-3xl py-12">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Why a mobile draw is worth the fee</h2>
             <ul className="space-y-3">
               {[
@@ -220,22 +221,26 @@ const MobilePhlebotomyCost = () => {
 
         {/* FAQ */}
         <section className="py-12 md:py-16">
-          <div className="container mx-auto px-4 max-w-3xl">
+          <div className="mx-auto px-4 w-full max-w-3xl">
             <h2 className="text-2xl font-bold text-gray-900 mb-6">Mobile phlebotomy cost: FAQ</h2>
-            <div className="space-y-5">
-              {COST_FAQS.map((f) => (
-                <div key={f.question} className="border-b border-gray-100 pb-5">
-                  <h3 className="font-semibold text-gray-900 mb-2">{f.question}</h3>
-                  <p className="text-gray-600 leading-relaxed text-sm">{f.answer}</p>
-                </div>
+            <Accordion type="single" collapsible className="w-full">
+              {COST_FAQS.map((f, i) => (
+                <AccordionItem key={f.question} value={`faq-${i}`}>
+                  <AccordionTrigger className="text-left text-base font-semibold text-gray-900">
+                    {f.question}
+                  </AccordionTrigger>
+                  <AccordionContent className="text-gray-600 leading-relaxed text-sm">
+                    {f.answer}
+                  </AccordionContent>
+                </AccordionItem>
               ))}
-            </div>
+            </Accordion>
           </div>
         </section>
 
         {/* Final CTA */}
         <section className="bg-gradient-to-br from-[#B91C1C] to-[#991B1B] text-white py-14">
-          <div className="container mx-auto px-4 text-center max-w-2xl">
+          <div className="mx-auto px-4 w-full text-center max-w-2xl">
             <h2 className="text-2xl md:text-3xl font-bold mb-3">See your exact price now</h2>
             <p className="text-red-100 mb-6">
               Pick a service, enter your ZIP, and get a flat quote in about 90 seconds —
@@ -248,7 +253,7 @@ const MobilePhlebotomyCost = () => {
                 </Button>
               </Link>
               <a href="tel:+19415279169">
-                <Button size="lg" variant="outline" className="border-white text-white hover:bg-white/10 gap-2">
+                <Button size="lg" variant="outline" className="bg-transparent border-2 border-white text-white hover:bg-white hover:text-[#B91C1C] gap-2">
                   <Phone className="h-4 w-4" /> (941) 527-9169
                 </Button>
               </a>
