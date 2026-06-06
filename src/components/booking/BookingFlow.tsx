@@ -357,6 +357,20 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       return;
     }
 
+    // In-clinic visit types (Office Visit) skip the Location/Address step
+    // AND the lab-order step → straight from Patient Info to Checkout. The
+    // draw is at our partner office, so asking for a home address (and
+    // gating by service radius) was both pointless and a conversion blocker.
+    if (currentStep === BookingStep.PatientInfo) {
+      const vt = methods.getValues('serviceDetails.visitType') || '';
+      if (skipsLocation(vt)) {
+        setCurrentStep(BookingStep.Checkout);
+        setShowDatePicker(false);
+        setShowLabOrder(false);
+        return;
+      }
+    }
+
     setCurrentStep(prev => prev + 1);
     setShowDatePicker(false);
     setShowLabOrder(false);
@@ -374,8 +388,24 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const skipsLabOrder = (visitType: string | undefined) =>
     NO_LAB_ORDER_SERVICES.includes(visitType || '');
 
+  // In-clinic visit types happen at our partner office — the patient comes to
+  // us. There's no home address to collect, and the service-area gate doesn't
+  // apply (the server also exempts in-office). Skip the Location/Address step.
+  const IN_CLINIC_SERVICES = ['in-office'];
+  const skipsLocation = (visitType: string | undefined) =>
+    IN_CLINIC_SERVICES.includes(visitType || '');
+
   const handleBack = () => {
     prevStepRef.current = currentStep;
+    // Mirror the in-clinic skip on the way back: Checkout → Patient Info
+    // (the Location/Address step was skipped for these visit types).
+    if (currentStep === BookingStep.Checkout) {
+      const vt = methods.getValues('serviceDetails.visitType') || '';
+      if (skipsLocation(vt)) {
+        setCurrentStep(BookingStep.PatientInfo);
+        return;
+      }
+    }
     const target = currentStep - 1;
     // Restore the SECOND sub-screen of any combined step we're walking back
     // into — the patient was last on the date picker (not the service tile)
