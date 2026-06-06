@@ -149,11 +149,19 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
     }
   }
 
+  // The $1 "Development Testing" card is an internal test tool — hide it from
+  // real patients. Still reachable for the owner via ?dev=1 (or a Vite dev build).
+  const devMode = (typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('dev') === '1')
+    || (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV === true);
+
   // Override hardcoded VISIT_TYPES prices with live DB prices when present.
-  const VISIT_TYPES_SYNCED = VISIT_TYPES.map(v => {
-    const dbPrice = dynamicPriceByCode.get(v.id);
-    return dbPrice && dbPrice > 0 ? { ...v, price: dbPrice } : v;
-  });
+  const VISIT_TYPES_SYNCED = VISIT_TYPES
+    .filter(v => v.id !== 'dev-testing' || devMode)
+    .map(v => {
+      const dbPrice = dynamicPriceByCode.get(v.id);
+      return dbPrice && dbPrice > 0 ? { ...v, price: dbPrice } : v;
+    });
 
   // Procedure-level service_types are NOT standalone visit types — they're
   // sub-procedures of a mobile/office draw. Surfacing them here as priced
