@@ -155,10 +155,30 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
     return dbPrice && dbPrice > 0 ? { ...v, price: dbPrice } : v;
   });
 
+  // Procedure-level service_types are NOT standalone visit types — they're
+  // sub-procedures of a mobile/office draw. Surfacing them here as priced
+  // cards caused patients who wanted a $55 Office Visit to instead pick a
+  // $150 "Routine/Fasting Blood Draw" card. They belong in the procedure
+  // step, not the "how do you want to be seen?" grid.
+  const PROCEDURE_SERVICE_TYPES = new Set(['routine', 'fasting', 'stat']);
+
   const dynamicCards = dynamicServices
     // Drop entries whose service_code collides with a hardcoded id — legacy
     // card wins for layout/iconography; price already merged above.
     .filter(d => !VISIT_TYPES.some(v => v.id === d.service_code))
+    // Only TRUE visit types belong in this grid. Exclude:
+    //  • QA / dev test services (qa-*) — accidental public leak
+    //  • procedure rows (routine/fasting/stat) — see note above
+    //  • lone specimen-collection rows (a procedure, not a visit type)
+    //  • partner rows — shown via the dedicated "Is your doctor one of these?" picker
+    // Genuine admin-added visit types and intentional packages still appear.
+    .filter(d =>
+      !d.service_code.startsWith('qa-') &&
+      d.service_code !== 'dev-testing' &&
+      !d.service_code.startsWith('specimen-collection') &&
+      d.category !== 'partner' &&
+      !PROCEDURE_SERVICE_TYPES.has(d.service_type || '')
+    )
     .map(d => {
       // For packages: build a short "2× Wellness · 1× Lipid" preview line.
       // For non-packages: fall back to the description.

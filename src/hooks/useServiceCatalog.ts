@@ -36,6 +36,8 @@ export interface DynamicServiceEntry {
   id: string;
   /** Free-text category (e.g. 'lab_draw', 'wellness', 'membership_addon'). */
   category?: string;
+  /** Underlying service_type discriminator (e.g. 'mobile','in-office','routine','fasting','stat','package','individual'). Used to keep procedure rows out of the visit-type grid. */
+  service_type?: string;
   /** Whether this entry came from the DB (true) vs the hardcoded legacy table. */
   source: 'db' | 'legacy';
   /** True when service_type === 'package'. Card UI shows the "Includes:" line. */
@@ -102,6 +104,7 @@ export function useServiceCatalog(): UseServiceCatalogResult {
       duration_minutes: r.duration_minutes || 30,
       requires_lab_order: !!r.requires_lab_order,
       category: r.category,
+      service_type: r.service_type || undefined,
       source: 'db',
       is_package: r.service_type === 'package',
       package_items: Array.isArray(r.package_items) ? r.package_items : undefined,
@@ -137,6 +140,7 @@ export async function fetchServiceCatalogOnce(): Promise<DynamicServiceEntry[]> 
       duration_minutes: r.duration_minutes || 30,
       requires_lab_order: !!r.requires_lab_order,
       category: r.category,
+      service_type: r.service_type || undefined,
       source: 'db' as const,
     }));
 }

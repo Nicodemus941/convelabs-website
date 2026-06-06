@@ -185,7 +185,17 @@ export function getServicePrice(serviceId: string, tier: MembershipTier = 'none'
   if (serviceId.startsWith('partner-')) {
     return PARTNER_PRICING[serviceId] ?? 125;
   }
-  return TIER_PRICING[serviceId]?.[tier] ?? TIER_PRICING['mobile']?.[tier] ?? 150;
+  const direct = TIER_PRICING[serviceId]?.[tier];
+  if (typeof direct === 'number') return direct;
+  // Unmapped service id. We fall back to the mobile price so checkout never
+  // breaks, but this is almost always a mis-categorized service that would
+  // silently OVERCHARGE (e.g. a $55 office draw priced at $150). Surface it
+  // loudly so it gets fixed instead of quietly charging the wrong amount.
+  console.warn(
+    `[pricingService] getServicePrice: unmapped service id "${serviceId}" — ` +
+    `falling back to mobile price. Add it to TIER_PRICING or route it through the correct visit type.`
+  );
+  return TIER_PRICING['mobile']?.[tier] ?? 150;
 }
 
 export function calculateBasePrice(serviceId: string): number {
