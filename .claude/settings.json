@@ -12,7 +12,6 @@
       "Bash(git log*)",
       "Bash(git add*)",
       "Bash(git commit*)",
-      "Bash(git push*)",
       "Bash(git revert*)",
       "Bash(git branch*)",
       "Bash(git show*)",
@@ -25,13 +24,24 @@
     ]
   },
   "hooks": {
-    "PostToolUse": [
+    "PreToolUse": [
       {
-        "matcher": "Edit|Write",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "if echo \"$CLAUDE_TOOL_FILE_PATH\" | grep -qE 'src/.*\\.(ts|tsx)$'; then cd /c/Users/nicod/convelabs-website && ./node_modules/.bin/tsc --noEmit -p tsconfig.app.json 2>&1 | grep -E 'error TS' | head -10 || echo 'typecheck: clean'; fi"
+            "command": "node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c).on(\"end\",()=>{try{const j=JSON.parse(d);const cmd=(j.tool_input&&j.tool_input.command)||\"\";if(/\\bgit\\s+push\\b/.test(cmd)){console.log(JSON.stringify({hookSpecificOutput:{hookEventName:\"PreToolUse\",permissionDecision:\"ask\",permissionDecisionReason:\"Push to a remote detected — confirm per the standing no-auto-push rule (prefer /ship).\"}}));}}catch(e){}})'"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e 'let d=\"\";process.stdin.on(\"data\",c=>d+=c).on(\"end\",()=>{try{const j=JSON.parse(d);const cmd=(j.tool_input&&j.tool_input.command)||\"\";const m=cmd.match(/functions\\s+deploy\\s+([a-zA-Z0-9_-]+)/);if(m){const fn=m[1];console.log(JSON.stringify({hookSpecificOutput:{hookEventName:\"PostToolUse\",additionalContext:\"Edge function \\\"\"+fn+\"\\\" was just deployed. VERIFY IT BOOTED: call the Supabase MCP get_logs tool (service=edge-function) for project yluyonhrxxtyuiyrdixl, scan the last ~60s for BOOT_ERROR / uncaught exceptions / 5xx, and hit any smoke or health path. The deploy is NOT done until logs are clean.\"}}));}}catch(e){}})'"
           }
         ]
       }
