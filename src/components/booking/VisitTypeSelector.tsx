@@ -264,7 +264,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
                 WebkitBackdropFilter: 'blur(12px)',
               }}
             >
-              {type.popular && (
+              {(type as any).popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white text-xs font-semibold px-4 py-1 rounded-full shadow-md">
                   Most Popular
                 </div>
