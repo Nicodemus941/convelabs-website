@@ -44,6 +44,9 @@ interface Props {
 const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
   const [rows, setRows] = useState<LabOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Bundle members (companions) drawn together who have NO lab order on file
+  // but whose service needs one — the phleb must know what to draw for them.
+  const [missing, setMissing] = useState<{ id: string; name: string }[]>([]);
   const pollTimer = useRef<number | null>(null);
 
   const fetchRows = async () => {
@@ -74,7 +77,7 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
     // "Matching provider…" spinner instead of polling forever.
     const { data: apptOrgRows } = await supabase
       .from('appointments')
-      .select('id, organization_id')
+      .select('id, organization_id, patient_name, companion_role, service_type')
       .in('id', appointmentIds);
     const apptOrgMap: Record<string, string> = Object.fromEntries(
       (apptOrgRows as any[] || [])
@@ -119,6 +122,26 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
         matched_org_name: effectiveOrgId ? orgMap[effectiveOrgId] : null,
       };
     }));
+
+    // For couple/family bundles, flag any member with NO lab order on file
+    // whose service actually needs one (in-office + partner-billed visits
+    // don't require a patient-uploaded order). Couple case (Brian + Kimberly):
+    // only the primary had an order — the phleb had nothing to draw for the
+    // companion. Only computed for true bundles to avoid solo-visit noise.
+    const isBundle = appointmentIds.length > 1;
+    if (isBundle) {
+      const haveOrder = new Set(baseRows.map(r => r.appointment_id));
+      const needsOrder = (st?: string | null) => {
+        const s = (st || '').toLowerCase();
+        return s !== 'in-office' && !s.startsWith('partner-');
+      };
+      const miss = (apptOrgRows as any[] || [])
+        .filter(a => !haveOrder.has(a.id) && needsOrder(a.service_type))
+        .map(a => ({ id: a.id, name: a.patient_name || 'Companion' }));
+      setMissing(miss);
+    } else {
+      setMissing([]);
+    }
     setLoading(false);
   };
 
@@ -149,10 +172,20 @@ const LabOrderStatusList: React.FC<Props> = ({ appointmentId, refreshKey }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  if (loading || rows.length === 0) return null;
+  if (loading) return null;
+  if (rows.length === 0 && missing.length === 0) return null;
 
   return (
     <div className="mt-2 space-y-1.5">
+      {/* Companion(s) with no lab order on file — phleb must confirm what to draw */}
+      {missing.map(m => (
+        <div key={`miss-${m.id}`} className="flex items-center gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border bg-amber-50 text-amber-800 border-amber-300">
+            <AlertCircle className="h-3 w-3" />
+            No lab order on file for {m.name} — confirm before drawing
+          </span>
+        </div>
+      ))}
       {rows.map(row => {
         const ocrRunning = row.ocr_status === 'pending' || row.ocr_status === 'running';
         const ocrFailed = row.ocr_status === 'failed';
