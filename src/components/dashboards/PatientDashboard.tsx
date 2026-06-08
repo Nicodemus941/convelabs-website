@@ -181,13 +181,19 @@ const PatientDashboard = () => {
           </div>
         </div>
       ) : hasUpcoming ? (
-        // UPCOMING: Countdown + prep
-        <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-2xl p-5 sm:p-6 mb-6 shadow-lg">
+        // UPCOMING: luxe concierge treatment — deep oxblood + gold accents
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#7f1d1d] via-[#5e1414] to-[#3f0d0d] text-white rounded-2xl p-5 sm:p-7 mb-6 shadow-lg">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-gray-400 mb-1">Your Next Visit</p>
-              <h2 className="text-xl sm:text-2xl font-bold">{stats.nextDate}</h2>
-              {stats.nextTime && <p className="text-lg text-gray-300">{stats.nextTime}</p>}
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#e9d8a6] mb-2">Your Next Visit</p>
+              <h2 className="font-serif text-2xl sm:text-3xl flex items-baseline gap-3 flex-wrap">
+                {stats.nextDate}
+                <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-200">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 0 4px rgba(52,211,153,.25)' }} />
+                  Confirmed
+                </span>
+              </h2>
+              {stats.nextTime && <p className="text-lg text-amber-50/90 mt-1">{stats.nextTime}</p>}
               {/*
                * Dynamic readiness copy — was a static "Have your lab order and
                * insurance card ready" that didn't change after the patient
@@ -197,18 +203,22 @@ const PatientDashboard = () => {
                * John Ritenour 2026-05-17.) Now: when lab order is on file we
                * confirm it; otherwise we still nudge.
                */}
-              <p className="text-sm text-gray-400 mt-2">
+              <div className="h-px bg-white/15 my-4" />
+              <p className="text-sm text-white/80">
                 {(stats as any).nextHasLabOrder
-                  ? <span className="text-emerald-300">✓ Lab order on file. Bring your insurance card — your lab (Quest, LabCorp, AdventHealth) bills it directly, not us.</span>
+                  ? <span className="text-emerald-200">✓ Lab order on file. Bring your insurance card — your lab (Quest, LabCorp, AdventHealth) bills it directly, not us.</span>
                   : <>Have your lab order + insurance card ready. The lab bills your insurance directly.</>
                 }
               </p>
+              <span className="inline-flex items-center gap-2 mt-4 text-xs font-semibold rounded-lg border border-[#c9a24b]/50 bg-[#c9a24b]/15 px-3 py-1.5">
+                <Shield className="h-3.5 w-3.5 text-[#e9d8a6]" /> On-time, or this visit is on us.
+              </span>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" className="border-gray-600 text-white hover:bg-gray-700 rounded-xl" asChild>
+            <div className="flex gap-2 flex-shrink-0">
+              <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 rounded-xl" asChild>
                 <Link to="/profile">My Profile</Link>
               </Button>
-              <Button className="bg-[#B91C1C] hover:bg-[#991B1B] text-white rounded-xl" asChild>
+              <Button className="bg-white text-[#7f1d1d] hover:bg-amber-50 font-semibold rounded-xl" asChild>
                 <Link to="/book-now">Book Another</Link>
               </Button>
             </div>
