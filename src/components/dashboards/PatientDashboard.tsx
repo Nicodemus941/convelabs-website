@@ -78,11 +78,11 @@ const PatientDashboard = () => {
     if (!user) return;
     const loadStats = async () => {
       let all: any[] = [];
-      const { data: byId } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path')
+      const { data: byId } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path, view_token')
         .eq('patient_id', user.id);
       if (byId) all = [...byId];
       if (user.email) {
-        const { data: byEmail } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path')
+        const { data: byEmail } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path, view_token')
           .ilike('patient_email', user.email);
         if (byEmail) { const ids = new Set(all.map(a => a.id)); all = [...all, ...(byEmail.filter(a => !ids.has(a.id)))]; }
       }
@@ -134,7 +134,7 @@ const PatientDashboard = () => {
         for (let i = 1; i < dates.length; i++) gaps.push((dates[i] - dates[i-1]) / 86400000);
         avgFrequency = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length);
       }
-      setStats({ upcoming: upcoming.length, completed: completed.length, pastVisits: pastVisitsCount, nextDate, nextTime, nextHasLabOrder, daysSince, totalSpent, avgFrequency } as any);
+      setStats({ upcoming: upcoming.length, completed: completed.length, pastVisits: pastVisitsCount, nextDate, nextTime, nextHasLabOrder, nextToken: next?.view_token || '', daysSince, totalSpent, avgFrequency } as any);
     };
     loadStats();
     supabase.from('email_preferences').select('notification_method').eq('user_id', user.id).maybeSingle()
@@ -215,6 +215,11 @@ const PatientDashboard = () => {
               </span>
             </div>
             <div className="flex gap-2 flex-shrink-0">
+              {(stats as any).nextToken && (
+                <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 rounded-xl" asChild>
+                  <Link to={`/appt/${(stats as any).nextToken}/confirm`}>Reschedule</Link>
+                </Button>
+              )}
               <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 rounded-xl" asChild>
                 <Link to="/profile">My Profile</Link>
               </Button>
