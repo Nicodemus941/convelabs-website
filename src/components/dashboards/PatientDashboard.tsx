@@ -80,11 +80,14 @@ const PatientDashboard = () => {
       let all: any[] = [];
       const { data: byId } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path, view_token')
         .eq('patient_id', user.id);
-      if (byId) all = [...byId];
+      // Cast to any[]: the generated Supabase types are stale and don't yet
+      // include `view_token`, which makes the typed result a SelectQueryError.
+      // The column exists in the DB; runtime is correct.
+      if (byId) all = [...(byId as any[])];
       if (user.email) {
         const { data: byEmail } = await supabase.from('appointments').select('id, status, appointment_date, appointment_time, total_amount, payment_status, lab_order_file_path, view_token')
           .ilike('patient_email', user.email);
-        if (byEmail) { const ids = new Set(all.map(a => a.id)); all = [...all, ...(byEmail.filter(a => !ids.has(a.id)))]; }
+        if (byEmail) { const ids = new Set(all.map(a => a.id)); all = [...all, ...((byEmail as any[]).filter(a => !ids.has(a.id)))]; }
       }
       const upcoming = all.filter(a => ['scheduled', 'confirmed'].includes(a.status)).sort((a, b) => new Date(a.appointment_date || 0).getTime() - new Date(b.appointment_date || 0).getTime());
       const completed = all.filter(a => a.status === 'completed').sort((a, b) => new Date(b.appointment_date || 0).getTime() - new Date(a.appointment_date || 0).getTime());

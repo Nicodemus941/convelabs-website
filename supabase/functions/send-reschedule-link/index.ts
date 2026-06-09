@@ -44,9 +44,17 @@ Deno.serve(async (req) => {
     if (['cancelled', 'completed', 'no_show'].includes(String(appt.status))) {
       return j({ error: 'not_reschedulable', status: appt.status }, 409);
     }
-    if (!appt.view_token) return j({ error: 'no_token' }, 409);
+    // Mint a view_token if the appointment doesn't have one yet. Older /
+    // admin-created appointments often lack it, which previously made this
+    // button silently fail. The token IS the reschedule link's identity.
+    let viewToken: string = appt.view_token || '';
+    if (!viewToken) {
+      viewToken = (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 28);
+      const { error: tErr } = await admin.from('appointments').update({ view_token: viewToken }).eq('id', appt.id);
+      if (tErr) return j({ error: 'token_mint_failed', detail: tErr.message }, 500);
+    }
 
-    const link = `${ORIGIN}/appt/${appt.view_token}/confirm`;
+    const link = `${ORIGIN}/appt/${viewToken}/confirm`;
     const first = String(appt.patient_name || 'there').split(' ')[0];
     const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
     const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
