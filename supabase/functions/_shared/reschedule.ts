@@ -103,18 +103,11 @@ export async function commitReschedule(
     });
   } catch { /* non-blocking */ }
 
-  // Record the fee as revenue (best-effort) so it shows in the ledger.
-  if (feeChargedCents > 0) {
-    try {
-      await admin.from('stripe_qb_sync_log').insert({
-        appointment_id: appt.id,
-        amount_net_cents: feeChargedCents,
-        qb_class_name: 'reschedule_fee',
-        sync_status: 'pending',
-        notes: `Late-reschedule fee for moving to ${date} ${time}`,
-      });
-    } catch { /* non-blocking */ }
-  }
+  // NOTE: we do NOT insert a stripe_qb_sync_log row here. That table requires
+  // stripe_charge_id (NOT NULL), which we don't have at commit time, and the
+  // existing Stripe→QB sync cron already ingests every Stripe charge (incl.
+  // this $25 fee) with the real charge id. Inserting here would both fail the
+  // constraint and risk a duplicate.
 
   // ── Patient confirmation (transactional; best-effort) ──
   const niceDate = new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });

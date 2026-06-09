@@ -42,6 +42,29 @@ async function checkDownstreamRecord(
   const type = session.metadata?.type || '';
   const sessionId = session.id;
 
+  // These two payment kinds are keyed on metadata.kind / metadata.source
+  // (NOT metadata.type), so they'd fall through to "unclassifiable" and
+  // false-alarm as orphans. Verify their real downstream effect instead.
+
+  // Late-reschedule fee → stripe-webhook moves the appointment.
+  if (session.metadata?.kind === 'reschedule_fee') {
+    const apptId = session.metadata?.appointment_id;
+    const newDate = String(session.metadata?.new_date || '').substring(0, 10);
+    if (!apptId) return { expected_type: 'reschedule_fee', found: false, missing_record: 'appointment_id absent from metadata' };
+    const { data } = await admin.from('appointments').select('appointment_date, rescheduled_at').eq('id', apptId).maybeSingle();
+    const moved = !!data && !!data.rescheduled_at && (!newDate || String(data.appointment_date).substring(0, 10) === newDate);
+    return { expected_type: 'reschedule_fee', found: moved, missing_record: moved ? '' : `appointment ${apptId} not moved to ${newDate} (webhook may have failed)` };
+  }
+
+  // Branded patient checkout (/pay/:token) → webhook stamps the appointment paid + tip.
+  if (session.metadata?.source === 'branded_checkout_v1') {
+    const apptId = session.metadata?.appointment_id;
+    if (!apptId) return { expected_type: 'branded_checkout', found: false, missing_record: 'appointment_id absent from metadata' };
+    const { data } = await admin.from('appointments').select('payment_status, tip_amount').eq('id', apptId).maybeSingle();
+    const ok = !!data && (String(data.payment_status || '').toLowerCase() === 'completed' || (data.tip_amount || 0) > 0);
+    return { expected_type: 'branded_checkout', found: ok, missing_record: ok ? '' : `appointment ${apptId} not marked paid (webhook may have failed)` };
+  }
+
   switch (type) {
     case 'appointment_payment': {
       const { data } = await admin
