@@ -26,12 +26,12 @@ const UnassignOrgButton: React.FC<Props> = ({ appointmentId, size = 'sm', classN
   const doUnassign = async () => {
     setBusy(true);
     try {
-      const { data, error } = await supabase.rpc('admin_unassign_appointment_orgs' as any, {
+      const { data, error } = await supabase.rpc('unassign_appointment_orgs' as any, {
         p_appointment_id: appointmentId,
       });
       if (error) throw error;
       const res = data as any;
-      if (res?.ok === false) throw new Error(res.reason === 'not_admin' ? 'Admin access required.' : (res.reason || 'Failed'));
+      if (res?.ok === false) throw new Error(res.reason === 'not_authorized' ? 'You don\'t have permission to unassign this org.' : (res.reason || 'Failed'));
       const n = res?.removed_count ?? 0;
       toast.success(n > 0
         ? `Unassigned ${res.removed || 'organization'} — they'll receive no further notifications.`

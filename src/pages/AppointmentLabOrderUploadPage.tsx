@@ -19,7 +19,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Loader2, FileUp, CheckCircle2, AlertTriangle, Camera } from 'lucide-react';
+import { Loader2, FileUp, CheckCircle2, AlertTriangle, Camera, ShieldCheck, Droplet } from 'lucide-react';
 import { resizeImageForUpload } from '@/lib/imageResize';
 
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
@@ -63,6 +63,15 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
   const [summary, setSummary] = useState<ApptSummary | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState(false);
+  // ── DOB identity gate ──────────────────────────────────────────────
+  // The link is a secret, but we add a second factor: the patient confirms
+  // their date of birth before any appointment detail (or upload) is shown.
+  const [verified, setVerified] = useState(false);
+  const [firstName, setFirstName] = useState<string>('there');
+  const [dob, setDob] = useState<string>('');           // YYYY-MM-DD from <input type=date>
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
   // Insurance card upload — independent of the lab-order flow but lives on
   // the same page so the patient captures both in one sitting. Lab needs
   // the card to bill the patient's insurance directly (we never bill
@@ -140,7 +149,10 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
           else if (j.error === 'token_not_found') setError('We couldn\'t find this link. Check that it\'s the most recent message we sent you.');
           else setError(j.message || j.error || 'Could not load your appointment.');
         } else {
-          setSummary(j.appointment);
+          // GET now returns only identity (first name) + the DOB gate. The
+          // appointment summary arrives after the patient confirms their DOB.
+          setFirstName(j.patient_first_name || 'there');
+          if (j.locked) setLocked(true);
         }
       } catch (e: any) {
         setError(e?.message || 'Could not load.');
@@ -149,6 +161,46 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
       }
     })();
   }, [token]);
+
+  // Confirm date of birth → unlocks the appointment summary + upload UI.
+  async function verifyDob(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!token || verifying || !dob) return;
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/submit-appointment-lab-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ token, action: 'verify_dob', dob }),
+      });
+      const j = await res.json().catch(() => ({} as any));
+      if (res.ok && j?.verified) {
+        setSummary(j.appointment);
+        setVerified(true);
+      } else if (j?.error === 'dob_mismatch') {
+        const left = typeof j.attempts_left === 'number' ? j.attempts_left : null;
+        setVerifyError(`That date of birth doesn't match our records.${left !== null && left <= 3 ? ` ${left} ${left === 1 ? 'try' : 'tries'} left.` : ''}`);
+        if (left === 0) setLocked(true);
+      } else if (j?.error === 'too_many_attempts') {
+        setLocked(true);
+      } else if (j?.error === 'invalid_dob') {
+        setVerifyError('Please enter your date of birth.');
+      } else if (j?.error === 'expired') {
+        setError('This upload link has expired. Call (941) 527-9169 and we\'ll send a fresh one.');
+      } else {
+        setVerifyError(j?.message || 'Could not verify. Please try again.');
+      }
+    } catch (err: any) {
+      setVerifyError(err?.message || 'Could not verify. Please try again.');
+    } finally {
+      setVerifying(false);
+    }
+  }
 
   // Track which family member is currently being uploaded for so we can
   // route the file + show a per-member spinner. null = single-patient
@@ -253,6 +305,56 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
     );
   }
 
+  // ── DOB IDENTITY GATE ──────────────────────────────────────────────
+  // Shown until the patient confirms their date of birth. No appointment
+  // details are revealed before this passes.
+  if (!verified) {
+    const today = new Date().toISOString().substring(0, 10);
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white px-6 py-5">
+            <h1 className="text-xl font-bold flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> Verify it's you</h1>
+            <p className="text-sm opacity-90 mt-0.5">ConveLabs Concierge Lab Services</p>
+          </div>
+          <div className="p-6">
+            {locked ? (
+              <div className="text-center">
+                <AlertTriangle className="h-10 w-10 text-amber-500 mx-auto mb-3" />
+                <p className="text-sm text-gray-700">For your security we've paused verification on this link. Please call <a href="tel:+19415279169" className="text-[#B91C1C] underline font-semibold">(941) 527-9169</a> or email <a href="mailto:info@convelabs.com" className="text-[#B91C1C] underline">info@convelabs.com</a> and we'll help you finish.</p>
+              </div>
+            ) : (
+              <form onSubmit={verifyDob}>
+                <p className="text-sm text-gray-900">Hi <strong>{firstName}</strong>,</p>
+                <p className="text-sm text-gray-700 mt-1">To protect your health information, please confirm your <strong>date of birth</strong> to access your visit and upload your lab order.</p>
+                <label className="block mt-4 text-xs font-semibold text-gray-700">Date of birth</label>
+                <input
+                  type="date"
+                  value={dob}
+                  max={today}
+                  onChange={(e) => { setDob(e.target.value); setVerifyError(null); }}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/40"
+                  required
+                />
+                {verifyError && (
+                  <p className="text-[13px] text-red-600 mt-2">{verifyError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={verifying || !dob}
+                  className="mt-4 w-full bg-[#B91C1C] hover:bg-[#991B1B] disabled:opacity-50 text-white font-semibold rounded-xl px-5 py-3 text-sm transition flex items-center justify-center gap-2"
+                >
+                  {verifying ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying…</> : <>Confirm &amp; continue →</>}
+                </button>
+                <p className="text-[11px] text-center text-gray-400 mt-3">🔒 Your information is private and HIPAA-protected.</p>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (success) {
     const dateLabel = summary?.appointment_date
       ? new Date(String(summary.appointment_date).substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
@@ -264,15 +366,22 @@ const AppointmentLabOrderUploadPage: React.FC = () => {
             <CheckCircle2 className="h-9 w-9 text-emerald-600" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Got it ✓</h1>
-          <p className="text-sm text-gray-700">Your lab order is on file.</p>
+          <p className="text-sm text-gray-700">Thank you{summary?.patient_first_name ? `, ${summary.patient_first_name}` : ''}! Your lab order is on file — there's nothing more you need to send us.</p>
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mt-4 text-left text-sm">
             <p className="text-emerald-900"><strong>See you {dateLabel}{summary?.appointment_time ? ` at ${summary.appointment_time}` : ''}.</strong></p>
             {summary?.fasting_required && (
-              <p className="text-amber-800 mt-2">⚠️ <strong>Fasting required</strong> — no food (water OK) for 8–12 hours before your visit. We'll text a reminder the night before.</p>
+              <p className="text-amber-800 mt-2">⚠️ <strong>Fasting required</strong> — no food (water is OK) for 8–12 hours before your visit. We'll text a reminder the night before.</p>
+            )}
+            {summary?.urine_required && (
+              <p className="text-blue-800 mt-2 flex items-start gap-1.5">
+                <Droplet className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <span><strong>Urine sample needed</strong> — please collect a urine sample the <strong>day of</strong> your visit. Your phlebotomist will bring a sterile collection container, so there's nothing to buy ahead of time.</span>
+              </p>
             )}
             <ul className="text-xs text-gray-700 mt-3 space-y-0.5 list-disc list-inside">
               <li>Wear a short-sleeve shirt</li>
               <li>Drink water tonight (helps the draw)</li>
+              {summary?.urine_required && <li>Try not to use the restroom right before we arrive (so you can give a sample)</li>}
               <li>{summary?.client_billed ? 'Have a photo ID ready (this order is prepaid — no insurance needed)' : 'Have a photo ID + insurance card ready'}</li>
             </ul>
           </div>

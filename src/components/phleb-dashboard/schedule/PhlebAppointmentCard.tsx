@@ -32,6 +32,7 @@ import { getLabHoursStatus, logMileage, type LabRow } from '@/lib/labStatus';
 import PatientStatusChip from '@/components/shared/PatientStatusChip';
 import TubePredictionPanel from './TubePredictionPanel';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
+import UnassignOrgButton from '@/components/appointments/UnassignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
 import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
 
@@ -830,12 +831,19 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               )}
 
               {/* Organization — view linked practice, reassign, edit details */}
-              <div className="px-4 py-3 border-b">
+              <div className="px-4 py-3 border-b space-y-2">
                 <AssignOrgButton
                   appointmentId={appointment.id}
                   currentOrgId={(appointment as any).organization_id}
                   variant="primary"
                 />
+                {(appointment as any).organization_id && (
+                  <UnassignOrgButton
+                    appointmentId={appointment.id}
+                    size="sm"
+                    className="w-full justify-center"
+                  />
+                )}
               </div>
 
               {/* Lab Order files (uploaded requisitions) */}

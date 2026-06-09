@@ -158,6 +158,16 @@ const FASTING_PANELS = [
   'Fasting Insulin', 'Lactic Acid', 'HbA1c',
 ];
 
+// Tests that require a URINE specimen. When any of these appear, the patient
+// must collect a sample on the day of the visit and the phleb brings a sterile
+// container — surfaced on the upload confirmation + the night-before reminder.
+const URINE_PANELS = [
+  'Urinalysis', 'Urine Analysis', ' UA ', 'U/A', 'Urine Culture',
+  'Microalbumin', 'Urine Microalbumin', 'Albumin/Creatinine', 'Albumin Creatinine Ratio',
+  'Urine Protein', 'Urine hCG', 'Urine Drug', 'Urine Tox', 'Urinary',
+  'Random Urine', '24 Hour Urine', '24-Hour Urine', 'Urine Pregnancy',
+];
+
 async function downloadFile(path: string): Promise<{ data: Uint8Array; mediaType: string } | null> {
   try {
     const { data, error } = await supabase.storage.from('lab-orders').download(path);
@@ -558,6 +568,13 @@ Deno.serve(async (req) => {
       FASTING_PANELS.some(fp => p.toLowerCase().includes(fp.toLowerCase()))
     );
 
+    // Urine-specimen detection — scan both the structured panels AND the full
+    // OCR text (some requisitions only show "UA" inline). Pad the haystack so
+    // the " UA " / "U/A" tokens match at string boundaries without false hits
+    // inside words like "evaluation".
+    const urineHay = ` ${[...result.panels, result.text || ''].join(' | ')} `.toLowerCase();
+    const urineDetected = URINE_PANELS.some(u => urineHay.includes(u.toLowerCase()));
+
     // ─── CLIENT-BILL / PREPAID DETECTION ──────────────────────────────
     // Evexia / Access Medical Labs / Ulta Lab Tests are prepaid functional-
     // medicine labs, OR the order is explicitly marked "Client Bill". In any
@@ -589,6 +606,7 @@ Deno.serve(async (req) => {
         ocr_detected_panels: result.panels,
         ocr_full_text: result.text,
         ocr_fasting_required: fastingDetected,
+        ocr_urine_required: urineDetected,
         ocr_completed_at: new Date().toISOString(),
         ...insuranceUpdate,
         // Client-bill / prepaid flags — drive the "no insurance needed" UI.
@@ -612,16 +630,18 @@ Deno.serve(async (req) => {
         try {
           const { data: allOrders } = await supabase
             .from('appointment_lab_orders')
-            .select('ocr_detected_panels, ocr_full_text, ocr_fasting_required')
+            .select('ocr_detected_panels, ocr_full_text, ocr_fasting_required, ocr_urine_required')
             .eq('appointment_id', targetId)
             .eq('ocr_status', 'complete');
           const merged = new Set<string>();
           let mergedText = '';
           let mergedFasting = false;
+          let mergedUrine = false;
           for (const o of (allOrders || []) as any[]) {
             for (const p of (o.ocr_detected_panels || [])) merged.add(String(p));
             if (o.ocr_full_text) mergedText += (mergedText ? '\n\n---\n\n' : '') + o.ocr_full_text;
             if (o.ocr_fasting_required) mergedFasting = true;
+            if (o.ocr_urine_required) mergedUrine = true;
           }
           // Include this row's results even if it isn't yet flushed into the
           // SELECT above (race window).
@@ -630,15 +650,17 @@ Deno.serve(async (req) => {
             mergedText += (mergedText ? '\n\n---\n\n' : '') + result.text;
           }
           mergedFasting = mergedFasting || fastingDetected;
+          mergedUrine = mergedUrine || urineDetected;
 
           await supabase.from('appointments').update({
             lab_order_panels: Array.from(merged),
             lab_order_ocr_text: mergedText.substring(0, 50000),
             ocr_processed_at: new Date().toISOString(),
-            // If fasting was detected and the appointment is currently
-            // tagged routine/non-fasting, surface the override via notes
-            // — but DON'T silently change service_type. Admin reviews.
+            // If fasting/urine was detected, surface it on the appointment so
+            // the upload confirmation + night-before reminder fire. We only
+            // ever set TRUE here — never downgrade an admin-set flag.
             ...(mergedFasting ? { fasting_required: true } : {}),
+            ...(mergedUrine ? { urine_required: true } : {}),
           }).eq('id', targetId);
         } catch (mirrorErr) {
           console.warn('[ocr->appointment-mirror] failed (non-blocking):', mirrorErr);

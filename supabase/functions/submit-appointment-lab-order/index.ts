@@ -43,7 +43,7 @@ function decodeB64ToUint8(b64: string): Uint8Array {
 async function loadRequestRow(admin: any, token: string) {
   const { data: row } = await admin
     .from('appointment_lab_order_requests')
-    .select('id, appointment_id, status, expires_at, opened_at')
+    .select('id, appointment_id, status, expires_at, opened_at, dob_verify_attempts, dob_verified_at')
     .eq('access_token', token)
     .maybeSingle();
   if (!row) return { ok: false as const, code: 'token_not_found' };
@@ -61,7 +61,7 @@ async function loadRequestRow(admin: any, token: string) {
 async function loadAppointmentSummary(admin: any, appointmentId: string) {
   const { data: appt } = await admin
     .from('appointments')
-    .select('id, patient_id, patient_name, patient_email, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, organization_id, family_group_id, lab_order_file_path')
+    .select('id, patient_id, patient_name, patient_email, appointment_date, appointment_time, address, service_type, service_name, lab_destination, fasting_required, urine_required, organization_id, family_group_id, lab_order_file_path')
     .eq('id', appointmentId)
     .maybeSingle();
   if (!appt) return null;
@@ -169,6 +169,7 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
     service_name: appt.service_name || appt.service_type,
     lab_destination: appt.lab_destination,
     fasting_required: appt.fasting_required,
+    urine_required: !!(appt as any).urine_required,
     org_name: orgName,
     family_group_id: appt.family_group_id,
     // Whether THIS appointment (the token's primary) already has an order on
@@ -185,6 +186,57 @@ async function loadAppointmentSummary(admin: any, appointmentId: string) {
     bill_type: billType,
   };
 }
+
+/**
+ * Resolve the patient's identity for the DOB verification gate.
+ * DOB lives on tenant_patients.date_of_birth (appointments has no DOB column).
+ * Returns the first name (for the "Hi {name}, confirm your DOB" prompt), the
+ * DOB on file (if any), and the tenant_patients row id so we can backfill a
+ * missing DOB after the patient confirms it.
+ */
+async function loadIdentity(admin: any, appointmentId: string): Promise<{
+  firstName: string; dobOnFile: string | null; tenantPatientId: string | null;
+} | null> {
+  const { data: appt } = await admin
+    .from('appointments')
+    .select('id, patient_id, patient_name, patient_email')
+    .eq('id', appointmentId)
+    .maybeSingle();
+  if (!appt) return null;
+  const firstName = String((appt as any).patient_name || 'there').split(' ')[0] || 'there';
+  let dobOnFile: string | null = null;
+  let tenantPatientId: string | null = null;
+  try {
+    const pid = (appt as any).patient_id;
+    const email = String((appt as any).patient_email || '').trim().toLowerCase();
+    // Prefer a row that actually has a DOB; otherwise grab any matching row so
+    // we can backfill it.
+    const { data: rows } = await admin
+      .from('tenant_patients')
+      .select('id, date_of_birth')
+      .or(`user_id.eq.${pid || '00000000-0000-0000-0000-000000000000'},email.ilike.${email || 'none'}`)
+      .limit(5);
+    const withDob = (rows || []).find((r: any) => r.date_of_birth);
+    const chosen = withDob || (rows || [])[0] || null;
+    if (chosen) {
+      tenantPatientId = (chosen as any).id || null;
+      dobOnFile = (chosen as any).date_of_birth || null;
+    }
+  } catch { /* non-blocking */ }
+  return { firstName, dobOnFile, tenantPatientId };
+}
+
+/** Normalize a date input to YYYY-MM-DD (accepts YYYY-MM-DD or a Date string). */
+function normalizeDob(raw: any): string | null {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return null;
+  const y = m[1]; const mo = m[2].padStart(2, '0'); const d = m[3].padStart(2, '0');
+  return `${y}-${mo}-${d}`;
+}
+
+const MAX_DOB_ATTEMPTS = 8;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -214,8 +266,25 @@ Deno.serve(async (req) => {
           .eq('id', result.row.id);
       }
 
+      // IDENTITY GATE: we no longer hand back the appointment details on the
+      // bare GET. The patient must confirm their date of birth first (POST
+      // action=verify_dob). The GET returns only the first name (so the page
+      // can say "Hi {name}, confirm your DOB") + whether a DOB is on file.
+      const ident = await loadIdentity(admin, result.row.appointment_id);
+      const locked = (result.row.dob_verify_attempts || 0) >= MAX_DOB_ATTEMPTS;
+      // Backward-compat: we ALSO return the appointment summary so the prior
+      // frontend (still live until the new build deploys) keeps working. The
+      // NEW frontend ignores `appointment` on load and reveals it only after
+      // the patient confirms their DOB via the verify_dob action below.
       const summary = await loadAppointmentSummary(admin, result.row.appointment_id);
-      return new Response(JSON.stringify({ ok: true, appointment: summary }), {
+      return new Response(JSON.stringify({
+        ok: true,
+        requires_dob: true,                 // always present the gate (seamless: no DOB on file → we capture + backfill)
+        dob_on_file: !!(ident?.dobOnFile),  // informational only
+        patient_first_name: ident?.firstName || 'there',
+        locked,
+        appointment: summary,               // transitional — remove once new build is the only client
+      }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -229,6 +298,67 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const token: string = body?.token || '';
+    const action: string = body?.action || '';
+
+    // ── DOB VERIFICATION GATE ────────────────────────────────────────────
+    // POST { token, action:'verify_dob', dob:'YYYY-MM-DD' }
+    //   • If a DOB is on file → must match (case the patient proves identity).
+    //   • If no DOB on file → accept the entered DOB and BACKFILL it (seamless,
+    //     and quietly closes the 271-missing-DOB gap over time).
+    //   • Returns the full appointment summary ONLY on success.
+    if (action === 'verify_dob') {
+      if (!token) return new Response(JSON.stringify({ error: 'token required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+      const vres = await loadRequestRow(admin, token);
+      if (!vres.ok) {
+        return new Response(JSON.stringify({ error: vres.code }), {
+          status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const reqRow = vres.row;
+      if ((reqRow.dob_verify_attempts || 0) >= MAX_DOB_ATTEMPTS) {
+        return new Response(JSON.stringify({ error: 'too_many_attempts' }), {
+          status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const enteredDob = normalizeDob(body?.dob);
+      if (!enteredDob) {
+        return new Response(JSON.stringify({ error: 'invalid_dob' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const ident = await loadIdentity(admin, reqRow.appointment_id);
+      const onFile = normalizeDob(ident?.dobOnFile);
+
+      if (onFile) {
+        if (onFile !== enteredDob) {
+          // Record the failed attempt; lock after MAX_DOB_ATTEMPTS.
+          await admin.from('appointment_lab_order_requests')
+            .update({ dob_verify_attempts: (reqRow.dob_verify_attempts || 0) + 1, updated_at: new Date().toISOString() })
+            .eq('id', reqRow.id);
+          return new Response(JSON.stringify({ error: 'dob_mismatch', attempts_left: Math.max(0, MAX_DOB_ATTEMPTS - ((reqRow.dob_verify_attempts || 0) + 1)) }), {
+            status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      } else if (ident?.tenantPatientId) {
+        // No DOB on record — accept what they entered and backfill it.
+        try {
+          await admin.from('tenant_patients')
+            .update({ date_of_birth: enteredDob })
+            .eq('id', ident.tenantPatientId);
+        } catch { /* non-blocking backfill */ }
+      }
+      // Success — stamp verified + return the full summary.
+      await admin.from('appointment_lab_order_requests')
+        .update({ dob_verified_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', reqRow.id);
+      const summary = await loadAppointmentSummary(admin, reqRow.appointment_id);
+      return new Response(JSON.stringify({ ok: true, verified: true, appointment: summary }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const fileB64: string = body?.file_b64 || '';
     const contentType: string = body?.content_type || 'application/pdf';
     const origName: string = body?.original_filename || 'lab-order';
@@ -250,6 +380,20 @@ Deno.serve(async (req) => {
       });
     }
     const requestRow = result.row;
+
+    // Identity gate: the upload is accepted only after the patient confirmed
+    // their DOB (verify_dob stamps dob_verified_at). The NEW frontend always
+    // verifies first. We enforce this server-side ONLY when the DOB gate was
+    // actually presented for this request (dob_verify_attempts > 0 OR already
+    // verified) — this avoids 403-ing uploads from the prior frontend during
+    // the rollout window. Tighten to an unconditional check once the new build
+    // is the only client (see ENFORCE_DOB note).
+    const dobGateWasUsed = !!requestRow.dob_verified_at || (requestRow.dob_verify_attempts || 0) > 0;
+    if (dobGateWasUsed && !requestRow.dob_verified_at) {
+      return new Response(JSON.stringify({ error: 'dob_required' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     // If a target appointment is specified, validate it belongs to the
     // same family group as the token's anchor — prevents the link from

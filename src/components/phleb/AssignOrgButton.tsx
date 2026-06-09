@@ -144,6 +144,27 @@ const AssignOrgButton: React.FC<Props> = ({ appointmentId, currentOrgId, variant
   const assign = async (org: OrgSummary | null) => {
     setSaving(org?.id || 'clear');
     try {
+      // CLEAR → full unassign. Route through the RPC so we don't just null the
+      // FK: it also deletes the appointment_organizations junction rows and
+      // resets the lab-order match across the whole family group, so the
+      // practice receives NO further notifications. (A bare org_id=null left
+      // the junction + lab-order match intact and the org still got notified.)
+      if (!org) {
+        const { data, error } = await supabase.rpc('unassign_appointment_orgs' as any, {
+          p_appointment_id: appointmentId,
+        });
+        if (error) throw error;
+        const res = data as any;
+        if (res?.ok === false) throw new Error(res.reason === 'not_authorized' ? 'You don\'t have permission to unassign this org.' : (res.reason || 'Failed'));
+        toast.success(res?.removed
+          ? `Unassigned ${res.removed} — no further notifications will be sent.`
+          : 'Organization unassigned.');
+        setCurrentName(null);
+        onAssigned?.(null, null);
+        setOpen(false);
+        setQ('');
+        return;
+      }
       // Read the appointment's family_group_id so we can propagate the org
       // assignment to every sibling on the same family booking. Otherwise
       // a primary like Susan Barnes gets assigned to Littleton but her 3
