@@ -28,6 +28,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import RescheduleAppointmentModal from './RescheduleAppointmentModal';
+import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
 import CancelAppointmentModal from './CancelAppointmentModal';
 import NoShowAppointmentModal from './NoShowAppointmentModal';
 import AppointmentLabOrdersPanel from './AppointmentLabOrdersPanel';
@@ -408,6 +409,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setRescheduleOpen(true)}>
               <CalendarClock className="h-3.5 w-3.5 mr-1" /> Reschedule
             </Button>
+            <SendRescheduleLinkButton appointmentId={appt.id} size="sm" variant="outline" className="h-8 text-xs" label="Send reschedule link" />
             <Button variant="outline" size="sm" className="h-8 text-xs" onClick={handleMessage}>
               <MessageSquare className="h-3.5 w-3.5 mr-1" /> Message
             </Button>

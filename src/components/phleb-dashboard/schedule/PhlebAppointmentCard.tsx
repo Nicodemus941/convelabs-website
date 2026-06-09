@@ -24,6 +24,7 @@ import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
 import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
 import RequestLabOrderButton from './RequestLabOrderButton';
+import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
 import LabOrderRequestStatus from './LabOrderRequestStatus';
 import AppointmentEarningPill from './AppointmentEarningPill';
 import BundleEarningsBreakdown from './BundleEarningsBreakdown';
@@ -541,6 +542,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 <Clock3 className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Late</span>
               </Button>
+            </div>
+            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+              <SendRescheduleLinkButton appointmentId={appointment.id} size="sm" variant="outline" className="w-full h-9" />
             </div>
           </div>
 

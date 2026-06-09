@@ -15,6 +15,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { isSlotStillAvailable, getAvailableSlotsForDate } from '../_shared/availability.ts';
+import { commitReschedule, isActiveMember, RESCHEDULE } from '../_shared/reschedule.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -245,113 +246,28 @@ Deno.serve(async (req) => {
           status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      // Apply — anchor date at noon ET for TZ stability (matches booking paths).
-      const newTimestamp = `${date}T12:00:00-04:00`;
-      const { error: updErr } = await admin.from('appointments').update({
-        appointment_date: newTimestamp,
-        appointment_time: time,
-        rescheduled_at: new Date().toISOString(),
-        // Re-open confirmation: a moved visit is no longer "confirmed".
-        status: 'scheduled',
-        patient_confirmed_at: null,
-      }).eq('id', appt.id);
-      if (updErr) {
-        return new Response(JSON.stringify({ error: updErr.message }), {
+      // FEE GATE: moving within the fee window ($25, ≥24h is free) requires a
+      // fee UNLESS the patient is a member. We do NOT commit here — the patient
+      // is sent to pay, and the move is committed by the Stripe webhook once the
+      // fee clears (create-reschedule-fee-checkout → stripe-webhook).
+      const withinFeeWindow = isFinite(hoursUntilCurrent) && hoursUntilCurrent < RESCHEDULE.FEE_WINDOW_HOURS;
+      const member = await isActiveMember(admin, (appt as any).patient_email);
+      if (withinFeeWindow && !member) {
+        return new Response(JSON.stringify({
+          ok: false, fee_required: true, fee_cents: RESCHEDULE.RESCHEDULE_FEE_CENTS,
+          date, time, hours_until: Math.round(hoursUntilCurrent),
+          message: `Moving within ${RESCHEDULE.FEE_WINDOW_HOURS} hours has a $${(RESCHEDULE.RESCHEDULE_FEE_CENTS / 100).toFixed(0)} fee. Members reschedule free.`,
+        }), { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
+      // Free path (≥24h out, or an active member): commit now via the shared helper.
+      const committed = await commitReschedule(admin, appt, date, time, 0);
+      if (!committed.ok) {
+        return new Response(JSON.stringify({ error: committed.error || 'commit_failed' }), {
           status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      // Audit (best-effort).
-      try {
-        await admin.from('activity_log' as any).insert({
-          appointment_id: appt.id,
-          activity_type: 'patient_self_reschedule',
-          description: `Patient self-rescheduled to ${date} ${time} via self-service token`,
-          patient_name: appt.patient_name,
-          status: 'completed',
-        });
-      } catch { /* non-blocking */ }
-
-      // ── PATIENT CONFIRMATION (transactional booking_confirmation —
-      // always-send; the patient just took this action and is waiting).
-      // Best-effort: never fail the reschedule on a notify error.
-      const niceDate = new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
-      const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
-      const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
-      const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY') || '';
-      const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
-      const normPhone = (p: string) => {
-        const d = p.replace(/\D/g, '');
-        if (d.length === 10) return `+1${d}`;
-        if (d.length === 11 && d.startsWith('1')) return `+${d}`;
-        return p.startsWith('+') ? p : `+${d}`;
-      };
-      const phone = String((appt as any).patient_phone || '').trim();
-      const email = String((appt as any).patient_email || '').trim();
-
-      if (phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
-        const smsBody = `ConveLabs: ✓ Rescheduled. Your visit is now ${niceDate} at ${time}. We'll text a reminder the night before. Questions? (941) 527-9169`;
-        let sid: string | null = null, ok = false;
-        try {
-          const fd = new URLSearchParams({ To: normPhone(phone), From: TWILIO_FROM, Body: smsBody });
-          const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-            method: 'POST',
-            headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: fd.toString(),
-          });
-          ok = tw.ok;
-          try { sid = (await tw.json())?.sid || null; } catch { /* */ }
-        } catch (e) { console.warn('[self-service reschedule] sms err:', e); }
-        try {
-          await admin.from('sms_notifications').insert({
-            appointment_id: appt.id, notification_type: 'reschedule_confirmation',
-            phone_number: normPhone(phone), message_content: smsBody.substring(0, 1500),
-            sent_at: new Date().toISOString(), delivery_status: ok ? 'sent' : 'failed',
-            twilio_message_sid: sid, metadata: { source: 'appointment-self-service', new_date: date, new_time: time },
-          });
-        } catch { /* non-blocking */ }
-      }
-
-      if (email && MAILGUN_API_KEY) {
-        const subject = `Rescheduled: your ConveLabs visit is now ${niceDate} at ${time}`;
-        const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
-  <div style="background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:22px;border-radius:12px 12px 0 0;text-align:center;"><h1 style="margin:0;font-size:20px;">✓ Your visit was rescheduled</h1></div>
-  <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111827;">
-    <p>Hi ${String(appt.patient_name || 'there').split(' ')[0]},</p>
-    <p>You're all set — here are your new details:</p>
-    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px;">
-      <p style="margin:0;"><strong>${niceDate} at ${time}</strong></p>
-      ${(appt as any).address ? `<p style="margin:6px 0 0;">${String((appt as any).address)}</p>` : ''}
-    </div>
-    <p style="font-size:13px;color:#6b7280;">We'll send a reminder the night before. Need to change again? Reply or call (941) 527-9169.</p>
-    <p style="margin-top:18px;">— Nico at ConveLabs</p>
-  </div>
-</div>`;
-        let mgId: string | null = null, ok = false;
-        try {
-          const fd = new FormData();
-          fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
-          fd.append('to', email);
-          fd.append('subject', subject);
-          fd.append('html', html);
-          fd.append('o:tracking-clicks', 'no');
-          const mg = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
-            method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd,
-          });
-          ok = mg.ok;
-          try { mgId = (await mg.json())?.id || null; } catch { /* */ }
-        } catch (e) { console.warn('[self-service reschedule] email err:', e); }
-        try {
-          await admin.from('email_send_log').insert({
-            appointment_id: appt.id, to_email: email, email_type: 'reschedule_confirmation',
-            subject, sent_at: new Date().toISOString(), status: ok ? 'sent' : 'failed',
-            mailgun_id: mgId, campaign_tag: 'reschedule_confirmation',
-            organization_id: (appt as any).organization_id || null,
-          });
-        } catch { /* non-blocking */ }
-      }
-
-      return new Response(JSON.stringify({ ok: true, action: 'reschedule', date, time }), {
+      return new Response(JSON.stringify({ ok: true, action: 'reschedule', date, time, fee_charged: false }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

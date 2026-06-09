@@ -89,6 +89,24 @@ const AppointmentConfirmPage: React.FC = () => {
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
         setRescheduled({ date: rsDate, time: rsTime });
+      } else if (res.status === 402 && j.fee_required) {
+        // Moving within 24h — a $25 fee applies (members are free). Send the
+        // patient to Stripe; the move is committed by the webhook once paid.
+        // Stripe's page shows the "$25 Reschedule fee" line + the new time, so
+        // they confirm the fee there; canceling returns them here unchanged.
+        try {
+          const fr = await fetch(`${SUPABASE_URL}/functions/v1/create-reschedule-fee-checkout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+            body: JSON.stringify({ token, date: rsDate, time: rsTime }),
+          });
+          const fj = await fr.json().catch(() => ({}));
+          if (fr.ok && fj.url) { window.location.href = fj.url; return; }
+          if (fj.error === 'slot_conflict') { setRsError('Sorry, that time was just taken — please pick another.'); loadSlots(rsDate); }
+          else setRsError('Could not start payment for the reschedule fee. Please call (941) 527-9169.');
+        } catch {
+          setRsError('Could not start payment for the reschedule fee. Please call (941) 527-9169.');
+        }
       } else if (j.error === 'slot_conflict') {
         setRsError('Sorry, that time was just taken — please pick another.');
         loadSlots(rsDate);
@@ -116,6 +134,15 @@ const AppointmentConfirmPage: React.FC = () => {
           setAppt(j.appointment);
           if (j.appointment.confirmed_at) setConfirmed(true);
           if (j.appointment.cancelled_at) setCancelled(true);
+          // Returned from paying the late-reschedule fee. The webhook commits
+          // the move within a few seconds; show success now (the confirmation
+          // SMS/email is the authoritative receipt).
+          if (new URLSearchParams(window.location.search).get('rescheduled') === '1') {
+            setRescheduled({
+              date: String(j.appointment.appointment_date || '').substring(0, 10),
+              time: j.appointment.appointment_time || '',
+            });
+          }
         }
       } catch (e: any) {
         setError(e?.message || 'Could not load.');

@@ -1,6 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from "../_shared/stripe.ts";
 import { verifyRecipientEmail, verifyRecipientPhone } from "../_shared/verify-recipient.ts";
+import { commitReschedule } from "../_shared/reschedule.ts";
+import { isSlotStillAvailable } from "../_shared/availability.ts";
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -88,10 +90,15 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Late-reschedule fee — the patient paid the <24h fee; commit the move
+      // now (payment → reschedule is atomic). No metadata.type, route first.
+      if (metadata.kind === 'reschedule_fee' && metadata.appointment_id) {
+        await handleRescheduleFeePaid(session);
+      }
       // Handle branded patient checkout (/pay/:token — invoice + tip).
       // Set apart by metadata.source; no metadata.type so it must be routed
       // BEFORE the legacy membership fallback below.
-      if (metadata.source === 'branded_checkout_v1' && metadata.appointment_id) {
+      else if (metadata.source === 'branded_checkout_v1' && metadata.appointment_id) {
         await handleBrandedCheckoutPayment(session);
       }
       // Handle appointment payments
@@ -1291,6 +1298,58 @@ async function handlePaymentFailure(invoice: any) {
 // (tip + paid), mark the pay token consumed, and break the tip out onto the
 // staff_payouts row for reporting. The tip already flows to the phleb because
 // auto_reconcile_phleb_payout_v2 recomputes the payout from the new totals.
+// Late-reschedule fee cleared → re-verify the slot and commit the move via the
+// shared helper (same path as a free reschedule). Idempotent + slot-safe.
+async function handleRescheduleFeePaid(session: any) {
+  const md = session.metadata || {};
+  const apptId = md.appointment_id;
+  const date = String(md.new_date || '').substring(0, 10);
+  const time = String(md.new_time || '').trim();
+  if (!apptId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !time) {
+    console.warn('[reschedule_fee] missing/invalid metadata', md);
+    return;
+  }
+  const { data: appt } = await supabaseClient
+    .from('appointments')
+    .select('id, patient_name, patient_email, patient_phone, address, organization_id, service_type, appointment_date, appointment_time, status')
+    .eq('id', apptId)
+    .maybeSingle();
+  if (!appt) { console.warn('[reschedule_fee] appt not found', apptId); return; }
+
+  // Idempotency: Stripe can replay this event. If already moved, do nothing.
+  if (String(appt.appointment_date).substring(0, 10) === date && String(appt.appointment_time || '').trim() === time) {
+    console.log('[reschedule_fee] already at target slot, skipping', apptId);
+    return;
+  }
+
+  // Re-verify the slot is still free before committing (held only loosely).
+  let tw: any = null;
+  if (appt.organization_id) {
+    const { data: org } = await supabaseClient.from('organizations').select('time_window_rules').eq('id', appt.organization_id).maybeSingle();
+    tw = org?.time_window_rules ?? null;
+  }
+  const free = await isSlotStillAvailable(supabaseClient, appt.organization_id, date, time, tw, appt.service_type);
+  if (!free) {
+    // Fee paid but the slot got taken in the meantime → flag for a refund.
+    console.error('[reschedule_fee] slot conflict AFTER payment', apptId, date, time);
+    try {
+      await supabaseClient.from('error_logs').insert({
+        error_type: 'reschedule_slot_conflict_after_payment',
+        component: 'stripe-webhook',
+        action: 'handleRescheduleFeePaid',
+        error_message: `Slot ${date} ${time} was taken after the $25 fee cleared for appointment ${apptId}. Refund the fee and contact the patient to pick another time.`,
+        payload: { session_id: session.id, appointment_id: apptId, date, time },
+        resolved: false,
+      });
+    } catch { /* non-blocking */ }
+    return;
+  }
+
+  const res = await commitReschedule(supabaseClient, appt, date, time, session.amount_total || 2500);
+  if (!res.ok) console.error('[reschedule_fee] commit failed', apptId, res.error);
+  else console.log('[reschedule_fee] committed move', apptId, '→', date, time);
+}
+
 async function handleBrandedCheckoutPayment(session: any) {
   const metadata = session.metadata || {};
   const apptId = metadata.appointment_id;
