@@ -150,6 +150,9 @@ serve(async (req) => {
       formData.append('From', TWILIO_PHONE_NUMBER!)
     }
     formData.append('Body', message)
+    // Delivery-status callback → real carrier outcome surfaces (catches A2P 30034 bounces)
+    const statusCallback = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`
+    if (statusCallback.startsWith('http')) formData.append('StatusCallback', statusCallback)
 
     const response = await fetch(twilioUrl, {
       method: 'POST',

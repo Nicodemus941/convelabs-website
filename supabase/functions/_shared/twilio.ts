@@ -25,10 +25,14 @@ export async function sendSMS(to: string, body: string): Promise<any> {
   }
 
   try {
+    const statusCallback = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
     const message = await twilio.messages.create({
       to,
       body,
-      from: fromNumber
+      from: fromNumber,
+      // Twilio calls this back with the REAL carrier outcome (delivered /
+      // undelivered / failed) so a silent bounce (e.g. A2P 30034) surfaces.
+      ...(statusCallback.startsWith('http') ? { statusCallback } : {}),
     });
 
     return message;

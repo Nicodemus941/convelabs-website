@@ -171,6 +171,8 @@ Deno.serve(async (_req) => {
         try {
           const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
           const fd = new URLSearchParams({ To: toNum, From: TWILIO_FROM, Body: smsBody });
+          const _scb = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
+          if (_scb.startsWith('http')) fd.append('StatusCallback', _scb);
           const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
             method: 'POST',
             headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },

@@ -74,9 +74,11 @@ export async function sendOwnerAlert(
     return { sent: 0, recipients: phones, errors: ['twilio_creds_missing'] };
   }
 
+  const statusCallback = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
   for (const To of phones) {
     try {
       const fd = new URLSearchParams({ To, From: TWILIO_FROM, Body: body });
+      if (statusCallback.startsWith('http')) fd.append('StatusCallback', statusCallback);
       const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
         method: 'POST',
         headers: {
