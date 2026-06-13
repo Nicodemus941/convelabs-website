@@ -32,6 +32,7 @@ const ProviderAuthPage = lazy(() => import('../pages/ProviderAuthPage'));
 const ProviderDashboardPage = lazy(() => import('../pages/ProviderDashboardPage'));
 const PatientLabRequestPage = lazy(() => import('../pages/PatientLabRequestPage'));
 const AppointmentLabOrderUploadPage = lazy(() => import('../pages/AppointmentLabOrderUploadPage'));
+const ChatThreadPage = lazy(() => import('../pages/ChatThreadPage'));
 const AppointmentConfirmPage = lazy(() => import('../pages/AppointmentConfirmPage'));
 const AppointmentTrackPage = lazy(() => import('../pages/AppointmentTrackPage'));
 const AppointmentPayPage = lazy(() => import('../pages/AppointmentPayPage'));
@@ -101,6 +102,8 @@ export const routes = [
   // Live "phleb is on the way" tracker; SMS fires when phleb taps OTW
   <Route key="appt-track" path="/appt/:token/track" element={<AppointmentTrackPage />} />,
   <Route key="pay-token" path="/pay/:token" element={<AppointmentPayPage />} />,
+  // Owner lands here from the Nicobot SMS link → token-authed two-way chat with the visitor.
+  <Route key="chat-thread" path="/c/:token" element={<ChatThreadPage />} />,
   // /join (no token) handles the email-upsell direct-checkout: ?tier=vip&email=…
   // Must come BEFORE /join/:token so the typed query path takes precedence
   // when there's no token segment in the URL.

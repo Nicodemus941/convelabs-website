@@ -323,6 +323,47 @@ Deno.serve(async (req) => {
       console.warn('[inbound-sms] thread log failed (non-blocking):', logErr);
     }
 
+    // ── NICOBOT MIRROR ───────────────────────────────────────────
+    // If this number belongs to a chatbot conversation that Nico has taken
+    // over (handoff_state='human'), thread the reply back into the chatbot
+    // conversation + flag it for staff + ping the owner with the /c link.
+    try {
+      const last10 = fromDigits.slice(-10);
+      const { data: convRow } = await admin
+        .from('chatbot_conversations')
+        .select('id, access_token, handoff_state')
+        .ilike('captured_phone', `%${last10}%`)
+        .eq('handoff_state', 'human')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (convRow?.id) {
+        await admin.from('chatbot_messages').insert({
+          conversation_id: convRow.id, role: 'user', content: body.substring(0, 2000),
+        } as any);
+        await admin.from('chatbot_conversations').update({
+          staff_unread: true, last_message_at: new Date().toISOString(), last_message_role: 'user', updated_at: new Date().toISOString(),
+        }).eq('id', convRow.id);
+        const tok = (convRow as any).access_token;
+        if (tok) {
+          const PUBLIC = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
+          const to = (Deno.env.get('OWNER_PHONE') || '9415279169').replace(/\D/g, '');
+          const oTo = to.length === 10 ? `+1${to}` : `+${to}`;
+          const TS = Deno.env.get('TWILIO_ACCOUNT_SID') || ''; const TT = Deno.env.get('TWILIO_AUTH_TOKEN') || ''; const TF = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+          if (TS && TT && TF) {
+            const p = new URLSearchParams({ To: oTo, From: TF, Body: `💬 Chat reply via text\n"${body.substring(0, 130)}"\n\nReply: ${PUBLIC}/c/${tok}` });
+            const scb = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
+            if (scb.startsWith('http')) p.append('StatusCallback', scb);
+            await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TS}/Messages.json`, {
+              method: 'POST', headers: { Authorization: `Basic ${btoa(`${TS}:${TT}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: p.toString(),
+            }).catch(() => {});
+          }
+        }
+        // It's a chatbot conversation reply — don't also run lab-request command parsing below.
+        return new Response('', { status: 200 });
+      }
+    } catch (e) { console.warn('[inbound-sms] nicobot mirror failed (non-blocking):', e); }
+
     // Find the most recent pending lab request for this phone
     const { data: reqs } = await admin
       .from('patient_lab_requests')

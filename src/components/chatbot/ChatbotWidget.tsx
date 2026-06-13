@@ -20,16 +20,20 @@ import { trackEvent } from '@/lib/posthog';
  */
 
 interface ChatMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'human';   // 'human' = Nico replying personally (staff takeover)
   content: string;
   suggestedActions?: Array<{ label: string; url: string }>;
   escalated?: boolean;
   ts: number;
+  dbId?: string;
 }
 
 const LS_VISITOR_KEY = 'convelabs_chat_visitor_id';
 const LS_CONVO_KEY = 'convelabs_chat_conversation_id';
 const LS_SEEN_WELCOME_KEY = 'convelabs_chat_seen_welcome';
+
+const SB_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
+const SB_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY || '';
 
 function getOrCreateVisitorId(): string {
   if (typeof window === 'undefined') return 'ssr';
@@ -144,6 +148,55 @@ const ChatbotWidget: React.FC = () => {
       window.localStorage.setItem(LS_CONVO_KEY, id);
     }
   };
+
+  // ── Contact capture ("leave your info so Nico can follow up") ──
+  const [showContact, setShowContact] = useState(false);
+  const [contactDone, setContactDone] = useState(false);
+  const [cName, setCName] = useState('');
+  const [cPhone, setCPhone] = useState('');
+  const [cEmail, setCEmail] = useState('');
+
+  const submitContact = async () => {
+    if (!cName.trim() && !cPhone.trim() && !cEmail.trim()) return;
+    setContactDone(true);
+    setShowContact(false);
+    setMessages(prev => [...prev, { role: 'human', content: `Thanks${cName ? `, ${cName.split(' ')[0]}` : ''}! Nico will follow up personally — you'll hear back here, and by text/email too.`, ts: Date.now() }]);
+    try {
+      await supabase.functions.invoke('chatbot', {
+        body: {
+          visitorId, conversationId,
+          message: '[contact submitted]',
+          contact: { name: cName.trim() || null, phone: cPhone.trim() || null, email: cEmail.trim() || null },
+          landingUrl: window.location.pathname,
+        },
+      });
+    } catch { /* non-blocking — owner still gets pinged on next poll/escalation */ }
+  };
+
+  // ── Poll for staff (human) replies while the widget is open ──
+  const seenHumanIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!open || !conversationId || !SB_KEY) return;
+    let active = true;
+    const poll = async () => {
+      try {
+        const r = await fetch(`${SB_URL}/functions/v1/chatbot?conversationId=${encodeURIComponent(conversationId)}&visitorId=${encodeURIComponent(visitorId)}`, {
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        });
+        const j = await r.json();
+        if (!active || !Array.isArray(j?.messages)) return;
+        const fresh = j.messages.filter((m: any) => m.role === 'human' && !seenHumanIds.current.has(m.id));
+        if (fresh.length) {
+          fresh.forEach((m: any) => seenHumanIds.current.add(m.id));
+          setMessages(prev => [...prev, ...fresh.map((m: any) => ({ role: 'human' as const, content: m.content, ts: Date.parse(m.created_at) || Date.now(), dbId: m.id }))]);
+          if (!open) setHasUnread(true);
+        }
+      } catch { /* transient */ }
+    };
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => { active = false; clearInterval(t); };
+  }, [open, conversationId, visitorId]);
 
   const sendToBackend = async (message: string, leadPath?: 'patient' | 'provider' | 'lab_request') => {
     setSending(true);
@@ -342,6 +395,39 @@ const ChatbotWidget: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Contact capture — "leave your info so Nico can follow up" */}
+          {hookPicked && !contactDone && (
+            <div className="border-t border-gray-100 bg-rose-50/40 px-3 py-2 flex-shrink-0">
+              {!showContact ? (
+                <button
+                  onClick={() => setShowContact(true)}
+                  className="w-full text-left text-[12px] text-conve-red font-medium flex items-center gap-1.5"
+                >
+                  <Phone className="h-3.5 w-3.5" /> Want Nico to follow up personally? Leave your info →
+                </button>
+              ) : (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] text-gray-600">Nico will text or email you back personally.</p>
+                  <input value={cName} onChange={e => setCName(e.target.value)} placeholder="Your name"
+                    className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-conve-red/40" />
+                  <div className="flex gap-1.5">
+                    <input value={cPhone} onChange={e => setCPhone(e.target.value)} placeholder="Mobile" inputMode="tel"
+                      className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-conve-red/40" />
+                    <input value={cEmail} onChange={e => setCEmail(e.target.value)} placeholder="Email" inputMode="email"
+                      className="flex-1 min-w-0 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:border-conve-red/40" />
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button onClick={submitContact} disabled={!cName.trim() && !cPhone.trim() && !cEmail.trim()}
+                      className="flex-1 bg-conve-red hover:bg-conve-red-dark disabled:opacity-40 text-white text-[12px] font-semibold rounded-lg py-1.5">
+                      Send to Nico
+                    </button>
+                    <button onClick={() => setShowContact(false)} className="text-[12px] text-gray-500 px-2">Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Composer — only show after hook picked */}
           {hookPicked && (
             <div className="border-t border-gray-200 bg-white px-3 py-3 flex items-center gap-2 flex-shrink-0">
@@ -382,14 +468,22 @@ const ChatMessageBubble: React.FC<{
   onActionClick: (url: string) => void;
 }> = ({ message, onActionClick }) => {
   const isUser = message.role === 'user';
+  const isHuman = message.role === 'human';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div className="max-w-[90%]">
+        {isHuman && (
+          <div className="text-[10px] font-semibold text-conve-red mb-0.5 flex items-center gap-1">
+            <Sparkles className="h-3 w-3" /> Nico · live
+          </div>
+        )}
         <div
           className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
             isUser
               ? 'bg-conve-red text-white rounded-tr-sm'
-              : 'bg-white text-gray-900 border border-gray-200 rounded-tl-sm shadow-sm'
+              : isHuman
+                ? 'bg-rose-50 text-gray-900 border border-conve-red/30 rounded-tl-sm shadow-sm'
+                : 'bg-white text-gray-900 border border-gray-200 rounded-tl-sm shadow-sm'
           }`}
         >
           {message.content}

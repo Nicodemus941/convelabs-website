@@ -131,6 +131,28 @@ const ChatbotTab: React.FC = () => {
     setLoadingMessages(false);
   };
 
+  // Reply to the visitor from the admin dashboard. chat-thread delivers it
+  // live in the widget + by SMS/email (whatever contact was captured).
+  const [adminReply, setAdminReply] = useState('');
+  const [adminSending, setAdminSending] = useState(false);
+  const sendAdminReply = async () => {
+    const body = adminReply.trim();
+    if (!body || !selectedConvo || adminSending) return;
+    setAdminSending(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('chat-thread', {
+        body: { conversationId: selectedConvo.id, body },
+      });
+      if (error || (data as any)?.error) throw new Error((data as any)?.error || error?.message || 'failed');
+      setAdminReply('');
+      await loadMessages(selectedConvo);
+    } catch (e: any) {
+      alert(`Could not send: ${e?.message || e}`);
+    } finally {
+      setAdminSending(false);
+    }
+  };
+
   const queueAsContentTopic = async (question: string) => {
     const { error } = await supabase.from('social_topic_queue' as any).insert({
       topic: `Answer: ${question.substring(0, 140)}`,
@@ -409,14 +431,17 @@ const ChatbotTab: React.FC = () => {
                   <div className="max-w-[85%]">
                     <div className={`flex items-center gap-1 text-[10px] mb-0.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'} text-muted-foreground`}>
                       {m.role === 'user' ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                      <span className="capitalize">{m.role}</span>
+                      <span className="capitalize">{m.role === 'human' ? 'Nico (you)' : m.role}</span>
                       <span>· {new Date(m.created_at).toLocaleTimeString()}</span>
+                      {(m as any).delivered_via && <span className="text-emerald-700 ml-1">· {(m as any).delivered_via}</span>}
                       {m.guardrail_triggered && <span className="text-amber-700 font-semibold ml-1">· guardrail: {m.guardrail_triggered}</span>}
                     </div>
                     <div className={`px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${
                       m.role === 'user'
                         ? 'bg-conve-red text-white rounded-tr-sm'
-                        : 'bg-white border border-gray-200 rounded-tl-sm'
+                        : m.role === 'human'
+                          ? 'bg-rose-50 border border-conve-red/30 rounded-tl-sm'
+                          : 'bg-white border border-gray-200 rounded-tl-sm'
                     }`}>
                       {m.content}
                     </div>
@@ -425,6 +450,27 @@ const ChatbotTab: React.FC = () => {
               ))
             )}
           </div>
+
+          {/* Reply composer — delivers live in the widget + by SMS/email */}
+          {selectedConvo && (
+            <div className="mt-3 border-t pt-3">
+              <div className="flex gap-2">
+                <input
+                  value={adminReply}
+                  onChange={(e) => setAdminReply(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && sendAdminReply()}
+                  placeholder={`Reply to ${(selectedConvo as any).captured_name || 'the visitor'}…`}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conve-red/40"
+                />
+                <Button onClick={sendAdminReply} disabled={adminSending || !adminReply.trim()} className="bg-conve-red hover:bg-conve-red/90 text-white">
+                  {adminSending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send'}
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Reaches them live in chat{(selectedConvo as any).captured_phone ? ', by text' : ''}{selectedConvo.captured_email ? ', and by email' : ''}. Taking over pauses the AI for this chat.
+              </p>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

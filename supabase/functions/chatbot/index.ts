@@ -307,27 +307,66 @@ async function callClaude(messages: Array<{ role: string; content: string }>, li
   return { text, usage: data?.usage || {} };
 }
 
-async function sendEscalationSMS(conversationId: string, reason: string, lastUserMsg: string) {
+const PUBLIC_SITE_URL = Deno.env.get('PUBLIC_SITE_URL') || 'https://www.convelabs.com';
+
+/** Ensure the conversation has a secure access token for the /c/<token> page.
+ *  Token is sent ONLY to the owner's phone, so it authenticates the owner to
+ *  view + reply to that one conversation without an admin login. */
+async function ensureToken(supabase: any, conversationId: string): Promise<string> {
+  const { data } = await supabase.from('chatbot_conversations').select('access_token').eq('id', conversationId).maybeSingle();
+  if ((data as any)?.access_token) return (data as any).access_token;
+  const token = (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 32);
+  await supabase.from('chatbot_conversations').update({
+    access_token: token,
+    token_expires_at: new Date(Date.now() + 30 * 864e5).toISOString(), // 30 days
+  }).eq('id', conversationId);
+  return token;
+}
+
+/** One owner SMS, from the 407 number, with the status callback wired. */
+async function sendOwnerSms(body: string) {
   if (!TWILIO_SID || !TWILIO_TOKEN) return;
   const to = OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`;
-  const body = `🔥 Ask-Nico bot escalation\nReason: ${reason}\nLast msg: ${lastUserMsg.substring(0, 120)}\n\nReview: convelabs.com/dashboard/super_admin/chatbot/${conversationId}`;
-  const params = new URLSearchParams();
-  params.append('To', to);
-  params.append('Body', body);
-  params.append('From', TWILIO_FROM);
+  const params = new URLSearchParams({ To: to, From: TWILIO_FROM, Body: body });
+  const scb = `${SUPABASE_URL}/functions/v1/twilio-status-callback`;
+  if (scb.startsWith('http')) params.append('StatusCallback', scb);
   await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
     method: 'POST',
-    headers: {
-      Authorization: `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers: { Authorization: `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: params.toString(),
   }).catch(() => {});
+}
+
+async function sendEscalationSMS(supabase: any, conversationId: string, reason: string, lastUserMsg: string) {
+  const token = await ensureToken(supabase, conversationId);
+  await sendOwnerSms(`🔥 Ask-Nico escalation\nReason: ${reason}\nLast msg: ${lastUserMsg.substring(0, 120)}\n\nOpen & reply: ${PUBLIC_SITE_URL}/c/${token}`);
 }
 
 // ═══════ HANDLER ═════════════════════════════════════════════════════
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  // ── POLL: widget fetches new messages (incl. staff 'human' replies) ──
+  // Secured by visitor_id (the localStorage secret) matching the conversation.
+  if (req.method === 'GET') {
+    try {
+      const u = new URL(req.url);
+      const cid = u.searchParams.get('conversationId') || '';
+      const vid = u.searchParams.get('visitorId') || '';
+      if (!cid) return new Response(JSON.stringify({ messages: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+      const { data: conv } = await supabase.from('chatbot_conversations').select('id, visitor_id, handoff_state').eq('id', cid).maybeSingle();
+      if (!conv || ((conv as any).visitor_id && vid && (conv as any).visitor_id !== vid)) {
+        return new Response(JSON.stringify({ messages: [] }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      const { data: msgs } = await supabase.from('chatbot_messages')
+        .select('id, role, content, suggested_actions, created_at')
+        .eq('conversation_id', cid).order('created_at', { ascending: true }).limit(200);
+      return new Response(JSON.stringify({ messages: msgs || [], handoffState: (conv as any).handoff_state }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    } catch (e: any) {
+      return new Response(JSON.stringify({ messages: [], error: e?.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
 
   try {
     if (!ANTHROPIC_API_KEY) {
@@ -359,12 +398,29 @@ Deno.serve(async (req) => {
     if (conversationId) {
       const { data: conv } = await supabase
         .from('chatbot_conversations')
-        .select('id, total_input_tokens, total_output_tokens, message_count, status')
+        .select('id, total_input_tokens, total_output_tokens, message_count, status, handoff_state')
         .eq('id', conversationId)
         .maybeSingle();
 
       if (!conv) {
         conversationId = null; // invalid id, start fresh
+      } else if ((conv as any).handoff_state === 'human') {
+        // A human (Nico) has taken over this thread — DON'T let the AI answer.
+        // Store the visitor's message, flag it for staff, ping the owner, and
+        // give the visitor a calm "you'll hear back" acknowledgement.
+        await supabase.from('chatbot_messages').insert({ conversation_id: conversationId, role: 'user', content: userMessage });
+        await supabase.from('chatbot_conversations').update({
+          staff_unread: true, last_message_at: new Date().toISOString(), last_message_role: 'user', updated_at: new Date().toISOString(),
+        }).eq('id', conversationId);
+        const token = await ensureToken(supabase, conversationId);
+        sendOwnerSms(`💬 Visitor replied (Nicobot)\n"${userMessage.substring(0, 140)}"\n\nReply: ${PUBLIC_SITE_URL}/c/${token}`).catch(() => {});
+        return new Response(JSON.stringify({
+          conversationId,
+          reply: "Got it — Nico's been looped in and will reply to you personally right here. You can keep typing; he'll see it.",
+          suggestedActions: [],
+          escalated: true,
+          humanHandoff: true,
+        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       } else if (conv.status !== 'active') {
         return new Response(JSON.stringify({ error: 'conversation is closed' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -426,6 +482,29 @@ Deno.serve(async (req) => {
       content: userMessage,
     });
 
+    // ── CONTACT CAPTURE ──────────────────────────────────────────
+    // The widget posts { contact: { name, email, phone, zip } } when a visitor
+    // (esp. a provider) fills out the "leave your info" card. Persist it and
+    // ping the owner with a tap-to-open/reply link so they can take over.
+    const contact = body?.contact || null;
+    if (contact && (contact.name || contact.email || contact.phone)) {
+      try {
+        await supabase.from('chatbot_conversations').update({
+          captured_name: contact.name || undefined,
+          captured_email: contact.email || undefined,
+          captured_phone: contact.phone || undefined,
+          captured_zip: contact.zip || undefined,
+          captured_contact_at: new Date().toISOString(),
+          staff_unread: true,
+          updated_at: new Date().toISOString(),
+        }).eq('id', conversationId);
+        const token = await ensureToken(supabase, conversationId);
+        const who = contact.name || contact.email || contact.phone;
+        const reach = [contact.phone, contact.email].filter(Boolean).join(' · ');
+        sendOwnerSms(`🆕 Nicobot lead${leadPath ? ` (${leadPath})` : ''}\n${who}${reach ? `\n${reach}` : ''}\n\nOpen & reply: ${PUBLIC_SITE_URL}/c/${token}`).catch(() => {});
+      } catch (e) { console.warn('[chatbot] contact capture failed:', e); }
+    }
+
     // ── BUILD LIVE CONTEXT + CALL CLAUDE ─────────────────────────
     const liveContext = await buildLiveContext(supabase);
     const claudeMessages = [...history, { role: 'user', content: userMessage }];
@@ -486,7 +565,7 @@ Deno.serve(async (req) => {
 
     // ── FIRE ESCALATION SMS (non-blocking) ──────────────────────
     if (parsed.escalate && parsed.escalationReason) {
-      sendEscalationSMS(conversationId, parsed.escalationReason, userMessage).catch(() => {});
+      sendEscalationSMS(supabase, conversationId, parsed.escalationReason, userMessage).catch(() => {});
     }
 
     return new Response(JSON.stringify({
