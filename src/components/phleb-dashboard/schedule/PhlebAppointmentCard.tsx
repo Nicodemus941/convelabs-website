@@ -415,7 +415,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       className="font-semibold text-gray-900 truncate cursor-pointer hover:text-[#B91C1C] hover:underline transition-colors"
                       onClick={(e) => { e.stopPropagation(); openPatientEdit(); }}
                       title="Click to edit patient details"
-                    >{appointment.patient_name}</h3>
+                    >{appointment.patient_name || 'Unknown patient'}</h3>
+                    {(appointment as any).ocr_name_unverified && (
+                      <span
+                        className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5 cursor-pointer"
+                        title="Name was read from the lab order by OCR and may be misread — tap to verify/correct before printing labels."
+                        onClick={(e) => { e.stopPropagation(); openPatientEdit(); }}
+                      >⚠ verify name</span>
+                    )}
                     {/* Companion / "+1" pill — phleb MUST see who else is
                         being drawn on this visit. Driven by the merged
                         list (family_group_id siblings + pricing_breakdown

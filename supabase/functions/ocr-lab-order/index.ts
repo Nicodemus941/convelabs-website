@@ -665,10 +665,11 @@ Deno.serve(async (req) => {
           //             always show a DOB once a lab order is uploaded)
           // Never overwrite a name/DOB an admin/patient already provided.
           const { data: apptRow } = await supabase
-            .from('appointments').select('patient_name, patient_dob').eq('id', targetId).maybeSingle();
+            .from('appointments').select('patient_name, patient_dob, patient_id, patient_email, tenant_id').eq('id', targetId).maybeSingle();
           const apptName = String((apptRow as any)?.patient_name || '').trim();
           const ocrName = String(result.patient?.fullName || '').trim();
           const ocrDob = result.patient?.dateOfBirth && /^\d{4}-\d{2}-\d{2}$/.test(result.patient.dateOfBirth) ? result.patient.dateOfBirth : null;
+          const filledNameFromOcr = !apptName && !!ocrName;
 
           await supabase.from('appointments').update({
             lab_order_panels: Array.from(merged),
@@ -679,9 +680,37 @@ Deno.serve(async (req) => {
             // ever set TRUE here — never downgrade an admin-set flag.
             ...(mergedFasting ? { fasting_required: true } : {}),
             ...(mergedUrine ? { urine_required: true } : {}),
-            ...((!apptName && ocrName) ? { patient_name: ocrName } : {}),
+            ...(filledNameFromOcr ? { patient_name: ocrName, ocr_name_unverified: true } : {}),
             ...((!(apptRow as any)?.patient_dob && ocrDob) ? { patient_dob: ocrDob } : {}),
           }).eq('id', targetId);
+
+          // Ensure a searchable patient chart record exists for lab-order-only
+          // visits (no patient_id yet) so they appear in patient search — the
+          // Angela Mendelsohn gap. Keyed on the appointment email (reliable);
+          // the OCR name is provisional (ocr_name_unverified above flags it for
+          // a human to confirm, since OCR can misread, e.g. Mendelsohn→Madison).
+          if (!(apptRow as any)?.patient_id) {
+            const email = String((apptRow as any)?.patient_email || '').trim();
+            const nameForRecord = apptName || ocrName;
+            if (email || nameForRecord) {
+              // Split "Last, First" or "First Last" into first/last.
+              let pf: string | null = null, pl: string | null = null;
+              if (nameForRecord.includes(',')) {
+                const [l, f] = nameForRecord.split(',', 2);
+                pf = (f || '').trim() || null; pl = (l || '').trim() || null;
+              } else {
+                const parts = nameForRecord.split(/\s+/).filter(Boolean);
+                pf = parts[0] || null; pl = parts.slice(1).join(' ') || null;
+              }
+              try {
+                const { data: ensuredId } = await supabase.rpc('get_or_create_tenant_patient' as any, {
+                  p_email: email || null, p_first: pf, p_last: pl, p_phone: null,
+                  p_dob: ocrDob, p_tenant_id: (apptRow as any)?.tenant_id || null, p_user_id: null,
+                });
+                if (ensuredId) await supabase.from('appointments').update({ patient_id: ensuredId }).eq('id', targetId);
+              } catch (linkErr) { console.warn('[ocr->ensure-patient] failed (non-blocking):', linkErr); }
+            }
+          }
         } catch (mirrorErr) {
           console.warn('[ocr->appointment-mirror] failed (non-blocking):', mirrorErr);
         }

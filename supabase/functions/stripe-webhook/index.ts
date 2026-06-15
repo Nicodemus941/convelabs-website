@@ -1559,19 +1559,27 @@ async function handleAppointmentPayment(session: any) {
     let fullAddress = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean).join(', ');
     if (metadata.apt_unit) fullAddress = `${metadata.apt_unit}, ${fullAddress}`;
 
-    // Find patient_id — try user_id from metadata first, then lookup by email
+    // Find patient_id — try user_id from metadata first, then find-or-create a
+    // chart record by email. Previously this only LOOKED UP by email, so a
+    // first-time guest booker (no account, no prior chart row) got
+    // patient_id=NULL and never appeared in patient search — their name never
+    // "locked" into a record. Now we ALWAYS ensure a tenant_patients row at
+    // booking via get_or_create_tenant_patient (idempotent + email-dedupe).
     let patientId = userId || null;
     if (!patientId && metadata.patient_email) {
-      // Look up patient by email in tenant_patients
       try {
-        const { data: tp } = await supabaseClient
-          .from('tenant_patients')
-          .select('id')
-          .ilike('email', metadata.patient_email.trim())
-          .maybeSingle();
-        if (tp) patientId = tp.id;
+        const { data: ensuredId } = await supabaseClient.rpc('get_or_create_tenant_patient' as any, {
+          p_email: metadata.patient_email.trim(),
+          p_first: metadata.patient_first_name || null,
+          p_last: metadata.patient_last_name || null,
+          p_phone: metadata.patient_phone || null,
+          p_dob: (metadata.patient_dob && /^\d{4}-\d{2}-\d{2}/.test(metadata.patient_dob)) ? metadata.patient_dob.substring(0, 10) : null,
+          p_tenant_id: metadata.tenant_id || null,
+          p_user_id: null,
+        });
+        if (ensuredId) patientId = ensuredId as string;
       } catch (lookupErr) {
-        console.error('Patient lookup error (non-fatal):', lookupErr);
+        console.error('Patient ensure error (non-fatal):', lookupErr);
       }
     }
 
