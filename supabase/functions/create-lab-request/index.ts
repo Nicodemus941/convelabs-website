@@ -484,15 +484,16 @@ Deno.serve(async (req) => {
           }
         }
 
-        // ── INVOICE-AT-ORDER-TIME (default) ──────────────────────────────
-        // The owner's chosen mechanism: when the org orders a draw, issue a
-        // Stripe invoice (net-30) immediately and let the patient book right
-        // away. No synchronous pay-now gate — Elite (and every trusted
-        // partner) is invoiced on order, mirroring the admin
-        // ScheduleAppointmentModal → send-appointment-invoice behavior.
-        // Org-billed visits are never auto-cancelled for non-payment
-        // (dunning guardrail), so notifying the patient immediately is safe.
-        if (payMethodClean === 'invoice') {
+        // ── REQUIRE UPFRONT PAYMENT (owner decision 2026-06-15) ──────────
+        // Org-billed orders MUST pay via Stripe before the patient is
+        // notified/scheduled. The old net-30 invoice-at-order-time default
+        // left partners (Elite Medical Concierge) uncollected — orders were
+        // booked, patients notified, invoices never paid. We now force the
+        // pay-now Checkout branch for every org-billed order. The invoice
+        // code below is retained but gated behind FORCE_UPFRONT_PAY so it can
+        // be re-enabled per-org later if needed.
+        const FORCE_UPFRONT_PAY = true;
+        if (!FORCE_UPFRONT_PAY && payMethodClean === 'invoice') {
           let invoiceId: string | null = null;
           if (customerId && orgChargeCents > 0) {
             await stripe.invoiceItems.create({
@@ -537,6 +538,13 @@ Deno.serve(async (req) => {
           }).eq('id', inserted.id);
           // Fall through (do NOT return early) → the normal patient-notify
           // path below fires the booking SMS/email with covered=true.
+        } else if (orgChargeCents <= 0) {
+          // Org is explicitly free ($0) — no Stripe step; notify the patient
+          // immediately as covered. (Rare; most org rates are configured.)
+          await admin.from('patient_lab_requests').update({
+            provider_payment_status: 'completed', billed_to: 'org',
+          }).eq('id', inserted.id);
+          // fall through to patient-notify path
         } else {
         const session = await stripe.checkout.sessions.create({
           mode: 'payment',

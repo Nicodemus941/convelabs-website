@@ -508,33 +508,13 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
               </button>
             </div>
 
-            {/* Sub-toggle when org pays: invoice monthly vs pay now */}
+            {/* Org pays → upfront via Stripe (net-30 invoicing retired 2026-06-15) */}
             {billedTo === 'org' && (
               <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1.5">How do you want to pay?</p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setProviderPayMethod('invoice')}
-                    className={`text-left p-2 rounded border-2 transition ${providerPayMethod === 'invoice' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}
-                  >
-                    <div className="text-xs font-semibold">Invoice my org</div>
-                    <div className="text-[10px] text-gray-500">Stripe invoice emailed now · net-30</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setProviderPayMethod('pay_now')}
-                    className={`text-left p-2 rounded border-2 transition ${providerPayMethod === 'pay_now' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}
-                  >
-                    <div className="text-xs font-semibold">Pay now · card</div>
-                    <div className="text-[10px] text-gray-500">Patient link sends AFTER payment</div>
-                  </button>
-                </div>
-                {providerPayMethod === 'pay_now' && (
-                  <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 mt-2">
-                    After you click Send, you'll be redirected to Stripe to pay. {patientFirstName} only gets their booking link once payment completes.
-                  </p>
-                )}
+                <p className="text-xs font-semibold text-gray-900">Your practice pays now · card</p>
+                <p className="text-[11px] text-gray-600 mt-0.5">
+                  After you click Send you'll go to Stripe to pay for this draw. {patientFirstName} gets their booking link the moment payment completes.
+                </p>
               </div>
             )}
           </div>
