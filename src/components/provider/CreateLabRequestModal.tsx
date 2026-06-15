@@ -73,7 +73,12 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   // NEW: billing
   const [billedTo, setBilledTo] = useState<'org' | 'patient'>(orgDefaultBilledTo || 'patient');
   // Sub-toggle when org pays: pay now via card vs invoice monthly
-  const [providerPayMethod, setProviderPayMethod] = useState<'invoice' | 'pay_now'>('invoice');
+  const [providerPayMethod, setProviderPayMethod] = useState<'invoice' | 'pay_now'>('pay_now');
+  // After org payment: send the patient their booking link, or hold for the
+  // provider to schedule the slot themselves.
+  const [postPaymentAction, setPostPaymentAction] = useState<'send_link' | 'provider_schedule'>('send_link');
+  // Household members ordered in the same visit (combined into one payment).
+  const [householdMembers, setHouseholdMembers] = useState<{ name: string; email: string; phone: string; dob: string }[]>([]);
 
   // NEW: OCR preview
   const [ocr, setOcr] = useState<OcrPreview | null>(null);
@@ -257,7 +262,19 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
           admin_notes: adminNotes.trim() || null,
           fasting_required: fastingRequired || null,
           billed_to: billedTo,
-          provider_pay_method: billedTo === 'org' ? providerPayMethod : 'invoice',
+          provider_pay_method: billedTo === 'org' ? 'pay_now' : 'invoice',
+          // After payment: send the patient their booking link, or hold for the
+          // provider to schedule. Only meaningful when the org pays.
+          post_payment_action: billedTo === 'org' ? postPaymentAction : 'send_link',
+          // Additional household members ordered together (one combined charge).
+          household_members: billedTo === 'org'
+            ? householdMembers.filter(m => m.name.trim()).map(m => ({
+                patient_name: m.name.trim(),
+                patient_email: m.email.trim() || null,
+                patient_phone: m.phone.trim() || null,
+                patient_dob: m.dob || null,
+              }))
+            : [],
         }),
       });
       const j = await resp.json();
@@ -510,10 +527,44 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
 
             {/* Org pays → upfront via Stripe (net-30 invoicing retired 2026-06-15) */}
             {billedTo === 'org' && (
-              <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg">
+              <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg space-y-2.5">
                 <p className="text-xs font-semibold text-gray-900">Your practice pays now · card</p>
-                <p className="text-[11px] text-gray-600 mt-0.5">
-                  After you click Send you'll go to Stripe to pay for this draw. {patientFirstName} gets their booking link the moment payment completes.
+
+                {/* After payment: who schedules? */}
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">After payment</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" onClick={() => setPostPaymentAction('send_link')}
+                      className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'send_link' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
+                      <div className="text-xs font-semibold">Text/email them the link</div>
+                      <div className="text-[10px] text-gray-500">Patient picks their own time</div>
+                    </button>
+                    <button type="button" onClick={() => setPostPaymentAction('provider_schedule')}
+                      className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'provider_schedule' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
+                      <div className="text-xs font-semibold">I'll schedule them</div>
+                      <div className="text-[10px] text-gray-500">Book the slot yourself after paying</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Household members → combined into one visit + one payment */}
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">Household members <span className="font-normal normal-case text-gray-400">(same address, one visit)</span></p>
+                  {householdMembers.map((m, i) => (
+                    <div key={i} className="flex gap-1.5 mb-1.5">
+                      <input value={m.name} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))} placeholder="Name" className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs" />
+                      <input value={m.phone} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, phone: e.target.value } : x))} placeholder="Mobile" inputMode="tel" className="w-24 border border-gray-200 rounded px-2 py-1 text-xs" />
+                      <input value={m.dob} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, dob: e.target.value } : x))} type="date" className="w-32 border border-gray-200 rounded px-1 py-1 text-xs" />
+                      <button type="button" onClick={() => setHouseholdMembers(hm => hm.filter((_, ix) => ix !== i))} className="text-gray-400 hover:text-red-600 px-1 text-sm">×</button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setHouseholdMembers(hm => [...hm, { name: '', email: '', phone: '', dob: '' }])}
+                    className="text-[11px] text-[#B91C1C] font-medium">+ Add household member</button>
+                </div>
+
+                <p className="text-[11px] text-gray-600">
+                  You'll pay for {householdMembers.filter(m => m.name.trim()).length + 1} draw{householdMembers.filter(m => m.name.trim()).length ? 's' : ''} on Stripe.
+                  {postPaymentAction === 'send_link' ? ' Booking link sends on payment.' : ' You schedule after paying.'}
                 </p>
               </div>
             )}

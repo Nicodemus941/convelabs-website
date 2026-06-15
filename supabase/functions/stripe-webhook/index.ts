@@ -3052,7 +3052,7 @@ async function handleLabRequestProviderPayment(session: any) {
     // Idempotency: if we already marked this paid, skip
     const { data: existing } = await supabaseClient
       .from('patient_lab_requests')
-      .select('id, provider_payment_status, provider_paid_at, patient_notified_at, patient_name, patient_email, patient_phone, organization_id, draw_by_date, fasting_required, lab_order_panels, admin_notes, access_token, next_doctor_appt_date')
+      .select('id, provider_payment_status, provider_paid_at, patient_notified_at, patient_name, patient_email, patient_phone, organization_id, draw_by_date, fasting_required, lab_order_panels, admin_notes, access_token, next_doctor_appt_date, post_payment_action, household_group_id')
       .eq('id', labRequestId)
       .maybeSingle();
     if (!existing) {
@@ -3091,6 +3091,32 @@ async function handleLabRequestProviderPayment(session: any) {
       // Log loudly + surface so the alert daemon catches it. Don't swallow.
       console.error(`[lab-request-org-pay] CRITICAL: lab_request UPDATE failed for ${labRequestId}: ${lrUpdErr.message}`);
       throw new Error(`patient_lab_requests UPDATE failed: ${lrUpdErr.message}`);
+    }
+
+    // ── HOUSEHOLD FAN-OUT + POST-PAYMENT ACTION ──────────────────────────
+    // One combined charge covered the primary + any household siblings; mark
+    // them all paid. Then honor what the provider chose to do next.
+    const postAction = (existing as any).post_payment_action === 'provider_schedule' ? 'provider_schedule' : 'send_link';
+    const householdGroupId = (existing as any).household_group_id || null;
+    if (householdGroupId) {
+      await supabaseClient.from('patient_lab_requests').update({
+        provider_payment_status: 'completed',
+        provider_paid_at: new Date().toISOString(),
+        billed_to: 'org',
+        status: 'pending_schedule',
+      }).eq('household_group_id', householdGroupId).neq('id', labRequestId);
+    }
+
+    // 'provider_schedule' → the provider books the slot themselves. Do NOT
+    // text/email the patient a booking link; just flag the request(s) ready.
+    if (postAction === 'provider_schedule') {
+      const nowIso = new Date().toISOString();
+      await supabaseClient.from('patient_lab_requests').update({ provider_schedule_ready_at: nowIso }).eq('id', labRequestId);
+      if (householdGroupId) {
+        await supabaseClient.from('patient_lab_requests').update({ provider_schedule_ready_at: nowIso }).eq('household_group_id', householdGroupId).neq('id', labRequestId);
+      }
+      console.log(`[lab-request-org-pay] paid; provider will self-schedule ${labRequestId} (no patient link sent)`);
+      return;
     }
 
     // Load org for the patient notification copy
@@ -3191,6 +3217,44 @@ async function handleLabRequestProviderPayment(session: any) {
     }).eq('id', labRequestId);
 
     console.log(`[lab-request-org-pay] paid + notified: ${labRequestId} for ${existing.patient_name} via ${org.name}`);
+
+    // ── HOUSEHOLD SIBLINGS: send each their own booking link ─────────────
+    if (householdGroupId) {
+      const { data: sibs } = await supabaseClient
+        .from('patient_lab_requests')
+        .select('id, patient_name, patient_email, patient_phone, access_token, fasting_required')
+        .eq('household_group_id', householdGroupId)
+        .neq('id', labRequestId)
+        .is('patient_notified_at', null);
+      for (const s of (sibs || [])) {
+        const sUrl = `${PUBLIC_SITE_URL}/lab-request/${(s as any).access_token}`;
+        const sFirst = String((s as any).patient_name || '').split(' ')[0] || 'there';
+        const sFast = (s as any).fasting_required ? ' Fasting required — no food 12h before.' : '';
+        if ((s as any).patient_email && MAILGUN_API_KEY) {
+          try {
+            const fd = new FormData();
+            fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
+            fd.append('to', (s as any).patient_email);
+            fd.append('subject', `${org.name} ordered your bloodwork — pick a time (covered)`);
+            fd.append('html', `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;"><div style="background:linear-gradient(135deg,#B91C1C,#7F1D1D);color:#fff;padding:20px;border-radius:12px 12px 0 0;"><strong>${org.name} ordered your bloodwork</strong></div><div style="padding:22px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;"><p>Hi ${sFirst}, your provider has covered the cost — no payment at booking.${sFast}</p><p style="text-align:center;margin:22px 0;"><a href="${sUrl}" style="background:#B91C1C;color:#fff;padding:13px 34px;border-radius:10px;text-decoration:none;font-weight:700;">📅 Pick my time →</a></p><p style="font-size:12px;color:#6b7280;">You can book together with your household. Questions? (941) 527-9169.</p></div></div>`);
+            fd.append('o:tracking-clicks', 'no');
+            await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+          } catch (e) { console.warn('[lab-request-org-pay] sibling email failed:', e); }
+        }
+        if ((s as any).patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+          try {
+            const pc = String((s as any).patient_phone).replace(/\D/g, '');
+            const pE = pc.length === 10 ? `+1${pc}` : pc.length === 11 && pc.startsWith('1') ? `+${pc}` : `+${pc}`;
+            const body = `Hi ${sFirst} — ConveLabs. ${org.name} ordered your bloodwork and covered the cost.${sFast} Book your time (and combine with your household): ${sUrl}`;
+            const scb = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
+            const fd = new URLSearchParams({ To: pE, From: TWILIO_FROM, Body: body });
+            if (scb.startsWith('http')) fd.append('StatusCallback', scb);
+            await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd.toString() });
+          } catch (e) { console.warn('[lab-request-org-pay] sibling SMS failed:', e); }
+        }
+        await supabaseClient.from('patient_lab_requests').update({ patient_notified_at: new Date().toISOString() }).eq('id', (s as any).id);
+      }
+    }
   } catch (e: any) {
     console.error('[lab-request-org-pay] top-level error:', e?.message || e);
   }

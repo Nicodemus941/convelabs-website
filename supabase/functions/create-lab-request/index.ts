@@ -194,9 +194,24 @@ Deno.serve(async (req) => {
       //   'pay_now'  → redirect the provider to Stripe Checkout to pay by card
       //                now; patient is notified only after payment completes.
       provider_pay_method,
+      // After org payment, what should happen:
+      //   'send_link'        → text/email the patient their booking link (default)
+      //   'provider_schedule'→ hold; the provider will book the slot themselves
+      post_payment_action,
+      // On-page embedded Stripe Payment Element instead of a hosted redirect.
+      embedded,
+      // Optional additional household members ordered in the same submission.
+      // Each: { patient_name, patient_email, patient_phone, patient_dob,
+      //         lab_order_file_path }. They become sibling lab requests sharing
+      //         a household_group_id and are covered by ONE combined payment.
+      household_members,
     } = body || {};
     const payMethodClean: 'invoice' | 'pay_now' =
       provider_pay_method === 'pay_now' ? 'pay_now' : 'invoice';
+    const postPaymentAction: 'send_link' | 'provider_schedule' =
+      post_payment_action === 'provider_schedule' ? 'provider_schedule' : 'send_link';
+    const useEmbedded = embedded === true;
+    const householdList: any[] = Array.isArray(household_members) ? household_members.filter((m: any) => m && m.patient_name) : [];
     // Normalize: accept both 'YYYY-MM-DD' and ISO strings; reject anything
     // else so a malformed value can't slip into the date column.
     const dobClean: string | null = (() => {
@@ -345,6 +360,7 @@ Deno.serve(async (req) => {
         access_token: accessToken,
         billed_to: billedToClean,
         patient_dob: finalDob,
+        post_payment_action: postPaymentAction,
       })
       .select('*')
       .single();
@@ -546,57 +562,80 @@ Deno.serve(async (req) => {
           }).eq('id', inserted.id);
           // fall through to patient-notify path
         } else {
-        const session = await stripe.checkout.sessions.create({
+        // ── HOUSEHOLD: create sibling lab requests (one combined payment) ──
+        // Each member becomes its own lab request at the same org rate, grouped
+        // by household_group_id = the primary's id. One Stripe charge covers
+        // them all; the webhook marks every sibling paid + notifies each.
+        const householdGroupId: string | null = householdList.length ? inserted.id : null;
+        const siblingIds: string[] = [];
+        if (householdGroupId) {
+          await admin.from('patient_lab_requests').update({ household_group_id: householdGroupId }).eq('id', inserted.id);
+          for (const m of householdList) {
+            const sibToken = crypto.randomUUID() + '-' + crypto.randomUUID().split('-')[0];
+            const sibDob = (() => { const s = String(m.patient_dob || ''); const mm = s.match(/^(\d{4})-(\d{2})-(\d{2})/); return mm ? `${mm[1]}-${mm[2]}-${mm[3]}` : null; })();
+            const { data: sib } = await admin.from('patient_lab_requests').insert({
+              organization_id, created_by: user.id,
+              patient_name: String(m.patient_name).trim(),
+              patient_email: m.patient_email?.trim().toLowerCase() || null,
+              patient_phone: m.patient_phone?.trim() || null,
+              lab_order_file_path: m.lab_order_file_path || null,
+              draw_by_date, next_doctor_appt_date: next_doctor_appt_date || null,
+              access_token: sibToken, billed_to: 'org', patient_dob: sibDob,
+              post_payment_action: postPaymentAction, household_group_id: householdGroupId,
+              provider_payment_status: 'pending', status: 'pending_payment',
+            }).select('id').single();
+            if (sib?.id) siblingIds.push(sib.id);
+          }
+        }
+        const memberCount = 1 + siblingIds.length;
+        const combinedCents = orgChargeCents * memberCount;
+        const patientLabel = memberCount > 1
+          ? `${patient_name} + ${siblingIds.length} household member${siblingIds.length === 1 ? '' : 's'}`
+          : patient_name;
+
+        const sessionParams: any = {
           mode: 'payment',
           customer: customerId || undefined,
           customer_email: customerId ? undefined : orgEmail || undefined,
           line_items: [{
             price_data: {
               currency: 'usd',
-              product_data: {
-                name: `Mobile Blood Draw — ${patient_name}`,
-                description: `Covered by ${org.name} on behalf of ${patient_name}`,
-              },
+              product_data: { name: `Mobile Blood Draw — ${patientLabel}`, description: `Covered by ${org.name}` },
               unit_amount: orgChargeCents,
             },
-            quantity: 1,
+            quantity: memberCount,
           }],
-          success_url: `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_paid=${inserted.id}`,
-          cancel_url: `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_payment_cancelled=${inserted.id}`,
           metadata: {
-            lab_request_id: inserted.id,
-            organization_id,
-            patient_name,
-            org_pays: 'true',
-            // Distinguishes this branch in the stripe-webhook switch
+            lab_request_id: inserted.id, organization_id, patient_name, org_pays: 'true',
             convelabs_flow: 'lab_request_org_pay',
+            post_payment_action: postPaymentAction,
+            household_group_id: householdGroupId || '',
           },
           payment_intent_data: {
-            metadata: {
-              lab_request_id: inserted.id,
-              organization_id,
-              convelabs_flow: 'lab_request_org_pay',
-            },
+            metadata: { lab_request_id: inserted.id, organization_id, convelabs_flow: 'lab_request_org_pay' },
           },
-        });
+        };
+        // Embedded on-page Payment Element vs hosted redirect.
+        if (useEmbedded) {
+          sessionParams.ui_mode = 'embedded';
+          sessionParams.return_url = `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_paid=${inserted.id}`;
+        } else {
+          sessionParams.success_url = `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_paid=${inserted.id}`;
+          sessionParams.cancel_url = `${PUBLIC_SITE_URL}/dashboard/provider?lab_request_payment_cancelled=${inserted.id}`;
+        }
+        const session = await stripe.checkout.sessions.create(sessionParams);
         stripeUrl = session.url || null;
+        const clientSecret = (session as any).client_secret || null;
 
         await admin.from('patient_lab_requests').update({
           provider_payment_status: 'pending',
           provider_stripe_session_id: session.id,
-          provider_payment_cents: orgChargeCents,
+          provider_payment_cents: combinedCents,
           billed_to: 'org',
-          // Patient_notified_at stays NULL — the webhook fires the notify
-          // call once payment completes. Status stays 'pending_schedule'
-          // (or whatever the default is) so the public lab-request page
-          // is functional but admin can see who's gated on org payment.
           status: 'pending_payment',
         }).eq('id', inserted.id);
 
-        // Return EARLY — do not send patient SMS/email yet. Aliases both
-        // the new (`requires_org_payment` / `stripe_url`) and the legacy
-        // (`provider_pay_now` / `provider_checkout_url`) response keys so
-        // the existing CreateLabRequestModal redirect handler keeps working.
+        // Return EARLY — patient(s) notified by the webhook on payment.
         return new Response(JSON.stringify({
           success: true,
           request_id: inserted.id,
@@ -606,8 +645,14 @@ Deno.serve(async (req) => {
           stripe_url: stripeUrl,
           provider_pay_now: true,
           provider_checkout_url: stripeUrl,
-          amount_cents: orgChargeCents,
-          message: 'Lab request created. Redirecting to Stripe to collect organization payment. Patient will be notified once payment completes.',
+          embedded: useEmbedded,
+          client_secret: clientSecret,
+          household_count: memberCount,
+          post_payment_action: postPaymentAction,
+          amount_cents: combinedCents,
+          message: useEmbedded
+            ? 'Pay to confirm — patient(s) notified the moment payment completes.'
+            : 'Redirecting to Stripe to collect organization payment.',
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } // end pay_now branch
       } catch (stripeErr: any) {
