@@ -608,6 +608,12 @@ Deno.serve(async (req) => {
         ocr_fasting_required: fastingDetected,
         ocr_urine_required: urineDetected,
         ocr_completed_at: new Date().toISOString(),
+        // Persist the OCR'd patient identity so the card + NIIMBOT labels can
+        // show the name/DOB even when there's no chart row (e.g. org-billed
+        // visits with no patient_id). Previously extracted but never stored.
+        ...(result.patient?.fullName ? { ocr_patient_name: result.patient.fullName } : {}),
+        ...(result.patient?.dateOfBirth && /^\d{4}-\d{2}-\d{2}$/.test(result.patient.dateOfBirth)
+          ? { ocr_patient_dob: result.patient.dateOfBirth } : {}),
         ...insuranceUpdate,
         // Client-bill / prepaid flags — drive the "no insurance needed" UI.
         // Only write a POSITIVE signal; never downgrade an existing client_bill
@@ -652,6 +658,18 @@ Deno.serve(async (req) => {
           mergedFasting = mergedFasting || fastingDetected;
           mergedUrine = mergedUrine || urineDetected;
 
+          // Backfill the patient identity onto the appointment from the order:
+          //   • name  — only if the appointment has no name (the "unknown
+          //             patient" card: org orders booked without a name)
+          //   • DOB   — only if not already set (so the card + NIIMBOT labels
+          //             always show a DOB once a lab order is uploaded)
+          // Never overwrite a name/DOB an admin/patient already provided.
+          const { data: apptRow } = await supabase
+            .from('appointments').select('patient_name, patient_dob').eq('id', targetId).maybeSingle();
+          const apptName = String((apptRow as any)?.patient_name || '').trim();
+          const ocrName = String(result.patient?.fullName || '').trim();
+          const ocrDob = result.patient?.dateOfBirth && /^\d{4}-\d{2}-\d{2}$/.test(result.patient.dateOfBirth) ? result.patient.dateOfBirth : null;
+
           await supabase.from('appointments').update({
             lab_order_panels: Array.from(merged),
             lab_order_ocr_text: mergedText.substring(0, 50000),
@@ -661,6 +679,8 @@ Deno.serve(async (req) => {
             // ever set TRUE here — never downgrade an admin-set flag.
             ...(mergedFasting ? { fasting_required: true } : {}),
             ...(mergedUrine ? { urine_required: true } : {}),
+            ...((!apptName && ocrName) ? { patient_name: ocrName } : {}),
+            ...((!(apptRow as any)?.patient_dob && ocrDob) ? { patient_dob: ocrDob } : {}),
           }).eq('id', targetId);
         } catch (mirrorErr) {
           console.warn('[ocr->appointment-mirror] failed (non-blocking):', mirrorErr);

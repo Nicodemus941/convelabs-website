@@ -263,7 +263,9 @@ export function usePhlebotomistAppointments() {
           // (companion_role, billing) for clinical/billing context.
           let patientPhone: string | null = appt.patient_phone || null;
           let patientEmail: string | null = appt.patient_email || null;
-          let patientDob: string | null = null;
+          // PRIORITY 1: DOB on the appointment row (OCR mirrors the lab order's
+          // DOB here, so it populates even when there's no chart row).
+          let patientDob: string | null = appt.patient_dob || null;
           let patientInsurance: string | null = null;
           let patientInsuranceId: string | null = null;
           let patientInsuranceGroup: string | null = null;
@@ -308,7 +310,7 @@ export function usePhlebotomistAppointments() {
             if (patientName === 'Unknown Patient') patientName = `${tpData.first_name || ''} ${tpData.last_name || ''}`.trim() || patientName;
             if (!patientPhone && tpData.phone) patientPhone = tpData.phone;
             if (!patientEmail && tpData.email) patientEmail = tpData.email;
-            patientDob = tpData.date_of_birth || null;
+            if (!patientDob) patientDob = tpData.date_of_birth || null;
             patientInsurance = tpData.insurance_provider || null;
             patientInsuranceId = tpData.insurance_member_id || null;
             patientInsuranceGroup = tpData.insurance_group_number || null;
