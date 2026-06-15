@@ -40,35 +40,50 @@ const OnTheWayDialog: React.FC<OnTheWayDialogProps> = ({
   const handleSend = async () => {
     setIsSending(true);
     try {
-      // Update status + capture phleb's current location for the
-      // tracking page (best-effort; never blocks the status change).
-      const captureGeo = (): Promise<{ lat: number; lng: number; accuracy: number } | null> =>
-        new Promise((resolve) => {
-          if (!navigator.geolocation) return resolve(null);
-          navigator.geolocation.getCurrentPosition(
-            (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-            () => resolve(null),
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 60_000 },
-          );
-        });
-      const geo = await captureGeo();
-
+      // PERSIST STATUS FIRST — before anything slow/flaky. Previously the
+      // en_route UPDATE was gated behind `await captureGeo()`; on mobile the
+      // geolocation PERMISSION prompt has no timeout, so if the phleb
+      // dismissed it or closed the app during "Sending…", getCurrentPosition
+      // never resolved and the status write never fired — the visit stayed
+      // 'confirmed' and the "On the way" button was active again on reopen
+      // (reported bug, 2026-06-15). Geo is now captured AFTER, best-effort.
       const { data: updatedRows, error: statusError } = await supabase
         .from('appointments')
-        .update({
-          status: 'en_route',
-          ...(geo ? { delivery_location: { ...geo, captured_at: new Date().toISOString() } } : {}),
-        })
+        .update({ status: 'en_route' })
         .eq('id', appointmentId)
         .select('id');
 
       if (statusError) throw statusError;
       // Defense-in-depth: a permission/RLS issue makes the UPDATE a silent
-      // no-op (0 rows, no error). Without this guard the SMS would still fire
-      // and the card would never advance off "On the Way" — the exact bug
-      // reported for Carolyn Alvarez. Surface it instead of pretending success.
+      // no-op (0 rows, no error). Surface it instead of pretending success.
       if (!updatedRows || updatedRows.length === 0) {
         throw new Error("Couldn't update the visit to 'On the way' — you may not have permission on this appointment. Refresh and retry, or contact admin.");
+      }
+
+      // Capture the phleb's location for the live tracking page — best-effort,
+      // AFTER status is safely persisted, with a hard wall-clock timeout so a
+      // hung/unanswered permission prompt can never block or lose the update.
+      const captureGeo = (): Promise<{ lat: number; lng: number; accuracy: number } | null> =>
+        new Promise((resolve) => {
+          if (!navigator.geolocation) return resolve(null);
+          let settled = false;
+          const done = (v: { lat: number; lng: number; accuracy: number } | null) => { if (!settled) { settled = true; resolve(v); } };
+          // Hard cap independent of the geolocation timeout option (which does
+          // NOT cover the time spent waiting on the permission prompt).
+          setTimeout(() => done(null), 6000);
+          navigator.geolocation.getCurrentPosition(
+            (pos) => done({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+            () => done(null),
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 60_000 },
+          );
+        });
+      const geo = await captureGeo();
+      if (geo) {
+        try {
+          await supabase.from('appointments')
+            .update({ delivery_location: { ...geo, captured_at: new Date().toISOString() } })
+            .eq('id', appointmentId);
+        } catch (geoErr) { console.warn('[on-the-way] geo patch failed (non-blocking):', geoErr); }
       }
 
       // Pull the appointment's view_token for the tracking link
