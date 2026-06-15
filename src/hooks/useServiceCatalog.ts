@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { hydrateDbServicePricing } from '@/services/pricing/pricingService';
 
 export interface DynamicServiceEntry {
   /** Stable slug — booking flow + server pricing key on this. */
@@ -76,6 +77,9 @@ export function useServiceCatalog(): UseServiceCatalogResult {
       const { data, error } = await supabase.rpc('get_active_service_catalog' as any);
       if (error) throw error;
       cached = { ts: Date.now(), rows: data || [] };
+      // Mirror DB prices into the client pricing cache so the checkout summary
+      // and previews match what the server charges for admin-created services.
+      hydrateDbServicePricing(data || []);
       setRows(data || []);
       setError(null);
     } catch (err: any) {
@@ -127,6 +131,7 @@ export async function fetchServiceCatalogOnce(): Promise<DynamicServiceEntry[]> 
     console.warn('[fetchServiceCatalogOnce] error:', error.message);
     return [];
   }
+  hydrateDbServicePricing(data || []);
   return (data || [])
     .filter((r: any) => r?.service_code)
     .map((r: any) => ({

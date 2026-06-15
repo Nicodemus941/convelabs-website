@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import AdminErrorBoundary from '@/components/admin/AdminErrorBoundary';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
 import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea, calculateTotal } from '@/services/pricing/pricingService';
+import { useServiceCatalog } from '@/hooks/useServiceCatalog';
 
 interface ScheduleAppointmentModalProps {
   open: boolean;
@@ -109,6 +110,24 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   // in this booking is FREE (Founding-50 perk).
   const [isFoundingMember, setIsFoundingMember] = useState<boolean>(false);
   const [referralCredits, setReferralCredits] = useState<Array<{ id: string; amount_cents: number; description: string | null }>>([]);
+
+  // Pull the live service catalog so admin-created services appear in this
+  // dropdown WITHOUT a code change, and so their DB prices hydrate the client
+  // pricing cache (getServicePrice). Merges the hardcoded legacy list with any
+  // DB service not already present (deduped by service_code). Inactive/package
+  // service_types stay out of the manual-booking grid.
+  const { services: dbServices } = useServiceCatalog();
+  const mergedServiceTypes = useMemo(() => {
+    const seen = new Set(SERVICE_TYPES.map(s => s.value));
+    const extras = (dbServices || [])
+      .filter(s => s.service_type !== 'package' && !seen.has(s.service_code))
+      .map(s => ({
+        value: s.service_code,
+        label: s.name,
+        price: Math.round(((s.tier_pricing?.none ?? 0) / 100) * 100) / 100,
+      }));
+    return [...SERVICE_TYPES, ...extras];
+  }, [dbServices]);
   // Matched lab_request from AutoLinkPreview — bound into the insert payload
   // so the DB trigger can stamp prepaid_at when the org already paid. Without
   // this binding the appointment lands un-linked, the prepaid trigger doesn't
@@ -722,7 +741,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       // $85). pricingService handles all 11 services + 5 partner orgs uniformly.
       // svc is still used for the human-readable label below; price comes from
       // pricingService.
-      const svc = SERVICE_TYPES.find(s => s.value === serviceType);
+      const svc = mergedServiceTypes.find(s => s.value === serviceType);
       const listPrice = getServicePrice(serviceType, 'none');
       const tierPrice = detectedTier !== 'none'
         ? getServicePrice(serviceType, detectedTier as any)
@@ -1287,7 +1306,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <Select value={serviceType} onValueChange={setServiceType}>
                 <SelectTrigger><SelectValue placeholder="Select a service" /></SelectTrigger>
                 <SelectContent>
-                  {SERVICE_TYPES.map(s => (
+                  {mergedServiceTypes.map(s => (
                     <SelectItem key={s.value} value={s.value}>{s.label} — ${s.price}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1929,7 +1948,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
               <div className="flex justify-between"><span className="text-muted-foreground">Patient</span><span className="font-medium">{patientName}</span></div>
               {patientEmail && <div className="flex justify-between"><span className="text-muted-foreground">Email</span><span>{patientEmail}</span></div>}
               {patientPhone && <div className="flex justify-between"><span className="text-muted-foreground">Phone</span><span>{patientPhone}</span></div>}
-              <div className="flex justify-between"><span className="text-muted-foreground">Service</span><span className="font-medium">{SERVICE_TYPES.find(s => s.value === serviceType)?.label} — ${previewBasePrice}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Service</span><span className="font-medium">{mergedServiceTypes.find(s => s.value === serviceType)?.label} — ${previewBasePrice}</span></div>
               {previewSurcharges.map((sc, i) => (
                 <div key={i} className="flex justify-between text-xs"><span className="text-amber-600">+ {sc.label}</span><span className="text-amber-600">+${sc.amount}</span></div>
               ))}
@@ -1978,7 +1997,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                     Charging <strong>${customVal.toFixed(2)}</strong> instead of the calculated <strong>${calculatedTotal.toFixed(2)}</strong>:
                   </p>
                   <ul className="text-[11px] text-amber-800 mt-1 ml-4 list-disc">
-                    <li>Base ({SERVICE_TYPES.find(s => s.value === serviceType)?.label}): ${previewBasePrice.toFixed(2)}</li>
+                    <li>Base ({mergedServiceTypes.find(s => s.value === serviceType)?.label}): ${previewBasePrice.toFixed(2)}</li>
                     {previewSurcharges.map((sc, i) => <li key={i}>{sc.label}: +${sc.amount.toFixed(2)}</li>)}
                   </ul>
                   <p className="text-[11px] text-amber-900 mt-1.5 font-medium">

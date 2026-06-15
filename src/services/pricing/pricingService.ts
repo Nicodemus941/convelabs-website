@@ -83,6 +83,45 @@ const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
   'partner-aristotle-education':     { none: 185,   member: 185,   vip: 185,   concierge: 185 },   // org_covers — patient pays 0
 };
 
+// ---------------------------------------------------------------------------
+// DB-hydrated pricing (admin-created services)
+// ---------------------------------------------------------------------------
+// `services_enhanced` is the source of truth (task #31). The server already
+// prices new services from the DB; this is the CLIENT mirror so the checkout
+// summary, admin booking, and price previews show the SAME number a brand-new
+// admin-created service is actually charged — instead of getServicePrice()
+// silently falling back to the $150 "mobile" price for any code it doesn't
+// recognize. `useServiceCatalog` calls hydrateDbServicePricing() whenever the
+// catalog loads, so this map stays current without per-call DB round-trips.
+const DB_TIER_PRICING: Record<string, Partial<Record<MembershipTier, number>>> = {};
+
+/**
+ * Hydrate the client-side price cache from the live service catalog.
+ * Accepts tier_pricing maps in CENTS (the catalog's native unit) and stores
+ * them in DOLLARS to match the hardcoded TIER_PRICING convention.
+ */
+export function hydrateDbServicePricing(
+  entries: Array<{ service_code?: string | null; tier_pricing?: Record<string, number> | null }>,
+): void {
+  for (const e of entries || []) {
+    const code = e?.service_code;
+    if (!code || !e.tier_pricing || typeof e.tier_pricing !== 'object') continue;
+    const dollars: Partial<Record<MembershipTier, number>> = {};
+    for (const tier of ['none', 'member', 'vip', 'concierge'] as MembershipTier[]) {
+      const cents = (e.tier_pricing as any)[tier];
+      if (typeof cents === 'number' && cents > 0) dollars[tier] = cents / 100;
+    }
+    if (Object.keys(dollars).length > 0) DB_TIER_PRICING[code] = dollars;
+  }
+}
+
+/** Resolve a DB-hydrated price for a service code + tier, with within-map fallback to `none`. */
+function getDbServicePrice(serviceId: string, tier: MembershipTier): number | undefined {
+  const row = DB_TIER_PRICING[serviceId];
+  if (!row) return undefined;
+  return row[tier] ?? row.none;
+}
+
 // Membership annual fees
 export const MEMBERSHIP_FEES: Record<string, { name: string; fee: number; label: string }> = {
   member: { name: 'Member', fee: 99, label: '$99/year' },
@@ -182,6 +221,12 @@ export function getServiceById(serviceId: string): ServiceOption | undefined {
 }
 
 export function getServicePrice(serviceId: string, tier: MembershipTier = 'none'): number {
+  // 1) DB catalog is the source of truth (task #31). Covers admin-created
+  //    services AND any tier overrides on legacy/partner codes. Empty until
+  //    the catalog hydrates, so legacy behavior is preserved on cold load.
+  const dbPrice = getDbServicePrice(serviceId, tier);
+  if (typeof dbPrice === 'number') return dbPrice;
+
   if (serviceId.startsWith('partner-')) {
     return PARTNER_PRICING[serviceId] ?? 125;
   }
