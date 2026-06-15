@@ -415,20 +415,51 @@ Deno.serve(async (req) => {
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
       const { data: blocks } = await supabaseClient
         .from('time_blocks')
-        .select('start_date, end_date, reason, block_type')
+        .select('start_date, end_date, start_time, end_time, reason, block_type')
         .lte('start_date', dateOnly)
         .gte('end_date', dateOnly)
-        .eq('block_type', 'office_closure')
-        .limit(1);
+        .eq('block_type', 'office_closure');
 
-      if (blocks && blocks.length > 0) {
-        console.warn(`[blocked-date-rejected] ${patientDetails.email} tried to book ${dateOnly} (reason: ${blocks[0].reason})`);
+      // A block with NO start/end time closes the WHOLE day. A block WITH a
+      // time window closes ONLY that window (e.g. "8:00–8:50 AM"). Previously
+      // this rejected ANY office_closure row covering the date as a full-day
+      // closure — so a partial 8:00–8:50 block bounced an 11 AM booking with
+      // date_blocked back to the date picker, even though the slot grid
+      // (which honors the window via getAvailableSlotsForDate) showed 11 AM
+      // open. Grid-vs-checkout disagreement = "Make Payment sends me back to
+      // the date/time page." (Mathew Shealy, 2026-06-15.) Now we honor the
+      // window so checkout matches the grid.
+      const blkToMin = (t: string | null | undefined): number | null => {
+        const c = normalizeSlotTime(t || '');
+        if (!c) return null;
+        const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(c);
+        if (!m) return null;
+        let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
+        if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+        if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
+        return h * 60 + mm;
+      };
+      const apptBlkMin = blkToMin(appointmentTime);
+      const blockingRow = (blocks || []).find((b: any) => {
+        const s = blkToMin(b.start_time);
+        const e = blkToMin(b.end_time);
+        if (s === null || e === null) return true;   // full-day closure
+        if (apptBlkMin === null) return false;       // no parseable time → don't full-day-block a windowed row
+        return apptBlkMin >= s && apptBlkMin < e;    // start-in-window (mirrors slot grid)
+      });
+
+      if (blockingRow) {
+        const r = (blockingRow as any).reason;
+        const windowed = (blockingRow as any).start_time && (blockingRow as any).end_time;
+        console.warn(`[blocked-date-rejected] ${patientDetails.email} tried ${dateOnly} ${appointmentTime} (reason: ${r}, windowed: ${!!windowed})`);
         return new Response(
           JSON.stringify({
             error: 'date_blocked',
-            message: `Sorry — we're not available on ${dateOnly}${blocks[0].reason ? ` (${blocks[0].reason})` : ''}. Please pick another date.`,
+            message: windowed
+              ? `Sorry — ${appointmentTime} isn't available on ${dateOnly}${r ? ` (${r})` : ''}. Please pick another time.`
+              : `Sorry — we're not available on ${dateOnly}${r ? ` (${r})` : ''}. Please pick another date.`,
             blockedDate: dateOnly,
-            reason: blocks[0].reason,
+            reason: r,
           }),
           { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
