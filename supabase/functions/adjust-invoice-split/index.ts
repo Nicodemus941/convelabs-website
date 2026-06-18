@@ -58,7 +58,19 @@ Deno.serve(async (req) => {
 
     const invoiceId = (appt as any).stripe_invoice_id as string;
     const totalCents = Math.round(Number((appt as any).total_amount || 0) * 100);
-    const phlebCents = Math.round((totalCents * Number(phlebPercent)) / 100);
+    // Canonical split: base p_base_phleb_pct% to phleb + 100% of surcharges +
+    // 100% of tips. Flat-percent-of-total is only the fallback if the RPC is
+    // unavailable — using it directly would give the phleb only `pct`% of the
+    // surcharge instead of the full pass-through the owner wants.
+    let phlebCents = Math.round((totalCents * Number(phlebPercent)) / 100);
+    try {
+      const { data: takeRes } = await supabase.rpc('compute_phleb_take_for_appointment' as any, {
+        p_appointment_id: appointmentId,
+        p_base_phleb_pct: Number(phlebPercent),
+      });
+      const row = Array.isArray(takeRes) ? takeRes[0] : takeRes;
+      if (row && row.take_cents != null) phlebCents = parseInt(String(row.take_cents), 10);
+    } catch (_e) { /* keep flat-pct fallback */ }
 
     const inv = await stripe.invoices.retrieve(invoiceId, { expand: ['payment_intent'] });
 

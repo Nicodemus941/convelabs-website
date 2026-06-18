@@ -327,50 +327,32 @@ Deno.serve(async (req) => {
     let totalTakeCents = 0;
     if (phlebConnectId && phlebStaffId) {
       try {
-        const apptsForTake: Array<{ id: string; total_amount: number; tip_amount: number; service_type: string; family_group_id: string | null }> = [
-          {
-            id: appt.id,
-            total_amount: Number(appt.total_amount || servicePrice || 0),
-            tip_amount: Number((appt as any).tip_amount || 0),
-            service_type: appt.service_type || serviceType || 'mobile',
-            family_group_id: appt.family_group_id || null,
-          },
-        ];
+        // Canonical split (compute_phleb_take_for_appointment): base 60% to
+        // phleb + 100% of surcharges + 100% of tips, read straight from each
+        // appointment row. This replaces the old compute_phleb_take_cents call
+        // that passed an EMPTY p_surcharges map — the bug that kept every
+        // same-day / after-hours / add-on surcharge with the business. (2026-06)
+        const takeApptIds: string[] = [appt.id];
         if (appt.family_group_id) {
           const { data: companionAppts } = await supabase
             .from('appointments')
-            .select('id, total_amount, tip_amount, service_type, family_group_id')
+            .select('id')
             .eq('family_group_id', appt.family_group_id)
             .neq('id', appointmentId)
             .eq('stripe_invoice_id', invoice.id);
-          for (const c of (companionAppts || [])) {
-            apptsForTake.push({
-              id: (c as any).id,
-              total_amount: Number((c as any).total_amount || 0),
-              tip_amount: Number((c as any).tip_amount || 0),
-              service_type: (c as any).service_type || appt.service_type || 'mobile',
-              family_group_id: (c as any).family_group_id || null,
-            });
-          }
+          for (const c of (companionAppts || [])) takeApptIds.push((c as any).id);
         }
-
-        for (const a of apptsForTake) {
-          const tipCents = Math.round((a.tip_amount || 0) * 100);
-          const hasCompanion = !!a.family_group_id;
-          const { data: takeRes } = await supabase.rpc('compute_phleb_take_cents' as any, {
-            p_staff_id: phlebStaffId,
-            p_service_type: a.service_type,
-            p_tip_cents: tipCents,
-            p_has_companion: hasCompanion,
-            p_surcharges: {},
-            p_is_owner: true,
+        for (const aid of takeApptIds) {
+          const { data: takeRes } = await supabase.rpc('compute_phleb_take_for_appointment' as any, {
+            p_appointment_id: aid,
+            p_base_phleb_pct: 60,
           });
-          const t = parseInt(String(takeRes || 0), 10);
+          const row = Array.isArray(takeRes) ? takeRes[0] : takeRes;
+          const t = parseInt(String(row?.take_cents || 0), 10);
           if (t > 0) totalTakeCents += t;
         }
 
-        // Cap at total invoice amount minus a tiny safety margin (Stripe
-        // requires transfer amount <= charge amount net of fees).
+        // Cap at total invoice amount (Stripe requires transfer <= charge).
         const primaryCents = Math.round((servicePrice || appt.total_amount || 0) * 100);
         const totalInvoiceCents = primaryCents + companionTotalCents;
         if (totalTakeCents > totalInvoiceCents) totalTakeCents = totalInvoiceCents;
