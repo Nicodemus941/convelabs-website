@@ -15,6 +15,7 @@ import {
   CornerDownRight, UserCheck, Flag,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import StaffActivityCard from './StaffActivityCard';
 
 /**
  * NotesTab — Hormozi-graded activity log + task assignment workspace.
@@ -415,6 +416,9 @@ const NotesTab: React.FC = () => {
           <Button variant="outline" size="sm" onClick={fetchActivities} className="gap-1"><RefreshCw className="h-4 w-4" /> Refresh</Button>
         </div>
       </div>
+
+      {/* Staff activity at a glance — logins, notes, org edits per person */}
+      <StaffActivityCard />
 
       {/* ─────────── HORMOZI DAILY SCOREBOARD ───────────
           Single sentence answers: "How is today going?" Updated in real-time
