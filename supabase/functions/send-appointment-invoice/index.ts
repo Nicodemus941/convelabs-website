@@ -327,11 +327,14 @@ Deno.serve(async (req) => {
     let totalTakeCents = 0;
     if (phlebConnectId && phlebStaffId) {
       try {
-        // Canonical split (compute_phleb_take_for_appointment): base 60% to
-        // phleb + 100% of surcharges + 100% of tips, read straight from each
-        // appointment row. This replaces the old compute_phleb_take_cents call
-        // that passed an EMPTY p_surcharges map — the bug that kept every
-        // same-day / after-hours / add-on surcharge with the business. (2026-06)
+        // Canonical split = compute_phleb_take_v2 (the same RPC the daily
+        // payout sweep uses): current per-service base rate + 100% of
+        // surcharges + 100% of tips. Owner rule 2026-06 (Option B): keep the
+        // existing base rates as the default; surcharges/tips always pass 100%
+        // to the phleb. The flat 60/40 is a per-invoice override applied only
+        // via adjust-invoice-split on request. This also fixes the prior bug
+        // where compute_phleb_take_cents got an EMPTY p_surcharges map and
+        // surcharges silently stayed with the business.
         const takeApptIds: string[] = [appt.id];
         if (appt.family_group_id) {
           const { data: companionAppts } = await supabase
@@ -343,9 +346,8 @@ Deno.serve(async (req) => {
           for (const c of (companionAppts || [])) takeApptIds.push((c as any).id);
         }
         for (const aid of takeApptIds) {
-          const { data: takeRes } = await supabase.rpc('compute_phleb_take_for_appointment' as any, {
+          const { data: takeRes } = await supabase.rpc('compute_phleb_take_v2' as any, {
             p_appointment_id: aid,
-            p_base_phleb_pct: 60,
           });
           const row = Array.isArray(takeRes) ? takeRes[0] : takeRes;
           const t = parseInt(String(row?.take_cents || 0), 10);
