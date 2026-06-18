@@ -276,10 +276,11 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
     //   • 'claude-sonnet-4-5'           — bare alias, bounced by Cloudflare (403)
     //   • 'claude-3-5-sonnet-20241022'  — Anthropic deprecated → 404 not_found_error
     //   • 'claude-3-7-sonnet-20250219'  — also 404 on this API key tier
-    //   • 'claude-sonnet-4-20250514'    — current. Same model already used by
-    //     extract-insurance-ocr in this project, so the API key is verified
-    //     to have access. Vision-capable, active-support.
-    model: 'claude-sonnet-4-20250514',
+    //   • 'claude-sonnet-4-20250514'    — now 404 not_found_error (4.0-gen ID
+    //     retired). Root cause of the "second lab order = OCR failed" reports
+    //     (e.g. Lauren Van Pelt) — every fresh OCR call 404'd. (2026-06-18)
+    //   • 'claude-sonnet-4-6'           — current Sonnet 4.6, vision-capable.
+    model: 'claude-sonnet-4-6',
     max_tokens: 1500,
     messages: [{
       role: 'user',

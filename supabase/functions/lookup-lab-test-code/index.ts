@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     // Fire Claude
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
     const msg = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 800,
       temperature: 0,
       messages: [{ role: 'user', content: PROMPT(lab_name, test_code_raw) }],
