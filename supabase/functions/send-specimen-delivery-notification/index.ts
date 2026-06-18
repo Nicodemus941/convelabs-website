@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     // Fetch appointment + linked orgs (primary + cc)
     const { data: appt } = await supabase
       .from('appointments')
-      .select('id, patient_name, patient_name_masked, org_reference_id, appointment_date, service_name, service_type, organization_id, patient_phone, patient_email, specimens_delivered_at')
+      .select('id, patient_name, patient_name_masked, org_reference_id, appointment_date, service_name, service_type, organization_id, patient_phone, patient_email, specimens_delivered_at, family_group_id')
       .eq('id', apptId)
       .maybeSingle();
 
@@ -338,14 +338,39 @@ Deno.serve(async (req) => {
       console.error('[specimen-notify] referring-provider receipt failed:', e?.message);
     }
 
+    // Collect the org(s) to notify — household-aware. A companion/2nd patient's
+    // own appointment often has NO org link (the ordering practice was matched
+    // on the primary's lab order), so delivering the companion's specimen used
+    // to notify no one. We now gather org links across the WHOLE family group
+    // (primary + every companion) so the referring practice is notified for any
+    // household member's specimen. (Buckles case, 2026-06-18)
+    const groupApptIds: string[] = [apptId];
+    if (appt.family_group_id) {
+      const { data: siblings } = await supabase
+        .from('appointments')
+        .select('id, organization_id')
+        .eq('family_group_id', appt.family_group_id);
+      for (const s of (siblings || [])) {
+        if (!groupApptIds.includes((s as any).id)) groupApptIds.push((s as any).id);
+      }
+    }
+
     const { data: links } = await supabase
       .from('appointment_organizations')
-      .select('organization_id, role, notified_delivery_at')
-      .eq('appointment_id', apptId);
+      .select('organization_id, role, notified_delivery_at, appointment_id')
+      .in('appointment_id', groupApptIds);
 
-    // Also include appointments.organization_id fallback if not in junction
-    const orgIds = new Set<string>((links || []).map((l: any) => l.organization_id));
+    // Junction links across the household + each appointment's organization_id.
+    const orgIds = new Set<string>((links || []).map((l: any) => l.organization_id).filter(Boolean));
     if (appt.organization_id) orgIds.add(appt.organization_id as string);
+    if (appt.family_group_id) {
+      const { data: sibOrgs } = await supabase
+        .from('appointments')
+        .select('organization_id')
+        .eq('family_group_id', appt.family_group_id)
+        .not('organization_id', 'is', null);
+      for (const s of (sibOrgs || [])) orgIds.add((s as any).organization_id as string);
+    }
 
     if (orgIds.size === 0) {
       // Patient SMS/email already fired above — just return.
