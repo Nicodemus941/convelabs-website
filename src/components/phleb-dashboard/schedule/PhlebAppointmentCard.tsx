@@ -20,6 +20,7 @@ import SpecimenDeliveryModal from './SpecimenDeliveryModal';
 import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal';
 import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
+import PhlebSmsDialog from './PhlebSmsDialog';
 import TubeLabelModal from './TubeLabelModal';
 import PhlebUploadLabOrderButton from './PhlebUploadLabOrderButton';
 import PhlebUploadInsuranceCardButton from './PhlebUploadInsuranceCardButton';
@@ -62,6 +63,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   });
   const [showSpecimenDelivery, setShowSpecimenDelivery] = useState(false);
   const [showRunningLate, setShowRunningLate] = useState(false);
+  const [showSmsDialog, setShowSmsDialog] = useState(false);
   const [showTubeLabel, setShowTubeLabel] = useState(false);
   const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string }>({ open: false, path: null });
   // Bumped after every phleb-side lab-order upload so the status list re-fetches immediately
@@ -626,6 +628,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   </Button>
                   <Button size="sm" variant="outline" className="flex-1 gap-1.5 h-8 text-xs" onClick={handleEmail}>
                     <Mail className="h-3 w-3" /> Email
+                  </Button>
+                  <Button size="sm" variant="outline" className="flex-1 gap-1.5 h-8 text-xs" onClick={(e) => { e.stopPropagation(); setShowSmsDialog(true); }}>
+                    <MessageSquare className="h-3 w-3" /> SMS
                   </Button>
                 </div>
                 {/* Insurance — primary + (optional) secondary, each verifiable */}
@@ -1253,6 +1258,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientFirstName={appointment.patient_name || 'there'}
         patientPhone={appointment.patient_phone}
         appointmentId={appointment.id}
+      />
+
+      <PhlebSmsDialog
+        open={showSmsDialog}
+        onOpenChange={setShowSmsDialog}
+        appointmentId={appointment.id}
+        patientName={appointment.patient_name || 'patient'}
+        patientPhone={appointment.patient_phone}
       />
 
       <TubeLabelModal
