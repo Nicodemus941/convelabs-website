@@ -225,9 +225,12 @@ async function handleMmsUpload(admin: any, from: string, formData: URLSearchPara
   }
 
   if (lo?.id) {
-    try { admin.functions.invoke('ocr-lab-order', { body: { labOrderId: lo.id } }).catch(() => {}); } catch {}
+    // notifyPatientSms=true → ocr-lab-order texts the patient a fasting/prep
+    // answer once it reads the order (Phase 3 concierge). Web/provider uploads
+    // don't set this flag, so only the "text a photo" path gets the follow-up.
+    try { admin.functions.invoke('ocr-lab-order', { body: { labOrderId: lo.id, notifyPatientSms: true } }).catch(() => {}); } catch {}
   }
-  return "Got it ✓ Your lab order is on file. We'll see you at your appointment. — ConveLabs";
+  return "Got it ✓ Reading your lab order now — I'll text you in a moment to let you know if you need to fast before your draw. — ConveLabs";
 }
 
 Deno.serve(async (req) => {

@@ -89,6 +89,18 @@ verify_jwt = false
 [functions.twilio-inbound-sms]
 verify_jwt = false
 
+# SMS concierge brain — invoked only by twilio-inbound-sms with the service-role
+# key. verify_jwt=true blocks public POSTs that would trigger SMS to arbitrary
+# numbers; the service-role bearer still passes.
+[functions.sms-concierge]
+verify_jwt = true
+
+# OCR — called by edge fns (service-role bearer) + browser uploads (anon/user
+# JWT via supabase-js). All callers authenticate; keep the gate on so the
+# notifyPatientSms trigger can't be abused anonymously.
+[functions.ocr-lab-order]
+verify_jwt = true
+
 [functions.twilio-voice-greeting]
 verify_jwt = false
 

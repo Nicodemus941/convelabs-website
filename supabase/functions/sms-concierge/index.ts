@@ -67,8 +67,9 @@ ACTIONS — when the patient clearly wants one of these, end your message with a
 - [[ACTION: reschedule]] — they want to reschedule, move, change the time of, or cancel an existing appointment. (Your line: e.g. "Happy to help — I'm texting you a secure link to pick a new time or cancel.")
 - [[ACTION: book]] — they want to book / schedule a new appointment. (Your line: e.g. "Love it — I'm texting you a link to book your visit.")
 - [[ACTION: callback]] — they want a person to call them, or ask to "have someone call me". (Your line: e.g. "Absolutely — I'll have our team give you a call shortly.")
+- [[ACTION: fasting]] — they ask whether they need to fast, or how to prep for their draw. (Your line: a brief acknowledgement like "Let me check your lab order for that." — the system appends the exact fasting answer.)
 
-ESCALATE to a human (end your message with a separate final line exactly: [[ESCALATE: <short reason>]]) when the patient: has a billing/payment question or dispute, has a complaint or bad experience, asks anything medical or about their results, mentions a real emergency, asks whether their lab order requires fasting, or asks anything you are not confident you can answer correctly. When you escalate, your visible message should be a brief, calm acknowledgement that you're connecting them with the team who will follow up shortly — do NOT guess at the answer.
+ESCALATE to a human (end your message with a separate final line exactly: [[ESCALATE: <short reason>]]) when the patient: has a billing/payment question or dispute, has a complaint or bad experience, asks anything medical or about their results (other than fasting/prep), mentions a real emergency, or asks anything you are not confident you can answer correctly. When you escalate, your visible message should be a brief, calm acknowledgement that you're connecting them with the team who will follow up shortly — do NOT guess at the answer.
 
 Emit at most ONE tag (ACTION or ESCALATE) per message. Never invent facts. If unsure, escalate.`;
 
@@ -84,19 +85,24 @@ Deno.serve(async (req) => {
     let patientName = '';
     let apptLine = '';
     let apptId: string | null = null;
+    let apptFasting = false, apptUrine = false, apptHasOrder = false, apptPanels: string[] = [];
     try {
       const { data: tp } = await admin.from('tenant_patients')
         .select('first_name, last_name')
         .filter('phone', 'ilike', `%${ten}%`).limit(1).maybeSingle();
       if (tp) patientName = [(tp as any).first_name, (tp as any).last_name].filter(Boolean).join(' ');
       const { data: appt } = await admin.from('appointments')
-        .select('id, appointment_date, appointment_time, status')
+        .select('id, appointment_date, appointment_time, status, fasting_required, urine_required, ocr_processed_at, lab_order_panels')
         .ilike('patient_phone', `%${ten}%`)
         .gte('appointment_date', new Date().toISOString())
         .not('status', 'eq', 'cancelled')
         .order('appointment_date', { ascending: true }).limit(1).maybeSingle();
       if (appt) {
         apptId = (appt as any).id;
+        apptFasting = !!(appt as any).fasting_required;
+        apptUrine = !!(appt as any).urine_required;
+        apptHasOrder = !!(appt as any).ocr_processed_at;
+        apptPanels = Array.isArray((appt as any).lab_order_panels) ? (appt as any).lab_order_panels : [];
         apptLine = `Upcoming appointment: ${String((appt as any).appointment_date).slice(0,10)} ${(appt as any).appointment_time || ''} (${(appt as any).status}).`;
       }
     } catch { /* context is best-effort */ }
@@ -170,6 +176,15 @@ Deno.serve(async (req) => {
       .replace(/\[\[ESCALATE:[^\]]*\]\]/i, '')
       .trim();
 
+    // Deterministic fasting-intent net — the model sometimes answers "it
+    // depends" or promises to check without emitting the tag. Force the
+    // fasting flow on clear fasting/prep phrasing so the patient always gets
+    // a precise answer (this path reads only the stored OCR determination, so
+    // it's safe to run even if the model misclassified).
+    if (!action && /fasting|\b(do i|should i|need to|have to|gotta)\s+fast\b|\bto fast\b|empty stomach|can i eat|should i eat|eat before|eat or drink|drink before/i.test(String(body))) {
+      action = 'fasting'; escalate = !aiText ? escalate : false; reason = escalate ? reason : '';
+    }
+
     // ── PHASE 2 ACTIONS — patient-confirmed links, no money/medical action ──
     // The helper functions text the patient the secure link themselves, so we
     // suppress our own patient SMS when one fires (avoids a double text).
@@ -220,6 +235,22 @@ Deno.serve(async (req) => {
     if (action === 'callback') {
       escalate = true; actionDone = 'callback_requested';
       if (!reason) reason = 'Patient requested a callback';
+    }
+
+    if (action === 'fasting') {
+      // Fasting/prep is patient prep instruction (not medical advice) — answer
+      // it from the OCR'd lab order on file; otherwise ask for a photo (Phase 3).
+      actionDone = 'fasting_answered';
+      const urineTip = apptUrine ? ` You'll also give a urine sample, so please don't use the restroom right before we arrive.` : '';
+      if (apptHasOrder) {
+        visible = apptFasting
+          ? `Based on your lab order on file, please FAST 8–12 hours before your draw — water and any prescribed medications are fine.${urineTip}`
+          : `Good news — your lab order on file doesn't require fasting; eat and drink normally before your visit.${urineTip} (If you're ever unsure, a 10–12h fast with water is always safe for a blood draw.)`;
+      } else if (apptId) {
+        visible = `I don't see your lab order on file yet. Text a clear photo of it here and I'll tell you right away whether you need to fast.`;
+      } else {
+        visible = `Happy to check! Text a photo of your lab order to this number and I'll let you know if you need to fast. Or book a visit anytime: ${PUBLIC}/book-now`;
+      }
     }
 
     // Sane default messages.

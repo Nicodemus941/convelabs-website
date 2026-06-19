@@ -428,7 +428,7 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
-    const { appointmentId, filePath: bareFilePath, labOrderId } = body || {};
+    const { appointmentId, filePath: bareFilePath, labOrderId, notifyPatientSms } = body || {};
 
     let filePath: string | null = bareFilePath || null;
     let targetId: string | null = appointmentId || null;
@@ -722,6 +722,42 @@ Deno.serve(async (req) => {
         lab_order_panels: result.panels,
         ocr_processed_at: new Date().toISOString(),
       }).eq('id', targetId);
+    }
+
+    // ─── PHASE 3: PATIENT FASTING/PREP SMS (SMS concierge MMS path) ───
+    // When a patient texts a photo of their lab order they expect to be told
+    // whether they need to fast. The MMS path passes notifyPatientSms=true;
+    // now that OCR has the determination, text them the prep answer. Only the
+    // MMS path sets this flag — web/provider uploads + re-OCR sweeps stay silent.
+    if (notifyPatientSms && targetId) {
+      try {
+        const { data: pa } = await supabase
+          .from('appointments')
+          .select('patient_phone, patient_name, fasting_required, urine_required')
+          .eq('id', targetId).maybeSingle();
+        const digits = String((pa as any)?.patient_phone || '').replace(/\D/g, '');
+        const TS = Deno.env.get('TWILIO_ACCOUNT_SID') || '', TT = Deno.env.get('TWILIO_AUTH_TOKEN') || '', TF = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
+        if (digits && TS && TT && TF) {
+          const fasts = fastingDetected || !!(pa as any)?.fasting_required;
+          const urine = urineDetected || !!(pa as any)?.urine_required;
+          const first = String((pa as any)?.patient_name || '').split(' ')[0];
+          const hi = first ? `${first}, ` : '';
+          let msg = fasts
+            ? `${hi}your lab order is on file ✓ Based on your order, please FAST 8–12 hours before your draw — water and any prescribed medications are fine.`
+            : `${hi}your lab order is on file ✓ No fasting needed based on your order — eat and drink normally before your visit.`;
+          if (urine) msg += ` You'll also give a urine sample, so please don't use the restroom right before we arrive.`;
+          msg += ` Questions? Just reply here. — ConveLabs`;
+          const to = digits.length === 10 ? `+1${digits}` : `+${digits}`;
+          const p = new URLSearchParams({ To: to, From: TF, Body: msg });
+          const scb = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-status-callback`;
+          if (scb.startsWith('http')) p.append('StatusCallback', scb);
+          await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TS}/Messages.json`, {
+            method: 'POST',
+            headers: { Authorization: `Basic ${btoa(`${TS}:${TT}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: p.toString(),
+          });
+        }
+      } catch (e) { console.warn('[ocr->fasting-sms] non-blocking:', (e as any)?.message); }
     }
 
     // ─── PATIENT DOB BACKFILL ─────────────────────────────────────
