@@ -5,11 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
   MessageCircle, AlertTriangle, CheckCircle2, User, Bot, RefreshCw,
-  Search, ExternalLink, Sparkles, TrendingUp, DollarSign, Users, ChevronRight, Loader2,
+  Search, ExternalLink, Sparkles, TrendingUp, DollarSign, Users, ChevronRight, ChevronLeft, Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -270,58 +269,127 @@ const ChatbotTab: React.FC = () => {
             </div>
           </div>
 
-          {loading ? (
-            <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-          ) : filtered.length === 0 ? (
-            <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">
-              No conversations match. {conversations.length === 0 && 'Waiting for real visitors to hit the widget.'}
-            </CardContent></Card>
-          ) : (
-            <div className="space-y-2">
-              {filtered.map((c) => (
-                <Card key={c.id} className={`cursor-pointer hover:shadow-md transition ${c.staff_unread ? 'ring-2 ring-red-300 bg-red-50/30' : ''}`} onClick={() => loadMessages(c)}>
-                  <CardContent className="p-3 flex items-start gap-3">
-                    <div className="h-10 w-10 rounded-lg bg-conve-red/10 flex items-center justify-center flex-shrink-0">
-                      <MessageCircle className="h-5 w-5 text-conve-red" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        {c.staff_unread && (
-                          <Badge variant="outline" className="bg-red-500 text-white border-red-500 animate-pulse">Needs reply</Badge>
-                        )}
-                        {c.captured_name && <span className="text-sm font-semibold text-gray-900">{c.captured_name}</span>}
-                        <Badge variant="outline" className={STATUS_STYLES[c.status] || STATUS_STYLES.active}>
-                          {c.status}
-                        </Badge>
-                        {c.lead_path && (
-                          <Badge variant="outline" className={LEAD_PATH_STYLES[c.lead_path] || LEAD_PATH_STYLES.unknown}>
-                            {c.lead_path}
-                          </Badge>
-                        )}
-                        {c.booked_at && <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Booked</Badge>}
-                        {c.qualified_at && !c.booked_at && <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Qualified</Badge>}
-                        <span className="text-[11px] text-muted-foreground">
-                          {formatDistanceToNow(new Date(c.started_at), { addSuffix: true })} · {c.message_count} msgs
-                        </span>
-                      </div>
-                      <div className="text-sm flex flex-wrap gap-x-4 gap-y-0.5 text-gray-700">
-                        {c.captured_email && <span>📧 {c.captured_email}</span>}
-                        {c.captured_phone && <span>📱 {c.captured_phone}</span>}
-                        {c.captured_zip && <span>📍 {c.captured_zip}</span>}
-                        {c.utm_source && <span className="text-[11px] text-muted-foreground">utm: {c.utm_source}</span>}
-                      </div>
-                      {c.escalation_reason && (
-                        <p className="text-xs text-red-700 mt-1 flex items-start gap-1">
-                          <AlertTriangle className="h-3 w-3 flex-shrink-0 mt-0.5" /> {c.escalation_reason}
-                        </p>
-                      )}
-                    </div>
-                    <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-1" />
-                  </CardContent>
-                </Card>
-              ))}
+          {/* Master–detail inbox: session sidebar (left) + thread (right).
+              On mobile it's single-column — the thread replaces the list and a
+              Back button returns to the session sidebar (no dead-end window). */}
+          <div className="flex flex-col md:flex-row border rounded-xl overflow-hidden bg-white h-[72vh]">
+            {/* ── SESSION SIDEBAR — toggle between any chat ── */}
+            <div className={`${selectedConvo ? 'hidden md:flex' : 'flex'} md:w-80 lg:w-96 flex-col border-r bg-gray-50/60 min-h-0`}>
+              <div className="px-3 py-2 border-b bg-white text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                <span>Chat sessions</span>
+                <span className="text-gray-400">{filtered.length}</span>
+              </div>
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {loading ? (
+                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+                ) : filtered.length === 0 ? (
+                  <p className="p-6 text-center text-sm text-muted-foreground">No conversations match.{conversations.length === 0 && ' Waiting for visitors.'}</p>
+                ) : (
+                  filtered.map((c) => {
+                    const isSel = selectedConvo?.id === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => loadMessages(c)}
+                        className={`w-full text-left px-3 py-2.5 border-b transition ${isSel ? 'bg-conve-red/10 border-l-2 border-l-conve-red' : c.staff_unread ? 'bg-red-50/60 hover:bg-red-50' : 'hover:bg-white'}`}
+                      >
+                        <div className="flex items-center gap-2 mb-0.5">
+                          {c.staff_unread && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                          <span className="text-sm font-semibold text-gray-900 truncate flex-1">
+                            {c.captured_name || c.captured_email || `Visitor ${(c.visitor_id || '').slice(0, 6)}`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                            {formatDistanceToNow(new Date(c.last_message_at || c.started_at), { addSuffix: false })}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {c.staff_unread && <Badge variant="outline" className="text-[9px] py-0 bg-red-500 text-white border-red-500">Needs reply</Badge>}
+                          <Badge variant="outline" className={`text-[9px] py-0 ${STATUS_STYLES[c.status] || STATUS_STYLES.active}`}>{c.status}</Badge>
+                          {c.lead_path && <span className="text-[10px] text-muted-foreground">{c.lead_path}</span>}
+                          <span className="text-[10px] text-muted-foreground">· {c.message_count} msgs</span>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
-          )}
+
+            {/* ── DETAIL PANE — selected session thread + reply ── */}
+            <div className={`${selectedConvo ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-h-0`}>
+              {!selectedConvo ? (
+                <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground p-8 text-center">
+                  Select a chat session on the left to view the full conversation.
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 py-2.5 border-b bg-white flex items-center gap-2">
+                    <button className="md:hidden p-1 -ml-1 text-muted-foreground hover:text-gray-900" onClick={() => setSelectedConvo(null)} aria-label="Back to sessions">
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold truncate">{selectedConvo.captured_name || selectedConvo.captured_email || 'Visitor'}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        Started {formatDistanceToNow(new Date(selectedConvo.started_at), { addSuffix: true })}
+                        {selectedConvo.captured_phone ? ` · 📱 ${selectedConvo.captured_phone}` : ''}
+                        {selectedConvo.captured_email ? ` · 📧 ${selectedConvo.captured_email}` : ''}
+                      </p>
+                    </div>
+                    <Badge variant="outline" className={STATUS_STYLES[selectedConvo.status] || ''}>{selectedConvo.status}</Badge>
+                  </div>
+                  {selectedConvo.escalation_reason && (
+                    <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-xs text-red-800 flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                      <span><strong>Escalated to Nico:</strong> {selectedConvo.escalation_reason}</span>
+                    </div>
+                  )}
+                  <div className="flex-1 overflow-y-auto bg-gray-50 p-3 space-y-2 min-h-0">
+                    {loadingMessages ? (
+                      <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                    ) : selectedMessages.length === 0 ? (
+                      <p className="text-xs text-muted-foreground text-center py-8">No messages yet.</p>
+                    ) : (
+                      selectedMessages.map((m) => (
+                        <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className="max-w-[85%]">
+                            <div className={`flex items-center gap-1 text-[10px] mb-0.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'} text-muted-foreground`}>
+                              {m.role === 'user' ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
+                              <span className="capitalize">{(m.role as string) === 'human' ? 'Nico (you)' : m.role}</span>
+                              <span>· {new Date(m.created_at).toLocaleString()}</span>
+                            </div>
+                            <div className={`px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${
+                              m.role === 'user' ? 'bg-conve-red text-white rounded-tr-sm'
+                              : (m.role as string) === 'human' ? 'bg-rose-50 border border-conve-red/30 rounded-tl-sm'
+                              : 'bg-white border border-gray-200 rounded-tl-sm'
+                            }`}>
+                              {m.content}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="border-t p-3 bg-white">
+                    <div className="flex gap-2">
+                      <input
+                        value={adminReply}
+                        onChange={(e) => setAdminReply(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && sendAdminReply()}
+                        placeholder={`Reply to ${selectedConvo.captured_name || 'the visitor'}…`}
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conve-red/40"
+                      />
+                      <Button onClick={sendAdminReply} disabled={adminSending || !adminReply.trim()} className="bg-conve-red hover:bg-conve-red/90 text-white">
+                        {adminSending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send'}
+                      </Button>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Reaches them live in chat{selectedConvo.captured_phone ? ', by text' : ''}{selectedConvo.captured_email ? ', and by email' : ''}. Taking over pauses the AI for this chat.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         </TabsContent>
 
         {/* ── FREQUENT QUESTIONS TAB ──────────────────────────── */}
@@ -422,93 +490,6 @@ const ChatbotTab: React.FC = () => {
         </TabsContent>
       </Tabs>
 
-      {/* Conversation detail dialog */}
-      <Dialog open={!!selectedConvo} onOpenChange={(v) => !v && setSelectedConvo(null)}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <MessageCircle className="h-5 w-5 text-conve-red" />
-              Conversation · {selectedConvo?.lead_path || 'unknown path'}
-            </DialogTitle>
-          </DialogHeader>
-
-          {selectedConvo && (
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2 text-[11px]">
-                <Badge variant="outline" className={STATUS_STYLES[selectedConvo.status] || ''}>{selectedConvo.status}</Badge>
-                {selectedConvo.captured_email && <span>📧 {selectedConvo.captured_email}</span>}
-                {selectedConvo.captured_zip && <span>📍 {selectedConvo.captured_zip}</span>}
-                {selectedConvo.utm_source && <span>utm: {selectedConvo.utm_source}</span>}
-                {selectedConvo.landing_url && <span>from: {selectedConvo.landing_url}</span>}
-                <span className="text-muted-foreground">
-                  Started {formatDistanceToNow(new Date(selectedConvo.started_at), { addSuffix: true })}
-                </span>
-              </div>
-              {selectedConvo.escalation_reason && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-2.5 text-xs text-red-800 flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-semibold">Escalated to Nico</p>
-                    <p className="mt-0.5">{selectedConvo.escalation_reason}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="bg-gray-50 rounded-lg p-3 space-y-2 mt-3 min-h-[200px]">
-            {loadingMessages ? (
-              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
-            ) : selectedMessages.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-8">No messages yet.</p>
-            ) : (
-              selectedMessages.map((m) => (
-                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className="max-w-[85%]">
-                    <div className={`flex items-center gap-1 text-[10px] mb-0.5 ${m.role === 'user' ? 'justify-end' : 'justify-start'} text-muted-foreground`}>
-                      {m.role === 'user' ? <User className="h-3 w-3" /> : <Bot className="h-3 w-3" />}
-                      <span className="capitalize">{m.role === 'human' ? 'Nico (you)' : m.role}</span>
-                      <span>· {new Date(m.created_at).toLocaleTimeString()}</span>
-                      {(m as any).delivered_via && <span className="text-emerald-700 ml-1">· {(m as any).delivered_via}</span>}
-                      {m.guardrail_triggered && <span className="text-amber-700 font-semibold ml-1">· guardrail: {m.guardrail_triggered}</span>}
-                    </div>
-                    <div className={`px-3 py-2 rounded-lg text-sm whitespace-pre-wrap ${
-                      m.role === 'user'
-                        ? 'bg-conve-red text-white rounded-tr-sm'
-                        : m.role === 'human'
-                          ? 'bg-rose-50 border border-conve-red/30 rounded-tl-sm'
-                          : 'bg-white border border-gray-200 rounded-tl-sm'
-                    }`}>
-                      {m.content}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Reply composer — delivers live in the widget + by SMS/email */}
-          {selectedConvo && (
-            <div className="mt-3 border-t pt-3">
-              <div className="flex gap-2">
-                <input
-                  value={adminReply}
-                  onChange={(e) => setAdminReply(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && sendAdminReply()}
-                  placeholder={`Reply to ${(selectedConvo as any).captured_name || 'the visitor'}…`}
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-conve-red/40"
-                />
-                <Button onClick={sendAdminReply} disabled={adminSending || !adminReply.trim()} className="bg-conve-red hover:bg-conve-red/90 text-white">
-                  {adminSending ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send'}
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Reaches them live in chat{(selectedConvo as any).captured_phone ? ', by text' : ''}{selectedConvo.captured_email ? ', and by email' : ''}. Taking over pauses the AI for this chat.
-              </p>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
