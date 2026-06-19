@@ -8,8 +8,8 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
-import { Loader2, Send, AlertTriangle, Phone, Mail, MapPin, User } from 'lucide-react';
+import { useParams, Link } from 'react-router-dom';
+import { Loader2, Send, AlertTriangle, Phone, Mail, MapPin, User, MessageCircle, Menu, X, Inbox } from 'lucide-react';
 
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
 const ANON = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || (import.meta as any).env?.VITE_SUPABASE_PUBLISHABLE_KEY || '';
@@ -28,6 +28,7 @@ const ChatThreadPage: React.FC = () => {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const headers = { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': `Bearer ${ANON}` };
@@ -84,11 +85,51 @@ const ChatThreadPage: React.FC = () => {
   const channels = (m: Msg) => m.delivered_via ? ` · sent via ${m.delivered_via.replace(/\+/g, ', ')}` : '';
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* Mobile backdrop when the session drawer is open */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/40 z-20 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* ── SESSION SIDEBAR (drawer on mobile, fixed column on desktop) ── */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-30 w-72 bg-white border-r flex flex-col transform transition-transform duration-200
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 md:static md:z-auto`}
+      >
+        <div className="px-4 py-3 border-b bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white flex items-center justify-between">
+          <span className="font-semibold flex items-center gap-2"><MessageCircle className="h-4 w-4" /> Chats</span>
+          <button className="md:hidden p-1" onClick={() => setSidebarOpen(false)} aria-label="Close"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400">This session</p>
+          <div className="rounded-lg border border-[#B91C1C]/30 bg-[#B91C1C]/5 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+              <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
+            </div>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              {conv?.status || 'active'}{conv?.lead_path ? ` · ${conv.lead_path}` : ''} · {messages.length} msgs
+            </p>
+          </div>
+        </div>
+        <div className="border-t p-3">
+          <Link
+            to="/dashboard/super_admin/chatbot"
+            className="flex items-center justify-center gap-2 w-full bg-gray-900 hover:bg-black text-white text-sm rounded-lg px-3 py-2.5"
+          >
+            <Inbox className="h-4 w-4" /> Open full Chat Inbox
+          </Link>
+          <p className="text-[10px] text-gray-400 mt-1.5 text-center">All sessions, searchable, with the session list to toggle between chats.</p>
+        </div>
+      </aside>
+
+      {/* ── MAIN THREAD ── */}
+      <div className="flex-1 flex flex-col min-w-0">
       {/* Header */}
       <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white px-4 py-3 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center gap-2">
+            <button className="md:hidden p-1 -ml-1" onClick={() => setSidebarOpen(true)} aria-label="Open chats"><Menu className="h-5 w-5" /></button>
             <User className="h-4 w-4" />
             <span className="font-semibold">{name}</span>
             {conv?.lead_path && <span className="text-[10px] bg-white/20 rounded-full px-2 py-0.5 uppercase tracking-wide">{conv.lead_path}</span>}
@@ -141,6 +182,7 @@ const ChatThreadPage: React.FC = () => {
           Your reply reaches them live in chat{conv?.captured_phone ? ', by text' : ''}{conv?.captured_email ? ', and by email' : ''}.
         </p>
       </form>
+      </div>
     </div>
   );
 };
