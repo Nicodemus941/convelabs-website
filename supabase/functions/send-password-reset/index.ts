@@ -69,14 +69,33 @@ Deno.serve(async (req) => {
       ? `https://www.convelabs.com/reset-password?token=${encodeURIComponent(hashedToken)}&email=${encodeURIComponent(email.trim())}&type=recovery`
       : actionLink;
 
-    // Step 2: Get patient name
-    const { data: tp } = await supabase
-      .from('tenant_patients')
-      .select('first_name')
-      .ilike('email', email.trim())
-      .maybeSingle();
-
-    const firstName = tp?.first_name || 'Patient';
+    // Step 2: Resolve the greeting name.
+    // ORG ACCOUNTS FIRST: if this email is an organization's contact email,
+    // greet the org's contact PERSON — never a patient who happens to share
+    // the org's shared inbox. (The "Hi Melissa" bug: a patient row shared
+    // Elite Medical Concierge's gmail, so the patient lookup won.) Only fall
+    // back to a patient first name for genuine patient accounts.
+    let greetingName = 'there';
+    const { data: orgs } = await supabase
+      .from('organizations')
+      .select('contact_name, name')
+      .ilike('contact_email', email.trim())
+      .limit(1);
+    const org = orgs?.[0];
+    if (org?.contact_name?.trim()) {
+      greetingName = org.contact_name.trim();
+    } else if (org?.name?.trim()) {
+      // Org with no contact person on file — use the org name, not a patient.
+      greetingName = org.name.trim();
+    } else {
+      // Not an organization email — safe to greet the patient by first name.
+      const { data: tps } = await supabase
+        .from('tenant_patients')
+        .select('first_name')
+        .ilike('email', email.trim())
+        .limit(1);
+      if (tps?.[0]?.first_name?.trim()) greetingName = tps[0].first_name.trim();
+    }
 
     // Step 3: Send email via Mailgun
     console.log('Sending reset email to:', email, 'via Mailgun');
@@ -87,7 +106,7 @@ Deno.serve(async (req) => {
         <p style="margin:6px 0 0;opacity:0.9;">ConveLabs Account Recovery</p>
       </div>
       <div style="background:white;border:1px solid #e5e7eb;padding:24px;border-radius:0 0 12px 12px;">
-        <p>Hi ${firstName},</p>
+        <p>Hi ${greetingName},</p>
         <p>We received a request to reset your ConveLabs password. Click the button below to create a new password:</p>
         <div style="text-align:center;margin:24px 0;">
           <a href="${resetLink}" style="display:inline-block;background:#B91C1C;color:white;padding:14px 40px;border-radius:12px;text-decoration:none;font-weight:700;font-size:16px;">Reset My Password</a>
