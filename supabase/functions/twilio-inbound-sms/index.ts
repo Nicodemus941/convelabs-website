@@ -426,20 +426,22 @@ Deno.serve(async (req) => {
     }
 
     if (!match) {
-      // If they're a booked patient, give them useful info instead of a brick-wall reply
-      if (alreadyBooked && alreadyBooked.appointment_id) {
-        const { data: appt } = await admin
-          .from('appointments')
-          .select('appointment_date, appointment_time, address, status')
-          .eq('id', alreadyBooked.appointment_id)
-          .maybeSingle();
-        if (appt) {
-          const d = appt.appointment_date?.substring(0, 10) || '';
-          const prettyDate = d ? new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'your scheduled date';
-          return twiml(`Your ConveLabs appointment: ${prettyDate} at ${appt.appointment_time || ''} · ${appt.address?.substring(0, 40) || ''}. Need to reschedule or cancel? Email info@convelabs.com or call (941) 527-9169.`);
-        }
-      }
-      return twiml(`We couldn't find an active lab request for this number. If you believe this is a mistake, email info@convelabs.com. Book any time at ${PUBLIC_SITE_URL}/book-now`);
+      // ─── INTELLIGENT SMS CONCIERGE (Phase 1) ──────────────────────
+      // No pending lab-request command matched — this is a general
+      // patient text ("what should I expect?", "can someone call me?",
+      // "do I need to fast?"). Hand it to the AI concierge brain, which:
+      //   • threads the message into the Chat Inbox (chatbot_conversations)
+      //   • answers HIPAA-safe questions
+      //   • escalates anything action-y/risky to a human (+ pings owner)
+      // Fire-and-forget so a slow Claude call can never time out this
+      // webhook — the concierge sends its reply via Twilio REST itself.
+      // Return empty 200 (no synchronous TwiML); the AI reply follows in
+      // a few seconds. Phases 2/3 (reschedule/book actions, photo→OCR
+      // fasting) layer onto the same router later.
+      try {
+        admin.functions.invoke('sms-concierge', { body: { from, body } }).catch(() => {});
+      } catch { /* never block */ }
+      return new Response('', { status: 200 });
     }
 
     // "DATES" / "D" / "TIMES" / "SLOTS" → resend fresh LIVE-AVAILABILITY slot list
