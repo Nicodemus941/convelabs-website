@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Calendar, Users, Briefcase, Package,
   FileText, Settings, Mail, Webhook,
-  CalendarDays, MessageSquare, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
+  CalendarDays, MessageSquare, MessageCircle, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
   Crown, GraduationCap, Inbox, Bell, Wallet,
 } from 'lucide-react';
 import { getUnreadReleaseCount } from '@/data/releaseNotes';
@@ -25,6 +25,7 @@ type SidebarItem = {
   inboxBadge?: boolean;  // numeric badge for OCR-pipeline items needing human touch
   labOrderBadge?: boolean; // numeric badge: unviewed provider-uploaded orders
   releaseBadge?: boolean;  // numeric badge: unread release notes
+  chatBadge?: boolean;     // numeric red badge: landing-page chats needing a reply (escalated/unread)
   ownerOnly?: boolean;
 };
 type SidebarSection = { label: string; items: SidebarItem[] };
@@ -54,6 +55,7 @@ function getSidebarSections(basePath: string): SidebarSection[] {
         { name: 'Staff', icon: Briefcase, path: `${basePath}/staff` },
         { name: 'Services', icon: Package, path: `${basePath}/services` },
         { name: 'SMS Messages', icon: MessageSquare, path: `${basePath}/sms`, badge: true },
+        { name: 'Chat Inbox', icon: MessageCircle, path: `${basePath}/chatbot`, roles: ['super_admin', 'office_manager'], chatBadge: true },
         { name: 'Invoices', icon: Receipt, path: `${basePath}/invoices` },
         { name: 'Organizations', icon: Building2, path: `${basePath}/organizations` },
         { name: 'Specimens', icon: FlaskConical, path: `${basePath}/specimens` },
@@ -69,7 +71,6 @@ function getSidebarSections(basePath: string): SidebarSection[] {
       label: 'MARKETING',
       items: [
         { name: 'Campaigns', icon: Mail, path: `${basePath}/marketing` },
-        { name: 'Ask Nico Chatbot', icon: MessageSquare, path: `${basePath}/chatbot`, roles: ['super_admin'] },
         { name: 'Provider Acquisition', icon: Users, path: `${basePath}/provider-acquisition`, roles: ['super_admin'] },
       ],
     },
@@ -100,6 +101,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const [myOpenTaskCount, setMyOpenTaskCount] = useState<number>(0);
   const [inboxCount, setInboxCount] = useState<number>(0);
   const [labOrderCount, setLabOrderCount] = useState<number>(0);
+  const [chatUnreadCount, setChatUnreadCount] = useState<number>(0);
   const [releaseUnreadCount, setReleaseUnreadCount] = useState<number>(() => getUnreadReleaseCount());
   // Re-poll the localStorage-derived unread count whenever the URL changes
   // (so visiting the page + marking-read clears the badge instantly).
@@ -201,6 +203,33 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
     const ch = supabase
       .channel('admin-lab-order-badge')
       .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'patient_lab_requests' }, () => recount())
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(ch); };
+  }, [user?.id]);
+
+  // ── CHAT INBOX BADGE ──────────────────────────────────────────────
+  // Counts landing-page chat conversations that need a human: staff_unread
+  // (set when a chat escalates to Nico AND on every visitor reply during
+  // human handoff). Realtime: any change to chatbot_conversations re-counts,
+  // so the moment a chat escalates the red badge appears above the tab — the
+  // live "notification icon" the owner asked for. Opening a conversation in
+  // ChatbotTab clears staff_unread, which decrements this live.
+  useEffect(() => {
+    if (!user?.id) return;
+    let mounted = true;
+    const recount = async () => {
+      try {
+        const { count } = await supabase
+          .from('chatbot_conversations' as any)
+          .select('id', { count: 'exact', head: true })
+          .eq('staff_unread', true);
+        if (mounted) setChatUnreadCount(count || 0);
+      } catch { /* silent */ }
+    };
+    recount();
+    const ch = supabase
+      .channel('admin-chat-inbox-badge')
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'chatbot_conversations' }, () => recount())
       .subscribe();
     return () => { mounted = false; supabase.removeChannel(ch); };
   }, [user?.id]);
@@ -312,6 +341,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                       {item.labOrderBadge && labOrderCount > 0 && !active && (
                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                       )}
+                      {item.chatBadge && chatUnreadCount > 0 && !active && (
+                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_6px_2px_rgba(239,68,68,0.6)]" />
+                      )}
                       {item.releaseBadge && releaseUnreadCount > 0 && !active && (
                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
                       )}
@@ -345,6 +377,15 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
                           : 'bg-emerald-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(16,185,129,0.5)]'
                       }`}>
                         {labOrderCount > 99 ? '99+' : labOrderCount}
+                      </span>
+                    )}
+                    {item.chatBadge && chatUnreadCount > 0 && (
+                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
+                        active
+                          ? 'bg-white text-conve-red'
+                          : 'bg-red-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(239,68,68,0.5)]'
+                      }`}>
+                        {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
                       </span>
                     )}
                     {item.releaseBadge && releaseUnreadCount > 0 && (

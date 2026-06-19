@@ -41,6 +41,10 @@ interface Conversation {
   message_count: number;
   utm_source: string | null;
   landing_url: string | null;
+  staff_unread?: boolean | null;
+  handoff_state?: string | null;
+  last_message_at?: string | null;
+  captured_name?: string | null;
 }
 
 interface Message {
@@ -95,7 +99,7 @@ const ChatbotTab: React.FC = () => {
   const [frequentQs, setFrequentQs] = useState<FrequentQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<'all' | 'escalated' | 'qualified' | 'today'>('all');
+  const [filter, setFilter] = useState<'all' | 'unread' | 'escalated' | 'qualified' | 'today'>('all');
   const [selectedConvo, setSelectedConvo] = useState<Conversation | null>(null);
   const [selectedMessages, setSelectedMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -119,6 +123,21 @@ const ChatbotTab: React.FC = () => {
 
   useEffect(() => { loadAll(); }, []);
 
+  // Realtime — keep the inbox live. A new chat, an escalation, or a visitor
+  // reply (which flips staff_unread / last_message_at) refreshes the list so
+  // the owner sees it appear + float up without hitting Refresh. Debounced so
+  // a burst of message inserts triggers one refetch.
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const bump = () => { if (t) clearTimeout(t); t = setTimeout(() => { loadAll(); }, 600); };
+    const ch = supabase
+      .channel('admin-chatbot-inbox-live')
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'chatbot_conversations' }, bump)
+      .on('postgres_changes' as any, { event: 'INSERT', schema: 'public', table: 'chatbot_messages' }, bump)
+      .subscribe();
+    return () => { if (t) clearTimeout(t); supabase.removeChannel(ch); };
+  }, []);
+
   const loadMessages = async (convo: Conversation) => {
     setSelectedConvo(convo);
     setLoadingMessages(true);
@@ -129,6 +148,18 @@ const ChatbotTab: React.FC = () => {
       .order('created_at', { ascending: true });
     setSelectedMessages((data as Message[]) || []);
     setLoadingMessages(false);
+
+    // Opening a conversation marks it read — clears the staff_unread flag that
+    // drives the sidebar escalation badge, and de-highlights the card here.
+    if (convo.staff_unread) {
+      supabase
+        .from('chatbot_conversations' as any)
+        .update({ staff_unread: false })
+        .eq('id', convo.id)
+        .then(() => {
+          setConversations((prev) => prev.map((c) => c.id === convo.id ? { ...c, staff_unread: false } : c));
+        });
+    }
   };
 
   // Reply to the visitor from the admin dashboard. chat-thread delivers it
@@ -171,6 +202,7 @@ const ChatbotTab: React.FC = () => {
 
   const filtered = useMemo(() => {
     return conversations.filter((c) => {
+      if (filter === 'unread' && !c.staff_unread) return false;
       if (filter === 'escalated' && c.status !== 'escalated') return false;
       if (filter === 'qualified' && !c.qualified_at) return false;
       if (filter === 'today' && new Date(c.started_at).toDateString() !== new Date().toDateString()) return false;
@@ -230,7 +262,7 @@ const ChatbotTab: React.FC = () => {
               <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search email / zip / reason…" className="pl-9" />
             </div>
             <div className="flex gap-1">
-              {(['all', 'today', 'qualified', 'escalated'] as const).map((f) => (
+              {(['all', 'unread', 'today', 'qualified', 'escalated'] as const).map((f) => (
                 <Button key={f} size="sm" variant={filter === f ? 'default' : 'outline'} onClick={() => setFilter(f)} className="capitalize">
                   {f}
                 </Button>
@@ -247,13 +279,17 @@ const ChatbotTab: React.FC = () => {
           ) : (
             <div className="space-y-2">
               {filtered.map((c) => (
-                <Card key={c.id} className="cursor-pointer hover:shadow-md transition" onClick={() => loadMessages(c)}>
+                <Card key={c.id} className={`cursor-pointer hover:shadow-md transition ${c.staff_unread ? 'ring-2 ring-red-300 bg-red-50/30' : ''}`} onClick={() => loadMessages(c)}>
                   <CardContent className="p-3 flex items-start gap-3">
                     <div className="h-10 w-10 rounded-lg bg-conve-red/10 flex items-center justify-center flex-shrink-0">
                       <MessageCircle className="h-5 w-5 text-conve-red" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
+                        {c.staff_unread && (
+                          <Badge variant="outline" className="bg-red-500 text-white border-red-500 animate-pulse">Needs reply</Badge>
+                        )}
+                        {c.captured_name && <span className="text-sm font-semibold text-gray-900">{c.captured_name}</span>}
                         <Badge variant="outline" className={STATUS_STYLES[c.status] || STATUS_STYLES.active}>
                           {c.status}
                         </Badge>
