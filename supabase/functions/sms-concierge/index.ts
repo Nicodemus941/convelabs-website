@@ -61,11 +61,16 @@ const SYSTEM = `You are the ConveLabs SMS concierge — texting on behalf of Con
 
 YOU CAN ANSWER directly: what ConveLabs is, how mobile draws work, service area (Central Florida / greater Orlando), what to expect at a visit, general prep, hours, how to book (point to ${PUBLIC}/book-now), and simple status-style reassurance.
 
-YOU MUST NOT: give medical advice or interpret lab results; quote or change prices; confirm/modify/cancel appointments yourself; promise anything money-related. ConveLabs is not a medical provider for advice purposes.
+YOU MUST NOT: give medical advice or interpret lab results; quote or change prices; directly confirm/modify/cancel an appointment in this text (instead use an ACTION below so the patient confirms on a secure page); promise anything money-related. ConveLabs is not a medical provider for advice purposes.
 
-ESCALATE to a human (end your message with a separate final line exactly: [[ESCALATE: <short reason>]]) when the patient: wants to reschedule/cancel/book a specific time, has a billing/payment question or dispute, has a complaint or bad experience, asks anything medical or about their results, mentions urgency (today/tomorrow/ASAP), asks whether their lab order requires fasting, or asks anything you are not confident you can answer correctly. When you escalate, your visible message to the patient should be a brief, calm acknowledgement that you're connecting them with the team who will follow up shortly — do NOT guess at the answer.
+ACTIONS — when the patient clearly wants one of these, end your message with a separate final line containing exactly the tag, and make your visible message a short, warm confirmation that you're texting them a secure link / handling it:
+- [[ACTION: reschedule]] — they want to reschedule, move, change the time of, or cancel an existing appointment. (Your line: e.g. "Happy to help — I'm texting you a secure link to pick a new time or cancel.")
+- [[ACTION: book]] — they want to book / schedule a new appointment. (Your line: e.g. "Love it — I'm texting you a link to book your visit.")
+- [[ACTION: callback]] — they want a person to call them, or ask to "have someone call me". (Your line: e.g. "Absolutely — I'll have our team give you a call shortly.")
 
-Never invent facts. If unsure, escalate.`;
+ESCALATE to a human (end your message with a separate final line exactly: [[ESCALATE: <short reason>]]) when the patient: has a billing/payment question or dispute, has a complaint or bad experience, asks anything medical or about their results, mentions a real emergency, asks whether their lab order requires fasting, or asks anything you are not confident you can answer correctly. When you escalate, your visible message should be a brief, calm acknowledgement that you're connecting them with the team who will follow up shortly — do NOT guess at the answer.
+
+Emit at most ONE tag (ACTION or ESCALATE) per message. Never invent facts. If unsure, escalate.`;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -78,18 +83,22 @@ Deno.serve(async (req) => {
     // Patient context — name + next appointment (best-effort).
     let patientName = '';
     let apptLine = '';
+    let apptId: string | null = null;
     try {
       const { data: tp } = await admin.from('tenant_patients')
         .select('first_name, last_name')
         .filter('phone', 'ilike', `%${ten}%`).limit(1).maybeSingle();
       if (tp) patientName = [(tp as any).first_name, (tp as any).last_name].filter(Boolean).join(' ');
       const { data: appt } = await admin.from('appointments')
-        .select('appointment_date, appointment_time, status')
+        .select('id, appointment_date, appointment_time, status')
         .ilike('patient_phone', `%${ten}%`)
         .gte('appointment_date', new Date().toISOString())
         .not('status', 'eq', 'cancelled')
         .order('appointment_date', { ascending: true }).limit(1).maybeSingle();
-      if (appt) apptLine = `Upcoming appointment: ${String((appt as any).appointment_date).slice(0,10)} ${(appt as any).appointment_time || ''} (${(appt as any).status}).`;
+      if (appt) {
+        apptId = (appt as any).id;
+        apptLine = `Upcoming appointment: ${String((appt as any).appointment_date).slice(0,10)} ${(appt as any).appointment_time || ''} (${(appt as any).status}).`;
+      }
     } catch { /* context is best-effort */ }
 
     // Find-or-create the chatbot conversation for this phone (threads into Chat Inbox).
@@ -150,13 +159,77 @@ Deno.serve(async (req) => {
       console.warn('[sms-concierge] anthropic failed:', (e as any)?.message);
     }
 
-    // Parse escalation signal.
+    // Parse action / escalation signals (at most one expected).
+    const actMatch = aiText.match(/\[\[ACTION:\s*(reschedule|book|callback)\s*\]\]/i);
+    let action: string | null = actMatch ? actMatch[1].toLowerCase() : null;
     const escMatch = aiText.match(/\[\[ESCALATE:\s*([^\]]*)\]\]/i);
-    const escalate = !!escMatch || !aiText;
-    const reason = escMatch?.[1]?.trim() || (!aiText ? 'AI unavailable' : '');
-    let visible = aiText.replace(/\[\[ESCALATE:[^\]]*\]\]/i, '').trim();
+    let escalate = (!!escMatch && !action) || !aiText;
+    let reason = escMatch?.[1]?.trim() || (!aiText ? 'AI unavailable' : '');
+    let visible = aiText
+      .replace(/\[\[ACTION:[^\]]*\]\]/i, '')
+      .replace(/\[\[ESCALATE:[^\]]*\]\]/i, '')
+      .trim();
+
+    // ── PHASE 2 ACTIONS — patient-confirmed links, no money/medical action ──
+    // The helper functions text the patient the secure link themselves, so we
+    // suppress our own patient SMS when one fires (avoids a double text).
+    let suppressPatientSms = false;
+    let actionDone: string | null = null;
+
+    if (action === 'reschedule') {
+      if (apptId) {
+        // send-reschedule-link is service-role safe (no human-user gate) and
+        // texts + emails the /appt/:token/confirm link itself.
+        const { data: rr, error: rerr } = await admin.functions.invoke('send-reschedule-link', { body: { appointment_id: apptId } });
+        if (rerr || !(rr && (rr as any).ok)) {
+          console.warn('[sms-concierge] reschedule failed:', rerr?.message || JSON.stringify(rr));
+          escalate = true; reason = 'reschedule link failed to send';
+        } else {
+          suppressPatientSms = true; actionDone = 'reschedule_link_sent';
+        }
+      } else {
+        // Nothing on file to reschedule — fall through to a fresh booking link.
+        action = 'book';
+      }
+    }
+
+    if (action === 'book') {
+      // NOTE: create-booking-prefill-link requires a human admin JWT (it calls
+      // auth.getUser), so a service-role invoke 401s. Mint the same prefill
+      // token row directly (service role bypasses RLS) and text the link
+      // ourselves — single message, no double-send.
+      try {
+        const [firstName, ...rest] = (patientName || '').split(' ');
+        const bookToken = randToken();
+        const { error: insErr } = await admin.from('booking_prefill_tokens').insert({
+          token: bookToken,
+          patient_first_name: firstName || null,
+          patient_last_name: rest.join(' ') || null,
+          patient_phone: from,
+          service_type: 'mobile',
+          service_name: 'Mobile Blood Draw',
+          service_price_cents: 15000,
+          billed_to: 'patient',
+        });
+        if (insErr) throw insErr;
+        visible = `Tap to book your mobile blood draw — about 90 seconds: ${PUBLIC}/book-now?prefill=${bookToken}`;
+        actionDone = 'booking_link_sent'; // we send `visible` ourselves below
+      } catch (e) { console.warn('[sms-concierge] book failed:', (e as any)?.message); escalate = true; reason = 'booking link failed to create'; }
+    }
+
+    if (action === 'callback') {
+      escalate = true; actionDone = 'callback_requested';
+      if (!reason) reason = 'Patient requested a callback';
+    }
+
+    // Sane default messages.
     if (escalate && (!visible || visible.length < 4)) {
       visible = `Thanks for reaching out${patientName ? `, ${patientName.split(' ')[0]}` : ''} — I'm connecting you with our team and someone will follow up shortly. For anything urgent, call (941) 527-9169.`;
+    }
+    if (suppressPatientSms && (!visible || visible.length < 4)) {
+      visible = action === 'book'
+        ? "I'm texting you a link to book your visit now. — ConveLabs"
+        : "I'm texting you a secure link to reschedule or cancel. — ConveLabs";
     }
 
     // Store assistant reply + update conversation.
@@ -167,15 +240,18 @@ Deno.serve(async (req) => {
       ...(escalate ? { status: 'escalated', escalated_at: new Date().toISOString(), escalation_reason: reason, staff_unread: true, handoff_state: 'human' } : {}),
     }).eq('id', conv.id);
 
-    // Send the reply to the patient.
-    await sendSms(from, visible);
+    // Send our reply to the patient (unless a helper already texted the link).
+    if (!suppressPatientSms) await sendSms(from, visible);
 
-    // On escalation, ping the owner with the thread link.
+    // Ping the owner on escalation OR a callback request.
     if (escalate && conv.access_token) {
-      await sendSms(OWNER_PHONE, `🔥 SMS concierge escalation${patientName ? ` — ${patientName}` : ''}\nReason: ${reason}\n"${String(body).slice(0,110)}"\nReply: ${PUBLIC}/c/${conv.access_token}`);
+      const head = actionDone === 'callback_requested'
+        ? `📞 Callback requested${patientName ? ` — ${patientName}` : ''}`
+        : `🔥 SMS concierge escalation${patientName ? ` — ${patientName}` : ''}`;
+      await sendSms(OWNER_PHONE, `${head}\nReason: ${reason}\n"${String(body).slice(0,110)}"\nReply: ${PUBLIC}/c/${conv.access_token}`);
     }
 
-    return j({ ok: true, escalated: escalate, conversation_id: conv.id });
+    return j({ ok: true, action: actionDone, escalated: escalate, conversation_id: conv.id });
   } catch (e) {
     console.error('[sms-concierge] error:', e);
     return j({ error: (e as Error).message }, 500);
