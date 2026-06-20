@@ -94,13 +94,22 @@ Return ONLY the JSON, no explanation or markdown.`;
 }
 Return ONLY the JSON, no explanation or markdown.`;
 
-    console.log(`[extract-insurance-ocr] processing rank=${insRank} side=${cardSide} patient=${patientId || 'none'}`);
+    console.log(`[extract-insurance-ocr] processing rank=${insRank} side=${cardSide} type=${mediaType} patient=${patientId || 'none'}`);
+    // PDFs need a `document` content block + the pdfs beta header — sending a
+    // PDF as an `image` block 400s (the gap that left PDF insurance cards,
+    // e.g. Don Anders' "Florida Blue.pdf", unextracted). Images keep the
+    // image block. The beta header is harmless for images.
+    const isPdf = mediaType === 'application/pdf';
+    const mediaBlock = isPdf
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'pdfs-2024-09-25',
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
@@ -108,7 +117,7 @@ Return ONLY the JSON, no explanation or markdown.`;
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
+            mediaBlock,
             { type: 'text', text: cardSide === 'back' ? BACK_PROMPT : FRONT_PROMPT },
           ],
         }],

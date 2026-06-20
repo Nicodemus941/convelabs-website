@@ -167,16 +167,32 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
       // is slow. Prior bug: this called a non-existent fn name
       // ('ocr-insurance-card') and silently swallowed the 404, which
       // meant insurance text fields were never auto-populated.
-      try {
-        supabase.functions.invoke('extract-insurance-ocr', {
-          body: { filePath: safeName, appointmentId, patientId: patientId || null, rank, side },
-        }).catch(() => {});
-      } catch (e) { console.warn('[insurance-upload] OCR invoke skipped:', e); }
-
       const rankLabel = rank === 'secondary' ? 'Secondary' : 'Primary';
       const sideLabel = side === 'back' ? 'back' : 'front';
       toast.success(`${rankLabel} insurance ${sideLabel} saved ✓`);
       onUploaded?.(safeName);
+
+      // Fire OCR and SURFACE the outcome — previously this was fire-and-forget
+      // with .catch(()=>{}), so a 500 (the base64 stack-overflow bug) left the
+      // carrier/member-ID silently unextracted while the phleb saw "saved ✓".
+      // Now: on the FRONT, if OCR can't read the carrier, tell the phleb so
+      // they can enter it manually instead of assuming the chart is complete.
+      try {
+        const { data: ocr, error: ocrErr } = await supabase.functions.invoke('extract-insurance-ocr', {
+          body: { filePath: safeName, appointmentId, patientId: patientId || null, rank, side },
+        });
+        if (side === 'front') {
+          const provider = (ocr as any)?.data?.provider;
+          if (ocrErr || !(ocr as any)?.success || !provider) {
+            toast.warning("Card image saved, but we couldn't auto-read the carrier — please enter the insurance details manually.");
+          } else {
+            toast.success(`Read ${provider}${(ocr as any)?.data?.memberId ? ` · ${(ocr as any).data.memberId}` : ''} ✓`);
+          }
+        }
+      } catch (e) {
+        console.warn('[insurance-upload] OCR invoke failed:', e);
+        if (side === 'front') toast.warning("Card image saved, but the reader didn't respond — enter the insurance details manually if needed.");
+      }
     } catch (e: any) {
       toast.error(`Upload crashed: ${e?.message || String(e)}`);
     } finally {
