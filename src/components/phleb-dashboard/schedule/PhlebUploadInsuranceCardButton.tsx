@@ -28,6 +28,13 @@ interface Props {
   appointmentId: string;
   patientId?: string | null;
   onUploaded?: (path: string) => void;
+  /**
+   * Fired AFTER the OCR call resolves (carrier/member-ID extracted). The card
+   * uses this to re-fetch patient_insurances a second time — the post-upload
+   * fetch runs before OCR finishes, so without this the extracted text only
+   * appears on a manual refresh (the "Lyla Levitt card not showing" report).
+   */
+  onExtracted?: () => void;
   variant?: 'primary' | 'subtle';
   label?: string;
   rank?: 'primary' | 'secondary';
@@ -43,7 +50,7 @@ interface Props {
 }
 
 const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
-  appointmentId, patientId, onUploaded, variant = 'subtle', label, rank = 'primary', side = 'front',
+  appointmentId, patientId, onUploaded, onExtracted, variant = 'subtle', label, rank = 'primary', side = 'front',
 }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -192,6 +199,10 @@ const PhlebUploadInsuranceCardButton: React.FC<Props> = ({
       } catch (e) {
         console.warn('[insurance-upload] OCR invoke failed:', e);
         if (side === 'front') toast.warning("Card image saved, but the reader didn't respond — enter the insurance details manually if needed.");
+      } finally {
+        // OCR done (success OR fail) — tell the card to re-fetch so the now-
+        // extracted carrier/member ID appears without a manual refresh.
+        onExtracted?.();
       }
     } catch (e: any) {
       toast.error(`Upload crashed: ${e?.message || String(e)}`);

@@ -74,6 +74,11 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   // page-load is also consistent. Same pattern for insurance card.
   const [labOrderJustUploaded, setLabOrderJustUploaded] = useState(false);
   const [insuranceJustUploaded, setInsuranceJustUploaded] = useState<string | null>(null);
+  // Bumped after OCR resolves so the insurance fetch re-runs and shows the
+  // freshly-extracted carrier/member ID (the post-upload fetch runs before OCR
+  // completes). Kept separate from insuranceJustUploaded so it never pollutes
+  // viewableCardPath.
+  const [insuranceRefreshKey, setInsuranceRefreshKey] = useState(0);
   // Sibling lab-order paths for family-group bookings. Couple/family bundles
   // store each patient's PDF on their own appointment row's lab_order_file_path
   // — without merging them, the primary's card only shows the primary's order.
@@ -227,7 +232,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
       }
     })();
     return () => { cancelled = true; };
-  }, [(appointment as any).patient_id, insuranceJustUploaded]);
+  }, [(appointment as any).patient_id, insuranceJustUploaded, insuranceRefreshKey]);
   const primaryInsurance = patientInsurances.find(i => i.rank === 'primary') || null;
   const secondaryInsurance = patientInsurances.find(i => i.rank === 'secondary') || null;
   // Legacy compatibility shim — many downstream renders still reference these
@@ -691,6 +696,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                                   appointmentId={appointment.id}
                                   patientId={(appointment as any).patient_id}
                                   onUploaded={() => setInsuranceJustUploaded(`back-${ins.rank}-${Date.now()}`)}
+                                  onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
                                   variant="subtle"
                                   label="+ Add back of card"
                                   rank={ins.rank}
@@ -711,6 +717,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       appointmentId={appointment.id}
                       patientId={(appointment as any).patient_id}
                       onUploaded={() => setInsuranceJustUploaded(`secondary-${Date.now()}`)}
+                      onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
                       variant="subtle"
                       label="+ Add secondary insurance"
                       rank="secondary"
@@ -1057,6 +1064,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       label={viewableCardPath ? 'Replace / Add back' : 'Add card photo'}
                       variant="subtle"
                       onUploaded={(p) => setInsuranceJustUploaded(p)}
+                      onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
                     />
                   </div>
                 </div>
@@ -1077,6 +1085,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       label="Capture Insurance Card"
                       variant="primary"
                       onUploaded={(p) => setInsuranceJustUploaded(p)}
+                      onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
                     />
                   </div>
                 )
