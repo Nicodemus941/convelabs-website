@@ -12,6 +12,23 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+/**
+ * Chunked base64 — `btoa(String.fromCharCode(...bytes))` spreads the WHOLE
+ * image into the call args and throws "Maximum call stack size exceeded" on
+ * any real card photo (~tens of KB). That 500 was silently swallowed by the
+ * fire-and-forget caller, so insurance text fields were NEVER auto-populated
+ * (Katherine Bucher: card image on file, provider/member_id null). Encode in
+ * 32 KB chunks so it never overflows.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -40,7 +57,7 @@ Deno.serve(async (req) => {
         dl = fb;
       }
       const arrayBuffer = await dl.data!.arrayBuffer();
-      base64Data = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      base64Data = bytesToBase64(new Uint8Array(arrayBuffer));
       if (filePath.endsWith('.png')) mediaType = 'image/png';
       else if (filePath.endsWith('.pdf')) mediaType = 'application/pdf';
       else if (filePath.endsWith('.heic')) mediaType = 'image/heic';
