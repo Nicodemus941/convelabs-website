@@ -65,7 +65,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   const [showRunningLate, setShowRunningLate] = useState(false);
   const [showSmsDialog, setShowSmsDialog] = useState(false);
   const [showTubeLabel, setShowTubeLabel] = useState(false);
-  const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string }>({ open: false, path: null });
+  const [labOrderViewer, setLabOrderViewer] = useState<{ open: boolean; path: string | null; name?: string; bucket?: string }>({ open: false, path: null });
   // Bumped after every phleb-side lab-order upload so the status list re-fetches immediately
   const [labOrderRefreshKey, setLabOrderRefreshKey] = useState(0);
   // Local override — flips the "Lab Orders" conditional branch the moment
@@ -1042,6 +1042,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                             open: true,
                             path: viewableCardPath,
                             name: 'Insurance Card',
+                            // Insurance cards live in the insurance-cards bucket;
+                            // the modal falls back to lab-orders for legacy paths.
+                            bucket: 'insurance-cards',
                           });
                         }}>
                         <Shield className="h-3.5 w-3.5" />
@@ -1250,6 +1253,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         onClose={() => setLabOrderViewer({ open: false, path: null })}
         filePath={labOrderViewer.path}
         fileName={labOrderViewer.name}
+        bucket={labOrderViewer.bucket}
       />
 
       <RunningLateModal

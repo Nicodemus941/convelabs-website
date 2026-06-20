@@ -20,9 +20,20 @@ interface Props {
   onClose: () => void;
   filePath: string | null;
   fileName?: string;
+  /**
+   * Storage bucket the file lives in. Defaults to 'lab-orders'. Insurance
+   * cards live in 'insurance-cards' — but legacy appointment.insurance_card_path
+   * values were written to 'lab-orders'. So whatever bucket is requested, we
+   * also try the OTHER known bucket as a fallback before declaring failure.
+   * This is what fixed the phleb "View Insurance Card" error (the viewer was
+   * hardcoded to lab-orders, so every insurance card 404'd).
+   */
+  bucket?: string;
 }
 
-const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileName }) => {
+const KNOWN_BUCKETS = ['lab-orders', 'insurance-cards'];
+
+const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileName, bucket = 'lab-orders' }) => {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,47 +44,43 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
     setError(null);
     setSignedUrl(null);
     (async () => {
+      // Try the requested bucket first, then any other known bucket as a
+      // fallback (handles legacy insurance cards stored under lab-orders and
+      // vice-versa) so the viewer never 404s on a bucket mismatch.
+      const buckets = [bucket, ...KNOWN_BUCKETS.filter(b => b !== bucket)];
       try {
-        // Strategy 1: build the public URL ourselves with per-segment
-        // encodeURIComponent. Supabase JS's getPublicUrl/download don't
-        // encode commas, so "Rienzi, Mary Ellen.pdf" and "Rienzi,P.pdf"
-        // 404'd at the CDN. Manual encoding fixes the entire class of
-        // filename bugs in one go.
-        const url = publicStorageUrl('lab-orders', filePath);
-        // Verify it actually resolves before locking the UI to that URL
-        try {
-          const head = await fetch(url, { method: 'HEAD' });
-          if (head.ok) {
-            setSignedUrl(url);
-            return;
-          }
-        } catch { /* fall through to alternate paths */ }
+        for (const b of buckets) {
+          // Strategy 1: build the public URL ourselves with per-segment
+          // encodeURIComponent. Supabase JS's getPublicUrl/download don't
+          // encode commas, so "Rienzi, Mary Ellen.pdf" and "Rienzi,P.pdf"
+          // 404'd at the CDN. Manual encoding fixes the entire class of
+          // filename bugs in one go.
+          const url = publicStorageUrl(b, filePath);
+          try {
+            const head = await fetch(url, { method: 'HEAD' });
+            if (head.ok) { setSignedUrl(url); return; }
+          } catch { /* try SDK paths for this bucket */ }
 
-        // Strategy 2 (fallback): SDK download() → blob URL
-        const { data: blob, error: dlErr } = await supabase.storage
-          .from('lab-orders')
-          .download(filePath);
-        if (!dlErr && blob) {
-          setSignedUrl(URL.createObjectURL(blob));
-          return;
-        }
+          // Strategy 2 (fallback): SDK download() → blob URL
+          const { data: blob, error: dlErr } = await supabase.storage
+            .from(b)
+            .download(filePath);
+          if (!dlErr && blob) { setSignedUrl(URL.createObjectURL(blob)); return; }
 
-        // Strategy 3 (last resort): signed URL
-        const { data: signed } = await supabase.storage
-          .from('lab-orders')
-          .createSignedUrl(filePath, 3600);
-        if (signed?.signedUrl) {
-          setSignedUrl(signed.signedUrl);
-          return;
+          // Strategy 3 (last resort): signed URL
+          const { data: signed } = await supabase.storage
+            .from(b)
+            .createSignedUrl(filePath, 3600);
+          if (signed?.signedUrl) { setSignedUrl(signed.signedUrl); return; }
         }
-        throw dlErr || new Error('Could not load file');
+        throw new Error('Could not load file');
       } catch (e: any) {
         setError(e.message || 'Failed to load file');
       } finally {
         setLoading(false);
       }
     })();
-  }, [open, filePath]);
+  }, [open, filePath, bucket]);
 
   // Revoke object URL on close to free memory
   useEffect(() => {
