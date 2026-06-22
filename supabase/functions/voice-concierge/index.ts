@@ -267,7 +267,9 @@ Deno.serve(async (req) => {
       let msg: any; try { msg = JSON.parse(ev.data as string); } catch { return; }
       try {
         if (msg.type === 'setup') {
-          const from = msg.from || msg.From || '';
+          // Prefer the caller number Twilio gave us in the webhook (passed via
+          // the WS URL); fall back to the setup message fields.
+          const from = url.searchParams.get('caller') || msg.from || msg.From || msg.customParameters?.from || '';
           ctx = await loadContext(admin, from); ctx.from = from;
           conv = await ensureConversation(admin, from, ctx.ten, ctx.patientName);
           if (conv?.handoff_state === 'human') {
@@ -315,8 +317,14 @@ Deno.serve(async (req) => {
   }
 
   // ── HTTP MODE: Twilio Voice webhook → start ConversationRelay ──
+  // Capture the caller's number from Twilio's webhook (From is guaranteed here)
+  // and pass it into the WS URL as the authoritative caller — so the booking
+  // link always goes to whoever actually called, regardless of the field name
+  // in ConversationRelay's setup message.
+  let callerNum = '';
+  try { const form = new URLSearchParams(await req.text()); callerNum = form.get('From') || form.get('Caller') || ''; } catch { /* */ }
   const host = url.host;
-  const wsUrl = `wss://${host}/functions/v1/voice-concierge?k=${encodeURIComponent(WS_SECRET)}`;
+  const wsUrl = `wss://${host}/functions/v1/voice-concierge?k=${encodeURIComponent(WS_SECRET)}${callerNum ? `&caller=${encodeURIComponent(callerNum)}` : ''}`;
   const actionUrl = `https://${host}/functions/v1/voice-concierge?handoff=1`;
   const greeting = "Hi, thanks for calling ConveLabs, your concierge mobile lab! Quick note: if this is a medical emergency, please hang up and dial 9 1 1 or go to your nearest emergency room. Otherwise, I'd love to help — I can book a visit, answer questions, or connect you with our team. What can I do for you today?";
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
