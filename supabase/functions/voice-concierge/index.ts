@@ -122,7 +122,9 @@ async function ensureConversation(admin: any, from: string, ten: string, patient
 }
 
 // Run one caller turn → { spoken, end, handoffData }.
-async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText: string) {
+// `session` persists for the whole call so we never text the same link twice
+// (the "multiple booking links" bug — each booking-ish utterance re-fired SMS).
+async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText: string, session: any) {
   await admin.from('chatbot_messages').insert({ conversation_id: conv.id, role: 'user', content: userText.slice(0, 2000), delivered_via: 'voice' });
 
   let aiText = '';
@@ -173,31 +175,42 @@ async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText
     end = true;
   } else if (action === 'reschedule') {
     if (ctx.apptId) {
-      const { data: rr, error: rerr } = await admin.functions.invoke('send-reschedule-link', { body: { appointment_id: ctx.apptId } });
-      if (rerr || !(rr && (rr as any).ok)) { escalate = true; reason = 'reschedule link failed'; }
-      else if (!spoken) spoken = "Done — I just texted you a secure link to pick a new time. Is there anything else I can help with?";
+      if (session.rescheduleLinkSent) {
+        // Already texted this call — don't send another. Just point them to it.
+        spoken = "I already texted you that reschedule link — just tap it to pick a new time. Anything else I can help with?";
+      } else {
+        const { data: rr, error: rerr } = await admin.functions.invoke('send-reschedule-link', { body: { appointment_id: ctx.apptId } });
+        if (rerr || !(rr && (rr as any).ok)) { escalate = true; reason = 'reschedule link failed'; }
+        else { session.rescheduleLinkSent = true; if (!spoken) spoken = "Done — I just texted you a secure link to pick a new time. Is there anything else I can help with?"; }
+      }
     } else { action = 'book'; }
   }
 
   if (action === 'book') {
-    try {
-      const [fn, ...rest] = (ctx.patientName || '').split(' ');
-      const bookToken = randToken();
-      // patient_id makes resolve-booking-prefill hydrate their saved address +
-      // insurance + DOB, so a known caller's link is fully pre-filled.
-      await admin.from('booking_prefill_tokens').insert({
-        token: bookToken,
-        patient_id: ctx.patientId || null,
-        patient_first_name: fn || null,
-        patient_last_name: rest.join(' ') || null,
-        patient_phone: ctx.from,
-        service_type: 'mobile', service_name: 'Mobile Blood Draw', service_price_cents: 15000, billed_to: 'patient',
-      });
-      await sendSms(ctx.from, `Here's your ConveLabs booking link — your details are already filled in, so it's about a minute: ${PUBLIC}/book-now?prefill=${bookToken}`);
-      if (!spoken) spoken = ctx.isKnown
-        ? "Perfect — I just texted a secure link to this number with your info already filled in, so it'll just take a minute. You can tap it now and stay on with me, or hang up whenever you're ready. Anything else?"
-        : "Perfect — I just texted a secure booking link to this number. Tap it whenever you're ready; you can stay on with me or hang up. Anything else I can help with?";
-    } catch (e) { console.warn('[voice-concierge] book failed:', (e as any)?.message); escalate = true; reason = 'booking link failed'; }
+    if (session.bookingLinkSent) {
+      // ONE link per call — re-asking just points them back to the one we sent.
+      spoken = "I've already sent that booking link to your phone — just tap it whenever you're ready, your info's already filled in. Anything else I can help with?";
+    } else {
+      try {
+        const [fn, ...rest] = (ctx.patientName || '').split(' ');
+        const bookToken = randToken();
+        // patient_id makes resolve-booking-prefill hydrate their saved address +
+        // insurance + DOB, so a known caller's link is fully pre-filled.
+        await admin.from('booking_prefill_tokens').insert({
+          token: bookToken,
+          patient_id: ctx.patientId || null,
+          patient_first_name: fn || null,
+          patient_last_name: rest.join(' ') || null,
+          patient_phone: ctx.from,
+          service_type: 'mobile', service_name: 'Mobile Blood Draw', service_price_cents: 15000, billed_to: 'patient',
+        });
+        await sendSms(ctx.from, `Here's your ConveLabs booking link — your details are already filled in, so it's about a minute: ${PUBLIC}/book-now?prefill=${bookToken}`);
+        session.bookingLinkSent = true;
+        if (!spoken) spoken = ctx.isKnown
+          ? "Perfect — I just texted a secure link to this number with your info already filled in, so it'll just take a minute. You can tap it now and stay on with me, or hang up whenever you're ready. Anything else?"
+          : "Perfect — I just texted a secure booking link to this number. Tap it whenever you're ready; you can stay on with me or hang up. Anything else I can help with?";
+      } catch (e) { console.warn('[voice-concierge] book failed:', (e as any)?.message); escalate = true; reason = 'booking link failed'; }
+    }
   }
 
   if (action === 'fasting') {
@@ -246,6 +259,8 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     let ctx: any = null, conv: any = null;
     const history: any[] = [];
+    // Per-call state — guards against re-sending the same link on repeat asks.
+    const session = { bookingLinkSent: false, rescheduleLinkSent: false };
     let busy = false;
 
     socket.onmessage = async (ev) => {
@@ -266,7 +281,7 @@ Deno.serve(async (req) => {
           const userText = String(msg.voicePrompt || '').trim();
           if (!userText) return;
           busy = true;
-          const res = await runTurn(admin, ctx, conv, history, userText);
+          const res = await runTurn(admin, ctx, conv, history, userText, session);
           socket.send(JSON.stringify({ type: 'text', token: res.spoken, last: true }));
           if (res.end) {
             // Let TTS finish the sentence before ending the session / handing off.
