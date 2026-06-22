@@ -145,6 +145,15 @@ verify_jwt = false
 [functions.backfill-provider-phone-auth]
 verify_jwt = false
 
+# Member login OTP — called pre-login from the patient browser (no JWT).
+# Pinned false so a deploy can never flip them to true (member-otp-send
+# drifted to true and tripped the public-endpoint smoke test, 2026-06-22).
+[functions.member-otp-send]
+verify_jwt = false
+
+[functions.member-otp-verify]
+verify_jwt = false
+
 [functions.provider-otp-send]
 verify_jwt = false
 
