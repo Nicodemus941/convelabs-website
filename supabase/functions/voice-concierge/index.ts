@@ -1,24 +1,21 @@
-// voice-concierge — the SMS concierge brain, now on the phone.
+// voice-concierge — the SMS concierge brain, on the phone (Twilio ConversationRelay).
 //
-// Twilio ConversationRelay (https://www.twilio.com/docs/voice/twiml/connect/conversationrelay)
-// handles speech-to-text + text-to-speech and bridges the live call to a
-// WebSocket we host here. A patient CALLS the ConveLabs number and just talks:
-//   • "Do I need to fast?"            → reads their lab order, answers out loud
-//   • "I'd like to book a draw"       → texts them a secure booking link
-//   • "Move my Tuesday appointment"   → texts them the reschedule link
-//   • "Have someone call me" / risky  → escalates + pings the owner
-// Every turn threads into the same chatbot_conversations Chat Inbox as SMS.
+// A patient CALLS the ConveLabs number and just talks. v2 upgrades:
+//   • Greeting opens with a 911 emergency disclaimer.
+//   • Caller is identified by phone → known patients get a booking link with
+//     their info pre-filled (name NEVER spoken aloud — HIPAA on an open line).
+//   • Upbeat, human, sales-savvy; handles several questions in one natural flow.
+//   • Every turn ends with a clear next step, and the agent can END the call
+//     cleanly (goodbye / emergency) so the caller is never left in dead air.
+//   • "Talk to a person" → live transfer to (941) 527-9169.
+//   • Every call threads into the Chat Inbox; risky intents escalate to the owner.
 //
-// TWO MODES on one URL:
-//   1. HTTP POST  (Twilio Voice webhook) → returns TwiML <Connect><ConversationRelay>
-//   2. WS upgrade (ConversationRelay)    → the live conversation loop
+// THREE request shapes on one URL:
+//   1. HTTP POST (Twilio Voice webhook)        → <Connect action=...><ConversationRelay/></Connect>
+//   2. HTTP POST ?handoff=1 (Connect action)   → <Dial> live agent  OR  <Hangup/>
+//   3. WS upgrade (ConversationRelay)          → the live conversation loop
 //
-// Twilio Console setup (owner):
-//   Phone Numbers → [number] → Voice → "A CALL COMES IN" → Webhook:
-//   https://<project>.supabase.co/functions/v1/voice-concierge  (HTTP POST)
-//
-// verify_jwt=false (Twilio sends no JWT). The WS is guarded by VOICE_WS_SECRET
-// in the URL query so randoms can't open it.
+// verify_jwt=false. The WS is guarded by VOICE_WS_SECRET in the URL query.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
@@ -31,6 +28,7 @@ const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
 const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
 const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939';
 const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+const LIVE_AGENT_NUMBER = '+19415279169'; // forward "talk to a person" here
 const WS_SECRET = Deno.env.get('VOICE_WS_SECRET') || 'cl-voice';
 
 function last10(p: string): string { return (p || '').replace(/\D/g, '').slice(-10); }
@@ -55,34 +53,45 @@ async function sendSms(to: string, body: string) {
   }).catch((e) => console.warn('[voice-concierge] sendSms failed:', e?.message));
 }
 
-const SYSTEM = `You are the ConveLabs phone concierge — speaking out loud with a caller for ConveLabs, a concierge mobile-phlebotomy practice in Central Florida (a licensed phlebotomist comes to the patient's home or office for blood draws). You are warm, calm, and efficient.
+const SYSTEM = `You are the ConveLabs phone concierge — a warm, upbeat, genuinely excited human-sounding receptionist for ConveLabs, a concierge mobile-phlebotomy practice in Central Florida. A licensed phlebotomist comes to the patient's home or office to draw blood; results go to their doctor or the destination lab.
 
-THIS IS A PHONE CALL. Keep every reply to 1–2 short spoken sentences. Ask ONE question at a time. No lists, no URLs spoken aloud (you text links instead), no markdown. Sound like a friendly human receptionist.
+VOICE STYLE: This is a live phone call. Speak in 1–2 short, natural sentences. Warm, friendly, a little excited — never robotic. Ask ONE thing at a time. No lists, no spelling out URLs, no markdown. Use contractions. Sound delighted to help.
 
-YOU CAN ANSWER directly: what ConveLabs is, how mobile draws work, the service area (Central Florida / greater Orlando), what to expect at a visit, general prep, hours, and how booking works.
+NEVER leave dead air: end EVERY reply with either a question or a clear next step ("Anything else I can help with?", "Want me to text you that link?", "You're all set — feel free to hang up whenever!"). The caller should always know what happens next.
 
-YOU MUST NOT: give medical advice or interpret results; quote or change prices; confirm/modify/cancel an appointment yourself (use an ACTION so the caller confirms via a texted link); promise anything money-related.
+PRIVACY: You may already know who's calling from their phone number, but NEVER say the caller's name or read back personal details out loud — someone else could be listening. Just help them; their saved info is used silently to pre-fill links.
 
-ACTIONS — when the caller clearly wants one, end your reply with a separate final line containing exactly the tag. Your spoken sentence should warmly say you're texting them a link or taking care of it:
-- [[ACTION: book]] — wants to book/schedule a new visit. (Say: "I'll text a secure link to your phone to lock it in.")
-- [[ACTION: reschedule]] — wants to move/change/cancel an existing visit. (Say: "I'm texting you a link to pick a new time.")
-- [[ACTION: callback]] — wants a person to call them, or you can't help confidently. (Say: "I'll have someone from our team call you right back.")
-- [[ACTION: fasting]] — asks whether they need to fast or how to prep. (Say a brief lead-in like "Let me check your order." — the system appends the exact answer.)
+WHAT YOU CAN DO (answer naturally, conversationally — handle several questions in one call):
+- Explain what ConveLabs is, how the at-home draw works, the Central Florida service area, what to expect, hours, and pricing in general terms.
+- BE GREAT AT SALES: if the caller is deciding whether to book, be genuinely enthusiastic and persuasive — emphasize the convenience (we come to you, no waiting rooms, no traffic), the licensed professional, fast results, and how easy it is. Gently invite them to book. Never pushy, always warm.
 
-ESCALATE with a final line [[ESCALATE: <short reason>]] for billing/payment disputes, complaints, medical/results questions, or anything you're unsure of. Say you're connecting them with the team.
+ACTIONS — when the caller clearly wants one, end your reply with a separate final line containing exactly the tag. Speak a warm, specific sentence too:
+- [[ACTION: book]] — wants to book/schedule. Say you're texting a secure link to their phone that already has their details filled in, and that they can tap it now and stay on the line or hang up — their choice.
+- [[ACTION: reschedule]] — wants to move/change/cancel an existing visit. Say you're texting them a link to pick a new time.
+- [[ACTION: fasting]] — asks about fasting or prep. Give a brief lead-in ("Let me check your order!") — the system appends the exact answer.
+- [[ACTION: transfer]] — wants to talk to a real/live person, a human, or a team member. Say "Of course — connecting you to our team right now, one moment!"
+- [[ACTION: callback]] — wants someone to call them back later (not right now).
+- [[ACTION: emergency]] — mentions a medical emergency, chest pain, trouble breathing, severe bleeding, etc. Say clearly: "This sounds like an emergency. Please hang up now and dial 9 1 1, or go to your nearest emergency room right away."
+- [[ACTION: hangup]] — caller is finished / says goodbye / "that's all". Give a warm sign-off.
 
-Emit at most ONE tag per reply. Never invent facts. If unsure, escalate.`;
+ESCALATE with a final line [[ESCALATE: <short reason>]] for billing disputes, complaints, or medical questions beyond fasting/prep that you can't confidently answer. Say you're connecting them with the team.
 
-// ───────────────────────── shared turn logic ─────────────────────────
+Emit at most ONE tag per reply. Never invent facts (hours, prices, policies you don't know) — if unsure, offer to connect them to the team. Keep it human and upbeat.`;
+
 // Resolve caller identity + appointment context once per call.
 async function loadContext(admin: any, from: string) {
   const ten = last10(from);
   let patientName = '', apptLine = 'No upcoming appointment on file.';
-  let apptId: string | null = null, apptFasting = false, apptUrine = false, apptHasOrder = false;
+  let patientId: string | null = null, apptId: string | null = null;
+  let apptFasting = false, apptUrine = false, apptHasOrder = false, isKnown = false;
   try {
     const { data: tp } = await admin.from('tenant_patients')
-      .select('first_name, last_name').filter('phone', 'ilike', `%${ten}%`).limit(1).maybeSingle();
-    if (tp) patientName = [(tp as any).first_name, (tp as any).last_name].filter(Boolean).join(' ');
+      .select('id, first_name, last_name').filter('phone', 'ilike', `%${ten}%`).limit(1).maybeSingle();
+    if (tp) {
+      patientId = (tp as any).id;
+      patientName = [(tp as any).first_name, (tp as any).last_name].filter(Boolean).join(' ');
+      isKnown = true;
+    }
     const { data: appt } = await admin.from('appointments')
       .select('id, appointment_date, appointment_time, status, fasting_required, urine_required, ocr_processed_at')
       .ilike('patient_phone', `%${ten}%`).gte('appointment_date', new Date().toISOString())
@@ -92,10 +101,11 @@ async function loadContext(admin: any, from: string) {
       apptFasting = !!(appt as any).fasting_required;
       apptUrine = !!(appt as any).urine_required;
       apptHasOrder = !!(appt as any).ocr_processed_at;
-      apptLine = `Upcoming appointment: ${String((appt as any).appointment_date).slice(0, 10)} ${(appt as any).appointment_time || ''} (${(appt as any).status}).`;
+      isKnown = true;
+      apptLine = `Caller HAS an upcoming appointment on ${String((appt as any).appointment_date).slice(0, 10)} at ${(appt as any).appointment_time || ''} (${(appt as any).status}).`;
     }
   } catch { /* best-effort */ }
-  return { ten, patientName, apptLine, apptId, apptFasting, apptUrine, apptHasOrder };
+  return { ten, patientName, patientId, apptLine, apptId, apptFasting, apptUrine, apptHasOrder, isKnown };
 }
 
 async function ensureConversation(admin: any, from: string, ten: string, patientName: string) {
@@ -111,9 +121,8 @@ async function ensureConversation(admin: any, from: string, ten: string, patient
   return created;
 }
 
-// Run one caller turn → returns the sentence to speak. Side-effects (texting a
-// link, escalation) happen here so the call stays conversational.
-async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText: string): Promise<string> {
+// Run one caller turn → { spoken, end, handoffData }.
+async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText: string) {
   await admin.from('chatbot_messages').insert({ conversation_id: conv.id, role: 'user', content: userText.slice(0, 2000), delivered_via: 'voice' });
 
   let aiText = '';
@@ -122,8 +131,8 @@ async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText
       method: 'POST',
       headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: MODEL, max_tokens: 300,
-        system: `${SYSTEM}\n\nCALLER CONTEXT: ${ctx.patientName ? `Name: ${ctx.patientName}. ` : ''}${ctx.apptLine}`,
+        model: MODEL, max_tokens: 320,
+        system: `${SYSTEM}\n\nCALLER CONTEXT (never read aloud): ${ctx.isKnown ? 'This is a KNOWN patient — their details are on file, so a booking link will be pre-filled. ' : 'Caller is not recognized — collect nothing sensitive aloud; the link will let them enter details. '}${ctx.apptLine}`,
         messages: [...history, { role: 'user', content: userText }],
       }),
     });
@@ -131,78 +140,106 @@ async function runTurn(admin: any, ctx: any, conv: any, history: any[], userText
     aiText = data?.content?.[0]?.text || '';
   } catch (e) { console.warn('[voice-concierge] anthropic failed:', (e as any)?.message); }
 
-  const actMatch = aiText.match(/\[\[ACTION:\s*(reschedule|book|callback|fasting)\s*\]\]/i);
+  const actMatch = aiText.match(/\[\[ACTION:\s*(reschedule|book|callback|fasting|transfer|emergency|hangup)\s*\]\]/i);
   let action: string | null = actMatch ? actMatch[1].toLowerCase() : null;
   const escMatch = aiText.match(/\[\[ESCALATE:\s*([^\]]*)\]\]/i);
   let escalate = (!!escMatch && !action) || !aiText;
   let reason = escMatch?.[1]?.trim() || (!aiText ? 'AI unavailable' : '');
   let spoken = aiText.replace(/\[\[ACTION:[^\]]*\]\]/i, '').replace(/\[\[ESCALATE:[^\]]*\]\]/i, '').trim();
 
-  // Deterministic fasting net (mirrors sms-concierge) — voice STT is noisy, so
-  // catch the intent even when the model doesn't tag it.
-  if (!action && /fasting|\b(do i|should i|need to|have to)\s+fast\b|empty stomach|can i eat|eat before|drink before/i.test(userText)) {
-    action = 'fasting'; escalate = !aiText ? escalate : false; reason = escalate ? reason : '';
+  // Deterministic safety/intent nets — voice STT is noisy; never miss these.
+  const t = userText.toLowerCase();
+  if (/\b(9-?1-?1|emergency|chest pain|can'?t breathe|cannot breathe|heart attack|stroke|bleeding (a lot|badly|out)|passed out|unconscious|overdose|suicidal)\b/.test(t)) {
+    action = 'emergency';
+  } else if (!action && /\b(talk|speak|connect)\b.*\b(person|human|someone|agent|representative|rep|staff|team|nico)\b|live (person|agent)|real person|customer service/.test(t)) {
+    action = 'transfer';
+  } else if (!action && /fasting|\b(do i|should i|need to|have to)\s+fast\b|empty stomach|can i eat|eat before|drink before/.test(t)) {
+    action = 'fasting'; escalate = false;
+  } else if (!action && !escMatch && /\b(that'?s all|that is all|nothing else|no thanks|no thank you|i'?m good|im good|all set|good ?bye|bye now)\b/.test(t)) {
+    action = 'hangup';
   }
 
-  const first = (ctx.patientName || '').split(' ')[0];
+  let end = false;
+  let handoffData = JSON.stringify({ intent: 'hangup' });
 
-  if (action === 'reschedule') {
+  if (action === 'emergency') {
+    spoken = 'This sounds like it could be an emergency. Please hang up now and dial 9 1 1, or go straight to your nearest emergency room. Take care of yourself.';
+    end = true;
+  } else if (action === 'transfer') {
+    if (!spoken) spoken = 'Of course — connecting you to our team right now. One moment!';
+    end = true; handoffData = JSON.stringify({ intent: 'transfer' });
+  } else if (action === 'hangup') {
+    if (!spoken) spoken = "You're all set! Thanks so much for calling ConveLabs — have a wonderful day.";
+    end = true;
+  } else if (action === 'reschedule') {
     if (ctx.apptId) {
       const { data: rr, error: rerr } = await admin.functions.invoke('send-reschedule-link', { body: { appointment_id: ctx.apptId } });
       if (rerr || !(rr && (rr as any).ok)) { escalate = true; reason = 'reschedule link failed'; }
-      else if (!spoken) spoken = "I'm texting you a secure link to pick a new time. Anything else I can help with?";
+      else if (!spoken) spoken = "Done — I just texted you a secure link to pick a new time. Is there anything else I can help with?";
     } else { action = 'book'; }
   }
+
   if (action === 'book') {
     try {
       const [fn, ...rest] = (ctx.patientName || '').split(' ');
       const bookToken = randToken();
+      // patient_id makes resolve-booking-prefill hydrate their saved address +
+      // insurance + DOB, so a known caller's link is fully pre-filled.
       await admin.from('booking_prefill_tokens').insert({
-        token: bookToken, patient_first_name: fn || null, patient_last_name: rest.join(' ') || null,
-        patient_phone: ctx.from, service_type: 'mobile', service_name: 'Mobile Blood Draw', service_price_cents: 15000, billed_to: 'patient',
+        token: bookToken,
+        patient_id: ctx.patientId || null,
+        patient_first_name: fn || null,
+        patient_last_name: rest.join(' ') || null,
+        patient_phone: ctx.from,
+        service_type: 'mobile', service_name: 'Mobile Blood Draw', service_price_cents: 15000, billed_to: 'patient',
       });
-      await sendSms(ctx.from, `Tap to book your mobile blood draw — about 90 seconds: ${PUBLIC}/book-now?prefill=${bookToken}`);
-      if (!spoken) spoken = "I just texted a secure booking link to your phone. Is there anything else?";
+      await sendSms(ctx.from, `Here's your ConveLabs booking link — your details are already filled in, so it's about a minute: ${PUBLIC}/book-now?prefill=${bookToken}`);
+      if (!spoken) spoken = ctx.isKnown
+        ? "Perfect — I just texted a secure link to this number with your info already filled in, so it'll just take a minute. You can tap it now and stay on with me, or hang up whenever you're ready. Anything else?"
+        : "Perfect — I just texted a secure booking link to this number. Tap it whenever you're ready; you can stay on with me or hang up. Anything else I can help with?";
     } catch (e) { console.warn('[voice-concierge] book failed:', (e as any)?.message); escalate = true; reason = 'booking link failed'; }
   }
+
   if (action === 'fasting') {
     const urineTip = ctx.apptUrine ? " You'll also give a urine sample, so please hold off on the restroom right before we arrive." : '';
     if (ctx.apptHasOrder) {
       spoken = ctx.apptFasting
-        ? `Based on your lab order, please fast for 8 to 12 hours before your draw — water and prescribed medications are fine.${urineTip}`
-        : `Good news — your lab order doesn't require fasting, so eat and drink normally before your visit.${urineTip}`;
-    } else if (ctx.apptId) {
-      spoken = "I don't see your lab order on file yet. If you text a photo of it to this number, I can tell you right away whether you need to fast.";
+        ? `Based on your lab order, please fast for 8 to 12 hours before your draw — water and prescribed meds are totally fine.${urineTip} Anything else I can help with?`
+        : `Good news — your lab order doesn't require fasting, so eat and drink normally beforehand.${urineTip} Anything else?`;
     } else {
-      spoken = "I'd be happy to check. Text a photo of your lab order to this number and I'll let you know if you need to fast.";
+      spoken = "I'd be happy to check! If you text a photo of your lab order to this number, I'll tell you right away whether you need to fast. Anything else I can help with?";
     }
   }
+
   if (action === 'callback') { escalate = true; if (!reason) reason = 'Caller requested a callback'; }
 
   if (escalate && (!spoken || spoken.length < 4)) {
-    spoken = `Thanks${first ? `, ${first}` : ''} — I'm connecting you with our team and someone will follow up shortly. For anything urgent you can also call during business hours.`;
+    spoken = "I want to make sure you get the right answer — let me connect you with our team and someone will follow up shortly. Is there anything else in the meantime?";
   }
-  if (!spoken) spoken = "I'm sorry, could you say that one more time?";
+  if (!spoken) spoken = "I'm sorry, I didn't quite catch that — could you say it once more?";
 
-  // Persist assistant turn + update conversation + (on escalation) ping owner.
+  // Persist assistant turn + update conversation + (on escalation/callback) ping owner.
   await admin.from('chatbot_messages').insert({ conversation_id: conv.id, role: 'assistant', content: spoken, escalation_triggered: escalate, delivered_via: 'voice' });
   await admin.from('chatbot_conversations').update({
     last_message_at: new Date().toISOString(), last_message_role: 'assistant', updated_at: new Date().toISOString(),
     ...(escalate ? { status: 'escalated', escalated_at: new Date().toISOString(), escalation_reason: reason, staff_unread: true, handoff_state: 'human' } : {}),
   }).eq('id', conv.id);
-  if (escalate && conv.access_token) {
-    await sendSms(OWNER_PHONE, `📞 Voice concierge${action === 'callback' ? ' callback' : ' escalation'}${ctx.patientName ? ` — ${ctx.patientName}` : ''}\nReason: ${reason}\n"${userText.slice(0, 110)}"\nReply: ${PUBLIC}/c/${conv.access_token}`);
+  if ((escalate || action === 'transfer') && conv.access_token) {
+    const head = action === 'transfer' ? '📞 Voice call transferred to you live'
+      : action === 'callback' ? `📞 Voice callback requested${ctx.patientName ? ` — ${ctx.patientName}` : ''}`
+      : `📞 Voice concierge escalation${ctx.patientName ? ` — ${ctx.patientName}` : ''}`;
+    await sendSms(OWNER_PHONE, `${head}\n${reason ? `Reason: ${reason}\n` : ''}"${userText.slice(0, 110)}"\n${PUBLIC}/c/${conv.access_token}`);
   }
 
   history.push({ role: 'user', content: userText }, { role: 'assistant', content: spoken });
-  if (history.length > 16) history.splice(0, history.length - 16); // keep last 8 turns
-  return spoken;
+  if (history.length > 16) history.splice(0, history.length - 16);
+  return { spoken, end, handoffData };
 }
 
 Deno.serve(async (req) => {
   const url = new URL(req.url);
 
-  // ── WS MODE: the live ConversationRelay conversation loop ──
+  // ── WS MODE: live ConversationRelay conversation loop ──
   if ((req.headers.get('upgrade') || '').toLowerCase() === 'websocket') {
     if (url.searchParams.get('k') !== WS_SECRET) return new Response('forbidden', { status: 403 });
     const { socket, response } = Deno.upgradeWebSocket(req);
@@ -218,11 +255,10 @@ Deno.serve(async (req) => {
           const from = msg.from || msg.From || '';
           ctx = await loadContext(admin, from); ctx.from = from;
           conv = await ensureConversation(admin, from, ctx.ten, ctx.patientName);
-          // If a human already took this thread over, hand off to a callback.
           if (conv?.handoff_state === 'human') {
-            socket.send(JSON.stringify({ type: 'text', token: "Thanks for calling — someone from our team is already helping you and will follow up shortly. Goodbye for now.", last: true }));
-            if (conv.access_token) await sendSms(OWNER_PHONE, `📞 Patient called (you're handling this thread)\nReply: ${PUBLIC}/c/${conv.access_token}`);
-            setTimeout(() => { try { socket.send(JSON.stringify({ type: 'end' })); } catch { /* */ } }, 1500);
+            socket.send(JSON.stringify({ type: 'text', token: "Thanks for calling — someone from our team is already helping you and will follow up shortly. Connecting you now.", last: true }));
+            await new Promise((r) => setTimeout(r, 4000));
+            socket.send(JSON.stringify({ type: 'end', handoffData: JSON.stringify({ intent: 'transfer' }) }));
           }
           return;
         }
@@ -230,13 +266,18 @@ Deno.serve(async (req) => {
           const userText = String(msg.voicePrompt || '').trim();
           if (!userText) return;
           busy = true;
-          const reply = await runTurn(admin, ctx, conv, history, userText);
-          socket.send(JSON.stringify({ type: 'text', token: reply, last: true }));
+          const res = await runTurn(admin, ctx, conv, history, userText);
+          socket.send(JSON.stringify({ type: 'text', token: res.spoken, last: true }));
+          if (res.end) {
+            // Let TTS finish the sentence before ending the session / handing off.
+            await new Promise((r) => setTimeout(r, 6000));
+            socket.send(JSON.stringify({ type: 'end', handoffData: res.handoffData }));
+          }
           busy = false;
         }
       } catch (e) {
         console.error('[voice-concierge] ws turn error:', (e as any)?.message);
-        try { socket.send(JSON.stringify({ type: 'text', token: "I'm sorry, I hit a snag. Let me have someone call you back.", last: true })); } catch { /* */ }
+        try { socket.send(JSON.stringify({ type: 'text', token: "I'm so sorry, I hit a snag. Let me connect you with our team.", last: true })); } catch { /* */ }
         busy = false;
       }
     };
@@ -244,17 +285,29 @@ Deno.serve(async (req) => {
     return response;
   }
 
+  // ── HANDOFF MODE: ConversationRelay ended → dial live agent or hang up ──
+  if (url.searchParams.get('handoff') === '1') {
+    let intent = 'hangup';
+    try {
+      const form = new URLSearchParams(await req.text());
+      const hd = form.get('HandoffData') || form.get('handoffData') || '';
+      if (hd) { try { intent = JSON.parse(hd)?.intent || 'hangup'; } catch { /* */ } }
+    } catch { /* */ }
+    const twiml = intent === 'transfer'
+      ? `<?xml version="1.0" encoding="UTF-8"?><Response><Say>Connecting you now.</Say><Dial callerId="${TWILIO_FROM}">${LIVE_AGENT_NUMBER}</Dial></Response>`
+      : `<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>`;
+    return new Response(twiml, { headers: { 'Content-Type': 'text/xml' } });
+  }
+
   // ── HTTP MODE: Twilio Voice webhook → start ConversationRelay ──
-  // (Twilio posts here when a call comes in.)
-  // Inside the edge runtime url.pathname is stripped to "/voice-concierge"
-  // (no "/functions/v1" prefix), so build the WS URL explicitly — otherwise
-  // Twilio connects to a path that doesn't exist.
-  const wsUrl = `wss://${url.host}/functions/v1/voice-concierge?k=${encodeURIComponent(WS_SECRET)}`;
-  const greeting = "Hi, thanks for calling ConveLabs, your mobile lab. I can help you book a visit, reschedule, or answer questions about your blood draw. What can I do for you?";
+  const host = url.host;
+  const wsUrl = `wss://${host}/functions/v1/voice-concierge?k=${encodeURIComponent(WS_SECRET)}`;
+  const actionUrl = `https://${host}/functions/v1/voice-concierge?handoff=1`;
+  const greeting = "Hi, thanks for calling ConveLabs, your concierge mobile lab! Quick note: if this is a medical emergency, please hang up and dial 9 1 1 or go to your nearest emergency room. Otherwise, I'd love to help — I can book a visit, answer questions, or connect you with our team. What can I do for you today?";
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Connect>
-    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" ttsProvider="Google" voice="en-US-Neural2-F" />
+  <Connect action="${xmlEscape(actionUrl)}">
+    <ConversationRelay url="${xmlEscape(wsUrl)}" welcomeGreeting="${xmlEscape(greeting)}" ttsProvider="Google" voice="en-US-Neural2-F" interruptible="true" />
   </Connect>
 </Response>`;
   return new Response(twiml, { headers: { 'Content-Type': 'text/xml' } });
