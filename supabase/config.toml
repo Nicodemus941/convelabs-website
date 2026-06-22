@@ -104,6 +104,11 @@ verify_jwt = true
 [functions.twilio-voice-greeting]
 verify_jwt = false
 
+# Voice AI concierge — Twilio Voice webhook + ConversationRelay WebSocket.
+# Twilio sends no JWT; the WS is guarded by VOICE_WS_SECRET in the URL query.
+[functions.voice-concierge]
+verify_jwt = false
+
 [functions.send-password-reset]
 verify_jwt = false
 
