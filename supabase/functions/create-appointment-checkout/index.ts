@@ -1087,8 +1087,11 @@ Deno.serve(async (req) => {
       // referral_credits rows with the correct amount.
       referral_code: appliedReferralCode || '',
       referral_discount_cents: String(appliedReferralDiscountCents || 0),
-      // First-class attachment metadata — stripe metadata values must be strings
-      lab_order_file_paths: Array.isArray(labOrderFilePaths) ? labOrderFilePaths.slice(0, 10).join(',').substring(0, 500) : '',
+      // First-class attachment metadata — stripe metadata values must be strings.
+      // Newline-delimited (filename-safe — lab-order names contain commas +
+      // spaces, e.g. "Rienzi, Mary Ellen.pdf"). The webhook splits on newline,
+      // stores ALL paths, and creates a lab-order record per file.
+      lab_order_file_paths: Array.isArray(labOrderFilePaths) ? labOrderFilePaths.slice(0, 10).join('\n').substring(0, 500) : '',
       insurance_card_path: insuranceCardPath ? String(insuranceCardPath).substring(0, 500) : '',
       // Insurance fields packed into one key to respect the 50-key Stripe
       // metadata cap. Webhook decodes and writes to tenant_patients.

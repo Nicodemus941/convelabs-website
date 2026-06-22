@@ -1626,8 +1626,14 @@ async function handleAppointmentPayment(session: any) {
         // Prefer first-class metadata fields (new post-2026-04-18 bookings).
         // Fall back to regex parsing of additional_notes for older bookings.
         lab_order_file_path: (() => {
-          const firstClass = String(metadata.lab_order_file_paths || '').split(',')[0]?.trim();
-          if (firstClass) return firstClass;
+          // Store ALL uploaded paths newline-joined (the phleb card + admin
+          // modal split on newline to list every file). Prior bug: took only
+          // [0], so a 2nd lab order in a family booking orphaned (Van Pelt).
+          const fc = String(metadata.lab_order_file_paths || '');
+          if (fc.trim()) {
+            const paths = fc.split('\n').map(s => s.trim()).filter(Boolean);
+            if (paths.length) return paths.join('\n');
+          }
           const notes = metadata.additional_notes || '';
           const match = notes.match(/Lab orders?:\s*([^|]+)/);
           return match ? match[1].trim() : null;
@@ -2303,17 +2309,34 @@ async function handleAppointmentPayment(session: any) {
       console.error('[owner-sms-early] non-fatal:', e);
     }
 
-    // Fire OCR on the uploaded lab order (fire-and-forget) so the fasting
-    // banner + panel chips render for image/PDF uploads too.
+    // Create a first-class appointment_lab_orders ROW PER uploaded file, then
+    // OCR them all. The booking flow can attach several orders (couple/family
+    // bookings) — prior bug stored only the first path and created no rows, so
+    // extra orders orphaned and never showed on the phleb card (Van Pelt).
     if (appointment.lab_order_file_path) {
       try {
-        // Fire-and-forget OCR trigger. Was `supabase.functions.invoke` which
-        // threw ReferenceError (no `supabase` binding in this module) — silently
-        // caught by the surrounding try, so OCR never ran. Use supabaseClient.
+        const paths = String(appointment.lab_order_file_path).split('\n').map((s: string) => s.trim()).filter(Boolean);
+        for (const fp of paths) {
+          // Idempotent on webhook retry — skip if a row for this file exists.
+          const { data: existingRow } = await supabaseClient
+            .from('appointment_lab_orders')
+            .select('id').eq('appointment_id', appointment.id).eq('file_path', fp).maybeSingle();
+          if (!existingRow) {
+            await supabaseClient.from('appointment_lab_orders').insert({
+              appointment_id: appointment.id,
+              file_path: fp,
+              original_filename: fp.split('/').pop() || null,
+              mime_type: fp.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+              ocr_status: 'pending',
+              uploaded_at: new Date().toISOString(),
+            });
+          }
+        }
+        // One invoke OCRs every pending row on the appointment (MODE 2 loop).
         supabaseClient.functions.invoke('ocr-lab-order', {
           body: { appointmentId: appointment.id },
         }).catch((e) => console.warn('[ocr] trigger failed (non-blocking):', e));
-      } catch (e) { console.warn('[ocr] invoke exception:', e); }
+      } catch (e) { console.warn('[lab-order-rows] create/ocr failed (non-blocking):', e); }
     }
 
     // Create visit bundle record if the booking included a bundle purchase
