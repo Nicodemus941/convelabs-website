@@ -296,6 +296,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   }, [appointment.lab_destination]);
   const labHoursStatus = nearestLab ? getLabHoursStatus(nearestLab) : null;
 
+  // Services with NO specimen to deliver — there's nothing to drop at a lab,
+  // so the phleb skips the specimen-delivery step and completes directly:
+  //   • in-office  — doctor's-office draw (the office keeps/handles the sample)
+  //   • therapeutic — therapeutic phlebotomy; blood is removed for treatment and discarded
+  const noSpecimenToDeliver = ['in-office', 'therapeutic'].includes(appointment.service_type || '');
+
   // Phleb verifies an insurance row at draw time. Stamps verified_at +
   // verified_by_user_id so the chart shows "✓ verified by phleb today."
   const handleVerifyInsurance = async (row: InsRow) => {
@@ -1143,24 +1149,24 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <Button
                     size="sm"
                     className={`h-16 flex flex-col gap-1 ${
-                      (appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))
+                      !noSpecimenToDeliver && (appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))
                         ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
-                    disabled={!(appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))}
+                    disabled={noSpecimenToDeliver || !(appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))}
                     onClick={(e) => { e.stopPropagation(); setShowSpecimenDelivery(true); }}
                   >
                     <Package className="h-4 w-4" />
-                    <span className="text-xs">Specimen Delivered</span>
+                    <span className="text-xs">{noSpecimenToDeliver ? 'No delivery needed' : 'Specimen Delivered'}</span>
                   </Button>
                   <Button
                     size="sm"
                     className={`col-span-2 h-12 flex flex-row gap-2 ${
-                      appointment.status === 'specimen_delivered'
+                      (appointment.status === 'specimen_delivered' || (noSpecimenToDeliver && ['arrived', 'in_progress'].includes(appointment.status)))
                         ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
-                    disabled={appointment.status !== 'specimen_delivered'}
+                    disabled={!(appointment.status === 'specimen_delivered' || (noSpecimenToDeliver && ['arrived', 'in_progress'].includes(appointment.status)))}
                     onClick={(e) => { e.stopPropagation(); onStatusUpdate(appointment.id, 'completed'); }}
                   >
                     <CheckCircle2 className="h-4 w-4" />

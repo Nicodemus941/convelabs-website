@@ -43,6 +43,13 @@ const LABS = [
   { value: 'other', label: 'Other' },
 ];
 
+// Labs that don't hand the courier a specimen/accession ID (e.g. AdventHealth
+// generates it internally on receipt), so the phleb has nothing to type. For
+// these destinations the specimen ID is OPTIONAL — confirming delivery only
+// needs the lab selected.
+const LABS_WITHOUT_SPECIMEN_ID = ['adventhealth'];
+const labRequiresSpecimenId = (lab: string) => !!lab && !LABS_WITHOUT_SPECIMEN_ID.includes(lab);
+
 interface SpecimenDeliveryModalProps {
   open: boolean;
   onClose: () => void;
@@ -420,12 +427,19 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
    *      a companion routed to a different org never sees the primary's data)
    */
   const confirmRow = async (id: string): Promise<boolean> => {
-    const row = rowsRef.current.find(r => rowKey(r) === id);
+    let row = rowsRef.current.find(r => rowKey(r) === id);
     if (!row) return false;
-    if (!row.specimenId.trim() || !row.labName) {
+    if (!row.labName) {
+      toast.error(`${row.patientName}: select a lab destination`);
+      return false;
+    }
+    if (labRequiresSpecimenId(row.labName) && !row.specimenId.trim()) {
       toast.error(`${row.patientName}: specimen ID + lab are required`);
       return false;
     }
+    // Labs that don't issue an ID (e.g. AdventHealth): record a clear
+    // placeholder so the audit trail + provider views read sensibly, not blank.
+    if (!row.specimenId.trim()) row = { ...row, specimenId: 'No lab-issued ID' };
     setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, confirming: true } : r));
     try {
       const lab = labLabel(row.labName);
@@ -758,12 +772,16 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                   {/* Inputs */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
-                      <Label className="text-[11px]">Specimen / Tracking ID *</Label>
+                      <Label className="text-[11px]">
+                        Specimen / Tracking ID {labRequiresSpecimenId(row.labName)
+                          ? '*'
+                          : <span className="text-gray-400 font-normal">(optional — {labLabel(row.labName)} doesn't issue one)</span>}
+                      </Label>
                       <Input
                         className="h-9 text-sm"
                         value={row.specimenId}
                         onChange={(e) => updateRow(rowKey(row), { specimenId: e.target.value })}
-                        placeholder="e.g. LC-2026-04131"
+                        placeholder={labRequiresSpecimenId(row.labName) ? 'e.g. LC-2026-04131' : 'Leave blank — not provided'}
                         disabled={row.alreadyDelivered}
                       />
                     </div>
@@ -810,7 +828,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                       <Button
                         size="sm"
                         onClick={() => confirmRow(rowKey(row))}
-                        disabled={row.confirming || !row.specimenId.trim() || !row.labName}
+                        disabled={row.confirming || !row.labName || (labRequiresSpecimenId(row.labName) && !row.specimenId.trim())}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 h-8 text-xs"
                       >
                         {row.confirming
@@ -867,7 +885,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             {totalRows > 1 && !allDelivered && (
               <Button
                 onClick={confirmAll}
-                disabled={confirmingAll || rows.every(r => r.alreadyDelivered || !r.specimenId.trim() || !r.labName)}
+                disabled={confirmingAll || rows.every(r => r.alreadyDelivered || !r.labName || (labRequiresSpecimenId(r.labName) && !r.specimenId.trim()))}
                 className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 min-w-[180px]"
               >
                 {confirmingAll
