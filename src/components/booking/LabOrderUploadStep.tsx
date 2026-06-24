@@ -303,9 +303,12 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       console.warn('[insurance-upload] exception during upload (non-blocking):', uploadErr);
     }
 
-    // Step 2: OCR (same as before). Image files only — PDFs need a
-    // different code path the OCR fn doesn't handle.
-    if (file.type.startsWith('image/')) {
+    // Step 2: OCR. Images can OCR by path OR inline base64; PDFs OCR by
+    // storage path only (extract-insurance-ocr reads PDFs from the bucket,
+    // not from inline base64), so only attempt a PDF when the upload landed.
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf';
+    if (isImage || (isPdf && uploadedPath)) {
       setOcrProcessing(true);
       try {
         // Prefer OCR-by-storage-path if upload succeeded (avoids re-sending

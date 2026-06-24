@@ -1760,6 +1760,7 @@ async function handleAppointmentPayment(session: any) {
         try { insurance = JSON.parse(metadata.insurance_json); } catch { /* */ }
       }
       const patch: any = {};
+      let resolvedInsPatientId: string | null = null;
       if (insurance?.provider)  patch.insurance_provider     = String(insurance.provider).substring(0, 100);
       if (insurance?.member_id) patch.insurance_member_id    = String(insurance.member_id).substring(0, 80);
       if (insurance?.group_no)  patch.insurance_group_number = String(insurance.group_no).substring(0, 80);
@@ -1783,6 +1784,7 @@ async function handleAppointmentPayment(session: any) {
           .limit(1);
         const tp = (tps && tps[0]) || null;
         if (tp) {
+          resolvedInsPatientId = (tp as any).id;
           // Only update fields that don't already have a value, so we never
           // wipe known-good insurance with a partial booking.
           const safeMerge: any = {};
@@ -1820,6 +1822,7 @@ async function handleAppointmentPayment(session: any) {
           if (insErr) {
             console.warn(`[insurance-persist] tenant_patients create failed for ${metadata.patient_email}: ${insErr.message}`);
           } else if (newTp) {
+            resolvedInsPatientId = (newTp as any).id;
             console.log(`[insurance-persist] created tenant_patients[${(newTp as any).id}] with ${Object.keys(createPatch).join(',')} for ${metadata.patient_email}`);
             // Link the just-created appointment to the new patient row.
             try {
@@ -1829,6 +1832,54 @@ async function handleAppointmentPayment(session: any) {
                 .eq('id', appointment.id);
             } catch { /* non-fatal */ }
           }
+        }
+      }
+
+      // ─── Sync booking insurance into patient_insurances ───────────────
+      // The phleb card, patient appointment card, and patient chart all read
+      // the patient_insurances table FIRST and only fall back to
+      // tenant_patients when NO row exists. A returning patient who already
+      // has a (possibly empty) patient_insurances row therefore never sees a
+      // newly-booked card — it landed only on tenant_patients/appointment.
+      // (Donna Lebruno + 5 others surfaced 2026-06-24.) Mirror the booking's
+      // insurance onto the primary row, but ONLY fill fields that are still
+      // empty so we never clobber a phleb-verified card or corrected provider.
+      if (resolvedInsPatientId && (insurance?.provider || metadata.insurance_card_path)) {
+        try {
+          const cardPath = metadata.insurance_card_path
+            ? String(metadata.insurance_card_path).substring(0, 500) : null;
+          const { data: existingIns } = await supabaseClient
+            .from('patient_insurances')
+            .select('id, provider, member_id, group_number, card_front_path')
+            .eq('patient_id', resolvedInsPatientId)
+            .eq('rank', 'primary')
+            .eq('is_active', true)
+            .maybeSingle();
+          if (existingIns) {
+            const insMerge: any = {};
+            if (cardPath && !(existingIns as any).card_front_path) insMerge.card_front_path = cardPath;
+            if (insurance?.provider && !(existingIns as any).provider) insMerge.provider = String(insurance.provider).substring(0, 100);
+            if (insurance?.member_id && !(existingIns as any).member_id) insMerge.member_id = String(insurance.member_id).substring(0, 80);
+            if (insurance?.group_no && !(existingIns as any).group_number) insMerge.group_number = String(insurance.group_no).substring(0, 80);
+            if (Object.keys(insMerge).length > 0) {
+              insMerge.updated_at = new Date().toISOString();
+              await supabaseClient.from('patient_insurances').update(insMerge).eq('id', (existingIns as any).id);
+              console.log(`[insurance-persist] synced patient_insurances[${(existingIns as any).id}] fields=${Object.keys(insMerge).join(',')}`);
+            }
+          } else {
+            await supabaseClient.from('patient_insurances').insert({
+              patient_id: resolvedInsPatientId,
+              rank: 'primary',
+              is_active: true,
+              provider: insurance?.provider ? String(insurance.provider).substring(0, 100) : null,
+              member_id: insurance?.member_id ? String(insurance.member_id).substring(0, 80) : null,
+              group_number: insurance?.group_no ? String(insurance.group_no).substring(0, 80) : null,
+              card_front_path: cardPath,
+            });
+            console.log(`[insurance-persist] created patient_insurances primary for patient[${resolvedInsPatientId}]`);
+          }
+        } catch (piErr: any) {
+          console.warn(`[insurance-persist] patient_insurances sync failed: ${piErr?.message || piErr}`);
         }
       }
     } catch (insErr: any) {
