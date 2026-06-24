@@ -102,7 +102,7 @@ const VISIT_TYPES = [
     id: 'senior',
     name: 'Senior Blood Draw',
     subtitle: 'Patients 65+',
-    price: 100,
+    price: 110,
     description: 'Discounted mobile visit for patients 65 and older. Lab order and insurance required.',
     icon: Heart,
     gradient: 'from-purple-500/10 to-purple-600/5',

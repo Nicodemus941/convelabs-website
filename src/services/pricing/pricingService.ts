@@ -69,7 +69,7 @@ const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
   'dev-testing':        { none: 1,   member: 1,   vip: 1,   concierge: 1 },
   'mobile':             { none: 150, member: 130, vip: 115, concierge: 99 },
   'in-office':          { none: 55,  member: 49,  vip: 45,  concierge: 39 },
-  'senior':             { none: 100, member: 85,  vip: 75,  concierge: 65 },
+  'senior':             { none: 110, member: 85,  vip: 75,  concierge: 65 },
   'specialty-kit':      { none: 185, member: 165, vip: 150, concierge: 135 },
   'specialty-kit-genova': { none: 200, member: 180, vip: 165, concierge: 150 },
   'therapeutic':        { none: 200, member: 180, vip: 165, concierge: 150 },
@@ -207,7 +207,7 @@ const SERVICE_CATALOG: ServiceOption[] = [
   { id: 'in-office', name: 'Office Visit (Standard)', description: 'Visit our partner office location', basePrice: 55 },
   { id: 'specialty-kit', name: 'Specialty Collection Kit', description: 'Specialty kits shipped via UPS/FedEx', basePrice: 185 },
   { id: 'specialty-kit-genova', name: 'Genova Diagnostics Kit', description: 'Genova specialty collection', basePrice: 200 },
-  { id: 'senior', name: 'Senior Blood Draw (65+)', description: 'Discounted mobile visit for 65+', basePrice: 100 },
+  { id: 'senior', name: 'Senior Blood Draw (65+)', description: 'Discounted mobile visit for 65+', basePrice: 110 },
   { id: 'therapeutic', name: 'Therapeutic Phlebotomy', description: 'Blood removal per doctor order', basePrice: 200 },
   { id: 'additional', name: 'Additional Patient (Same Location)', description: 'Add another patient at the same visit', basePrice: 75 },
 ];
@@ -218,6 +218,40 @@ export function getServiceCatalog(): ServiceOption[] {
 
 export function getServiceById(serviceId: string): ServiceOption | undefined {
   return SERVICE_CATALOG.find(s => s.id === serviceId);
+}
+
+// ─── Senior auto-pricing (65+) ───────────────────────────────────────────
+// A patient 65+ on a standard mobile visit automatically gets the senior rate
+// ($110). We only ever switch DOWNWARD (mobile → senior) — we never raise a
+// patient's price based on age. Single source of truth for the threshold.
+export const SENIOR_AGE = 65;
+
+/** Whole-year age from a YYYY-MM-DD (or parseable) DOB. null if unparseable. */
+export function ageFromDob(dob: string | null | undefined): number | null {
+  if (!dob) return null;
+  const d = new Date(`${String(dob).slice(0, 10)}T00:00:00`);
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+/** True when this DOB qualifies for senior (65+) pricing. */
+export function isSeniorAge(dob: string | null | undefined): boolean {
+  const age = ageFromDob(dob);
+  return age !== null && age >= SENIOR_AGE;
+}
+
+/**
+ * The visit type that should actually be billed given the chosen type + DOB.
+ * Only ever switches a standard mobile visit to senior for 65+ (a price DROP);
+ * never the reverse, and never touches partner/in-office/therapeutic/specialty.
+ */
+export function resolveSeniorVisitType(visitType: string, dob: string | null | undefined): string {
+  if (visitType === 'mobile' && isSeniorAge(dob)) return 'senior';
+  return visitType;
 }
 
 export function getServicePrice(serviceId: string, tier: MembershipTier = 'none'): number {

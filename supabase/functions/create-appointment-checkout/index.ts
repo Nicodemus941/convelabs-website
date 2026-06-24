@@ -19,7 +19,7 @@ const TIER_PRICING: Record<string, Record<MemberTier, number>> = {
   'dev-testing':          { none: 1,   member: 1,   vip: 1,   concierge: 1 },
   'mobile':               { none: 150, member: 130, vip: 115, concierge: 99 },
   'in-office':            { none: 55,  member: 49,  vip: 45,  concierge: 39 },
-  'senior':               { none: 100, member: 85,  vip: 75,  concierge: 65 },
+  'senior':               { none: 110, member: 85,  vip: 75,  concierge: 65 },
   'specialty-kit':        { none: 185, member: 165, vip: 150, concierge: 135 },
   'specialty-kit-genova': { none: 200, member: 180, vip: 165, concierge: 150 },
   'therapeutic':          { none: 200, member: 180, vip: 165, concierge: 150 },
@@ -85,7 +85,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const {
+    let {
       serviceType,
       serviceName,
       amount: clientAmount, // in cents — WHAT THE CLIENT CLAIMS (don't trust)
@@ -152,6 +152,31 @@ Deno.serve(async (req) => {
       // guard below applies.
       allowOutOfArea = false,
     } = await req.json();
+
+    // ─── Senior auto-pricing safety net (65+) ───────────────────────
+    // If the client sent a standard mobile visit but the patient's DOB shows
+    // they're 65+, bill the discounted senior rate. Mirrors the client-side
+    // auto-apply (PatientInfoStep) so the price is always correct even if the
+    // UI didn't flip it. DOWNWARD ONLY — we never raise a patient's price
+    // based on age; senior ($110) is strictly cheaper than mobile ($150).
+    try {
+      const dobRaw = (patientDetails as any)?.dateOfBirth || (patientDetails as any)?.dob;
+      if (serviceType === 'mobile' && dobRaw) {
+        const d = new Date(`${String(dobRaw).slice(0, 10)}T00:00:00`);
+        if (!isNaN(d.getTime())) {
+          const now = new Date();
+          let age = now.getFullYear() - d.getFullYear();
+          const m = now.getMonth() - d.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+          if (age >= 65 && age < 130) {
+            console.log(`[senior-auto] reprice mobile → senior (age ${age}, dob ${String(dobRaw).slice(0, 10)})`);
+            serviceType = 'senior';
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn('[senior-auto] DOB parse failed (leaving serviceType as-is):', e?.message);
+    }
 
     // ─── SERVER-SIDE: destination required for mobile visits ────────
     // Hormozi rule: "Never fulfill on ambiguity you could have resolved at intake."

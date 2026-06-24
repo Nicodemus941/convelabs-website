@@ -58,7 +58,7 @@ function makeToken(): string {
 const SERVICE_PRICE_HINT: Record<string, { name: string; price: number }> = {
   'mobile': { name: 'Mobile Blood Draw', price: 150 },
   'in-office': { name: 'Office Visit', price: 55 },
-  'senior': { name: 'Senior Blood Draw', price: 100 },
+  'senior': { name: 'Senior Blood Draw', price: 110 },
   'specialty-kit': { name: 'Specialty Collection Kit', price: 185 },
   'specialty-kit-genova': { name: 'Genova Diagnostics Kit', price: 200 },
   'therapeutic': { name: 'Therapeutic Phlebotomy', price: 200 },

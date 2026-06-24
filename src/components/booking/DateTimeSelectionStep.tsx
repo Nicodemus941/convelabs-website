@@ -806,7 +806,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     const priceMap: Record<string, { base: number; vip: number }> = {
                       mobile: { base: 150, vip: 115 },
                       'in-office': { base: 55, vip: 45 },
-                      senior: { base: 100, vip: 75 },
+                      senior: { base: 110, vip: 75 },
                       'specialty-kit': { base: 185, vip: 150 },
                       'specialty-kit-genova': { base: 200, vip: 165 },
                       therapeutic: { base: 200, vip: 165 },

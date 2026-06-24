@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { Form, FormField, FormItem, FormControl, FormMessage } from '@/components/ui/form';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
+import { isSeniorAge } from '@/services/pricing/pricingService';
 
 interface PatientInfoStepProps {
   onNext: () => void;
@@ -239,7 +240,25 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
     control,
     name: 'additionalPatients',
   });
-  
+
+  // ─── Senior auto-pricing (65+) ─────────────────────────────────────────
+  // If the patient's DOB shows they're 65+, automatically switch a standard
+  // mobile visit to the discounted senior rate. We only ever move DOWN in
+  // price (mobile → senior) — never flip back or raise the price. The whole
+  // downstream pipeline (procedure options, checkout, server) keys off
+  // visitType, so flipping it here is the single cleanest lever.
+  const visitType = watch('serviceDetails.visitType');
+  const [seniorAutoApplied, setSeniorAutoApplied] = useState(false);
+  useEffect(() => {
+    if (visitType === 'mobile' && isSeniorAge(dateOfBirth)) {
+      setValue('serviceDetails.visitType', 'senior');
+      if (!seniorAutoApplied) {
+        setSeniorAutoApplied(true);
+        toast.success("You qualify for our Senior (65+) rate — we've applied the discounted price for you.");
+      }
+    }
+  }, [visitType, dateOfBirth, setValue, seniorAutoApplied]);
+
   const handleBookingForToggle = (forSelf: boolean) => {
     setBookingForSelf(forSelf);
     // Always reset the family_member_id when toggling — protects against

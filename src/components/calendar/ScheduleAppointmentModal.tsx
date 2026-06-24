@@ -12,7 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
-import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea, calculateTotal } from '@/services/pricing/pricingService';
+import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea, calculateTotal, isSeniorAge, ageFromDob } from '@/services/pricing/pricingService';
 import { useServiceCatalog } from '@/hooks/useServiceCatalog';
 
 interface ScheduleAppointmentModalProps {
@@ -49,7 +49,7 @@ interface ScheduleAppointmentModalProps {
 const SERVICE_TYPES = [
   { value: 'mobile', label: 'Mobile Blood Draw', price: 150 },
   { value: 'in-office', label: 'Office Visit', price: 55 },
-  { value: 'senior', label: 'Senior (65+)', price: 100 },
+  { value: 'senior', label: 'Senior (65+)', price: 110 },
   { value: 'specialty-kit', label: 'Specialty Collection Kit', price: 185 },
   { value: 'specialty-kit-genova', label: 'Genova Diagnostics', price: 200 },
   { value: 'therapeutic', label: 'Therapeutic Phlebotomy', price: 200 },
@@ -145,6 +145,11 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const [patientName, setPatientName] = useState('');
   const [patientEmail, setPatientEmail] = useState('');
   const [patientPhone, setPatientPhone] = useState('');
+  // Primary patient DOB — drives senior (65+) auto-pricing. When the DOB shows
+  // the patient is 65+, a standard mobile visit auto-switches to the senior
+  // rate ($110). DOWNWARD ONLY — we never raise the price based on age.
+  const [patientDob, setPatientDob] = useState('');
+  const [seniorAutoApplied, setSeniorAutoApplied] = useState(false);
   const [serviceType, setServiceType] = useState('');
   const [date, setDate] = useState(defaultDate || new Date().toISOString().split('T')[0]);
   const [time, setTime] = useState('');
@@ -212,6 +217,19 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const removeCompanion = (id: string) => {
     setCompanions(curr => curr.filter(c => c.id !== id));
   };
+
+  // ─── Senior auto-pricing (65+) ─────────────────────────────────────────
+  // When the primary patient's DOB shows they're 65+, auto-switch a standard
+  // mobile visit to the senior rate. DOWNWARD ONLY — never raises the price.
+  useEffect(() => {
+    if (serviceType === 'mobile' && isSeniorAge(patientDob)) {
+      setServiceType('senior');
+      if (!seniorAutoApplied) {
+        setSeniorAutoApplied(true);
+        toast.success(`Patient is ${ageFromDob(patientDob)} — applied Senior (65+) rate ($110).`);
+      }
+    }
+  }, [serviceType, patientDob, seniorAutoApplied]);
   const [invoiceMemo, setInvoiceMemo] = useState('');
   const [orgBilling, setOrgBilling] = useState(false);
 
@@ -400,6 +418,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setPatientName('');
     setPatientEmail('');
     setPatientPhone('');
+    setPatientDob('');
+    setSeniorAutoApplied(false);
     setServiceType('');
     setDate(defaultDate || new Date().toISOString().split('T')[0]);
     setTime('');
@@ -452,6 +472,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setCity(String(p.city || ''));
     setZipcode(String(p.zipCode || p.zipcode || ''));
     setGateCode(String(p.gateCode || ''));
+    setPatientDob(String(p.dob || p.dateOfBirth || p.date_of_birth || ''));
     if (p.id) {
       setSelectedPatient({
         id: p.id,
@@ -469,7 +490,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
       (async () => {
         try {
           const { data: tp } = await supabase
-            .from('tenant_patients').select('user_id').eq('id', p.id).maybeSingle();
+            .from('tenant_patients').select('user_id, date_of_birth').eq('id', p.id).maybeSingle();
+          if ((tp as any)?.date_of_birth) setPatientDob(String((tp as any).date_of_birth));
           const uid = (tp as any)?.user_id;
           if (!uid) return;
           const { data: mem } = await supabase
@@ -519,7 +541,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     // Sprint: auto-detect member tier + pull referral credit balance
     try {
       const { data: tp } = await supabase
-        .from('tenant_patients').select('user_id').eq('id', p.id).maybeSingle();
+        .from('tenant_patients').select('user_id, date_of_birth').eq('id', p.id).maybeSingle();
+      if ((tp as any)?.date_of_birth) setPatientDob(String((tp as any).date_of_birth));
       const uid = (tp as any)?.user_id;
       if (uid) {
         // Active membership?
@@ -872,6 +895,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         patient_name: patientName,
         patient_email: patientEmail || null,
         patient_phone: patientPhone || null,
+        patient_dob: patientDob || null,
         service_type: serviceType,
         service_name: svc?.label || serviceType,
         status: 'scheduled',
@@ -1297,6 +1321,15 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                     <Label>Phone</Label>
                     <Input type="tel" value={patientPhone} onChange={e => setPatientPhone(e.target.value)} placeholder="(555) 123-4567" />
                   </div>
+                </div>
+                <div>
+                  <Label>Date of Birth <span className="text-[11px] text-gray-400 font-normal">(auto-applies Senior 65+ rate)</span></Label>
+                  <Input type="date" value={patientDob} onChange={e => setPatientDob(e.target.value)} max={new Date().toISOString().split('T')[0]} />
+                  {isSeniorAge(patientDob) && (
+                    <p className="text-[11px] text-purple-700 mt-1">
+                      ✓ Patient is {ageFromDob(patientDob)} — Senior (65+) pricing ($110) applies.
+                    </p>
+                  )}
                 </div>
               </>
             )}

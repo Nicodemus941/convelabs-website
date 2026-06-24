@@ -131,7 +131,7 @@ const AdminCalendar: React.FC = () => {
       toast.error('No valid dates remaining after resolution.');
       return;
     }
-    const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
+    const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 110, therapeutic: 200 };
     const serviceNames: Record<string, string> = { mobile: 'Mobile Blood Draw', 'in-office': 'Office Visit', senior: 'Senior Blood Draw', therapeutic: 'Therapeutic Phlebotomy' };
     const price = prices[recurringForm.serviceType] || 150;
     const svcName = serviceNames[recurringForm.serviceType] || 'Blood Draw';
@@ -1016,7 +1016,7 @@ const AdminCalendar: React.FC = () => {
                   <SelectContent>
                     <SelectItem value="mobile">Mobile Blood Draw ($150)</SelectItem>
                     <SelectItem value="in-office">Office Visit ($55)</SelectItem>
-                    <SelectItem value="senior">Senior 65+ ($100)</SelectItem>
+                    <SelectItem value="senior">Senior 65+ ($110)</SelectItem>
                     <SelectItem value="therapeutic">Therapeutic ($200)</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1163,7 +1163,7 @@ const AdminCalendar: React.FC = () => {
                 {!recurringForm.waiveFee && recurringForm.paymentMode === 'prepaid_bundle' && (
                   <p className="mt-1 font-medium text-emerald-700">
                     {(() => {
-                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
+                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 110, therapeutic: 200 };
                       const p = prices[recurringForm.serviceType] || 150;
                       const n = parseInt(recurringForm.occurrences || '1');
                       const full = p * n;
@@ -1175,7 +1175,7 @@ const AdminCalendar: React.FC = () => {
                 {!recurringForm.waiveFee && recurringForm.paymentMode === 'per_visit' && (
                   <p className="font-medium text-[#B91C1C]">
                     Total: ${(() => {
-                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 100, therapeutic: 200 };
+                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 110, therapeutic: 200 };
                       return ((prices[recurringForm.serviceType] || 150) * parseInt(recurringForm.occurrences || '1')).toFixed(2);
                     })()}
                     {' '}(invoice sent to patient)

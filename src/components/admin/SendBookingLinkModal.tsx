@@ -58,7 +58,7 @@ interface ServiceOption {
 const SERVICES: ServiceOption[] = [
   { value: 'mobile', label: 'Mobile Blood Draw', priceLabel: '$150', category: 'common' },
   { value: 'in-office', label: 'Office Visit', priceLabel: '$55', category: 'common' },
-  { value: 'senior', label: 'Senior (65+)', priceLabel: '$100', category: 'common' },
+  { value: 'senior', label: 'Senior (65+)', priceLabel: '$110', category: 'common' },
   { value: 'specialty-kit', label: 'Specialty Kit', priceLabel: '$185', category: 'specialty' },
   { value: 'specialty-kit-genova', label: 'Genova Kit', priceLabel: '$200', category: 'specialty' },
   { value: 'therapeutic', label: 'Therapeutic', priceLabel: '$200', category: 'specialty' },

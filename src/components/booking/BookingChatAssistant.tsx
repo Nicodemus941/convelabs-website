@@ -10,7 +10,7 @@ const BOOKING_SYSTEM_PROMPT = `You are a ConveLabs booking assistant helping pat
 Services & Pricing:
 - Mobile Blood Draw (at home): $150
 - Doctor Office Blood Draw: $55
-- Senior Blood Draw (65+): $100
+- Senior Blood Draw (65+): $110
 - Additional Patient (same location): $75
 - Same-day surcharge: +$50
 - Weekend surcharge: +$75
