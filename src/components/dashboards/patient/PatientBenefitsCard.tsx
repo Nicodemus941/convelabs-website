@@ -40,7 +40,7 @@ type Tier = 'none' | 'member' | 'vip' | 'concierge';
 const TIER_SAVINGS: Record<string, Record<Tier, number>> = {
   mobile:                       { none: 150, member: 130, vip: 115, concierge: 99  },
   'in-office':                  { none: 55,  member: 49,  vip: 45,  concierge: 39  },
-  senior:                       { none: 100, member: 85,  vip: 75,  concierge: 65  },
+  senior:                       { none: 110, member: 85,  vip: 75,  concierge: 65  },
   'specialty-kit':              { none: 185, member: 165, vip: 150, concierge: 135 },
   'specialty-kit-genova':       { none: 200, member: 180, vip: 165, concierge: 150 },
   therapeutic:                  { none: 200, member: 180, vip: 165, concierge: 150 },

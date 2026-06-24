@@ -986,7 +986,7 @@ export function getLocationFAQs(location: LocationData): { question: string; ans
   return [
     {
       question: `How much does mobile phlebotomy cost in ${name}?`,
-      answer: `Mobile blood draws in ${name} start at $150 per visit. Office visits are $55. Senior patients (65+) pay $100. Members save 15-25% on all services. Additional patients at the same location are $75 each.`,
+      answer: `Mobile blood draws in ${name} start at $150 per visit. Office visits are $55. Senior patients (65+) pay $110. Members save 15-25% on all services. Additional patients at the same location are $75 each.`,
     },
     {
       question: `Is same-day mobile phlebotomy available in ${name}?`,

@@ -38,7 +38,7 @@ Anyone reading this top-to-bottom should be able to operate the business by Day 
 
 **Customer:** Florida adults who hate going to a lab. Especially seniors, busy execs, and concierge-medicine patients whose doctors order frequent draws.
 
-**Product:** A licensed phlebotomist comes to the patient's home or partner office, draws blood, delivers specimens to Quest / LabCorp / AdventHealth / Orlando Health / Genova / Mayo same day. **$150 mobile draw**, **$100 senior**, **$55 in-office**.
+**Product:** A licensed phlebotomist comes to the patient's home or partner office, draws blood, delivers specimens to Quest / LabCorp / AdventHealth / Orlando Health / Genova / Mayo same day. **$150 mobile draw**, **$110 senior**, **$55 in-office**.
 
 **Profit engine:** annual memberships ($99 / $199 / $399). Each membership locks ~24% off every visit + perks. Members average 3+ visits/yr, so the membership pays for itself fast and patient renewal is sticky.
 
@@ -61,7 +61,7 @@ ConveLabs LLC is a Florida-licensed mobile phlebotomy + lab-logistics company. W
 | Stream | Pricing | Notes |
 |---|---|---|
 | Mobile blood draw (at-home) | $150 | $115 with VIP, $130 with Regular, $99 with Concierge |
-| Senior (65+) | $100 | $75 / $85 / $65 with tiers |
+| Senior (65+) | $110 | $75 / $85 / $65 with tiers |
 | In-office | $55 | $45 / $49 / $39 with tiers |
 | Specialty kit (Genova, etc.) | $185–$200 | Includes shipping |
 | Therapeutic phlebotomy | $200 | Per doctor order |
@@ -381,7 +381,7 @@ Service              | none | member | vip  | concierge
 ---------------------|------|--------|------|----------
 mobile               | $150 |  $130  | $115 |   $99
 in-office            |  $55 |   $49  |  $45 |   $39
-senior               | $100 |   $85  |  $75 |   $65
+senior               | $110 |   $85  |  $75 |   $65
 specialty-kit        | $185 |  $165  | $150 |  $135
 specialty-kit-genova | $200 |  $180  | $165 |  $150
 therapeutic          | $200 |  $180  | $165 |  $150

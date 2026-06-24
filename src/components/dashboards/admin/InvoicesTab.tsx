@@ -80,7 +80,7 @@ const InvoicesTab: React.FC = () => {
   const SERVICE_PRICES: Record<string, { label: string; price: number }> = {
     mobile: { label: 'Mobile Blood Draw', price: 150 },
     'in-office': { label: 'Office Visit', price: 55 },
-    senior: { label: 'Senior (65+)', price: 100 },
+    senior: { label: 'Senior (65+)', price: 110 },
     'specialty-kit': { label: 'Specialty Kit', price: 185 },
     therapeutic: { label: 'Therapeutic Phlebotomy', price: 200 },
     custom: { label: 'Custom Amount', price: 0 },

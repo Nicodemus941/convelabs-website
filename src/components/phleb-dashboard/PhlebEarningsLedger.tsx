@@ -747,7 +747,7 @@ const PhlebEarningsLedger: React.FC = () => {
           <Info className="h-3.5 w-3.5 text-gray-500 flex-shrink-0 mt-0.5" />
           <div>
             <strong>Your comp rule:</strong> Business keeps $87 on standard mobile / therapeutic / specialty visits — you take the rest.
-            Partner-org visits (Elite Medical, NaturaMed, ND Wellness, etc.) and the $100 senior service use the per-service base rate (e.g. $42 for senior, $35 for partner-elite).
+            Partner-org visits (Elite Medical, NaturaMed, ND Wellness, etc.) and the $110 senior service use the per-service base rate (e.g. $42 for senior, $35 for partner-elite).
             <strong> Tips, companion add-ons, extended-area, after-hours, and same-day surcharges always pass 100% to you</strong> — on EVERY rule.
           </div>
         </CardContent>
