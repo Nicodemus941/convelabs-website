@@ -82,6 +82,10 @@ interface RowState {
   organizationName: string | null;
   companionRole: string | null;
   alreadyDelivered: boolean;
+  /** The lab the ORDER says to deliver to (appointments.lab_destination).
+   *  Used to DEFAULT the dropdown + warn on a mismatch at confirm so the
+   *  patient is never told a lab that differs from what was ordered. */
+  labDestination: string | null;
   // Editable
   specimenId: string;
   labName: string;
@@ -128,6 +132,20 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
   const labLabel = (v: string) => LABS.find(l => l.value === v)?.label || v;
 
   /**
+   * Map a stored lab_destination string ("Quest Diagnostics") back to a LABS
+   * `value` so the delivery dropdown can DEFAULT to the lab the order names.
+   * Exact label match first, then a loose contains-match for partials.
+   */
+  const labValueFromDestination = (dest: string | null | undefined): string => {
+    if (!dest) return '';
+    const d = String(dest).trim().toLowerCase();
+    if (!d) return '';
+    return LABS.find(l => l.label.toLowerCase() === d)?.value
+        || LABS.find(l => d.includes(l.label.toLowerCase()) || l.label.toLowerCase().includes(d))?.value
+        || '';
+  };
+
+  /**
    * localStorage draft layer — defensive fallback so PWA tab-suspend or
    * service-worker refresh can't lose in-flight keystrokes. Keyed per row;
    * cleared on successful confirmRow. On loadRows() we merge any cached
@@ -170,7 +188,8 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         .select(`
           id, patient_id, patient_name, patient_phone, patient_email,
           service_type, organization_id, family_group_id, companion_role,
-          specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at
+          specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at,
+          lab_destination
         `)
         .eq('id', appointmentId)
         .maybeSingle();
@@ -183,7 +202,8 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           .select(`
             id, patient_id, patient_name, patient_phone, patient_email,
             service_type, organization_id, family_group_id, companion_role,
-            specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at
+            specimen_tracking_id, specimen_lab_name, specimens_delivered_at, delivered_at,
+            lab_destination
           `)
           .eq('family_group_id', (anchor as any).family_group_id)
           .neq('status', 'cancelled');
@@ -274,8 +294,10 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             organizationName: orgId ? (orgNameMap.get(orgId) || null) : null,
             companionRole: null,
             alreadyDelivered: !!lo.delivered_at,
+            labDestination: (anchor as any).lab_destination || null,
             specimenId: lo.delivery_specimen_id || '',
-            labName: matchLab ? matchLab.value : (lo.delivery_lab_name ? 'other' : ''),
+            labName: (matchLab ? matchLab.value : (lo.delivery_lab_name ? 'other' : ''))
+                     || labValueFromDestination((anchor as any).lab_destination),
             tubeCount: lo.delivery_tube_count ? String(lo.delivery_tube_count) : '1',
             tubeTypes: lo.delivery_tube_types || '',
             deliveryNotes: '',
@@ -299,8 +321,14 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             organizationName: a.organization_id ? (orgNameMap.get(a.organization_id) || null) : null,
             companionRole: a.companion_role || null,
             alreadyDelivered: !!(a.specimens_delivered_at || a.delivered_at),
+            labDestination: a.lab_destination || null,
             specimenId: a.specimen_tracking_id || '',
-            labName: matchLab ? matchLab.value : (a.specimen_lab_name ? 'other' : ''),
+            // Default an undelivered row to the lab the ORDER specifies so the
+            // phleb confirms the right lab instead of starting blank (which let
+            // a stale draft fill the wrong one — Donna 2026-06-24: ordered
+            // Quest, logged AdventHealth, patient told AdventHealth).
+            labName: (matchLab ? matchLab.value : (a.specimen_lab_name ? 'other' : ''))
+                     || labValueFromDestination(a.lab_destination),
             tubeCount: '1',
             tubeTypes: '',
             deliveryNotes: '',
@@ -436,6 +464,21 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
     if (labRequiresSpecimenId(row.labName) && !row.specimenId.trim()) {
       toast.error(`${row.patientName}: specimen ID + lab are required`);
       return false;
+    }
+    // Safety net: the selected lab differs from what the ORDER specifies. A
+    // blank default + stale draft used to silently send the patient the wrong
+    // lab (Donna 2026-06-24: order Quest, logged AdventHealth). Require an
+    // explicit confirmation so what we tell the patient always matches reality.
+    if (row.labDestination) {
+      const orderedVal = labValueFromDestination(row.labDestination);
+      if (orderedVal && orderedVal !== row.labName) {
+        const ok = window.confirm(
+          `Heads up — the order for ${row.patientName} says ${row.labDestination}, ` +
+          `but you selected ${labLabel(row.labName)}.\n\n` +
+          `Deliver to ${labLabel(row.labName)} anyway? The patient will be told this lab.`
+        );
+        if (!ok) return false;
+      }
     }
     // Labs that don't issue an ID (e.g. AdventHealth): record a clear
     // placeholder so the audit trail + provider views read sensibly, not blank.
