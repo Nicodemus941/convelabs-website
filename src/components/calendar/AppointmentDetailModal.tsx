@@ -946,17 +946,21 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
           <p className="text-sm font-bold text-gray-900">Insurance Card</p>
           {insuranceCardPath ? (
             <Button variant="outline" size="sm" className="gap-1.5 text-xs w-full justify-start h-8" onClick={async () => {
-              // Resolve bucket: legacy appointment.insurance_card_path lived in
-              // lab-orders; new multi-row + self-serve uploads live in
-              // insurance-cards. Try the right one first, fall back if missing.
+              // A card path can live in EITHER bucket (booking/self-serve →
+              // insurance-cards; legacy admin upload → lab-orders). createSignedUrl
+              // signs ANY path without checking the object exists, so signing the
+              // wrong bucket produced a valid-looking URL that 404'd on open
+              // ("loads, then error"). download() actually fetches the bytes, so
+              // it only succeeds for the bucket that truly has the file — then we
+              // open the verified blob. Order-independent + RLS-respecting.
               const tryBuckets = insuranceCardBucket === 'insurance-cards'
                 ? ['insurance-cards', 'lab-orders']
                 : ['lab-orders', 'insurance-cards'];
               for (const b of tryBuckets) {
-                const { data } = await supabase.storage.from(b).createSignedUrl(insuranceCardPath, 3600);
-                if (data?.signedUrl) { window.open(data.signedUrl, '_blank'); return; }
+                const { data: blob, error: dlErr } = await supabase.storage.from(b).download(insuranceCardPath);
+                if (!dlErr && blob) { window.open(URL.createObjectURL(blob), '_blank', 'noopener,noreferrer'); return; }
               }
-              toast.error('Could not load file');
+              toast.error('Could not load the insurance card file');
             }}>
               <Shield className="h-3.5 w-3.5" /> View Insurance Card
               <ExternalLink className="h-3 w-3 ml-auto" />
