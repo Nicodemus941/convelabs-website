@@ -49,9 +49,16 @@ const DOBVerifyGate: React.FC<Props> = ({ token, onVerified }) => {
         setErr('Too many attempts. Try again in 15 minutes.');
       } else if (res?.reason === 'mismatch') {
         const left = res?.attempts_remaining ?? 0;
-        setErr(left > 0
-          ? `That doesn't match our records. ${left} ${left === 1 ? 'attempt' : 'attempts'} remaining.`
-          : 'Too many attempts. Try again in 15 minutes.');
+        if (left <= 0) {
+          setErr('Too many attempts. Try again in 15 minutes.');
+        } else if (left <= 2) {
+          // 3rd+ failed attempt. The likeliest cause now is a wrong DOB on the
+          // order itself (provider typo), not patient error — so give a real
+          // path forward instead of just counting down to a lockout.
+          setErr(`That still doesn't match what your provider sent — ${left} ${left === 1 ? 'attempt' : 'attempts'} left. If you're sure your date of birth is correct, your provider may have entered a different one. Call us at (941) 527-9169 and we'll verify you manually.`);
+        } else {
+          setErr(`That doesn't match our records. ${left} ${left === 1 ? 'attempt' : 'attempts'} remaining.`);
+        }
       } else if (res?.reason === 'expired') {
         setErr('This link has expired. Please contact your provider for a new one.');
       } else if (res?.reason === 'no_dob_on_file') {
