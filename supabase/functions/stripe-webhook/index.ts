@@ -90,9 +90,16 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Add-a-companion-to-existing-appointment (/add-companion/:token). The
+      // patient paid the companion fee (same slot) or full visit price
+      // (different date); create the linked companion row(s) now. No
+      // metadata.type — route by metadata.flow before everything else.
+      if (metadata.flow === 'add_companion' && metadata.primary_appointment_id) {
+        await handleAddCompanionPaid(session);
+      }
       // Late-reschedule fee — the patient paid the <24h fee; commit the move
       // now (payment → reschedule is atomic). No metadata.type, route first.
-      if (metadata.kind === 'reschedule_fee' && metadata.appointment_id) {
+      else if (metadata.kind === 'reschedule_fee' && metadata.appointment_id) {
         await handleRescheduleFeePaid(session);
       }
       // Handle branded patient checkout (/pay/:token — invoice + tip).
@@ -357,6 +364,113 @@ Deno.serve(async (req) => {
  * runs when that checkout completes — marks the bundle + all linked appointments
  * as paid, and pings the owner.
  */
+// ─── Add-companion-to-existing-appointment: create the linked row(s) ──────
+// Fired when /add-companion/:token checkout completes. Creates one appointment
+// row per companion, linked to the primary via family_group_id. Same-slot
+// companions inherit the primary's date/time; different-date companions carry
+// the chosen date/time (and were charged the full visit price).
+async function handleAddCompanionPaid(session: any) {
+  const m = session.metadata || {};
+  const primaryId = m.primary_appointment_id;
+  const token = m.add_token || null;
+  const when = m.when === 'different' ? 'different' : 'same';
+  const serviceType = m.service_type || 'mobile';
+  let companions: any[] = [];
+  try { companions = JSON.parse(m.companions_json || '[]'); } catch { /* */ }
+  if (!primaryId || companions.length === 0) {
+    console.warn('[add_companion] missing primary_appointment_id or companions');
+    return;
+  }
+
+  const { data: primary } = await supabaseClient.from('appointments')
+    .select('id, patient_id, patient_name, patient_email, patient_phone, family_group_id, appointment_date, appointment_time, address, zipcode, organization_id, billed_to, service_name, lab_destination, lab_destination_pending, patient_name_masked')
+    .eq('id', primaryId).maybeSingle();
+  if (!primary) { console.warn('[add_companion] primary not found', primaryId); return; }
+
+  // Ensure the primary anchors a family group so siblings render together.
+  const familyGroupId = (primary as any).family_group_id || primary.id;
+  if (!(primary as any).family_group_id) {
+    try {
+      await supabaseClient.from('appointments')
+        .update({ family_group_id: familyGroupId, companion_role: 'primary' })
+        .eq('id', primary.id);
+    } catch { /* non-blocking */ }
+  }
+
+  // Tenant for the companion tenant_patient stubs (contact inherits at runtime).
+  let tenantId: string | null = null;
+  if ((primary as any).patient_id) {
+    try {
+      const { data: tp } = await supabaseClient.from('tenant_patients')
+        .select('tenant_id').eq('id', (primary as any).patient_id).maybeSingle();
+      tenantId = (tp as any)?.tenant_id || null;
+    } catch { /* */ }
+  }
+
+  const apptDate = when === 'different' && m.new_date ? m.new_date : primary.appointment_date;
+  const apptTime = when === 'different' && m.new_time ? m.new_time : primary.appointment_time;
+
+  let created = 0;
+  for (const c of companions) {
+    const cName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || 'Companion';
+    let cPatientId: string | null = null;
+    if (tenantId) {
+      try {
+        const { data: newTp } = await supabaseClient.from('tenant_patients').insert({
+          tenant_id: tenantId,
+          first_name: cName.split(' ')[0] || cName,
+          last_name: cName.split(' ').slice(1).join(' ') || '(companion)',
+          email: null, phone: null,
+          date_of_birth: c.dob || null,
+          patient_notes: `Auto-created ${new Date().toISOString().slice(0, 10)} via add-companion on appt ${primary.id}.`,
+          is_active: true,
+        }).select('id').single();
+        cPatientId = (newTp as any)?.id || null;
+      } catch (e: any) { console.warn('[add_companion] tenant_patient stub failed:', e?.message); }
+    }
+    const feeDollars = (Number(c.fee_cents) || 0) / 100;
+    const { error: cErr } = await supabaseClient.from('appointments').insert([{
+      appointment_date: apptDate,
+      appointment_time: apptTime,
+      status: 'scheduled',
+      payment_status: 'completed',
+      patient_id: cPatientId,
+      patient_name: cName,
+      patient_email: null,
+      patient_phone: null,
+      address: primary.address,
+      zipcode: primary.zipcode || '',
+      service_type: serviceType,
+      service_name: (primary as any).service_name || serviceType,
+      family_group_id: familyGroupId,
+      companion_role: 'companion',
+      organization_id: (primary as any).organization_id || null,
+      billed_to: (primary as any).billed_to || 'patient',
+      patient_name_masked: !!(primary as any).patient_name_masked,
+      lab_destination: (primary as any).lab_destination || null,
+      lab_destination_pending: (primary as any).lab_destination_pending || false,
+      specialty_kit_count: Number(c.kits) || 1,
+      stripe_checkout_session_id: null,
+      total_amount: feeDollars,
+      service_price: feeDollars,
+      tip_amount: 0,
+      booking_source: 'add_companion',
+      notes: `Companion added to ${primary.patient_name} (primary appt ${primary.id})${when === 'different' ? ' — separate date' : ''}.`,
+    }]);
+    if (cErr) console.warn('[add_companion] row insert failed:', cErr.message);
+    else created++;
+  }
+
+  if (token) {
+    try {
+      await supabaseClient.from('add_companion_tokens')
+        .update({ status: 'consumed', companions_added: created, updated_at: new Date().toISOString() })
+        .eq('token', token);
+    } catch { /* */ }
+  }
+  console.log(`[add_companion] created ${created} companion row(s) for primary ${primary.id} (when=${when})`);
+}
+
 async function handleBundlePayment(session: any) {
   const metadata = session.metadata || {};
   const bundleId = metadata.bundle_id;

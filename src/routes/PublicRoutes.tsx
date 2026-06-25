@@ -36,6 +36,7 @@ const ChatThreadPage = lazy(() => import('../pages/ChatThreadPage'));
 const AppointmentConfirmPage = lazy(() => import('../pages/AppointmentConfirmPage'));
 const AppointmentTrackPage = lazy(() => import('../pages/AppointmentTrackPage'));
 const AppointmentPayPage = lazy(() => import('../pages/AppointmentPayPage'));
+const AddCompanionPage = lazy(() => import('../pages/AddCompanionPage'));
 const ProviderClaimPage = lazy(() => import('../pages/ProviderClaimPage'));
 const JoinTier = lazy(() => import('../pages/JoinTier'));
 const CheckoutSuccessPage = lazy(() => import('../pages/CheckoutSuccessPage'));
@@ -102,6 +103,8 @@ export const routes = [
   // Live "phleb is on the way" tracker; SMS fires when phleb taps OTW
   <Route key="appt-track" path="/appt/:token/track" element={<AppointmentTrackPage />} />,
   <Route key="pay-token" path="/pay/:token" element={<AppointmentPayPage />} />,
+  // Self-service "add a companion to my existing appointment + pay the difference".
+  <Route key="add-companion" path="/add-companion/:token" element={<AddCompanionPage />} />,
   // Owner lands here from the Nicobot SMS link → token-authed two-way chat with the visitor.
   <Route key="chat-thread" path="/c/:token" element={<ChatThreadPage />} />,
   // /join (no token) handles the email-upsell direct-checkout: ?tier=vip&email=…

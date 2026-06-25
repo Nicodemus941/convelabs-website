@@ -572,6 +572,34 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               Send Pay Link
             </Button>
           )}
+
+          {/* Add-companion link — patient self-serves at /add-companion/:token:
+              adds a person to THIS visit (same slot, discounted fee) or a
+              different day (full visit price), and pays the difference. */}
+          {appt.status !== 'cancelled' && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-8 gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
+              onClick={async () => {
+                try {
+                  const { data, error } = await supabase.functions.invoke('add-companion', {
+                    body: { action: 'create', primaryAppointmentId: appt.id },
+                  });
+                  if (error) throw error;
+                  const url = (data as any)?.url;
+                  if (!url) throw new Error('No link returned');
+                  try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
+                  toast.success('Add-companion link copied — send it to the patient', { description: url, duration: 15000 });
+                } catch (e: any) {
+                  toast.error(e?.message || 'Failed to create add-companion link');
+                }
+              }}
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Add Companion Link
+            </Button>
+          )}
         </div>
 
         {/* Patient name + contact */}

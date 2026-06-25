@@ -254,3 +254,10 @@ verify_jwt = true
 [functions.training-ask-nico]
 verify_jwt = true
 
+# Add-companion-to-existing-appointment. Public 'details'/'checkout' actions are
+# gated by the opaque add_companion_tokens token; the admin 'create' action
+# validates the caller's JWT inside the function. verify_jwt=false so the
+# token-only patient page can call it without a login.
+[functions.add-companion]
+verify_jwt = false
+
