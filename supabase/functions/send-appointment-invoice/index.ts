@@ -259,7 +259,11 @@ Deno.serve(async (req) => {
     await stripe.invoiceItems.create({
       customer: customerId,
       invoice: invoice.id,
-      amount: Math.round((servicePrice || 0) * 100),
+      // Fall back to the authoritative DB total_amount when the caller didn't
+      // pass servicePrice — otherwise the primary line item lands at $0 (only
+      // companions get billed) and the phleb transfer_data can exceed amount_due,
+      // which Stripe rejects at finalize. (Mathew Shealy add-companion, 2026-06-25.)
+      amount: Math.round((servicePrice || appt.total_amount || 0) * 100),
       currency: 'usd',
       description: `${serviceName || serviceType || 'Mobile Blood Draw'} — ${patientLabel} — ${appointmentDate || ''}${appointmentTime ? ` at ${appointmentTime}` : ''}`,
     });
