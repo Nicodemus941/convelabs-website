@@ -25,6 +25,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+import { getAvailableSlotsForDate } from '../_shared/availability.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -81,6 +82,42 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
+function normPhone(p: string): string {
+  const d = String(p || '').replace(/\D/g, '');
+  if (d.length === 10) return `+1${d}`;
+  if (d.length === 11 && d.startsWith('1')) return `+${d}`;
+  return p?.startsWith('+') ? p : `+${d}`;
+}
+
+async function sendSms(to: string, bodyText: string): Promise<boolean> {
+  const SID = Deno.env.get('TWILIO_ACCOUNT_SID'); const TOK = Deno.env.get('TWILIO_AUTH_TOKEN'); const FROM = Deno.env.get('TWILIO_PHONE_NUMBER');
+  if (!SID || !TOK || !FROM || !to) return false;
+  try {
+    const fd = new URLSearchParams({ To: normPhone(to), From: FROM, Body: bodyText });
+    const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${SID}/Messages.json`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${btoa(`${SID}:${TOK}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: fd.toString(),
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+  const KEY = Deno.env.get('MAILGUN_API_KEY'); const DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
+  if (!KEY || !to) return false;
+  try {
+    const fd = new FormData();
+    fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
+    fd.append('to', to); fd.append('subject', subject); fd.append('html', html);
+    fd.append('o:tracking-clicks', 'no');
+    const r = await fetch(`https://api.mailgun.net/v3/${DOMAIN}/messages`, {
+      method: 'POST', headers: { Authorization: `Basic ${btoa(`api:${KEY}`)}` }, body: fd,
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
 /** Resolve the patient's membership tier from their email (best-effort). */
 async function resolveTier(admin: any, email: string | null): Promise<Tier> {
   const e = String(email || '').trim().toLowerCase();
@@ -117,7 +154,8 @@ Deno.serve(async (req) => {
       const primaryAppointmentId = String(body?.primaryAppointmentId || '');
       if (!primaryAppointmentId) return json({ error: 'appointment_required' }, 400);
       const { data: appt } = await admin.from('appointments')
-        .select('id, status').eq('id', primaryAppointmentId).maybeSingle();
+        .select('id, status, patient_name, patient_email, patient_phone, appointment_date, service_name')
+        .eq('id', primaryAppointmentId).maybeSingle();
       if (!appt) return json({ error: 'appointment_not_found' }, 404);
 
       const token = `addc_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -125,7 +163,34 @@ Deno.serve(async (req) => {
         token, primary_appointment_id: primaryAppointmentId, created_by: role,
       });
       if (insErr) return json({ error: insErr.message }, 500);
-      return json({ ok: true, token, url: `${SITE}/add-companion/${token}` });
+      const url = `${SITE}/add-companion/${token}`;
+
+      // Auto-send the link to the patient unless explicitly suppressed.
+      let sentSms = false, sentEmail = false;
+      if (body?.send !== false) {
+        const fn = String((appt as any).patient_name || 'there').split(' ')[0];
+        const niceDate = (() => {
+          try { return new Date(`${String((appt as any).appointment_date).slice(0, 10)}T12:00:00`).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }); }
+          catch { return 'your upcoming'; }
+        })();
+        if ((appt as any).patient_phone) {
+          sentSms = await sendSms((appt as any).patient_phone,
+            `ConveLabs: Want to add someone to your ${niceDate} visit? Tap to add them and pay — same time as you or a different day: ${url}`);
+        }
+        if ((appt as any).patient_email) {
+          const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;">
+  <div style="background:#B91C1C;color:#fff;padding:18px 22px;border-radius:12px 12px 0 0;"><h2 style="margin:0;font-size:18px;">Add someone to your visit</h2></div>
+  <div style="padding:22px;border:1px solid #eee;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111;">
+    <p>Hi ${fn},</p>
+    <p>Bringing a partner, parent, or family member to your <strong>${niceDate}</strong> appointment? Add them and pay in under a minute — at the same time as you (discounted) or on a different day.</p>
+    <p style="margin:22px 0;"><a href="${url}" style="background:#B91C1C;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;">Add a companion</a></p>
+    <p style="font-size:13px;color:#666;">Questions? Call (941) 527-9169.</p>
+    <p style="margin-top:16px;">— Nico at ConveLabs</p>
+  </div></div>`;
+          sentEmail = await sendEmail((appt as any).patient_email, 'Add someone to your ConveLabs visit', html);
+        }
+      }
+      return json({ ok: true, token, url, sent_sms: sentSms, sent_email: sentEmail });
     }
 
     // ─── Token-gated actions (details / checkout) ────────────────────────
@@ -166,6 +231,23 @@ Deno.serve(async (req) => {
         same_slot_fee_cents: Math.round(companionFeeDollars(serviceType, tier, 'same', 1) * 100),
         different_date_fee_cents: Math.round(companionFeeDollars(serviceType, tier, 'different', 1) * 100),
       });
+    }
+
+    // Available time slots for a chosen different-date (live availability).
+    if (action === 'slots') {
+      const date = String(body?.date || '').slice(0, 10);
+      if (!date) return json({ error: 'date_required' }, 400);
+      try {
+        const all = await getAvailableSlotsForDate(
+          admin, (primary as any).organization_id || '', date, null,
+          (primary as any).lab_destination, serviceType,
+        );
+        const times = (all || []).filter((s: any) => s?.available).map((s: any) => s.time);
+        return json({ ok: true, slots: times });
+      } catch (e: any) {
+        console.warn('[add-companion] slots failed:', e?.message);
+        return json({ ok: true, slots: [] }); // fail open — page falls back to full grid
+      }
     }
 
     if (action === 'checkout') {
@@ -218,8 +300,10 @@ Deno.serve(async (req) => {
         },
       });
 
+      // Keep status 'pending' — the webhook flips it to 'consumed' only after
+      // payment actually clears. We just record the latest session id.
       await admin.from('add_companion_tokens')
-        .update({ stripe_checkout_session_id: session.id, status: 'paid', updated_at: new Date().toISOString() })
+        .update({ stripe_checkout_session_id: session.id, updated_at: new Date().toISOString() })
         .eq('id', tok.id);
 
       return json({ ok: true, stripe_url: session.url });

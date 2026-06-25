@@ -53,6 +53,8 @@ const AddCompanionPage: React.FC = () => {
   const [when, setWhen] = useState<'same' | 'different'>('same');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
+  const [availSlots, setAvailSlots] = useState<string[] | null>(null);
+  const [slotsLoading, setSlotsLoading] = useState(false);
   const [companions, setCompanions] = useState<Companion[]>([{ firstName: '', lastName: '', dob: '', kitsCount: 1 }]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -79,6 +81,26 @@ const AddCompanionPage: React.FC = () => {
       finally { setLoading(false); }
     })();
   }, [token]);
+
+  // Live availability for a chosen different-date — fetch open time slots.
+  useEffect(() => {
+    if (when !== 'different' || !date || !token) { setAvailSlots(null); return; }
+    let cancelled = false;
+    setSlotsLoading(true); setTime('');
+    (async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/add-companion`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({ action: 'slots', token, date }),
+        });
+        const j = await res.json();
+        if (!cancelled) setAvailSlots(Array.isArray(j?.slots) ? j.slots : []);
+      } catch { if (!cancelled) setAvailSlots(null); }
+      finally { if (!cancelled) setSlotsLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [when, date, token]);
 
   const unitFee = when === 'same' ? (data?.same_slot_fee_cents || 0) : (data?.different_date_fee_cents || 0);
   // Client estimate (server recomputes authoritatively, incl. specialty kits).
@@ -167,9 +189,9 @@ const AddCompanionPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)}
                     className="border border-gray-300 rounded-md px-3 py-2 text-sm" />
-                  <select value={time} onChange={e => setTime(e.target.value)} className="border border-gray-300 rounded-md px-3 py-2 text-sm">
-                    <option value="">Pick a time</option>
-                    {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                  <select value={time} onChange={e => setTime(e.target.value)} disabled={slotsLoading} className="border border-gray-300 rounded-md px-3 py-2 text-sm disabled:opacity-60">
+                    <option value="">{slotsLoading ? 'Checking availability…' : (availSlots && availSlots.length === 0 ? 'No times — try another day' : 'Pick a time')}</option>
+                    {(availSlots ?? TIME_SLOTS).map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               )}

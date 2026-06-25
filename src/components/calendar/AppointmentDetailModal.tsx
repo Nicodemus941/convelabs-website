@@ -590,7 +590,12 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
                   const url = (data as any)?.url;
                   if (!url) throw new Error('No link returned');
                   try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
-                  toast.success('Add-companion link copied — send it to the patient', { description: url, duration: 15000 });
+                  const sms = (data as any)?.sent_sms, em = (data as any)?.sent_email;
+                  if (sms || em) {
+                    toast.success(`Add-companion link sent to patient${sms && em ? ' (SMS + email)' : sms ? ' (SMS)' : ' (email)'} — copied too`, { description: url, duration: 12000 });
+                  } else {
+                    toast.success('Add-companion link copied — paste it to the patient', { description: url, duration: 15000 });
+                  }
                 } catch (e: any) {
                   toast.error(e?.message || 'Failed to create add-companion link');
                 }

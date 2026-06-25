@@ -9,7 +9,7 @@ import {
   ChevronRight, ChevronUp, CheckCircle2, Truck, Play, Package,
   Stethoscope, Shield, CalendarClock, DollarSign, Crown, AlertTriangle,
   Globe, Pencil, FileText, FlaskConical, HelpCircle,
-  Route, Utensils, Clock3, Printer, Repeat,
+  Route, Utensils, Clock3, Printer, Repeat, UserPlus,
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -751,6 +751,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <Badge className="ml-2 bg-purple-600 hover:bg-purple-700 text-white gap-1">
                     <FlaskConical className="h-3 w-3" />
                     {appointment.specialty_kit_count || 1} kit{(appointment.specialty_kit_count || 1) === 1 ? '' : 's'} to draw
+                  </Badge>
+                )}
+                {/* Flag companions a patient added AFTER the original booking
+                    (self-serve /add-companion link) so the phleb expects them. */}
+                {appointment.booking_source === 'add_companion' && (
+                  <Badge className="ml-2 bg-amber-500 hover:bg-amber-600 text-white gap-1">
+                    <UserPlus className="h-3 w-3" />
+                    Added after booking
                   </Badge>
                 )}
                 {appointment.gate_code && (
