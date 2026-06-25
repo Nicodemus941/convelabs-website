@@ -745,6 +745,14 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <Stethoscope className="h-3 w-3" />
                   {appointment.service_name || appointment.service_type?.replace(/_/g, ' ')}
                 </Badge>
+                {/* Specialty-kit count — tells the phleb how many kits to draw
+                    for THIS person at the visit (each companion has their own). */}
+                {(appointment.service_type || '').startsWith('specialty-kit') && (appointment.specialty_kit_count || 1) >= 1 && (
+                  <Badge className="ml-2 bg-purple-600 hover:bg-purple-700 text-white gap-1">
+                    <FlaskConical className="h-3 w-3" />
+                    {appointment.specialty_kit_count || 1} kit{(appointment.specialty_kit_count || 1) === 1 ? '' : 's'} to draw
+                  </Badge>
+                )}
                 {appointment.gate_code && (
                   <p className="text-sm mt-2 flex items-center gap-1.5">
                     <span className="text-muted-foreground">Gate Code:</span>

@@ -47,6 +47,9 @@ export interface PhlebAppointment {
   // OCR-extracted content from the lab order (populated by ocr-lab-order edge fn)
   lab_order_ocr_text: string | null;
   lab_order_panels: string[] | null;
+  // Ordered specialty-kit count for THIS patient (specialty-kit* visits) — how
+  // many kits to draw at the home visit. Primary + each companion carry their own.
+  specialty_kit_count: number | null;
   ocr_processed_at: string | null;
   // Patient selected "I'll confirm with my doctor" — admin follow-up required
   lab_destination_pending: boolean;
@@ -401,6 +404,7 @@ export function usePhlebotomistAppointments() {
             insurance_card_path: appt.insurance_card_path || null,
             lab_order_ocr_text: appt.lab_order_ocr_text || null,
             lab_order_panels: Array.isArray(appt.lab_order_panels) ? appt.lab_order_panels : null,
+            specialty_kit_count: typeof appt.specialty_kit_count === 'number' ? appt.specialty_kit_count : null,
             ocr_processed_at: appt.ocr_processed_at || null,
             collection_at: appt.collection_at || null,
             recurrence_group_id: appt.recurrence_group_id || null,

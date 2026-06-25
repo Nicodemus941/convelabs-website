@@ -2023,6 +2023,23 @@ async function handleAppointmentPayment(session: any) {
       }
     };
 
+    // ─── Persist ordered specialty-kit counts (fulfillment record) ──────
+    // Billing for specialty-kit bundles was already validated; this stamps how
+    // many kits to DRAW per person so the phleb knows at the home visit. Runs
+    // for the primary even with no companions (solo patient ordering 2+ kits).
+    const _svcType = String(metadata.service_type || '');
+    const _isSpecialtyKit = _svcType === 'specialty-kit' || _svcType === 'specialty-kit-genova';
+    if (_isSpecialtyKit && appointment?.id) {
+      const primaryKits = Math.max(1, Number(pendingBreakdown?.primary_kits || 1));
+      try {
+        await supabaseClient.from('appointments')
+          .update({ specialty_kit_count: primaryKits })
+          .eq('id', appointment.id);
+      } catch (e: any) {
+        console.warn('[specialty-kit] primary kit-count stamp failed:', e?.message);
+      }
+    }
+
     try {
       const companions = Array.isArray(pendingBreakdown?.additional_patients)
         ? pendingBreakdown.additional_patients
@@ -2118,6 +2135,10 @@ async function handleAppointmentPayment(session: any) {
             // render this as a sibling of the primary
             family_group_id: familyGroupId,
             companion_role: c.relationship || 'companion',
+            // Ordered specialty-kit count for THIS companion (specialty-kit*
+            // bundles). Lets the phleb see "needs 2 kits" on the home visit;
+            // billing for it already rode on the primary's validated total.
+            specialty_kit_count: _isSpecialtyKit ? Math.max(1, Number(c.kits || 1)) : 1,
             // Org / billing fields inherit from primary (parses org_json
             // with backward-compat fallback to legacy top-level keys)
             organization_id: metadata.organization_id || null,

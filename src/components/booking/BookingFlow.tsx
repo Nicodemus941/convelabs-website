@@ -615,9 +615,16 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           // reminder for this patient at the 24-hr cron. The Amy/Robert
           // case (couple, one fasts, one doesn't) uses this.
           fastingRequired: !!p?.fastingRequired,
+          // Per-companion specialty-kit count. Used for pricing via the bundle
+          // already; carry it here too so the webhook can stamp the companion's
+          // appointment row (specialty_kit_count) — otherwise the phleb has no
+          // record of how many kits to draw for this person at the home visit.
+          kits: Math.max(1, Number(p?.kitsCount || 1)),
           source: p?._source || 'additional',
         })),
         additional_patient_count: additionalPatientCount,
+        // Primary patient's ordered specialty-kit count (specialty-kit* visits).
+        primary_kits: Math.max(1, Number((data as any).primaryKitsCount || 1)),
         tip: tipAmount,
         referral_code: referralCode || null,
         referral_discount: referralDiscount,
