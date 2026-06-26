@@ -1,8 +1,10 @@
 
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Capacitor } from '@capacitor/core';
 import AppRoutes from './AppRoutes.tsx';
 import { initPostHog } from './lib/posthog';
+import { initNativeApp } from './native/initNativeApp';
 import './index.css';
 
 // Initialize PostHog as early as possible so page-view events fire on first
@@ -25,12 +27,18 @@ createRoot(document.getElementById("root")!).render(
   </QueryClientProvider>
 );
 
+// Native (Capacitor) bootstrap: status bar, back button, deep links, splash
+// hide. No-op on the website build.
+initNativeApp();
+
 // Register service worker for PWA — with self-heal fallback when the SW
 // gets stuck in an "invalid state" (seen in admin-portal screenshots
 // 2026-04-25). When that happens, a stale bundle keeps serving users
 // the old code and click handlers break silently. We unregister + reload
 // once to recover, gated by sessionStorage so we don't loop.
-if ('serviceWorker' in navigator) {
+// Skipped entirely inside the native app — a SW intercepting the
+// capacitor:// scheme is what causes the "stuck loading flash" on mobile.
+if (!Capacitor.isNativePlatform() && 'serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
       const registration = await navigator.serviceWorker.register('/sw.js');

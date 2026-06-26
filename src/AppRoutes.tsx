@@ -20,6 +20,7 @@ const BookAppointment = lazy(() => import('./pages/BookAppointment'));
 const SuperAdminSetupPage = lazy(() => import('./pages/SuperAdminSetupPage'));
 
 import { ScrollToTop } from './components/utils/ScrollToTop';
+import { NativeLaunchRedirect } from './native/NativeLaunchRedirect';
 
 // Lightweight loading fallback
 const PageLoader = () => (
@@ -59,6 +60,7 @@ const AppRoutes = () => {
   return (
     <Router>
       <ScrollToTop />
+      <NativeLaunchRedirect />
       <HelmetProvider>
         <AuthProvider>
           <ConversionOptimizationProvider>
