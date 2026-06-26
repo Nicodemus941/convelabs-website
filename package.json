@@ -10,10 +10,12 @@
     "build:novite": "node scripts/generate-seo-html.mjs",
     "build:patient": "cross-env VITE_APP_TARGET=patient vite build",
     "build:phleb": "cross-env VITE_APP_TARGET=phleb vite build",
-    "cap:patient": "cross-env CAP_TARGET=patient VITE_APP_TARGET=patient vite build && cross-env CAP_TARGET=patient cap sync",
-    "cap:phleb": "cross-env CAP_TARGET=phleb VITE_APP_TARGET=phleb vite build && cross-env CAP_TARGET=phleb cap sync",
+    "cap:patient": "node scripts/set-cap-target.mjs patient && cross-env CAP_TARGET=patient VITE_APP_TARGET=patient vite build && cross-env CAP_TARGET=patient cap sync",
+    "cap:phleb": "node scripts/set-cap-target.mjs phleb && cross-env CAP_TARGET=phleb VITE_APP_TARGET=phleb vite build && cross-env CAP_TARGET=phleb cap sync",
     "cap:open:android": "cap open android",
     "cap:open:ios": "cap open ios",
+    "icons:patient": "node scripts/set-cap-target.mjs patient && capacitor-assets generate --iconBackgroundColor #ffffff --iconBackgroundColorDark #ffffff --splashBackgroundColor #ffffff --splashBackgroundColorDark #7F1D1D",
+    "icons:phleb": "node scripts/set-cap-target.mjs phleb && capacitor-assets generate --iconBackgroundColor #7F1D1D --iconBackgroundColorDark #7F1D1D --splashBackgroundColor #7F1D1D --splashBackgroundColorDark #7F1D1D",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -103,6 +105,7 @@
   },
   "devDependencies": {
     "@capacitor/android": "^8.4.1",
+    "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/ios": "^8.4.1",
     "@eslint/js": "^9.9.0",
