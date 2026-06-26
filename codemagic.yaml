@@ -1,0 +1,153 @@
+# Codemagic CI — cloud builds for the two ConveLabs apps (no Mac required).
+#
+# One web codebase -> two apps, selected by the npm cap:<target> script which
+# stamps the native applicationId / bundle id + display name before building:
+#   patient -> com.convelabs.patient  ("ConveLabs")
+#   phleb   -> com.convelabs.phleb    ("ConveLabs Pro")
+#
+# BEFORE the first run, set these up in the Codemagic UI:
+#   * Env group "convelabs_web"     -> VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
+#                                       VITE_STRIPE_PUBLISHABLE_KEY, VITE_POSTHOG_KEY, ...
+#                                       (whatever the web build reads from import.meta.env)
+#   * iOS: App Store Connect API key (Integrations) + provision both bundle ids.
+#   * Android: keystore in env group "android_keystore" + Google Play service account.
+#
+# Trigger a workflow manually (or wire branch triggers) per app/platform.
+
+definitions:
+  env_versions: &env_versions
+    node: 22
+  cache_cfg: &cache_cfg
+    cache_paths:
+      - $HOME/.npm
+
+workflows:
+  # ---------------- PATIENT (ConveLabs) ----------------
+  ios-patient:
+    name: ConveLabs Patient · iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.convelabs.patient
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (patient)
+        script: npm run cap:patient
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-patient:
+    name: ConveLabs Patient · Android
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+        - android_keystore   # CM_KEYSTORE, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (patient)
+        script: npm run cap:patient
+      - name: Decode keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/keystore.jks
+      - name: Build AAB
+        script: |
+          cd android
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks \
+            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+
+  # ---------------- PHLEB (ConveLabs Pro) ----------------
+  ios-phleb:
+    name: ConveLabs Pro · iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.convelabs.phleb
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (phleb)
+        script: npm run cap:phleb
+      - name: Set up code signing
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-phleb:
+    name: ConveLabs Pro · Android
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+        - android_keystore
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (phleb)
+        script: npm run cap:phleb
+      - name: Decode keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/keystore.jks
+      - name: Build AAB
+        script: |
+          cd android
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks \
+            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal

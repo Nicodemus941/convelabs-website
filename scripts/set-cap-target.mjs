@@ -51,4 +51,14 @@ rewrite('android/app/src/main/res/values/strings.xml', [
   [/(<string name="title_activity_main">)[^<]*(<\/string>)/, `$1${app.appName}$2`],
 ]);
 
+// iOS bundle id (every Debug/Release config) — global replace.
+rewrite('ios/App/App.xcodeproj/project.pbxproj', [
+  [/PRODUCT_BUNDLE_IDENTIFIER = [^;]*;/g, `PRODUCT_BUNDLE_IDENTIFIER = ${app.appId};`],
+]);
+
+// iOS display name
+rewrite('ios/App/App/Info.plist', [
+  [/(<key>CFBundleDisplayName<\/key>\s*<string>)[^<]*(<\/string>)/, `$1${app.appName}$2`],
+]);
+
 console.log(`[set-cap-target] done: ${app.appName} (${app.appId})`);
