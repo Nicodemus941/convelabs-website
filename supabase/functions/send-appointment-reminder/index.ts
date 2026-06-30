@@ -46,12 +46,20 @@ serve(async (req: Request) => {
       return await processSingleAppointment(appointmentId, supabaseClient);
     }
     
-    // Otherwise, find all appointments happening in the next 24 hours
+    // Otherwise, find all appointments happening in the next 24 hours.
+    // This cron is scheduled once daily in the early ET evening (see the
+    // `process-appointment-reminders` pg_cron job — 0 22 * * * UTC ≈ 6 PM ET),
+    // so a 24h look-ahead lands a single "night before" reminder. It used to
+    // run hourly, which (combined with appointment_date stored at UTC-midnight
+    // for online bookings — 8 PM ET the prior evening) fired the reminder ~1.5
+    // days early. Melissa Neptune got a July-1 reminder on June 29. (2026-06-29)
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(now.getDate() + 1);
-    
-    // Get appointments in the next 24 hours
+
+    // Get appointments in the next 24 hours. Include `confirmed` — most
+    // appointments are confirmed by the day before, so filtering to only
+    // `scheduled` meant confirmed patients got no reminder at all.
     const { data: appointments, error } = await supabaseClient
       .from('appointments')
       .select(`
@@ -59,7 +67,7 @@ serve(async (req: Request) => {
         appointment_date,
         patient_id
       `)
-      .eq('status', 'scheduled')
+      .in('status', ['scheduled', 'confirmed'])
       .gte('appointment_date', now.toISOString())
       .lte('appointment_date', tomorrow.toISOString());
     
