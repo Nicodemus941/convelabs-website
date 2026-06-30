@@ -230,6 +230,23 @@ Deno.serve(async (req) => {
               .select('id').eq('stripe_payment_intent_id', pi).maybeSingle();
             if (appt) continue;
           }
+          // Also exclude charges whose INVOICE is tied to an appointment.
+          // Companion add-on / visit invoices store stripe_invoice_id (not the
+          // PI) on the row, so the PI check above misses them. This killed the
+          // Ava Shealy $225 companion+specialty-kit invoice colliding with the
+          // Essential Care $225 membership price. (2026-06-30)
+          const invId = typeof ch.invoice === 'string' ? ch.invoice : (ch.invoice as any)?.id || null;
+          if (invId) {
+            const { data: apptByInv } = await admin.from('appointments')
+              .select('id').eq('stripe_invoice_id', invId).maybeSingle();
+            if (apptByInv) continue;
+          }
+          // And exclude charges explicitly tagged as a non-membership flow
+          // (companion add-ons, visit/appointment invoices, tips). Amount alone
+          // is never proof of a membership purchase.
+          const md = { ...(ch.metadata || {}) } as Record<string, string>;
+          const flow = `${md.type || ''} ${md.source || ''} ${md.flow || ''}`.toLowerCase();
+          if (/companion|appointment|visit|addon|add_on|tip|invoice_payment/.test(flow)) continue;
 
           // Does this customer already have an active membership? (then fine)
           const { data: tp } = await admin.from('tenant_patients')
