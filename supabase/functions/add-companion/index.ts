@@ -230,6 +230,12 @@ Deno.serve(async (req) => {
         // Unit prices the page previews; checkout recomputes authoritatively.
         same_slot_fee_cents: Math.round(companionFeeDollars(serviceType, tier, 'same', 1) * 100),
         different_date_fee_cents: Math.round(companionFeeDollars(serviceType, tier, 'different', 1) * 100),
+        // Specialty-kit add-on prices so a companion can opt into a kit even
+        // when the primary is a standard draw. Tier-aware, all-in.
+        kit_options: [
+          { serviceType: 'specialty-kit', label: 'Specialty kit', same_cents: Math.round(companionFeeDollars('specialty-kit', tier, 'same', 1) * 100), different_cents: Math.round(companionFeeDollars('specialty-kit', tier, 'different', 1) * 100) },
+          { serviceType: 'specialty-kit-genova', label: 'Specialty kit (Genova)', same_cents: Math.round(companionFeeDollars('specialty-kit-genova', tier, 'same', 1) * 100), different_cents: Math.round(companionFeeDollars('specialty-kit-genova', tier, 'different', 1) * 100) },
+        ],
       });
     }
 
@@ -262,13 +268,18 @@ Deno.serve(async (req) => {
       // Recompute the total server-side. Never trust a client amount.
       let totalCents = 0;
       const normalized = companions.map((c: any) => {
-        const kits = isSpecialty(serviceType) ? Math.max(1, Number(c?.kitsCount || 1)) : 1;
-        const feeCents = Math.round(companionFeeDollars(serviceType, tier, when, kits) * 100);
+        // A companion may need a different service than the primary — e.g. a
+        // specialty kit while the primary is a standard draw. Only allow
+        // upgrading to a specialty service (never downgrade pricing).
+        const cType = isSpecialty(String(c?.serviceType || '')) ? String(c.serviceType) : serviceType;
+        const kits = isSpecialty(cType) ? Math.max(1, Number(c?.kitsCount || 1)) : 1;
+        const feeCents = Math.round(companionFeeDollars(cType, tier, when, kits) * 100);
         totalCents += feeCents;
         return {
           firstName: String(c?.firstName || '').slice(0, 60),
           lastName: String(c?.lastName || '').slice(0, 60),
           dob: c?.dob ? String(c.dob).slice(0, 10) : null,
+          serviceType: cType,
           kits, fee_cents: feeCents,
         };
       });

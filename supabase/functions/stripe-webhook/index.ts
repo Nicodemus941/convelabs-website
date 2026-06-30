@@ -440,8 +440,13 @@ async function handleAddCompanionPaid(session: any) {
       patient_phone: null,
       address: primary.address,
       zipcode: primary.zipcode || '',
-      service_type: serviceType,
-      service_name: (primary as any).service_name || serviceType,
+      // Per-companion service: a companion can need a specialty kit even when
+      // the primary is a standard draw (self-serve add-companion lets them
+      // pick it). Falls back to the primary's service when not specified.
+      service_type: c.serviceType || serviceType,
+      service_name: (c.serviceType && c.serviceType !== serviceType)
+        ? (c.serviceType === 'specialty-kit-genova' ? 'Specialty Kit Collection (Genova)' : 'Specialty Kit Collection')
+        : ((primary as any).service_name || serviceType),
       family_group_id: familyGroupId,
       companion_role: 'companion',
       organization_id: (primary as any).organization_id || null,

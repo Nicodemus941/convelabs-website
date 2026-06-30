@@ -35,8 +35,9 @@ interface Details {
   tier: string;
   same_slot_fee_cents: number;
   different_date_fee_cents: number;
+  kit_options?: Array<{ serviceType: string; label: string; same_cents: number; different_cents: number }>;
 }
-interface Companion { firstName: string; lastName: string; dob: string; kitsCount: number; }
+interface Companion { firstName: string; lastName: string; dob: string; kitsCount: number; kitType: string | null; }
 
 const prettyDate = (d: string | null) => {
   if (!d) return '';
@@ -55,7 +56,7 @@ const AddCompanionPage: React.FC = () => {
   const [time, setTime] = useState('');
   const [availSlots, setAvailSlots] = useState<string[] | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
-  const [companions, setCompanions] = useState<Companion[]>([{ firstName: '', lastName: '', dob: '', kitsCount: 1 }]);
+  const [companions, setCompanions] = useState<Companion[]>([{ firstName: '', lastName: '', dob: '', kitsCount: 1, kitType: null }]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -103,17 +104,22 @@ const AddCompanionPage: React.FC = () => {
   }, [when, date, token]);
 
   const unitFee = when === 'same' ? (data?.same_slot_fee_cents || 0) : (data?.different_date_fee_cents || 0);
+  const kitOpt = (st: string | null) => data?.kit_options?.find(k => k.serviceType === st) || null;
   // Client estimate (server recomputes authoritatively, incl. specialty kits).
   const estimate = useMemo(() => companions.reduce((s, c) => {
+    // Companion opted into a specialty kit (primary is a standard draw):
+    if (c.kitType && !data?.is_specialty) {
+      const opt = kitOpt(c.kitType);
+      return s + (opt ? (when === 'same' ? opt.same_cents : opt.different_cents) : unitFee);
+    }
     const kits = data?.is_specialty ? Math.max(1, Number(c.kitsCount || 1)) : 1;
-    // rough extra-kit bump for the estimate; exact total shown on the pay page
     const extra = data?.is_specialty ? (kits - 1) * 3500 : 0;
     return s + unitFee + extra;
-  }, 0), [companions, unitFee, data]);
+  }, 0), [companions, unitFee, when, data]);
 
   const updateCompanion = (i: number, patch: Partial<Companion>) =>
     setCompanions(cs => cs.map((c, idx) => idx === i ? { ...c, ...patch } : c));
-  const addCompanion = () => setCompanions(cs => [...cs, { firstName: '', lastName: '', dob: '', kitsCount: 1 }]);
+  const addCompanion = () => setCompanions(cs => [...cs, { firstName: '', lastName: '', dob: '', kitsCount: 1, kitType: null }]);
   const removeCompanion = (i: number) => setCompanions(cs => cs.filter((_, idx) => idx !== i));
 
   const valid = companions.every(c => c.firstName.trim() && c.lastName.trim())
@@ -126,7 +132,16 @@ const AddCompanionPage: React.FC = () => {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/add-companion`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ action: 'checkout', token, companions, when, date, time }),
+        body: JSON.stringify({
+          action: 'checkout', token, when, date, time,
+          companions: companions.map(c => ({
+            firstName: c.firstName, lastName: c.lastName, dob: c.dob,
+            kitsCount: c.kitsCount,
+            // Only send serviceType when the companion opted into a kit and the
+            // primary isn't already a specialty visit.
+            serviceType: (!data?.is_specialty && c.kitType) ? c.kitType : undefined,
+          })),
+        }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.stripe_url) { window.location.href = j.stripe_url; return; }
@@ -215,6 +230,25 @@ const AddCompanionPage: React.FC = () => {
                         <div className="col-span-2 flex items-center justify-between">
                           <span className="text-xs text-gray-600">Specialty kits</span>
                           <input type="number" min={1} max={6} value={c.kitsCount} onChange={e => updateCompanion(i, { kitsCount: Math.max(1, Number(e.target.value) || 1) })} className="border border-gray-300 rounded-md px-2 py-1 text-sm w-16 text-center" />
+                        </div>
+                      )}
+                      {!data.is_specialty && data.kit_options && (
+                        <div className="col-span-2">
+                          <label className="flex items-center gap-2 text-xs text-gray-700">
+                            <input type="checkbox" checked={!!c.kitType}
+                              onChange={e => updateCompanion(i, { kitType: e.target.checked ? 'specialty-kit' : null })} />
+                            This person needs a specialty collection kit
+                          </label>
+                          {c.kitType && (
+                            <select value={c.kitType} onChange={e => updateCompanion(i, { kitType: e.target.value })}
+                              className="mt-1.5 border border-gray-300 rounded-md px-2 py-1.5 text-sm w-full">
+                              {data.kit_options.map(k => (
+                                <option key={k.serviceType} value={k.serviceType}>
+                                  {k.label} — {fmt(when === 'same' ? k.same_cents : k.different_cents)}
+                                </option>
+                              ))}
+                            </select>
+                          )}
                         </div>
                       )}
                     </div>
