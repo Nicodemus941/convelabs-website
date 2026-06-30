@@ -3,6 +3,7 @@ import { stripe } from "../_shared/stripe.ts";
 import { verifyRecipientEmail, verifyRecipientPhone } from "../_shared/verify-recipient.ts";
 import { commitReschedule } from "../_shared/reschedule.ts";
 import { isSlotStillAvailable } from "../_shared/availability.ts";
+import { resolveMembershipPlan, upsertUserMembership, userIdFromEmail } from "../_shared/membership.ts";
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -147,6 +148,14 @@ Deno.serve(async (req) => {
       else {
         await handleMembershipSignup(session, isFoundingMember, isSupernovaMember);
       }
+    }
+    // Handle subscription created — deterministic, real-time membership create.
+    // The subscription carries metadata.type='membership' + plan_id (stamped by
+    // create-checkout-session via subscription_data.metadata), so this never
+    // depends on the checkout.session metadata path and never guesses by amount.
+    else if (event.type === 'customer.subscription.created') {
+      const subscription = event.data.object;
+      await handleSubscriptionCreated(subscription);
     }
     // Handle subscription updated (e.g. renewing)
     else if (event.type === 'customer.subscription.updated') {
@@ -942,6 +951,52 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
   } catch (error) {
     console.error('Error processing membership signup:', error);
     throw error;
+  }
+}
+
+// Deterministic, real-time membership creation on subscription.created.
+// ONLY acts on memberships (metadata.type==='membership') — recurring-visit,
+// org, corporate and add-on subscriptions carry other types and are ignored
+// here. Resolves the plan via metadata.plan_id → price id → amount, resolves
+// the user via metadata.user_id → customer email, and upserts idempotently
+// through the shared helper. This is the belt-and-suspenders guarantee: even
+// if the checkout.session path is incomplete, a real membership subscription
+// always produces a user_memberships row the instant Stripe activates it.
+async function handleSubscriptionCreated(subscription: any) {
+  try {
+    const md = subscription.metadata || {};
+    if (md.type !== 'membership') return; // not a membership subscription
+
+    const item = subscription.items?.data?.[0];
+    const priceId = item?.price?.id || null;
+    const unit = item?.price?.unit_amount || 0;
+    const cust = subscription.customer;
+    const customerId = typeof cust === 'string' ? cust : (cust?.id || null);
+
+    let userId: string | null = (md.user_id && md.user_id !== 'guest') ? md.user_id : null;
+    let email: string | null = null;
+    if (customerId) {
+      try {
+        const c: any = await stripe.customers.retrieve(customerId);
+        if (c && !c.deleted) email = c.email || null;
+      } catch { /* customer fetch optional */ }
+    }
+    if (!userId) userId = await userIdFromEmail(supabaseClient, email);
+    if (!userId) { console.warn('[sub.created] membership but no resolvable user', subscription.id); return; }
+
+    const resolved = await resolveMembershipPlan(supabaseClient, { planId: md.plan_id, priceId, amountCents: unit });
+    if (!resolved) { console.warn('[sub.created] membership but no plan match', subscription.id); return; }
+
+    const periodEnd = subscription.current_period_end;
+    const nextRenewal = (typeof periodEnd === 'number' && periodEnd > 0) ? new Date(periodEnd * 1000).toISOString() : null;
+    const res = await upsertUserMembership(supabaseClient, {
+      userId, plan: resolved.plan, stripeCustomerId: customerId, stripeSubscriptionId: subscription.id,
+      billingFrequency: md.billing_frequency || (item?.price?.recurring?.interval === 'month' ? 'monthly' : 'annual'),
+      billingEmail: email, nextRenewal,
+    });
+    console.log(`[sub.created] membership ${res.created ? 'created' : 'ensured'} for ${userId} (${resolved.plan.name}, matched by ${resolved.matchedBy})`);
+  } catch (e: any) {
+    console.error('[sub.created] failed:', e?.message);
   }
 }
 
@@ -3176,19 +3231,30 @@ async function handleLabRequestUnlock(session: any) {
       console.warn('[unlock] invoice item create failed:', e.message);
     }
 
-    // Create the membership row
-    const { data: plan } = await supabaseClient
-      .from('membership_plans' as any).select('id').eq('tier', tier).maybeSingle();
-    if (plan) {
-      await supabaseClient.from('user_memberships' as any).insert({
-        email: patientEmail,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: subscriptionId,
-        membership_plan_id: plan.id,
-        status: 'active',
-        started_at: new Date().toISOString(),
-        source: 'lab_request_unlock',
-      });
+    // Create the membership row via the canonical helper. The previous insert
+    // was doubly broken: it looked up membership_plans by a non-existent `tier`
+    // column (always null → nothing created) and used columns that don't exist
+    // (email / membership_plan_id / started_at / source). Resolve the plan by
+    // name↔tier and upsert with the real schema.
+    try {
+      const { data: planRows } = await supabaseClient.from('membership_plans')
+        .select('id, name, annual_price, monthly_price, quarterly_price, credits_per_year, stripe_annual_price_id, stripe_monthly_price_id, stripe_quarterly_price_id');
+      const tierKey = String(tier || '').toLowerCase();
+      const wanted = tierKey === 'member' ? 'regular' : tierKey;
+      const plan = (planRows || []).find((p: any) => String(p.name).toLowerCase().includes(wanted));
+      const uid = await userIdFromEmail(supabaseClient, patientEmail);
+      if (plan && uid) {
+        await upsertUserMembership(supabaseClient, {
+          userId: uid, plan,
+          stripeCustomerId: typeof customerId === 'string' ? customerId : null,
+          stripeSubscriptionId: typeof subscriptionId === 'string' ? subscriptionId : null,
+          billingEmail: patientEmail,
+        });
+      } else {
+        console.warn('[unlock] membership not created — unresolved', { hasPlan: !!plan, hasUser: !!uid, tier });
+      }
+    } catch (e: any) {
+      console.warn('[unlock] membership upsert failed:', e?.message);
     }
 
     // Create the appointment

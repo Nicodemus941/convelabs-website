@@ -337,6 +337,9 @@ Deno.serve(async (req) => {
         cancel_url: cancelUrl,
         customer: stripeCustomer,
         metadata: {
+          // Explicit membership signal so the webhook + reconcile route by
+          // INTENT, not by guessing from the charge amount.
+          type: 'membership',
           user_id: user?.id || 'guest',
           plan_id: planId,
           billing_frequency: billingFrequency,
@@ -357,6 +360,22 @@ Deno.serve(async (req) => {
           agreement_version: (requestBody?.metadata?.agreement_version as string) || null
         },
       };
+
+      // Stamp the SUBSCRIPTION itself (not just the checkout session) with the
+      // membership signal + plan_id. Stripe copies subscription_data.metadata
+      // onto the created Subscription, so every customer.subscription.* event
+      // and the reconcile cron can resolve the plan deterministically without
+      // the session — closing the "subscription has no plan_id" gap.
+      if (mode === 'subscription') {
+        (sessionConfig as any).subscription_data = {
+          metadata: {
+            type: 'membership',
+            plan_id: planId,
+            user_id: user?.id || 'guest',
+            billing_frequency: billingFrequency,
+          },
+        };
+      }
 
       const session = await stripe.checkout.sessions.create(sessionConfig);
 
