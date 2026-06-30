@@ -42,10 +42,33 @@ const fmtDate = (d: string) =>
     weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC',
   });
 
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
+const ADMIN_ROLES = ['super_admin', 'office_manager', 'admin', 'owner'];
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // Admin gate — this fn is verify_jwt=false at the gateway (so it can also
+    // be reached by token-based self-serve later), so enforce staff-only here.
+    // The admin UI invoke() passes the signed-in user's JWT automatically.
+    const authHeader = req.headers.get('Authorization') || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    let authorized = false;
+    if (token && token !== ANON_KEY) {
+      const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+      const { data: { user } } = await userClient.auth.getUser();
+      if (user) {
+        const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', user.id);
+        authorized = (roles || []).some((r: any) => ADMIN_ROLES.includes(String(r.role)));
+      }
+    }
+    if (!authorized) {
+      return new Response(JSON.stringify({ error: 'not_authorized', reason: 'staff role required' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const body = await req.json().catch(() => ({}));
     const {
