@@ -119,17 +119,23 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          # SUSTAINABLE SIGNING — no more cert churn.
-          # `create-certificate --save` mints a distribution certificate AND saves
-          # its private key into Codemagic on the FIRST run; on every later build
-          # it 409s (Apple's 2-cert cap) and we swallow it with `|| true`, then
-          # fetch-signing-files REUSES the Codemagic-saved certificate instead of
-          # minting a new one. Result: ConveLabs keeps ONE stable cert, so builds
-          # no longer pile up under the cap. Additive — never revokes any existing
-          # app's certificate (E-Labus/Do-Ya untouched).
-          app-store-connect create-certificate --type IOS_DISTRIBUTION --save 2>/dev/null || true
+          # PROVEN recipe (builds #7/#9/#10 shipped to TestFlight with this).
+          # Generate a fresh key locally so the certificate's private key is
+          # KNOWN — that's what makes keychain add-certificates + the archive
+          # signing work. Additive: never revokes the E-Labus/Do-Ya cert.
+          #
+          # NOTE on the 2-cert cap: this mints a throwaway distribution cert each
+          # build, so on CONSECUTIVE ConveLabs builds Apple's 2-cert limit is hit
+          # and you must first revoke the PRIOR ConveLabs distribution cert (the
+          # newest "Do-Ya Medical Services, LLC" one — NOT the E-Labus cert) in
+          # the Apple Developer portal. A create-certificate --save reuse recipe
+          # was tried (build #11) and FAILED — the archive couldn't find a
+          # provisioning profile. Durable fix = a persisted CONVELABS_CERT_KEY
+          # env var (then `--certificate-key=@env:...`) or a separate Apple team.
+          openssl genrsa -out /tmp/convelabs_cert_key.pem 2048
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/convelabs_cert_key.pem \
             --create
           keychain add-certificates
           xcode-project use-profiles
