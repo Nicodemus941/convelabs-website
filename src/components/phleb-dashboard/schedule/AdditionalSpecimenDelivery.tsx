@@ -41,9 +41,12 @@ interface Props {
   patientId: string | null;
   patientName: string;
   serviceType: string;
+  /** Reports how many additional deliveries are logged (for the parent's
+   *  "all specimens logged" gate). Called on load and after each save. */
+  onCountChange?: (n: number) => void;
 }
 
-const AdditionalSpecimenDelivery: React.FC<Props> = ({ appointmentId, patientId, patientName, serviceType }) => {
+const AdditionalSpecimenDelivery: React.FC<Props> = ({ appointmentId, patientId, patientName, serviceType, onCountChange }) => {
   const [logged, setLogged] = useState<Delivery[]>([]);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -64,8 +67,10 @@ const AdditionalSpecimenDelivery: React.FC<Props> = ({ appointmentId, patientId,
       .eq('appointment_id', appointmentId)
       .not('order_label', 'is', null)
       .order('created_at', { ascending: true });
-    setLogged((data as any) || []);
-  }, [appointmentId]);
+    const rows = (data as any) || [];
+    setLogged(rows);
+    onCountChange?.(rows.length);
+  }, [appointmentId, onCountChange]);
 
   useEffect(() => { load(); }, [load]);
 
