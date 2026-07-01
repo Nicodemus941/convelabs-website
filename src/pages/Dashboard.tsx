@@ -3,57 +3,65 @@ import React, { useEffect } from "react";
 import { Navigate, useParams, useNavigate, useLocation } from "react-router-dom";
 import { UserRole } from "@/types/auth";
 import DashboardWrapper from "@/components/dashboards/DashboardWrapper";
-import SuperAdminDashboard from "@/components/dashboards/SuperAdminDashboard";
-import PatientDashboard from "@/components/dashboards/PatientDashboard";
-import PhlebotomistDashboard from "@/components/dashboards/PhlebotomistDashboard";
-import OfficeManagerDashboard from "@/components/dashboards/OfficeManagerDashboard";
-import ConciergeDoctorDashboard from "@/components/dashboards/ConciergeDoctorDashboard";
-import ProviderDashboard from "@/components/dashboards/ProviderDashboard";
 import { supabase } from "@/integrations/supabase/client";
 import RoleProtectedRoute from "@/components/auth/RoleProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
-import UserManagementTab from "@/components/dashboards/admin/UserManagementTab";
-import StaffManagement from "@/components/dashboards/admin/staff/StaffManagement";
-import InventoryTab from "@/components/dashboards/admin/InventoryTab";
-import AdminServicesTab from "@/components/admin/AdminServicesTab";
-import EnhancedAppointmentsTab from "@/components/dashboards/admin/enhanced/EnhancedAppointmentsTab";
-import DocumentationTab from "@/components/dashboards/admin/DocumentationTab";
-import SettingsTab from "@/components/dashboards/admin/SettingsTab";
-import MarketingTab from "@/components/dashboards/admin/MarketingTab";
-import StaffManagementTab from "@/components/dashboards/admin/StaffManagementTab";
-import WebhookEventMonitor from "@/components/dashboards/admin/WebhookEventMonitor";
-import AdminCalendar from "@/components/calendar/AdminCalendar";
-import SMSMessagingTab from "@/components/dashboards/admin/SMSMessagingTab";
-import InvoicesTab from "@/components/dashboards/admin/InvoicesTab";
-import SpecimenTrackingTab from "@/components/dashboards/admin/SpecimenTrackingTab";
-import NotesTab from "@/components/dashboards/admin/NotesTab";
-import InboxTab from "@/components/dashboards/admin/InboxTab";
-import PatientProfileTab from "@/components/dashboards/admin/PatientProfileTab";
-// Lazy-load the Lab Orders tab — large component (drawer + grouped view +
-// auto-fulfill UI). Most admin sessions never open this tab, so deferring
-// it speeds up first paint for every other admin route.
-//
-// Wrapped in lazyWithRetry so stale-bundle deploys never strand an admin
-// on a blank tab (Naquala hit this 2026-05-12 — old index.html referenced
-// LabOrdersTab-DCdZ9xfX.js after a new deploy replaced the chunk hash).
-// First failure triggers a one-time hard reload; second failure surfaces
-// to ErrorBoundary so the admin gets an actionable error instead of a
-// silent blank page.
 import { lazyWithRetry } from "@/lib/lazyWithRetry";
+import AdminLayout from "@/components/dashboards/admin/AdminLayout";
+
+// Role dashboards + admin tabs are LAZY-loaded so each role only downloads its
+// OWN code. Eagerly importing all of them bundled the entire admin suite
+// (charts, calendar, CFO, marketing, hormozi…) into one ~2.4MB chunk that
+// EVERY user — including patients on mobile/PWA — had to download just to open
+// their dashboard, so it failed to load on slower phones. (Incident 2026-07-01.)
+// lazyWithRetry adds a one-time hard reload on a stale-bundle chunk 404 so a
+// deploy never strands anyone on a blank tab.
+const SuperAdminDashboard = lazyWithRetry(() => import("@/components/dashboards/SuperAdminDashboard"), 'SuperAdminDashboard');
+const PatientDashboard = lazyWithRetry(() => import("@/components/dashboards/PatientDashboard"), 'PatientDashboard');
+const PhlebotomistDashboard = lazyWithRetry(() => import("@/components/dashboards/PhlebotomistDashboard"), 'PhlebotomistDashboard');
+const OfficeManagerDashboard = lazyWithRetry(() => import("@/components/dashboards/OfficeManagerDashboard"), 'OfficeManagerDashboard');
+const ConciergeDoctorDashboard = lazyWithRetry(() => import("@/components/dashboards/ConciergeDoctorDashboard"), 'ConciergeDoctorDashboard');
+const ProviderDashboard = lazyWithRetry(() => import("@/components/dashboards/ProviderDashboard"), 'ProviderDashboard');
+
+const UserManagementTab = lazyWithRetry(() => import("@/components/dashboards/admin/UserManagementTab"), 'UserManagementTab');
+const InventoryTab = lazyWithRetry(() => import("@/components/dashboards/admin/InventoryTab"), 'InventoryTab');
+const AdminServicesTab = lazyWithRetry(() => import("@/components/admin/AdminServicesTab"), 'AdminServicesTab');
+const EnhancedAppointmentsTab = lazyWithRetry(() => import("@/components/dashboards/admin/enhanced/EnhancedAppointmentsTab"), 'EnhancedAppointmentsTab');
+const DocumentationTab = lazyWithRetry(() => import("@/components/dashboards/admin/DocumentationTab"), 'DocumentationTab');
+const SettingsTab = lazyWithRetry(() => import("@/components/dashboards/admin/SettingsTab"), 'SettingsTab');
+const MarketingTab = lazyWithRetry(() => import("@/components/dashboards/admin/MarketingTab"), 'MarketingTab');
+const StaffManagementTab = lazyWithRetry(() => import("@/components/dashboards/admin/StaffManagementTab"), 'StaffManagementTab');
+const WebhookEventMonitor = lazyWithRetry(() => import("@/components/dashboards/admin/WebhookEventMonitor"), 'WebhookEventMonitor');
+const AdminCalendar = lazyWithRetry(() => import("@/components/calendar/AdminCalendar"), 'AdminCalendar');
+const SMSMessagingTab = lazyWithRetry(() => import("@/components/dashboards/admin/SMSMessagingTab"), 'SMSMessagingTab');
+const InvoicesTab = lazyWithRetry(() => import("@/components/dashboards/admin/InvoicesTab"), 'InvoicesTab');
+const SpecimenTrackingTab = lazyWithRetry(() => import("@/components/dashboards/admin/SpecimenTrackingTab"), 'SpecimenTrackingTab');
+const NotesTab = lazyWithRetry(() => import("@/components/dashboards/admin/NotesTab"), 'NotesTab');
+const InboxTab = lazyWithRetry(() => import("@/components/dashboards/admin/InboxTab"), 'InboxTab');
+const PatientProfileTab = lazyWithRetry(() => import("@/components/dashboards/admin/PatientProfileTab"), 'PatientProfileTab');
 const LabOrdersTab = lazyWithRetry(() => import("@/components/dashboards/admin/LabOrdersTab"), 'LabOrdersTab');
 const NewUpdatesTab = lazyWithRetry(() => import("@/components/dashboards/admin/NewUpdatesTab"), 'NewUpdatesTab');
-import OrganizationsTab from "@/components/dashboards/admin/OrganizationsTab";
-import OperationsPanel from "@/components/dashboards/admin/OperationsPanel";
-import AIOpsAssistant from "@/components/dashboards/admin/AIOpsAssistant";
-import FrankCFO from "@/components/dashboards/admin/FrankCFO";
-import ExpensesManager from "@/components/dashboards/admin/ExpensesManager";
-import HormoziDashboard from "@/components/dashboards/admin/hormozi/HormoziDashboard";
-import UpgradesTab from "@/components/dashboards/admin/UpgradesTab";
-import TrainingTab from "@/components/dashboards/admin/TrainingTab";
-import ChatbotTab from "@/components/dashboards/admin/ChatbotTab";
-import ProviderAcquisitionTab from "@/components/dashboards/admin/ProviderAcquisitionTab";
-import ScriptsTab from "@/components/dashboards/admin/ScriptsTab";
-import AdminLayout from "@/components/dashboards/admin/AdminLayout";
+const OrganizationsTab = lazyWithRetry(() => import("@/components/dashboards/admin/OrganizationsTab"), 'OrganizationsTab');
+const OperationsPanel = lazyWithRetry(() => import("@/components/dashboards/admin/OperationsPanel"), 'OperationsPanel');
+const AIOpsAssistant = lazyWithRetry(() => import("@/components/dashboards/admin/AIOpsAssistant"), 'AIOpsAssistant');
+const FrankCFO = lazyWithRetry(() => import("@/components/dashboards/admin/FrankCFO"), 'FrankCFO');
+const ExpensesManager = lazyWithRetry(() => import("@/components/dashboards/admin/ExpensesManager"), 'ExpensesManager');
+const HormoziDashboard = lazyWithRetry(() => import("@/components/dashboards/admin/hormozi/HormoziDashboard"), 'HormoziDashboard');
+const UpgradesTab = lazyWithRetry(() => import("@/components/dashboards/admin/UpgradesTab"), 'UpgradesTab');
+const TrainingTab = lazyWithRetry(() => import("@/components/dashboards/admin/TrainingTab"), 'TrainingTab');
+const ChatbotTab = lazyWithRetry(() => import("@/components/dashboards/admin/ChatbotTab"), 'ChatbotTab');
+const ProviderAcquisitionTab = lazyWithRetry(() => import("@/components/dashboards/admin/ProviderAcquisitionTab"), 'ProviderAcquisitionTab');
+const ScriptsTab = lazyWithRetry(() => import("@/components/dashboards/admin/ScriptsTab"), 'ScriptsTab');
+
+// Suspense fallback while a lazy dashboard/tab chunk loads.
+const DashLoader = () => (
+  <div className="min-h-[40vh] flex items-center justify-center">
+    <div className="w-8 h-8 border-2 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
+  </div>
+);
+const S = ({ children }: { children: React.ReactNode }) => (
+  <React.Suspense fallback={<DashLoader />}>{children}</React.Suspense>
+);
 
 const Dashboard = () => {
   const { "*": urlPath } = useParams<{ "*": string }>();
@@ -161,7 +169,7 @@ const Dashboard = () => {
   if (isPartnerOrgStaff) {
     return (
       <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "provider"]}>
-        <ProviderDashboard />
+        <S><ProviderDashboard /></S>
       </RoleProtectedRoute>
     );
   }
@@ -180,6 +188,7 @@ const Dashboard = () => {
     return (
       <RoleProtectedRoute allowedRoles={["super_admin", "office_manager"]}>
         <AdminLayout>
+          <S>
           {adminTab === "users" && <UserManagementTab />}
           {adminTab === "staff" && <StaffManagementTab />}
           {adminTab === "services" && <AdminServicesTab />}
@@ -220,11 +229,12 @@ const Dashboard = () => {
           {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "new-updates", "organizations", "operations", "ai-assistant", "hormozi", "frank", "expenses", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
             <Navigate to={`/dashboard/${userRole}`} replace />
           )}
+          </S>
         </AdminLayout>
       </RoleProtectedRoute>
     );
   }
-  
+
   // Determine which dashboard to render based on role
   const renderDashboard = () => {
     console.log("Rendering dashboard for role:", userRole);
@@ -288,24 +298,24 @@ const Dashboard = () => {
   if (userRole === "phlebotomist") {
     return (
       <RoleProtectedRoute allowedRoles={["super_admin", "office_manager", "phlebotomist"]}>
-        <PhlebotomistDashboard />
+        <S><PhlebotomistDashboard /></S>
       </RoleProtectedRoute>
     );
   }
 
   // Provider portal has its own branded header — no DashboardWrapper
   if (userRole === "provider") {
-    return renderDashboard();
+    return <S>{renderDashboard()}</S>;
   }
 
   // Admin roles use AdminLayout (sidebar) — skip DashboardWrapper Header/Footer
   if (userRole === "super_admin" || userRole === "office_manager") {
-    return renderDashboard();
+    return <S>{renderDashboard()}</S>;
   }
 
   return (
     <DashboardWrapper>
-      {renderDashboard()}
+      <S>{renderDashboard()}</S>
     </DashboardWrapper>
   );
 };
