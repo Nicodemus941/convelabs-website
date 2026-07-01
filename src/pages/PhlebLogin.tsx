@@ -45,7 +45,7 @@ const PhlebLogin: React.FC = () => {
     <>
       <Helmet>
         <title>ConveLabs Pro — Sign In</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
       </Helmet>
 
       <div className="min-h-screen flex flex-col items-center justify-center bg-conve-red px-6 pt-safe pb-safe">
