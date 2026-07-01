@@ -2,7 +2,7 @@
   "name": "ConveLabs - Mobile Phlebotomy",
   "short_name": "ConveLabs",
   "description": "Mobile phlebotomy trusted by NFL athletes. Licensed phlebotomist at your door in Central Florida.",
-  "start_url": "/dashboard",
+  "start_url": "/",
   "display": "standalone",
   "background_color": "#F8F4ED",
   "theme_color": "#7F1D1D",

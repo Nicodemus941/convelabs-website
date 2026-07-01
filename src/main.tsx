@@ -1,7 +1,6 @@
 
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Capacitor } from '@capacitor/core';
 import AppRoutes from './AppRoutes.tsx';
 import { initPostHog } from './lib/posthog';
 import { initNativeApp } from './native/initNativeApp';
@@ -31,45 +30,26 @@ createRoot(document.getElementById("root")!).render(
 // hide. No-op on the website build.
 initNativeApp();
 
-// Register service worker for PWA — with self-heal fallback when the SW
-// gets stuck in an "invalid state" (seen in admin-portal screenshots
-// 2026-04-25). When that happens, a stale bundle keeps serving users
-// the old code and click handlers break silently. We unregister + reload
-// once to recover, gated by sessionStorage so we don't loop.
-// Skipped entirely inside the native app — a SW intercepting the
-// capacitor:// scheme is what causes the "stuck loading flash" on mobile.
-if (!Capacitor.isNativePlatform() && 'serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      // Force an update check on every load
-      try {
-        await registration.update();
-      } catch (updateErr: any) {
-        const msg = String(updateErr?.message || '');
-        if (/invalid state|InvalidStateError/i.test(msg) && !sessionStorage.getItem('sw_self_healed')) {
-          console.warn('[sw] invalid-state detected, self-healing once…');
-          sessionStorage.setItem('sw_self_healed', '1');
-          await registration.unregister();
-          window.location.reload();
-          return;
-        }
-        console.log('SW update failed:', msg);
-      }
-      // New SW installed behind the current one → activate it asap
-      registration.addEventListener('updatefound', () => {
-        const next = registration.installing;
-        if (next) {
-          next.addEventListener('statechange', () => {
-            if (next.state === 'installed' && navigator.serviceWorker.controller) {
-              // A new version is ready; tell it to take over on next load.
-              next.postMessage({ type: 'SKIP_WAITING' });
-            }
-          });
-        }
-      });
-    } catch (err) {
-      console.log('SW registration failed:', err);
-    }
-  });
+// The public site is ONLINE-ONLY and must NEVER register a service worker.
+//
+// INCIDENT 2026-07-01 — infinite refresh loop on mobile: this file used to
+// `navigator.serviceWorker.register('/sw.js')` on every load, but /sw.js is a
+// self-destructing worker that, on activate, unregisters itself AND force-
+// reloads every open client. Because it unregisters itself, the NEXT load's
+// register() always installed a fresh copy → activate → reload → register →
+// … an endless loop ("the page keeps refreshing"). The old sw.js has no fetch
+// handler, so it never even served cached content — its only effect was the
+// reload loop.
+//
+// Fix: register nothing. Just UNREGISTER any lingering worker from older
+// builds and drop its caches — no reload, no re-registration. Once the old
+// worker is gone it can't activate again, so the loop ends on the first load
+// of this build.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations()
+    .then((regs) => regs.forEach((r) => r.unregister().catch(() => {})))
+    .catch(() => {});
+  if ('caches' in window) {
+    caches.keys().then((names) => names.forEach((n) => caches.delete(n))).catch(() => {});
+  }
 }
