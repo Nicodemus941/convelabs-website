@@ -129,28 +129,33 @@
     /></noscript>
     
     <div id="root"></div>
-    <!-- Kill all service workers and caches — ConveLabs is online-only -->
+    <!-- ConveLabs is online-only and registers NO service worker. Kill any
+         legacy worker + caches here, at the logo stage (before the app bundle).
+         SELF-HEAL for the mobile refresh loop: if an OLD self-destructing worker
+         is still CONTROLLING this page, unregistering it isn't enough — it keeps
+         control until the page reloads without it. So do exactly ONE gated
+         reload to drop the controller, then the device loads clean and never
+         registers a worker again. Devices with no worker never reload here. -->
     <script>
       (function(){
-        // NUCLEAR: Unregister ALL service workers permanently
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistrations().then(function(regs) {
-            regs.forEach(function(reg) {
-              reg.unregister().then(function() {
-                console.log('Service worker unregistered');
-              });
-            });
-          });
-        }
-        // Delete ALL caches
-        if ('caches' in window) {
-          caches.keys().then(function(names) {
-            names.forEach(function(name) {
-              caches.delete(name);
-              console.log('Cache deleted:', name);
-            });
-          });
-        }
+        try {
+          if ('caches' in window) {
+            caches.keys().then(function(names){ names.forEach(function(n){ try { caches.delete(n); } catch(e){} }); }).catch(function(){});
+          }
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs){
+              var had = regs && regs.length > 0;
+              regs.forEach(function(reg){ try { reg.unregister(); } catch(e){} });
+              var controlled = !!navigator.serviceWorker.controller;
+              var already = false;
+              try { already = sessionStorage.getItem('__sw_reset') === '1'; } catch(e){}
+              if (had && controlled && !already) {
+                try { sessionStorage.setItem('__sw_reset', '1'); } catch(e){}
+                location.reload();
+              }
+            }).catch(function(){});
+          }
+        } catch(e){}
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>
