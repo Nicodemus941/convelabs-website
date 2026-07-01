@@ -19,27 +19,31 @@
   .pt-safe-header { padding-top: calc(env(safe-area-inset-top, 0px) + 1rem); }
 }
 
-/* Soft rise-in used for the field login card. */
-@keyframes conve-rise {
-  from { opacity: 0; transform: translateY(24px) scale(0.98); }
-  to   { opacity: 1; transform: translateY(0)    scale(1); }
-}
-.animate-conve-rise { animation: conve-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+/* Entrance/boot animations.
+   IMPORTANT: gated behind prefers-reduced-motion AND defined WITHOUT
+   animation-fill-mode:both, so the resting state is always the element's
+   natural (fully visible) state. If the WebView doesn't play the keyframes
+   (iOS Reduce Motion on, or a stalled animation), the content is STILL fully
+   visible — it just doesn't animate. A previous version used `both` +
+   `from{opacity:0}`, which left the login card + boot splash invisible on
+   devices that didn't run the animation (the "blank login" bug). The boot
+   splash fades out via a plain CSS *transition* (see NativeBootSplash), which
+   WebViews run far more reliably than keyframe animations. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes conve-rise {
+    from { opacity: 0; transform: translateY(24px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+  .animate-conve-rise { animation: conve-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1); }
 
-/* Native boot splash: "ConveLabs" flies up in, holds, then scales out + fades
-   (the "explode" hand-off to the app). Timeline ≈ 1.8s. */
-@keyframes conve-flyin {
-  0%   { opacity: 0; transform: translateY(40px) scale(0.9); letter-spacing: 0.15em; }
-  35%  { opacity: 1; transform: translateY(0)    scale(1);   letter-spacing: 0.02em; }
-  70%  { opacity: 1; transform: translateY(0)    scale(1);   letter-spacing: 0.02em; }
-  100% { opacity: 0; transform: translateY(0)    scale(1.6); letter-spacing: 0.3em; filter: blur(4px); }
+  @keyframes conve-flyin {
+    0%   { opacity: 0; transform: translateY(40px) scale(0.9); }
+    30%  { opacity: 1; transform: translateY(0)    scale(1); }
+    72%  { opacity: 1; transform: translateY(0)    scale(1); }
+    100% { opacity: 0; transform: scale(1.5); }
+  }
+  .animate-conve-flyin { animation: conve-flyin 1.6s cubic-bezier(0.22, 1, 0.36, 1); }
 }
-.animate-conve-flyin { animation: conve-flyin 1.8s cubic-bezier(0.22, 1, 0.36, 1) both; }
-@keyframes conve-splash-fade {
-  0%, 78% { opacity: 1; }
-  100%    { opacity: 0; visibility: hidden; }
-}
-.animate-conve-splash-fade { animation: conve-splash-fade 2s ease forwards; }
 
 @layer base {
   :root {
