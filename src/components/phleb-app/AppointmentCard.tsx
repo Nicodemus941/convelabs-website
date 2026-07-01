@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { User, Phone, Mail, MapPin, FileText, Clock, Truck, CheckCircle, Play, Package } from 'lucide-react';
 import NavigateButton from './NavigateButton';
+import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import { useAppointmentStatus } from '@/hooks/useAppointmentStatus';
 import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
