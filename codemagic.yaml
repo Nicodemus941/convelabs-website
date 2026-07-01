@@ -27,12 +27,12 @@ workflows:
     name: ConveLabs Patient · iOS
     instance_type: mac_mini_m2
     max_build_duration: 60
+    integrations:
+      app_store_connect: ELabusAppStoreKey
     environment:
       <<: *env_versions
       groups:
         - convelabs_web
-      integrations:
-        app_store_connect: ELabusAppStoreKey
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.convelabs.patient
@@ -98,12 +98,12 @@ workflows:
     name: ConveLabs Pro · iOS
     instance_type: mac_mini_m2
     max_build_duration: 60
+    integrations:
+      app_store_connect: ELabusAppStoreKey
     environment:
       <<: *env_versions
       groups:
         - convelabs_web
-      integrations:
-        app_store_connect: ELabusAppStoreKey
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.convelabs.phleb
