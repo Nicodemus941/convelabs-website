@@ -31,6 +31,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
 import TubeConfirmation from './TubeConfirmation';
+import AdditionalSpecimenDelivery from './AdditionalSpecimenDelivery';
 
 const LABS = [
   { value: 'labcorp', label: 'LabCorp' },
@@ -880,6 +881,16 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                       </Button>
                     </div>
                   )}
+
+                  {/* Multi-order: log extra specimens going to a different
+                      destination (e.g. a Vibrant specialty kit shipped via
+                      FedEx/UPS while the blood draw drops at Quest). */}
+                  <AdditionalSpecimenDelivery
+                    appointmentId={row.appointmentId}
+                    patientId={row.patientId}
+                    patientName={row.patientName}
+                    serviceType={row.serviceType}
+                  />
                 </div>
               ))}
 
