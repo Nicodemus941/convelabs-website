@@ -110,6 +110,13 @@ const PhlebDashboardShell: React.FC = () => {
         {/* Mobile Header - hidden on desktop */}
         <div className="md:hidden bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white px-4 py-5" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)' }}>
           <div className="max-w-lg mx-auto">
+            {/* ConveLabs brand lockup — white badge reads cleanly on the red header */}
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-9 w-9 rounded-xl bg-white flex items-center justify-center overflow-hidden shadow-sm">
+                <img src="/apple-touch-icon.png" alt="ConveLabs" className="h-8 w-8 object-contain" />
+              </div>
+              <span className="font-semibold tracking-tight text-white">ConveLabs Pro</span>
+            </div>
             <div className="flex items-center justify-between mb-1">
               <div>
                 <p className="text-red-200 text-sm">Good {greeting},</p>
@@ -129,9 +136,14 @@ const PhlebDashboardShell: React.FC = () => {
         {/* Desktop Welcome Banner */}
         <div className="hidden md:block bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white px-6 py-4">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
-            <div>
-              <p className="text-red-200 text-sm">Good {greeting},</p>
-              <h1 className="text-xl font-bold">{user?.firstName || 'Phlebotomist'}</h1>
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-xl bg-white flex items-center justify-center overflow-hidden shadow-sm">
+                <img src="/apple-touch-icon.png" alt="ConveLabs" className="h-10 w-10 object-contain" />
+              </div>
+              <div>
+                <p className="text-red-200 text-sm">Good {greeting},</p>
+                <h1 className="text-xl font-bold">{user?.firstName || 'Phlebotomist'}</h1>
+              </div>
             </div>
             <p className="text-red-100 text-sm">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
           </div>
