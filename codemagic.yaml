@@ -33,8 +33,9 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
-      vars:
-        BUNDLE_ID: "com.convelabs.patient"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.convelabs.patient
     cache: *cache_cfg
     scripts:
       - name: Install deps
@@ -46,11 +47,7 @@ workflows:
           cd ios/App
           agvtool new-version -all "$BUILD_NUMBER"
       - name: Set up code signing
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
-          keychain add-certificates
-          xcode-project use-profiles
+        script: xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
@@ -107,8 +104,9 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
-      vars:
-        BUNDLE_ID: "com.convelabs.phleb"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.convelabs.phleb
     cache: *cache_cfg
     scripts:
       - name: Install deps
@@ -120,11 +118,7 @@ workflows:
           cd ios/App
           agvtool new-version -all "$BUILD_NUMBER"
       - name: Set up code signing
-        script: |
-          keychain initialize
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
-          keychain add-certificates
-          xcode-project use-profiles
+        script: xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
