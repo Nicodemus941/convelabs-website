@@ -10,6 +10,7 @@ const Brand = lazy(() => import('../pages/Brand'));
 const About = lazy(() => import('../pages/About'));
 const Contact = lazy(() => import('../pages/Contact'));
 const Login = lazy(() => import('../pages/Login'));
+const PhlebLogin = lazy(() => import('../pages/PhlebLogin'));
 const Signup = lazy(() => import('../pages/Signup'));
 const PrivacyPolicy = lazy(() => import('../pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('../pages/TermsOfService'));
@@ -86,6 +87,7 @@ export const routes = [
   <Route key="corporate-billing" path="/corporate-billing" element={<CorporateBilling />} />,
   <Route key="corporate-invite" path="/corporate-invite/:token" element={<CorporateInviteAccept />} />,
   <Route key="login" path="/login" element={<Login />} />,
+  <Route key="phleb-login" path="/phleb-login" element={<PhlebLogin />} />,
   <Route key="provider" path="/provider" element={<ProviderLogin />} />,
   // Partner Portal MVP (2026-05-25) — magic-link auth + patient dashboard
   <Route key="provider-auth" path="/provider/auth/:token" element={<ProviderAuthPage />} />,

@@ -20,3 +20,15 @@ export const isPatientApp = APP_TARGET === 'patient';
 export function landingRouteForTarget(target: AppTarget = APP_TARGET): string {
   return target === 'phleb' ? '/phleb-app' : '/dashboard';
 }
+
+/**
+ * Where an UNAUTHENTICATED native launch should be sent to sign in. The phleb
+ * build uses a dedicated, field-branded login (no marketing chrome) that lands
+ * the user straight on the field dashboard. On the website / patient build this
+ * stays the normal marketing login, so public + patient behavior is unchanged.
+ */
+export function loginRouteForTarget(target: AppTarget = APP_TARGET): string {
+  return target === 'phleb'
+    ? '/phleb-login?redirect=/phleb-app'
+    : '/login?redirect=/dashboard';
+}

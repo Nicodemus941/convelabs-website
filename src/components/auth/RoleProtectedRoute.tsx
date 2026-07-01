@@ -4,6 +4,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '@/hooks/useAuthSession';
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from '@/integrations/supabase/client';
+import { loginRouteForTarget } from '@/lib/appTarget';
 
 interface RoleProtectedRouteProps {
   children: React.ReactNode;
@@ -16,19 +17,23 @@ export const RoleProtectedRoute: React.FC<RoleProtectedRouteProps> = ({
 }) => {
   const { session, isLoading, userRole } = useAuthSession();
   const navigate = useNavigate();
-  
+
+  // Target-aware login route: the phleb field app sends unauthenticated users
+  // to its own /phleb-login (no marketing chrome); web/patient is unchanged.
+  const loginRoute = loginRouteForTarget();
+
   // Check for valid authentication on mount and redirect if not authenticated
   useEffect(() => {
     const checkAuth = async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session) {
         console.log("No valid session found in RoleProtectedRoute, redirecting to login");
-        navigate('/login?redirect=/dashboard', { replace: true });
+        navigate(loginRoute, { replace: true });
       }
     };
-    
+
     checkAuth();
-  }, [navigate]);
+  }, [navigate, loginRoute]);
   
   if (isLoading) {
     // Show a better loading state with skeleton UI
@@ -45,8 +50,8 @@ export const RoleProtectedRoute: React.FC<RoleProtectedRouteProps> = ({
   }
   
   if (!session) {
-    // Redirect to login if not authenticated
-    return <Navigate to="/login?redirect=/dashboard" replace />;
+    // Redirect to login if not authenticated (target-aware: phleb app → /phleb-login)
+    return <Navigate to={loginRoute} replace />;
   }
   
   if (!userRole || !allowedRoles.includes(userRole)) {

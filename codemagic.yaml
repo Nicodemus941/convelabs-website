@@ -40,6 +40,10 @@ workflows:
         script: npm ci
       - name: Build web + sync (patient)
         script: npm run cap:patient
+      - name: Set iOS build number
+        script: |
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Build IPA
@@ -105,6 +109,10 @@ workflows:
         script: npm ci
       - name: Build web + sync (phleb)
         script: npm run cap:phleb
+      - name: Set iOS build number
+        script: |
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
       - name: Set up code signing
         script: xcode-project use-profiles
       - name: Build IPA
