@@ -31,6 +31,8 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
+      integrations:
+        app_store_connect: ELabusAppStoreKey
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.convelabs.patient
@@ -100,6 +102,8 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
+      integrations:
+        app_store_connect: ELabusAppStoreKey
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.convelabs.phleb
