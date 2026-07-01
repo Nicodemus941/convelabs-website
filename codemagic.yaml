@@ -119,14 +119,17 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          # Generate a fresh key locally so the certificate's private key is known
-          # (this is what makes keychain add-certificates + archive signing work).
-          # Additive only — creates signing files for com.convelabs.phleb without
-          # touching any existing app's certificates.
-          openssl genrsa -out /tmp/convelabs_cert_key.pem 2048
+          # SUSTAINABLE SIGNING — no more cert churn.
+          # `create-certificate --save` mints a distribution certificate AND saves
+          # its private key into Codemagic on the FIRST run; on every later build
+          # it 409s (Apple's 2-cert cap) and we swallow it with `|| true`, then
+          # fetch-signing-files REUSES the Codemagic-saved certificate instead of
+          # minting a new one. Result: ConveLabs keeps ONE stable cert, so builds
+          # no longer pile up under the cap. Additive — never revokes any existing
+          # app's certificate (E-Labus/Do-Ya untouched).
+          app-store-connect create-certificate --type IOS_DISTRIBUTION --save 2>/dev/null || true
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --certificate-key=@file:/tmp/convelabs_cert_key.pem \
             --create
           keychain add-certificates
           xcode-project use-profiles
