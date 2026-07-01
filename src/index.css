@@ -5,6 +5,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS/Android safe-area helpers. The native app runs edge-to-edge under the
+   status bar / notch (viewport-fit=cover + black-translucent), so any fixed/
+   sticky chrome must inset itself. `pb-safe` was already referenced in the
+   phleb app but never defined — these make it real. No effect on desktop web
+   (env() insets resolve to 0). */
+@layer utilities {
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pl-safe { padding-left: env(safe-area-inset-left, 0px); }
+  .pr-safe { padding-right: env(safe-area-inset-right, 0px); }
+  /* Sticky header that also fills the status-bar strip with its own colour. */
+  .pt-safe-header { padding-top: calc(env(safe-area-inset-top, 0px) + 1rem); }
+}
+
+/* Soft rise-in used for the field login card. */
+@keyframes conve-rise {
+  from { opacity: 0; transform: translateY(24px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+.animate-conve-rise { animation: conve-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Native boot splash: "ConveLabs" flies up in, holds, then scales out + fades
+   (the "explode" hand-off to the app). Timeline ≈ 1.8s. */
+@keyframes conve-flyin {
+  0%   { opacity: 0; transform: translateY(40px) scale(0.9); letter-spacing: 0.15em; }
+  35%  { opacity: 1; transform: translateY(0)    scale(1);   letter-spacing: 0.02em; }
+  70%  { opacity: 1; transform: translateY(0)    scale(1);   letter-spacing: 0.02em; }
+  100% { opacity: 0; transform: translateY(0)    scale(1.6); letter-spacing: 0.3em; filter: blur(4px); }
+}
+.animate-conve-flyin { animation: conve-flyin 1.8s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes conve-splash-fade {
+  0%, 78% { opacity: 1; }
+  100%    { opacity: 0; visibility: hidden; }
+}
+.animate-conve-splash-fade { animation: conve-splash-fade 2s ease forwards; }
+
 @layer base {
   :root {
     --background: 0 0% 100%;

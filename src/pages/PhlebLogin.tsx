@@ -48,19 +48,19 @@ const PhlebLogin: React.FC = () => {
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
       </Helmet>
 
-      <div className="min-h-screen flex flex-col bg-conve-red pt-safe pb-safe">
-        {/* Brand header */}
-        <div className="flex-1 flex flex-col items-center justify-end pb-8 px-6 text-center">
-          <div className="h-16 w-16 rounded-2xl bg-white flex items-center justify-center mb-4 shadow-lg">
-            <span className="text-conve-red text-3xl font-black">C</span>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-conve-red px-6 pt-safe pb-safe">
+        <div className="w-full max-w-sm animate-conve-rise">
+          {/* Brand mark */}
+          <div className="text-center mb-8">
+            <div className="h-16 w-16 rounded-2xl bg-white flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <span className="text-conve-red text-3xl font-black">C</span>
+            </div>
+            <h1 className="text-white text-2xl font-bold">ConveLabs Pro</h1>
+            <p className="text-white/80 text-sm mt-1">Field team sign‑in</p>
           </div>
-          <h1 className="text-white text-2xl font-bold">ConveLabs Pro</h1>
-          <p className="text-white/80 text-sm mt-1">Field team sign‑in</p>
-        </div>
 
-        {/* Login card */}
-        <div className="bg-background rounded-t-3xl px-6 pt-8 pb-10 shadow-2xl">
-          <div className="max-w-md mx-auto w-full">
+          {/* Login card */}
+          <div className="bg-background rounded-3xl px-6 pt-7 pb-8 shadow-2xl">
             <h2 className="text-lg font-semibold mb-1">Welcome back</h2>
             <p className="text-sm text-muted-foreground mb-6">
               Sign in with your ConveLabs staff account to see today's route.

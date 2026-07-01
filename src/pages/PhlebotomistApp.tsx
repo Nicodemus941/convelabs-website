@@ -28,6 +28,7 @@ const PhlebotomistApp: React.FC = () => {
   const [appointments, setAppointments] = useState<PhlebAppointment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const phlebotomistName = user?.firstName
     ? `${user.firstName} ${user.lastName || ''}`.trim()
@@ -37,32 +38,26 @@ const PhlebotomistApp: React.FC = () => {
     if (!user) return;
 
     setIsLoading(true);
+    setLoadError(null);
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
     const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
 
-    // Get staff profile for current user
-    const { data: staffProfile } = await supabase
-      .from('staff_profiles')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (!staffProfile) {
-      setIsLoading(false);
-      return;
-    }
-
+    // appointments.phlebotomist_id is a FOREIGN KEY to auth.users — it stores
+    // the phlebotomist's *user id*, NOT their staff_profiles.id. Filtering by
+    // staff_profiles.id matched 0 of 283 rows, so every phleb saw an empty
+    // list. Query by the signed-in user's id.
     const { data, error } = await supabase
       .from('appointments')
       .select('*')
-      .eq('phlebotomist_id', staffProfile.id)
+      .eq('phlebotomist_id', user.id)
       .gte('appointment_date', startOfDay)
       .lt('appointment_date', endOfDay)
       .order('appointment_time', { ascending: true });
 
     if (error) {
       console.error('Error fetching appointments:', error);
+      setLoadError('Could not load your visits. Tap refresh to try again.');
       toast.error('Failed to load appointments');
     } else {
       setAppointments(data || []);
@@ -115,7 +110,7 @@ const PhlebotomistApp: React.FC = () => {
 
       <div className="min-h-screen bg-background pb-safe">
         {/* Header */}
-        <div className="bg-conve-red text-white p-4 flex items-center justify-between sticky top-0 z-10">
+        <div className="bg-conve-red text-white px-4 pb-4 pt-safe-header flex items-center justify-between sticky top-0 z-10">
           <div>
             <h1 className="font-bold">ConveLabs</h1>
             <p className="text-xs opacity-90">{phlebotomistName}</p>
@@ -155,9 +150,14 @@ const PhlebotomistApp: React.FC = () => {
             <div className="flex justify-center py-12">
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
+          ) : loadError ? (
+            <div className="text-center py-12 space-y-3">
+              <p className="text-muted-foreground">{loadError}</p>
+              <Button variant="outline" onClick={fetchTodayAppointments}>Try again</Button>
+            </div>
           ) : activeAppointments.length === 0 ? (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">No active appointments for today.</p>
+              <p className="text-muted-foreground">No visits scheduled for today.</p>
             </div>
           ) : (
             <div className="space-y-4">

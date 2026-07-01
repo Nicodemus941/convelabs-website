@@ -21,6 +21,7 @@ const SuperAdminSetupPage = lazy(() => import('./pages/SuperAdminSetupPage'));
 
 import { ScrollToTop } from './components/utils/ScrollToTop';
 import { NativeLaunchRedirect } from './native/NativeLaunchRedirect';
+import { NativeBootSplash } from './native/NativeBootSplash';
 
 // Lightweight loading fallback
 const PageLoader = () => (
@@ -61,6 +62,7 @@ const AppRoutes = () => {
     <Router>
       <ScrollToTop />
       <NativeLaunchRedirect />
+      <NativeBootSplash />
       <HelmetProvider>
         <AuthProvider>
           <ConversionOptimizationProvider>
