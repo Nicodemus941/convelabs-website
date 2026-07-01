@@ -119,10 +119,15 @@ workflows:
       - name: Set up code signing
         script: |
           keychain initialize
-          # Create a distribution certificate + private key if none is available
-          # to this app (|| true so it's non-fatal once one already exists).
-          app-store-connect create-certificate --type IOS_DISTRIBUTION --save || true
-          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          # Generate a fresh key locally so the certificate's private key is known
+          # (this is what makes keychain add-certificates + archive signing work).
+          # Additive only — creates signing files for com.convelabs.phleb without
+          # touching any existing app's certificates.
+          openssl genrsa -out /tmp/convelabs_cert_key.pem 2048
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/convelabs_cert_key.pem \
+            --create
           keychain add-certificates
           xcode-project use-profiles
       - name: Build IPA
