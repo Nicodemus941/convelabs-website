@@ -104,9 +104,8 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.convelabs.phleb
+      vars:
+        BUNDLE_ID: "com.convelabs.phleb"
     cache: *cache_cfg
     scripts:
       - name: Install deps
@@ -118,7 +117,14 @@ workflows:
           cd ios/App
           agvtool new-version -all "$BUILD_NUMBER"
       - name: Set up code signing
-        script: xcode-project use-profiles
+        script: |
+          keychain initialize
+          # Create a distribution certificate + private key if none is available
+          # to this app (|| true so it's non-fatal once one already exists).
+          app-store-connect create-certificate --type IOS_DISTRIBUTION --save || true
+          app-store-connect fetch-signing-files "$BUNDLE_ID" --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
