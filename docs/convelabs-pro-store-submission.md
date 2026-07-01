@@ -79,6 +79,35 @@ device sensors beyond what the WebView uses. No ads, no third-party sharing.
   chrome, lands on `/phleb-app`. Auth guard is target-aware so the phleb app never bounces
   to the marketing login or the patient dashboard.
 
+## 3a. Codemagic status (DONE) + secrets you must add
+
+**Done:** `convelabs-website` is now connected to Codemagic as its own app
+(app id `6a455ebd80e8c04354c02a13`), pointed at the `mobile-app-shell` branch.
+The `codemagic.yaml` validates and all 4 workflows parse and are runnable:
+`ios-patient`, `android-patient`, `ios-phleb`, `android-phleb`. The App Store
+Connect API key integration `ELabusAppStoreKey` (shared Convenient Laboratories
+Apple account) is referenced by both iOS workflows.
+
+**Before the first build succeeds, add these in the Codemagic UI:**
+
+1. **Env group `convelabs_web`** (app → Environment variables → group `convelabs_web`).
+   Copy the values from your local `.env`:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`
+   - `VITE_SUPABASE_ANON_KEY`  (same value as publishable key)
+   - `VITE_STRIPE_PUBLISHABLE_KEY`
+   - `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST`  (optional — analytics)
+   > `VITE_APP_TARGET` is NOT needed here — the `cap:phleb` / `cap:patient` scripts set it.
+
+2. **Env group `android_keystore`** (only for Android builds):
+   - `CM_KEYSTORE` (base64 of your upload keystore), `CM_KEYSTORE_PASSWORD`,
+     `CM_KEY_ALIAS`, `CM_KEY_PASSWORD`, and `GCLOUD_SERVICE_ACCOUNT_CREDENTIALS`
+     (Play service-account JSON). Generate a keystore with `keytool` if you don't have one.
+
+Then trigger a workflow: app → **Start new build** → branch `mobile-app-shell` →
+workflow **ConveLabs Pro · iOS** (or Android). iOS produces a signed `.ipa` and
+pushes to TestFlight; Android produces a signed `.aab` to the Play internal track.
+
 ## 4. Still owner-only (I can't do these — accounts / irreversible submits)
 
 - Registering the App ID and creating the two store records.
