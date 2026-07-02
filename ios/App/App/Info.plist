@@ -49,5 +49,9 @@
 	<true/>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>ConveLabs uses the camera so you can photograph insurance cards, lab orders, and documents to attach to an appointment.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ConveLabs accesses your photos so you can attach insurance cards, lab orders, and documents to an appointment.</string>
 </dict>
 </plist>
