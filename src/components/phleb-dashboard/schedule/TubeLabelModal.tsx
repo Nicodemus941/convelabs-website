@@ -117,16 +117,16 @@ const TubeLabelModal: React.FC<Props> = ({
   const markCollection = async () => {
     setMarking(true);
     const stampAt = new Date();
-    let location: { lat: number; lng: number; accuracy: number } | null = null;
     try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        if (!navigator.geolocation) return reject('no_geo');
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 5000, maximumAge: 60_000 });
-      });
-      location = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
-    } catch { /* opt-in */ }
-
-    try {
+      // PERF 2026-07-02: stamp the collection time IMMEDIATELY — do NOT block
+      // on geolocation first. Previously we awaited
+      // navigator.geolocation.getCurrentPosition (up to 5s, and effectively
+      // longer/hung inside the iOS WebView while the location permission
+      // prompt was up), which made "Mark collection time" feel like it froze
+      // for several seconds before logging. Write the timestamp + status now;
+      // capture the chain-of-custody location in the BACKGROUND and patch it
+      // onto the row when (if) it resolves.
+      //
       // N1 fix 2026-05-25: also flip status to 'specimen_delivered' so the
       // visit stops appearing as "in_progress" forever. Phlebs were tapping
       // Mark Collection then forgetting to flip status separately, leaving
@@ -135,19 +135,33 @@ const TubeLabelModal: React.FC<Props> = ({
       //
       // We use 'specimen_delivered' (not 'completed') so the visit still
       // shows in the phleb's day view until they confirm specimen handoff.
-      // The auto-close-to-completed step can be wired to the SpecimenDelivery
-      // confirmation modal later.
       const updates: Record<string, any> = {
         collection_at: stampAt.toISOString(),
         status: 'specimen_delivered',
         updated_at: stampAt.toISOString(),
-        ...(location ? { collection_location: location } : {}),
       };
       const { error } = await supabase.from('appointments').update(updates).eq('id', appointmentId);
       if (error) throw error;
       setMarkedAt(stampAt);
       toast.success(`Collection stamped: ${displayTime(stampAt)} · Status → Specimen Delivered`);
       onMarked?.();
+
+      // Background, best-effort chain-of-custody location. Non-blocking: the
+      // stamp is already saved, so a slow/denied GPS never delays the phleb.
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const location = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+            supabase
+              .from('appointments')
+              .update({ collection_location: location })
+              .eq('id', appointmentId)
+              .then(() => {}, () => { /* non-fatal: location is optional */ });
+          },
+          () => { /* declined / unavailable — optional */ },
+          { enableHighAccuracy: false, timeout: 8000, maximumAge: 60_000 },
+        );
+      }
     } catch (e: any) {
       toast.error(e.message || 'Failed to stamp collection time');
     } finally {

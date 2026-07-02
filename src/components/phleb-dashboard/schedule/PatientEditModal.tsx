@@ -13,10 +13,20 @@ interface PatientEditModalProps {
   patientId: string | null;
   patientEmail: string | null;
   initialName: string;
+  /**
+   * The appointment this edit was opened from. We always touch this row on
+   * save so (a) the phleb card reflects the edit instantly — the appointment
+   * row's denormalized patient_* columns are the priority-1 source in
+   * usePhlebotomistAppointments — and (b) the `appointments` realtime channel
+   * fires, pushing the change to every other open surface (PWA/website) within
+   * seconds. Chart-only writes to tenant_patients have no realtime channel, so
+   * without this the edit never propagated cross-device.
+   */
+  appointmentId?: string | null;
 }
 
 const PatientEditModal: React.FC<PatientEditModalProps> = ({
-  open, onClose, patientId, patientEmail, initialName,
+  open, onClose, patientId, patientEmail, initialName, appointmentId,
 }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -121,13 +131,51 @@ const PatientEditModal: React.FC<PatientEditModalProps> = ({
         insurance_group_number: insuranceGroup || null,
       };
 
+      let savedTpId = tpId;
       if (tpId) {
         const { error } = await supabase.from('tenant_patients').update(updates).eq('id', tpId);
         if (error) throw error;
       } else {
         updates.tenant_id = '00000000-0000-0000-0000-000000000001';
-        const { error } = await supabase.from('tenant_patients').insert(updates);
+        const { data: inserted, error } = await supabase
+          .from('tenant_patients')
+          .insert(updates)
+          .select('id')
+          .maybeSingle();
         if (error) throw error;
+        savedTpId = (inserted as any)?.id || null;
+        if (savedTpId) setTpId(savedTpId);
+      }
+
+      // Propagate the chart edit onto the patient's appointment row(s). This is
+      // what makes the edit (a) actually show on the phleb card — the
+      // appointment row's denormalized patient_* columns are the priority-1
+      // source in usePhlebotomistAppointments — and (b) fire the `appointments`
+      // realtime channel so the change reaches the PWA / website within
+      // seconds. Chart-only writes to tenant_patients emit no realtime event,
+      // which is why edits "didn't necessarily transfer over to the PWA".
+      // Best-effort: the chart itself is already saved, so a propagation
+      // failure never blocks the phleb.
+      const fullName = `${firstName} ${lastName}`.trim();
+      const apptPatch: Record<string, any> = {
+        patient_name: fullName || null,
+        patient_phone: phone || null,
+        patient_email: email || null,
+        patient_dob: dob || null,
+        updated_at: new Date().toISOString(),
+      };
+      try {
+        // Always touch the originating appointment (guarantees realtime + an
+        // instant card refresh even if it isn't linked by patient_id).
+        if (appointmentId) {
+          await supabase.from('appointments').update(apptPatch).eq('id', appointmentId);
+        }
+        // Keep this patient's OTHER visits in sync too (linked by patient_id).
+        if (savedTpId) {
+          await supabase.from('appointments').update(apptPatch).eq('patient_id', savedTpId);
+        }
+      } catch (propErr) {
+        console.warn('[patient-edit] appointment propagation failed (chart still saved):', propErr);
       }
 
       toast.success('Patient details saved');
