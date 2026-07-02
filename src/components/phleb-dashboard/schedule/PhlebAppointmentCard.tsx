@@ -1236,6 +1236,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientId={appointment.patient_id}
         patientEmail={appointment.patient_email}
         initialName={appointment.patient_name}
+        appointmentId={appointment.id}
       />
 
       <SpecimenDeliveryModal
