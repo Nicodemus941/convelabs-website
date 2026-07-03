@@ -134,7 +134,12 @@ workflows:
             exit 1
           fi
           keychain initialize
-          printf '%s' "$IOS_DIST_CERT_KEY" | base64 --decode > /tmp/convelabs_cert_key.pem
+          # Diagnostics (length + digest only, never key material) + tr strips
+          # whitespace a UI paste can introduce. Expected: length 2312,
+          # sha256 starts db865ca99cdeae46 (same shared key as e-labus/GHS).
+          echo "IOS_DIST_CERT_KEY length: ${#IOS_DIST_CERT_KEY}"
+          printf '%s' "$IOS_DIST_CERT_KEY" | shasum -a 256 | cut -c1-16
+          printf '%s' "$IOS_DIST_CERT_KEY" | tr -d ' \t\r\n' | base64 --decode > /tmp/convelabs_cert_key.pem
           if ! app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --certificate-key=@file:/tmp/convelabs_cert_key.pem \
