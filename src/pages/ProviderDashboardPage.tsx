@@ -141,20 +141,21 @@ const ProviderDashboardPage: React.FC = () => {
         <title>{org?.name ? `${org.name} — Provider Dashboard | ConveLabs` : 'Provider Dashboard | ConveLabs'}</title>
         <meta name="robots" content="noindex,nofollow" />
       </Helmet>
-    <div className="min-h-screen bg-gray-50">
+    {/* Approved web design: warm paper ground + crimson-gradient brand mark */}
+    <div className="min-h-screen bg-[#F6F0EE]">
       {/* Header */}
-      <header className="bg-white border-b border-gray-200">
+      <header className="bg-white border-b border-[#EFE3E1]">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="h-9 w-9 rounded-lg bg-[#B91C1C] text-white flex items-center justify-center flex-shrink-0">
+            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center flex-shrink-0 shadow-sm">
               <Building2 className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-sm sm:text-base font-bold text-gray-900 truncate">{org?.name || 'Provider Dashboard'}</h1>
-              <p className="text-[11px] text-gray-500">ConveLabs Provider Portal</p>
+              <h1 className="text-sm sm:text-base font-extrabold tracking-tight text-[#1A1416] truncate">{org?.name || 'Provider Dashboard'}</h1>
+              <p className="text-[10px] text-[#8B7C7E] uppercase tracking-[0.09em] font-bold">ConveLabs Provider Portal</p>
             </div>
           </div>
-          <button onClick={logout} className="text-xs text-gray-500 hover:text-gray-900 flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-gray-100">
+          <button onClick={logout} className="text-xs text-[#8B7C7E] hover:text-[#1A1416] flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-[#F6F0EE]">
             <LogOut className="h-3.5 w-3.5" /> Sign out
           </button>
         </div>
@@ -162,37 +163,40 @@ const ProviderDashboardPage: React.FC = () => {
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {/* Stats strip */}
+        {/* Approved design: warm hairline KPI cards w/ microlabels + tabular
+            figures; status hues follow the grammar (amber pending, blue
+            scheduled, green drawn/done, crimson accent on the active filter). */}
         {stats && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <button onClick={() => setFilter('all')} className={`text-left bg-white rounded-xl border p-4 transition hover:border-gray-300 ${filter==='all' ? 'border-[#B91C1C] ring-2 ring-red-100' : 'border-gray-200'}`}>
-              <div className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total</div>
-              <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
+            <button onClick={() => setFilter('all')} className={`text-left bg-white rounded-xl border shadow-sm p-4 transition hover:border-[#B91C1C]/40 ${filter==='all' ? 'border-[#B91C1C] ring-2 ring-red-100' : 'border-[#EFE3E1]'}`}>
+              <div className="text-[10px] uppercase tracking-[0.09em] text-[#8B7C7E] font-extrabold">Total</div>
+              <div className="text-2xl font-extrabold tracking-tight tabular-nums text-[#1A1416]">{stats.total}</div>
             </button>
-            <button onClick={() => setFilter('awaiting_lab_order')} className={`text-left bg-white rounded-xl border p-4 transition hover:border-gray-300 ${filter==='awaiting_lab_order' ? 'border-amber-500 ring-2 ring-amber-100' : 'border-gray-200'}`}>
-              <div className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">Awaiting order</div>
-              <div className="text-2xl font-bold text-amber-700">{stats.awaiting_lab_order}</div>
+            <button onClick={() => setFilter('awaiting_lab_order')} className={`text-left bg-white rounded-xl border shadow-sm p-4 transition hover:border-amber-400 ${filter==='awaiting_lab_order' ? 'border-amber-500 ring-2 ring-amber-100' : 'border-[#EFE3E1]'}`}>
+              <div className="text-[10px] uppercase tracking-[0.09em] text-amber-700 font-extrabold">Awaiting order</div>
+              <div className="text-2xl font-extrabold tracking-tight tabular-nums text-amber-700">{stats.awaiting_lab_order}</div>
             </button>
-            <button onClick={() => setFilter('ready_to_draw')} className={`text-left bg-white rounded-xl border p-4 transition hover:border-gray-300 ${filter==='ready_to_draw' ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200'}`}>
-              <div className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">Scheduled</div>
-              <div className="text-2xl font-bold text-blue-700">{stats.scheduled}</div>
+            <button onClick={() => setFilter('ready_to_draw')} className={`text-left bg-white rounded-xl border shadow-sm p-4 transition hover:border-blue-400 ${filter==='ready_to_draw' ? 'border-blue-500 ring-2 ring-blue-100' : 'border-[#EFE3E1]'}`}>
+              <div className="text-[10px] uppercase tracking-[0.09em] text-blue-700 font-extrabold">Scheduled</div>
+              <div className="text-2xl font-extrabold tracking-tight tabular-nums text-blue-700">{stats.scheduled}</div>
             </button>
-            <button onClick={() => setFilter('specimen_delivered')} className={`text-left bg-white rounded-xl border p-4 transition hover:border-gray-300 ${filter==='specimen_delivered' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-gray-200'}`}>
-              <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Drawn</div>
-              <div className="text-2xl font-bold text-emerald-700">{stats.in_progress}</div>
+            <button onClick={() => setFilter('specimen_delivered')} className={`text-left bg-white rounded-xl border shadow-sm p-4 transition hover:border-emerald-400 ${filter==='specimen_delivered' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-[#EFE3E1]'}`}>
+              <div className="text-[10px] uppercase tracking-[0.09em] text-emerald-700 font-extrabold">Drawn</div>
+              <div className="text-2xl font-extrabold tracking-tight tabular-nums text-emerald-700">{stats.in_progress}</div>
             </button>
-            <button onClick={() => setFilter('completed')} className={`text-left bg-white rounded-xl border p-4 transition hover:border-gray-300 ${filter==='completed' ? 'border-emerald-700 ring-2 ring-emerald-200' : 'border-gray-200'}`}>
-              <div className="text-[10px] uppercase tracking-wider text-emerald-800 font-semibold">Completed</div>
-              <div className="text-2xl font-bold text-emerald-900">{stats.completed}</div>
+            <button onClick={() => setFilter('completed')} className={`text-left bg-white rounded-xl border shadow-sm p-4 transition hover:border-emerald-500 ${filter==='completed' ? 'border-emerald-700 ring-2 ring-emerald-200' : 'border-[#EFE3E1]'}`}>
+              <div className="text-[10px] uppercase tracking-[0.09em] text-emerald-800 font-extrabold">Completed</div>
+              <div className="text-2xl font-extrabold tracking-tight tabular-nums text-emerald-900">{stats.completed}</div>
             </button>
           </div>
         )}
 
         {/* Patient list */}
-        <section className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-          <div className="px-4 sm:px-6 py-3 border-b border-gray-200 flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-              <Users className="h-4 w-4 text-gray-500" /> Your patients
-              <span className="text-xs text-gray-500 font-normal">({filteredRows.length} of {rows.length})</span>
+        <section className="bg-white border border-[#EFE3E1] rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 sm:px-6 py-3 border-b border-[#EFE3E1] flex items-center justify-between gap-3">
+            <h2 className="text-sm font-bold text-[#1A1416] flex items-center gap-2">
+              <Users className="h-4 w-4 text-[#B91C1C]" /> Your patients
+              <span className="text-xs text-[#8B7C7E] font-normal">({filteredRows.length} of {rows.length})</span>
             </h2>
             <div className="flex items-center gap-2">
               {filter !== 'all' && (
@@ -209,10 +213,16 @@ const ProviderDashboardPage: React.FC = () => {
             <div className="divide-y divide-gray-100">
               {filteredRows.map(r => {
                 const meta = STATUS_PILL[r.display_status] || { label: r.display_status, className: 'bg-gray-100 text-gray-700 border-gray-200' };
+                const initials = (r.patient_name || '')
+                  .split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
                 return (
-                  <div key={r.id} className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4 hover:bg-gray-50">
+                  <div key={r.id} className="px-4 sm:px-6 py-3 flex items-center justify-between gap-4 hover:bg-[#FBF7F5]">
+                    {/* Approved design: crimson-gradient initials avatar */}
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center flex-shrink-0 font-bold text-[10px] shadow-sm">
+                      {initials || '—'}
+                    </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 truncate">{r.patient_name}</div>
+                      <div className="text-sm font-semibold text-[#1A1416] truncate">{r.patient_name}</div>
                       <div className="text-[11px] text-gray-500 flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{format(parseISO(String(r.appointment_date).substring(0,10) + 'T12:00:00'), 'MMM d, yyyy')}{r.appointment_time ? ` · ${r.appointment_time}` : ''}</span>
                         <span>·</span>
