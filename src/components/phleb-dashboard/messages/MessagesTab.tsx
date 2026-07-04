@@ -570,9 +570,13 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         const now = new Date();
         const sameDay = when && when.toDateString() === now.toDateString();
         const ts = when ? (sameDay ? format(when, 'h:mm a') : format(when, 'MMM d')) : '';
+        // Key by normalized phone — it's the phoneToConv map key, so it's
+        // unique per row. conv.id is a patient id and the same patient can
+        // legitimately appear under two phones (duplicate-key warning).
+        const rowKey = conv.patient_phone.replace(/\D/g, '').slice(-10) || conv.patient_phone || conv.id;
         return (
           <Card
-            key={conv.id || conv.patient_phone}
+            key={rowKey}
             className={`shadow-sm cursor-pointer hover:shadow-md transition-shadow ${conv.unread ? 'border-l-4 border-l-[#B91C1C]' : ''}`}
             onClick={() => setActiveConversation(conv)}
           >
