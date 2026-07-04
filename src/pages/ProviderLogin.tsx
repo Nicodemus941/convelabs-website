@@ -185,16 +185,23 @@ const ProviderLogin: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white px-4 py-12">
+    // Approved design: crimson brand screen matching PhlebLogin — same
+    // gradient, blood-drop mark and uppercase portal tag.
+    <div className="min-h-screen flex items-center justify-center px-4 py-12"
+      style={{ background: 'radial-gradient(140% 90% at 50% 0%, #D23B2E 0%, #B91C1C 42%, #7F1010 100%)' }}>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold">
-            ConveLabs<span className="text-[#B91C1C]">.</span>
+          <svg viewBox="0 0 48 60" className="h-14 w-14 mx-auto mb-3 drop-shadow-lg" aria-hidden="true">
+            <path d="M24 2C24 2 6 24 6 38a18 18 0 0 0 36 0C42 24 24 2 24 2Z" fill="#fff" />
+            <path d="M24 12c0 0-11 13-11 22a11 11 0 0 0 22 0C35 25 24 12 24 12Z" fill="#B91C1C" />
+          </svg>
+          <h1 className="text-3xl font-extrabold tracking-tight text-white">
+            ConveLabs
           </h1>
-          <p className="mt-1 text-xs text-gray-500 uppercase tracking-wider font-semibold">Provider Portal</p>
+          <p className="mt-1.5 text-[11px] text-white/70 uppercase tracking-[0.2em] font-bold">Provider Portal</p>
         </div>
 
-        <Card className="shadow-lg">
+        <Card className="shadow-2xl border-0 rounded-3xl">
           <CardHeader className="space-y-1">
             <CardTitle className="text-xl font-semibold flex items-center gap-2">
               <Shield className="h-5 w-5 text-[#B91C1C]" />
@@ -400,10 +407,10 @@ const ProviderLogin: React.FC = () => {
 
         {/* First-time-provider CTA — shows only on main login view */}
         {view === 'login' && (
-          <div className="mt-3 text-center">
+          <div className="mt-4 text-center">
             <button
               onClick={() => { setError(null); setClaimEmail(email); setView('claim-form'); }}
-              className="text-sm text-[#B91C1C] hover:underline font-medium inline-flex items-center gap-1"
+              className="text-sm text-white hover:underline font-semibold inline-flex items-center gap-1 drop-shadow-sm"
             >
               <Sparkles className="h-4 w-4" />
               First time? Claim your practice's portal →
@@ -411,12 +418,12 @@ const ProviderLogin: React.FC = () => {
           </div>
         )}
 
-        <p className="text-center text-xs text-gray-400 mt-6">
-          Need help? Email <a href="mailto:info@convelabs.com" className="text-[#B91C1C] hover:underline">info@convelabs.com</a>
+        <p className="text-center text-xs text-white/60 mt-6">
+          Need help? Email <a href="mailto:info@convelabs.com" className="text-white/90 hover:underline font-medium">info@convelabs.com</a>
           {' · '}
-          <a href="tel:+19415279169" className="text-[#B91C1C] hover:underline">(941) 527-9169</a>
+          <a href="tel:+19415279169" className="text-white/90 hover:underline font-medium">(941) 527-9169</a>
           {' · '}
-          <Link to="/" className="text-gray-500 hover:underline">Back to home</Link>
+          <Link to="/" className="text-white/70 hover:underline">Back to home</Link>
         </p>
       </div>
     </div>
