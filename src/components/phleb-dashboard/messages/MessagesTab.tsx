@@ -574,24 +574,33 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         // unique per row. conv.id is a patient id and the same patient can
         // legitimately appear under two phones (duplicate-key warning).
         const rowKey = conv.patient_phone.replace(/\D/g, '').slice(-10) || conv.patient_phone || conv.id;
+        // Approved design: gradient initials avatar + crimson unread dot.
+        const initials = (conv.patient_name || '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map(w => w[0])
+          .join('')
+          .toUpperCase();
         return (
           <Card
             key={rowKey}
-            className={`shadow-sm cursor-pointer hover:shadow-md transition-shadow ${conv.unread ? 'border-l-4 border-l-[#B91C1C]' : ''}`}
+            className="shadow-sm border-[#EFE3E1] cursor-pointer hover:shadow-md transition-shadow"
             onClick={() => setActiveConversation(conv)}
           >
             <CardContent className="p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#B91C1C]/10 flex items-center justify-center flex-shrink-0">
-                <User className="h-5 w-5 text-[#B91C1C]" />
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center flex-shrink-0 font-bold text-xs shadow-sm">
+                {initials || <User className="h-5 w-5" />}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
                   <p className={`text-sm truncate ${conv.unread ? 'font-bold text-gray-900' : 'font-semibold'}`}>{conv.patient_name}</p>
                   {ts && <p className="text-[10px] text-muted-foreground flex-shrink-0">{ts}</p>}
                 </div>
-                <p className={`text-xs truncate ${hasHistory ? 'text-gray-600' : 'text-gray-400 italic'}`}>{conv.last_message}</p>
+                <p className={`text-xs truncate ${conv.unread ? 'text-gray-800 font-medium' : hasHistory ? 'text-gray-600' : 'text-gray-400 italic'}`}>{conv.last_message}</p>
                 <p className="text-[10px] text-muted-foreground">{conv.patient_phone}</p>
               </div>
+              {conv.unread && <span className="w-2 h-2 rounded-full bg-[#B91C1C] flex-shrink-0" />}
             </CardContent>
           </Card>
         );

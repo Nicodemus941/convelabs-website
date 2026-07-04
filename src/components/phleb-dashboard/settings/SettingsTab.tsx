@@ -97,12 +97,13 @@ const SettingsTab: React.FC = () => {
       </h2>
 
       {/* Profile Info */}
-      <Card className="shadow-sm">
+      <Card className="shadow-sm border-[#EFE3E1]">
         <CardContent className="p-4 space-y-3">
           <h3 className="font-semibold text-sm text-gray-800">Profile</h3>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-[#B91C1C]/10 flex items-center justify-center">
-              <User className="h-6 w-6 text-[#B91C1C]" />
+            {/* Approved design: crimson-gradient initials avatar */}
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center font-bold shadow-sm">
+              {`${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || <User className="h-6 w-6" />}
             </div>
             <div>
               <p className="font-semibold">{user?.firstName} {user?.lastName}</p>
@@ -115,7 +116,7 @@ const SettingsTab: React.FC = () => {
       </Card>
 
       {/* Phone Number */}
-      <Card className="shadow-sm">
+      <Card className="shadow-sm border-[#EFE3E1]">
         <CardContent className="p-4 space-y-3">
           <h3 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
             <Phone className="h-4 w-4" />
@@ -152,7 +153,7 @@ const SettingsTab: React.FC = () => {
       <StripeConnectCard />
 
       {/* Notification Preferences */}
-      <Card className="shadow-sm">
+      <Card className="shadow-sm border-[#EFE3E1]">
         <CardContent className="p-4 space-y-3">
           <h3 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
             <Bell className="h-4 w-4" />
@@ -185,7 +186,7 @@ const SettingsTab: React.FC = () => {
       </Card>
 
       {/* App Info */}
-      <Card className="shadow-sm">
+      <Card className="shadow-sm border-[#EFE3E1]">
         <CardContent className="p-4 space-y-2">
           <h3 className="font-semibold text-sm text-gray-800 flex items-center gap-2">
             <Shield className="h-4 w-4" />

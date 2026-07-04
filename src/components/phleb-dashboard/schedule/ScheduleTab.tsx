@@ -199,7 +199,7 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
             Completed ({completedAppts.length})
           </p>
           {completedAppts.map((appt) => (
-            <div key={appt.id} className="bg-white rounded-xl shadow-sm border border-l-4 border-l-gray-300 opacity-70 p-3 mb-2">
+            <div key={appt.id} className="bg-white rounded-xl shadow-sm border border-[#EFE3E1] border-l-4 border-l-emerald-400 opacity-80 p-3 mb-2">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />
