@@ -71,7 +71,8 @@ const PhlebDashboardShell: React.FC = () => {
 
   return (
     <NotificationsProvider>
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white pb-20 md:pb-0">
+      {/* Warm paper wash — approved mockup ground (#F6F0EE) */}
+      <div className="min-h-screen bg-[#F6F0EE] pb-20 md:pb-0">
         {/* Desktop Top Nav - hidden on mobile */}
         <div className="hidden md:block bg-white border-b shadow-sm sticky top-0 z-40">
           <div className="max-w-6xl mx-auto px-6 flex items-center justify-between h-14">
@@ -107,31 +108,36 @@ const PhlebDashboardShell: React.FC = () => {
           </div>
         </div>
 
-        {/* Mobile Header - hidden on desktop */}
-        <div className="md:hidden bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white px-4 py-5" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 20px)' }}>
-          <div className="max-w-lg mx-auto">
-            <div className="flex items-center justify-between mb-1">
-              <div>
-                <p className="text-red-200 text-sm">Good {greeting},</p>
-                <h1 className="text-xl font-bold">{user?.firstName || 'Phlebotomist'}</h1>
-              </div>
-              <div className="flex items-center gap-2">
-                <OnDutyToggle variant="mobile" />
-                <NotificationCenter />
-              </div>
+        {/* Mobile Header — approved mockup: light-on-wash with crimson avatar,
+            greeting stack, duty toggle right (replaces the old red banner). */}
+        <div className="md:hidden px-4 pt-3 pb-2" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
+          <div className="max-w-lg mx-auto flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full flex-shrink-0 bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center font-bold text-sm shadow-sm">
+              {`${user?.firstName?.[0] || 'P'}${user?.lastName?.[0] || ''}`.toUpperCase()}
             </div>
-            <p className="text-red-100 text-sm mt-1">
-              {format(new Date(), 'EEEE, MMMM d, yyyy')}
-            </p>
+            <div className="min-w-0 leading-tight">
+              <p className="text-[11.5px] text-[#8B7C7E]">Good {greeting},</p>
+              <h1 className="text-lg font-extrabold tracking-tight text-[#1A1416] truncate">{user?.firstName || 'Phlebotomist'}</h1>
+              <p className="text-[10.5px] text-[#B7A9AB]">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+            </div>
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+              <OnDutyToggle variant="mobile" />
+              <NotificationCenter />
+            </div>
           </div>
         </div>
 
         {/* Desktop Welcome Banner */}
         <div className="hidden md:block bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white px-6 py-4">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
-            <div>
-              <p className="text-red-200 text-sm">Good {greeting},</p>
-              <h1 className="text-xl font-bold">{user?.firstName || 'Phlebotomist'}</h1>
+            <div className="flex items-center gap-3">
+              <div className="h-11 w-11 rounded-xl bg-white flex items-center justify-center overflow-hidden shadow-sm">
+                <img src="/apple-touch-icon.png" alt="ConveLabs" className="h-10 w-10 object-contain" />
+              </div>
+              <div>
+                <p className="text-red-200 text-sm">Good {greeting},</p>
+                <h1 className="text-xl font-bold">{user?.firstName || 'Phlebotomist'}</h1>
+              </div>
             </div>
             <p className="text-red-100 text-sm">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
           </div>
@@ -160,18 +166,18 @@ const PhlebDashboardShell: React.FC = () => {
                 <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{monthLabel} {now.getFullYear()}</p>
                 <p className="text-[10px] text-gray-400">Current month only</p>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-white rounded-xl shadow-md p-3 text-center">
-                  <p className="text-2xl font-bold text-[#B91C1C]">{monthRemaining}</p>
-                  <p className="text-xs text-muted-foreground">Remaining</p>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 text-center">
+                  <p className="text-2xl font-bold text-[#B91C1C] tabular-nums">{monthRemaining}</p>
+                  <p className="text-[11px] text-[#8B7C7E] font-medium">Remaining</p>
                 </div>
-                <div className="bg-white rounded-xl shadow-md p-3 text-center">
-                  <p className="text-2xl font-bold text-emerald-600">{monthCompleted}</p>
-                  <p className="text-xs text-muted-foreground">Completed</p>
+                <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-600 tabular-nums">{monthCompleted}</p>
+                  <p className="text-[11px] text-[#8B7C7E] font-medium">Completed</p>
                 </div>
-                <div className="bg-white rounded-xl shadow-md p-3 text-center">
-                  <p className="text-2xl font-bold text-gray-800">{monthAppts.length}</p>
-                  <p className="text-xs text-muted-foreground">This month</p>
+                <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 text-center">
+                  <p className="text-2xl font-bold text-[#1A1416] tabular-nums">{monthAppts.length}</p>
+                  <p className="text-[11px] text-[#8B7C7E] font-medium">This month</p>
                 </div>
               </div>
             </div>

@@ -22,7 +22,7 @@ const tabs: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
 const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, unreadMessages = 0 }) => {
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50"
+      className="fixed bottom-0 left-0 right-0 bg-white border-t border-[#EFE3E1] shadow-lg z-50"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       <div className="max-w-lg mx-auto flex">
@@ -32,22 +32,20 @@ const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onTabChange, unreadMes
             <button
               key={id}
               onClick={() => onTabChange(id)}
-              className={`flex-1 flex flex-col items-center py-2 pt-2.5 relative transition-colors ${
-                isActive ? 'text-[#B91C1C]' : 'text-gray-400'
+              className={`flex-1 flex flex-col items-center py-1.5 pt-2 relative transition-colors ${
+                isActive ? 'text-[#B91C1C]' : 'text-[#B7A9AB]'
               }`}
             >
-              {isActive && (
-                <div className="absolute top-0 left-1/4 right-1/4 h-0.5 bg-[#B91C1C] rounded-b" />
-              )}
-              <div className="relative">
+              {/* Approved design: soft crimson pill behind the active icon */}
+              <div className={`relative flex items-center justify-center rounded-full px-3 py-0.5 transition-colors ${isActive ? 'bg-[#B91C1C]/10' : ''}`}>
                 <Icon className="h-5 w-5" />
                 {id === 'messages' && unreadMessages > 0 && (
-                  <span className="absolute -top-1.5 -right-2 bg-[#B91C1C] text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
+                  <span className="absolute -top-1.5 -right-1 bg-[#B91C1C] text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center px-1">
                     {unreadMessages > 9 ? '9+' : unreadMessages}
                   </span>
                 )}
               </div>
-              <span className="text-[10px] font-medium mt-1">{label}</span>
+              <span className={`text-[10px] mt-0.5 ${isActive ? 'font-bold' : 'font-medium'}`}>{label}</span>
             </button>
           );
         })}
