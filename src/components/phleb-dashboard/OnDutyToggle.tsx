@@ -95,7 +95,7 @@ const OnDutyToggle: React.FC<{ variant?: 'desktop' | 'mobile' }> = ({ variant = 
 
   if (loading) {
     return (
-      <button disabled className={`inline-flex items-center gap-1.5 rounded-full ${variant === 'mobile' ? 'bg-white/10 text-white/80' : 'bg-gray-100 text-gray-500'} px-3 py-1.5 text-xs`}>
+      <button disabled className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 text-gray-500 px-3 py-1.5 text-xs">
         <Loader2 className="h-3 w-3 animate-spin" /> Duty…
       </button>
     );
@@ -107,9 +107,9 @@ const OnDutyToggle: React.FC<{ variant?: 'desktop' | 'mobile' }> = ({ variant = 
     ? `On duty · until ${dutyThrough!.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`
     : 'Off duty';
 
-  const buttonClass = variant === 'mobile'
-    ? `inline-flex items-center gap-1.5 rounded-full bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 text-xs font-medium transition`
-    : `inline-flex items-center gap-1.5 rounded-full ${isOnDuty ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-700 border border-gray-200'} hover:opacity-90 px-3 py-1.5 text-xs font-medium transition`;
+  // Mobile header is now light (approved design) — both variants use the
+  // emerald/gray pill so the state reads at a glance on a light ground.
+  const buttonClass = `inline-flex items-center gap-1.5 rounded-full ${isOnDuty ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-gray-100 text-gray-700 border border-gray-200'} hover:opacity-90 px-3 py-1.5 text-xs font-medium transition`;
 
   return (
     <div className="relative">
