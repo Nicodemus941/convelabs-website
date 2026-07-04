@@ -509,7 +509,7 @@ const ProviderDashboard: React.FC = () => {
         />
 
         {/* THIS MONTH */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2"><DollarSign className="h-4 w-4 text-emerald-600" /> This month</CardTitle>
             <CardDescription className="text-xs">Live data — as of {format(new Date(), 'MMM d, h:mm a')}</CardDescription>
@@ -523,7 +523,7 @@ const ProviderDashboard: React.FC = () => {
         </Card>
 
         {/* UPCOMING 7 DAYS */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardHeader className="pb-3 flex flex-row items-center justify-between gap-2 flex-wrap">
             <div className="min-w-0">
               <CardTitle className="text-base">Upcoming · next 7 days</CardTitle>
@@ -599,7 +599,7 @@ const ProviderDashboard: React.FC = () => {
         {/* RECENT ACTIVITY — last 30 days of completed/delivered visits.
             Permanent timeline so org sees the work we did for them even
             after the date rolls over. Each row shows tracking + lab. */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Recent activity · last 30 days</CardTitle>
             <CardDescription className="text-xs">
@@ -660,7 +660,7 @@ const ProviderDashboard: React.FC = () => {
         </Card>
 
         {/* PARTNERSHIP RULES */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Your partnership rules</CardTitle>
             <CardDescription className="text-xs">Locked in for your org — invoices + pricing route according to these.</CardDescription>
@@ -674,7 +674,7 @@ const ProviderDashboard: React.FC = () => {
         </Card>
 
         {/* PATIENTS */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-base">My patients</CardTitle>
@@ -709,7 +709,7 @@ const ProviderDashboard: React.FC = () => {
         </Card>
 
         {/* INVOICES / BILLING */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2"><FileText className="h-4 w-4 text-[#B91C1C]" /> Billing history</CardTitle>
             <CardDescription className="text-xs">Your billing — scoped to {org.name} only. Never mixes with any other org or patient.</CardDescription>
@@ -1010,7 +1010,7 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
   const rows = groups[tab];
 
   return (
-    <Card className="shadow-sm">
+    <Card className="shadow-sm border-[#EFE3E1]">
       <CardHeader className="pb-3 flex flex-row items-center justify-between">
         <div>
           <CardTitle className="text-base flex items-center gap-2"><FileHeart className="h-4 w-4 text-[#B91C1C]" /> Lab requests</CardTitle>
@@ -1117,24 +1117,26 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
   );
 };
 
+// Approved web design: warm hairline KPI cards, microlabels, tabular figures;
+// urgent state uses the crimson "needs you" grammar.
 const LiveOpCard: React.FC<{ label: string; value: number; detail: string; icon: React.ReactNode; urgent?: boolean }> = ({ label, value, detail, icon, urgent }) => (
-  <Card className={`shadow-sm ${urgent ? 'border-red-300 bg-red-50' : ''}`}>
+  <Card className={`shadow-sm ${urgent ? 'border-[#B91C1C]/40 bg-[#B91C1C]/5' : 'border-[#EFE3E1]'}`}>
     <CardContent className="p-4">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">{label}</p>
+        <p className="text-[10px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">{label}</p>
         {icon}
       </div>
-      <p className={`text-2xl font-bold ${urgent ? 'text-red-700' : 'text-gray-900'}`}>{value}</p>
-      <p className="text-[11px] text-gray-500 mt-1">{detail}</p>
+      <p className={`text-2xl font-extrabold tracking-tight tabular-nums ${urgent ? 'text-[#B91C1C]' : 'text-[#1A1416]'}`}>{value}</p>
+      <p className="text-[11px] text-[#8B7C7E] mt-1">{detail}</p>
     </CardContent>
   </Card>
 );
 
 const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
   <div>
-    <p className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">{label}</p>
-    <p className="text-xl font-bold mt-1">{value}</p>
-    {hint && <p className="text-[11px] text-gray-500 mt-0.5">{hint}</p>}
+    <p className="text-[10px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">{label}</p>
+    <p className="text-xl font-extrabold tracking-tight tabular-nums mt-1 text-[#1A1416]">{value}</p>
+    {hint && <p className="text-[11px] text-[#8B7C7E] mt-0.5">{hint}</p>}
   </div>
 );
 

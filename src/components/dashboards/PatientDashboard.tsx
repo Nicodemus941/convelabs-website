@@ -184,37 +184,43 @@ const PatientDashboard = () => {
           </div>
         </div>
       ) : hasUpcoming ? (
-        // UPCOMING: luxe concierge treatment — deep oxblood + gold accents
-        <div className="relative overflow-hidden bg-gradient-to-br from-[#7f1d1d] via-[#5e1414] to-[#3f0d0d] text-white rounded-2xl p-5 sm:p-7 mb-6 shadow-lg">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        // UPCOMING — approved web design: crimson gradient hero + prep chips.
+        // (Readiness stays dynamic per the Valli/Ritenour trust fix 2026-05-17:
+        // once the lab order is uploaded the chip confirms it, else it nudges.)
+        <div className="relative overflow-hidden text-white rounded-2xl p-5 sm:p-7 mb-6 shadow-lg"
+          style={{ background: 'linear-gradient(135deg, #D23B2E 0%, #B91C1C 45%, #7F1010 100%)' }}>
+          <div className="absolute -right-14 -top-16 w-56 h-56 rounded-full bg-white/[0.07] pointer-events-none" />
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#e9d8a6] mb-2">Your Next Visit</p>
-              <h2 className="font-serif text-2xl sm:text-3xl flex items-baseline gap-3 flex-wrap">
+              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/70 mb-2">Your Next Visit</p>
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-3 flex-wrap">
                 {stats.nextDate}
                 <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-200">
                   <span className="h-2 w-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 0 4px rgba(52,211,153,.25)' }} />
                   Confirmed
                 </span>
               </h2>
-              {stats.nextTime && <p className="text-lg text-amber-50/90 mt-1">{stats.nextTime}</p>}
-              {/*
-               * Dynamic readiness copy — was a static "Have your lab order and
-               * insurance card ready" that didn't change after the patient
-               * actually uploaded their lab order. Trust gap: patient finishes
-               * the upload flow, returns to dashboard, sees the same
-               * "you still need to" copy and wonders if it landed. (Valli &
-               * John Ritenour 2026-05-17.) Now: when lab order is on file we
-               * confirm it; otherwise we still nudge.
-               */}
-              <div className="h-px bg-white/15 my-4" />
-              <p className="text-sm text-white/80">
-                {(stats as any).nextHasLabOrder
-                  ? <span className="text-emerald-200">✓ Lab order on file. Bring your insurance card — your lab (Quest, LabCorp, AdventHealth) bills it directly, not us.</span>
-                  : <>Have your lab order + insurance card ready. The lab bills your insurance directly.</>
-                }
+              {stats.nextTime && <p className="text-lg text-white/85 mt-1">{stats.nextTime}</p>}
+              {/* Prep chips — status grammar: white = confirmed, amber = still needed */}
+              <div className="flex flex-wrap gap-2 mt-4">
+                {(stats as any).nextHasLabOrder ? (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-white/95 text-[#7F1010] rounded-full px-3 py-1.5">
+                    ✓ Lab order on file
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-[#FFE9C7] text-[#8A5406] rounded-full px-3 py-1.5">
+                    Lab order needed
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-white/95 text-[#7F1010] rounded-full px-3 py-1.5">
+                  Bring insurance card
+                </span>
+              </div>
+              <p className="text-xs text-white/75 mt-3">
+                Your lab (Quest, LabCorp, AdventHealth) bills your insurance directly — not us.
               </p>
-              <span className="inline-flex items-center gap-2 mt-4 text-xs font-semibold rounded-lg border border-[#c9a24b]/50 bg-[#c9a24b]/15 px-3 py-1.5">
-                <Shield className="h-3.5 w-3.5 text-[#e9d8a6]" /> On-time, or this visit is on us.
+              <span className="inline-flex items-center gap-2 mt-3 text-xs font-semibold rounded-lg border border-white/30 bg-white/10 px-3 py-1.5">
+                <Shield className="h-3.5 w-3.5" /> On-time, or this visit is on us.
               </span>
             </div>
             <div className="flex gap-2 flex-shrink-0">
@@ -226,7 +232,7 @@ const PatientDashboard = () => {
               <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 rounded-xl" asChild>
                 <Link to="/profile">My Profile</Link>
               </Button>
-              <Button className="bg-white text-[#7f1d1d] hover:bg-amber-50 font-semibold rounded-xl" asChild>
+              <Button className="bg-white text-[#B91C1C] hover:bg-red-50 font-semibold rounded-xl" asChild>
                 <Link to="/book-now">Book Another</Link>
               </Button>
             </div>
@@ -275,6 +281,24 @@ const PatientDashboard = () => {
         </Button>
       </div>
 
+      {/* ===== WELLNESS STAT BAND — approved web design (summary before detail) ===== */}
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 sm:p-4">
+          <p className="text-[9.5px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">Total visits</p>
+          <p className="text-xl sm:text-2xl font-extrabold tracking-tight tabular-nums text-[#1A1416] mt-1">{stats.completed}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 sm:p-4">
+          <p className="text-[9.5px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">Last tested</p>
+          <p className={`text-xl sm:text-2xl font-extrabold tracking-tight tabular-nums mt-1 ${stats.daysSince > 90 ? 'text-[#B91C1C]' : 'text-emerald-600'}`}>
+            {stats.daysSince > 0 ? `${stats.daysSince}d` : stats.completed > 0 ? 'Recent' : '—'}
+          </p>
+        </div>
+        <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 sm:p-4">
+          <p className="text-[9.5px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">Total invested</p>
+          <p className="text-xl sm:text-2xl font-extrabold tracking-tight tabular-nums text-[#1A1416] mt-1">${stats.totalSpent}</p>
+        </div>
+      </div>
+
       {/* ===== MEMBER BENEFITS — auto-hides for non-members ===== */}
       <PatientBenefitsCard />
 
@@ -293,7 +317,7 @@ const PatientDashboard = () => {
         <div className="lg:col-span-2 space-y-6">
 
           {/* Upcoming */}
-          <Card className="shadow-sm">
+          <Card className="shadow-sm border-[#EFE3E1]">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-bold">Upcoming Appointments</CardTitle>
@@ -308,7 +332,7 @@ const PatientDashboard = () => {
           </Card>
 
           {/* Past */}
-          <Card className="shadow-sm">
+          <Card className="shadow-sm border-[#EFE3E1]">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-bold">Past Visits</CardTitle>
@@ -326,11 +350,12 @@ const PatientDashboard = () => {
         {/* ===== SIDEBAR (desktop) ===== */}
         <div className="hidden lg:block space-y-5">
           {/* Profile */}
-          <Card className="shadow-sm">
+          <Card className="shadow-sm border-[#EFE3E1]">
             <CardContent className="p-4">
               <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 rounded-full bg-[#B91C1C]/10 flex items-center justify-center">
-                  <User className="h-5 w-5 text-[#B91C1C]" />
+                {/* Approved design: crimson-gradient initials avatar */}
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center font-bold text-xs shadow-sm">
+                  {`${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || <User className="h-5 w-5" />}
                 </div>
                 <div>
                   <p className="font-semibold text-sm">{user?.firstName} {user?.lastName}</p>
@@ -344,7 +369,7 @@ const PatientDashboard = () => {
           </Card>
 
           {/* Health Summary */}
-          <Card className="shadow-sm">
+          <Card className="shadow-sm border-[#EFE3E1]">
             <CardContent className="p-4 space-y-3">
               <p className="font-semibold text-sm flex items-center gap-1.5"><Activity className="h-4 w-4 text-[#B91C1C]" /> Health Summary</p>
               <div className="space-y-2 text-sm">
@@ -373,7 +398,7 @@ const PatientDashboard = () => {
           </Card>
 
           {/* Notifications */}
-          <Card className="shadow-sm">
+          <Card className="shadow-sm border-[#EFE3E1]">
             <CardContent className="p-4">
               <p className="font-semibold text-sm mb-2 flex items-center gap-1.5"><Bell className="h-4 w-4" /> Reminders</p>
               <div className="flex gap-1.5">
@@ -389,7 +414,7 @@ const PatientDashboard = () => {
           </Card>
 
           {/* Actions */}
-          <Card className="shadow-sm">
+          <Card className="shadow-sm border-[#EFE3E1]">
             <CardContent className="p-4 space-y-1.5">
               <Button variant="ghost" size="sm" className="w-full justify-between text-sm h-9" asChild>
                 <Link to="/profile"><span className="flex items-center gap-2"><User className="h-4 w-4" /> My Profile</span><ChevronRight className="h-4 w-4" /></Link>
@@ -408,7 +433,7 @@ const PatientDashboard = () => {
 
       {/* ===== MOBILE: Notification + Sign Out (below content) ===== */}
       <div className="lg:hidden space-y-4 mt-6">
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-[#EFE3E1]">
           <CardContent className="p-4">
             <p className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Bell className="h-4 w-4" /> Reminders</p>
             <div className="flex gap-2">
