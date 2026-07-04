@@ -28,7 +28,7 @@ const WeekStrip: React.FC<WeekStripProps> = ({
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border p-3">
+    <div className="bg-white rounded-xl shadow-sm border border-[#EFE3E1] p-3">
       {/* Week navigation */}
       <div className="flex items-center justify-between mb-2 px-1">
         <button
