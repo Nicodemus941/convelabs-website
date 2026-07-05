@@ -207,6 +207,35 @@ const PartnerWithUs: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* SELF-SERVE FAST PATH — configure a recurring draw plan and start today */}
+              <div className="mt-6 sm:mt-8 max-w-2xl mx-auto">
+                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-conve-red to-red-900 text-white p-5 sm:p-6 shadow-lg">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="inline-flex items-center gap-1.5 bg-white/15 rounded-full px-2.5 py-1 mb-2">
+                        <Zap className="h-3.5 w-3.5" />
+                        <span className="text-[10px] font-bold uppercase tracking-widest">Skip the wait — self-serve</span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-bold leading-tight">
+                        Know your volume? Set up a recurring draw plan now.
+                      </h3>
+                      <p className="text-xs sm:text-sm text-white/85 mt-1.5 leading-relaxed">
+                        Pick your patient count and cadence, see live volume pricing (as low as $55/draw), e-sign, and start today — no waiting on a reply.
+                      </p>
+                    </div>
+                    <Link
+                      to="/providers/draw-plan"
+                      className="inline-flex items-center justify-center gap-1.5 bg-white text-conve-red font-bold text-sm rounded-xl px-5 py-3 hover:bg-white/90 transition-colors whitespace-nowrap flex-shrink-0"
+                    >
+                      Build my plan <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </div>
+                <p className="text-center text-[11px] text-gray-400 mt-2">
+                  Prefer a custom quote or have questions? Use the form below.
+                </p>
+              </div>
             </div>
           </section>
 
