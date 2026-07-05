@@ -83,6 +83,7 @@ Deno.serve(async (req) => {
         'subscription_payment',
         'credit_pack',
         'org_subscription',
+        'partnership',
       ]);
       if (metadata.type && !KNOWN_TYPES.has(metadata.type)) {
         throw new Error(
@@ -138,6 +139,13 @@ Deno.serve(async (req) => {
       // Handle org-subscription checkout (practice-pays-per-seat plan)
       else if (metadata.type === 'org_subscription') {
         await handleOrgSubscriptionActivated(session);
+      }
+      // Handle partnership (custom-software) purchase. Previously this had no
+      // metadata.type and silently fell through to handleMembershipSignup —
+      // booking a $5-10k partnership as a $99 patient membership. Now routed
+      // explicitly so it is recorded, never misclassified.
+      else if (metadata.type === 'partnership') {
+        await handlePartnershipPaid(session);
       }
       // Handle membership upgrades
       else if (isUpgrade) {
@@ -568,6 +576,57 @@ async function handleOrgSubscriptionActivated(session: any) {
     console.log(`[org-subscription] activated org=${orgId} seats=${seatCap} $${priceCents/100}/mo`);
   } catch (e: any) {
     console.error('[org-subscription-activated] error:', e?.message);
+  }
+}
+
+/**
+ * Records a paid partnership (custom-software) purchase. This is the safety
+ * net that stops the purchase being misclassified as a membership. It stamps
+ * the partnership_onboarding row (if the post-redirect form already created
+ * one keyed by session id) as paid, and always writes a durable structured
+ * record so the owner can complete provisioning. Full auto-provisioning of the
+ * legacy partnership product is a separate follow-up.
+ */
+async function handlePartnershipPaid(session: any) {
+  try {
+    const meta = session.metadata || {};
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') || '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+    );
+
+    const record = {
+      stripe_session_id: session.id,
+      stripe_subscription_id: session.subscription ?? null,
+      stripe_customer_id: session.customer ?? null,
+      partnership_plan: meta.partnership_plan ?? null,
+      user_id: meta.user_id && meta.user_id !== 'guest' ? meta.user_id : null,
+      amount_total_cents: session.amount_total ?? null,
+      status: 'paid',
+    };
+
+    // Best-effort: mark a matching post-redirect onboarding row as paid.
+    // Guarded — a 0-row update (row not yet created) is fine.
+    try {
+      await supabase
+        .from('partnership_onboarding')
+        .update({ status: 'paid', paid_at: new Date().toISOString() })
+        .eq('stripe_session_id', session.id);
+    } catch (_) { /* column/table optional — non-fatal */ }
+
+    // Durable record for owner follow-up (never create a membership here).
+    try {
+      await supabase.from('error_logs').insert({
+        source: 'stripe-webhook',
+        level: 'info',
+        message: 'partnership purchase paid — needs provisioning',
+        context: record,
+      });
+    } catch (_) { /* logging table optional — non-fatal */ }
+
+    console.log(`[partnership] paid session=${session.id} plan=${record.partnership_plan} total=$${(session.amount_total ?? 0) / 100}`);
+  } catch (e: any) {
+    console.error('[partnership-paid] error:', e?.message);
   }
 }
 
