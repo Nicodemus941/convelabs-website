@@ -114,13 +114,17 @@ const BookNow: React.FC = () => {
           {mode === 'booking' && (
             <>
               <div className="text-center mb-6 md:mb-8">
-                <p className="text-xs font-semibold tracking-[0.2em] uppercase text-conve-red mb-2">
-                  One-Try Blood Draws · Results in 48 Hours
-                </p>
-                <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-                  Book Your Home Visit
+                <div className="flex items-center justify-center gap-3 mb-3">
+                  <span className="h-px w-8 bg-brand-gold/50" />
+                  <p className="text-xs font-medium tracking-[0.24em] uppercase text-brand-gold-deep">
+                    One-Try Blood Draws · Results in 48 Hours
+                  </p>
+                  <span className="h-px w-8 bg-brand-gold/50" />
+                </div>
+                <h1 className="font-playfair text-3xl md:text-5xl font-medium tracking-tight text-conve-black">
+                  Book your <span className="italic text-brand-gold-deep">home visit.</span>
                 </h1>
-                <p className="text-muted-foreground mt-2 max-w-lg mx-auto">
+                <p className="text-brand-gray-warm mt-3 max-w-lg mx-auto">
                   Licensed phlebotomist at your door in 60 minutes. Same-day appointments available across Central Florida.
                 </p>
               </div>

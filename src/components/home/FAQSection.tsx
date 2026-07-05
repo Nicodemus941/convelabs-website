@@ -36,7 +36,7 @@ const faqs = [
 
 const FAQSection = () => {
   return (
-    <section id="faq" className="py-16 sm:py-20 bg-white">
+    <section id="faq" className="py-16 sm:py-20 bg-brand-cream">
       <div className="container mx-auto px-4 max-w-3xl">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -45,10 +45,17 @@ const FAQSection = () => {
           transition={{ duration: 0.6 }}
           className="text-center mb-12"
         >
-          <h2 className="text-3xl sm:text-4xl font-bold text-foreground mb-4">
-            Frequently Asked Questions
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <span className="h-px w-8 bg-brand-gold/50" />
+            <span className="text-xs font-medium uppercase tracking-[0.24em] text-brand-gold-deep">
+              Before You Book
+            </span>
+            <span className="h-px w-8 bg-brand-gold/50" />
+          </div>
+          <h2 className="font-playfair text-3xl sm:text-4xl md:text-5xl font-medium text-conve-black mb-4">
+            Frequently asked questions
           </h2>
-          <p className="text-lg text-muted-foreground">
+          <p className="text-lg text-brand-gray-warm">
             Everything you need to know about our mobile blood draw service.
           </p>
         </motion.div>
@@ -64,12 +71,12 @@ const FAQSection = () => {
               <AccordionItem
                 key={i}
                 value={`faq-${i}`}
-                className="border border-border rounded-xl px-5 data-[state=open]:bg-muted/30"
+                className="border border-brand-gold/25 rounded-xl px-5 bg-brand-cream-soft data-[state=open]:bg-white"
               >
-                <AccordionTrigger className="text-left text-base font-medium text-foreground hover:no-underline py-4">
+                <AccordionTrigger className="text-left text-base font-medium text-conve-black hover:no-underline py-4">
                   {faq.q}
                 </AccordionTrigger>
-                <AccordionContent className="text-muted-foreground text-sm leading-relaxed pb-4">
+                <AccordionContent className="text-brand-gray-warm text-sm leading-relaxed pb-4">
                   {faq.a}
                 </AccordionContent>
               </AccordionItem>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Shield, Stethoscope } from "lucide-react";
+import { ArrowRight, Stethoscope } from "lucide-react";
 import { motion, type Variants } from "framer-motion";
 import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 import { supabase } from "@/integrations/supabase/client";
@@ -78,17 +78,20 @@ const Hero = () => {
           loop
           playsInline
           poster={HERO_POSTER}
-          className="w-full h-full object-cover opacity-60"
+          className="w-full h-full object-cover opacity-50"
           aria-hidden="true"
         >
           <source src={HERO_VIDEO_WEBM} type="video/webm" />
           <source src={HERO_VIDEO_MP4} type="video/mp4" />
         </video>
-        {/* Dark gradient overlay for readability */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-black/80" />
+        {/* Deep ink overlay — richer, more editorial than a flat scrim.
+            Vertical gradient for text legibility + a subtle warm vignette
+            so the crimson/gold accents read as intentional, not neon. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/85 via-black/65 to-black/90" />
+        <div className="absolute inset-0 bg-[radial-gradient(120%_120%_at_50%_0%,transparent_45%,rgba(0,0,0,0.55)_100%)]" />
       </div>
 
-      <div className="relative z-10 py-20 sm:py-24 md:py-28 lg:py-32">
+      <div className="relative z-10 py-24 sm:py-28 md:py-32 lg:py-40">
         <div className="container mx-auto px-4 max-w-6xl">
           <motion.div
             className="max-w-4xl mx-auto text-center"
@@ -96,47 +99,53 @@ const Hero = () => {
             initial="hidden"
             animate="visible"
           >
-            {/* H1 — patient-centric, not athlete-centric. Tells the visitor
-                WHAT we do and FOR WHOM in the first three seconds. */}
+            {/* Eyebrow — gold hairline rulesframing an all-caps kicker.
+                Signals the category + geography before the headline lands. */}
+            <motion.div
+              variants={itemVariants}
+              className="flex items-center justify-center gap-4 mb-7"
+            >
+              <span className="h-px w-8 sm:w-12 bg-brand-gold/50" />
+              <span className="text-[0.7rem] sm:text-xs font-medium uppercase tracking-[0.28em] text-brand-gold-soft">
+                Mobile Phlebotomy · Central Florida
+              </span>
+              <span className="h-px w-8 sm:w-12 bg-brand-gold/50" />
+            </motion.div>
+
+            {/* H1 — editorial serif with a gold-italic accent phrase.
+                Same message, elevated to a five-star-hospitality register. */}
             <motion.h1
               variants={itemVariants}
-              className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold leading-[1.05] tracking-tight text-white mb-6"
+              className="font-playfair text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-medium leading-[1.08] tracking-tight text-white mb-7"
             >
-              Blood Draws at Your <span className="text-conve-red">Kitchen Table.</span>
+              Blood draws at your{" "}
+              <span className="italic text-brand-gold">kitchen table.</span>
               <br />
-              Not a Waiting Room.
+              Not a waiting room.
             </motion.h1>
 
             {/* Subtitle — the critical insurance-clarity line that answers
                 "why pay when LabCorp is free?" Immediate category separation. */}
             <motion.p
               variants={itemVariants}
-              className="text-lg sm:text-xl md:text-2xl text-white/90 max-w-2xl mx-auto mb-6 leading-relaxed"
+              className="text-lg sm:text-xl md:text-2xl font-light text-white/90 max-w-2xl mx-auto mb-7 leading-relaxed"
             >
               Your doctor ordered labs — we come to you.
-              <span className="block mt-2 text-base sm:text-lg text-white/80">
+              <span className="block mt-2 text-base sm:text-lg text-white/75">
                 Your insurance still covers the tests. We're the phlebotomist who skips the drive.
               </span>
             </motion.p>
 
-            {/* Guarantee stripe — kept but compressed to one line */}
-            <motion.p
-              variants={itemVariants}
-              className="inline-flex items-center gap-1.5 mb-8 text-white font-semibold"
-            >
-              <Shield className="h-4 w-4 text-green-400" />
-              On-time, one-try, 48-hour results — or your visit is free.
-            </motion.p>
-
-            {/* Dual CTA */}
+            {/* Dual CTA — refined: crimson primary with letter-spaced caps,
+                gold-hairline ghost secondary. Sharper radius reads couture. */}
             <motion.div
               variants={itemVariants}
-              className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-8"
+              className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10 mt-2"
             >
               <Button
                 onClick={handleBookNow}
                 size="lg"
-                className="h-14 px-10 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-lg rounded-xl shadow-luxury-red hover:shadow-luxury-red-hover transition-all w-full sm:w-auto"
+                className="h-14 px-10 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-sm uppercase tracking-[0.15em] rounded-lg shadow-luxury-red hover:shadow-luxury-red-hover transition-all w-full sm:w-auto"
               >
                 Book My Home Visit
                 <ArrowRight className="ml-2 h-5 w-5" />
@@ -145,7 +154,7 @@ const Hero = () => {
                 onClick={scrollToHowItWorks}
                 size="lg"
                 variant="outline"
-                className="h-14 px-8 font-semibold text-lg rounded-xl border-2 border-white/30 bg-white/10 backdrop-blur-sm text-white hover:bg-white hover:text-gray-900 w-full sm:w-auto"
+                className="h-14 px-8 font-semibold text-sm uppercase tracking-[0.15em] rounded-lg border border-brand-gold/40 bg-transparent text-white hover:bg-brand-gold/10 hover:border-brand-gold/70 transition-all w-full sm:w-auto"
               >
                 <Stethoscope className="mr-2 h-5 w-5" />
                 How It Works
@@ -159,27 +168,27 @@ const Hero = () => {
                 signals for a cold stranger landing from Google. */}
             <motion.div
               variants={itemVariants}
-              className="flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-sm text-white/80"
+              className="flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-sm text-white/75"
             >
               <span className="flex items-center gap-1.5">
-                <span className="text-yellow-400">⭐</span>
-                <span className="font-semibold text-white">5.0</span>
-                <span className="text-white/70">(164 reviews)</span>
+                <span className="text-brand-gold">★</span>
+                <span className="font-semibold text-white tabular-nums">5.0</span>
+                <span className="text-white/60">from 164 reviews</span>
               </span>
-              <span className="text-white/40">·</span>
-              <span className="font-semibold text-white">{visitCount.toLocaleString()}+ home visits</span>
-              <span className="text-white/40">·</span>
-              <span>🛡️ HIPAA Compliant</span>
+              <span className="text-brand-gold/40">·</span>
+              <span className="font-semibold text-white tabular-nums">{visitCount.toLocaleString()}+ home visits</span>
+              <span className="text-brand-gold/40">·</span>
+              <span className="text-white/75">HIPAA Compliant</span>
             </motion.div>
 
             {/* Live urgency badge */}
-            <motion.div variants={itemVariants} className="mt-8">
-              <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/20 backdrop-blur-sm rounded-full border border-green-400/30">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-400"></span>
+            <motion.div variants={itemVariants} className="mt-9">
+              <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 backdrop-blur-sm rounded-full border border-brand-gold/25">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-gold opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-brand-gold"></span>
                 </span>
-                <span className="text-sm font-semibold text-green-100">
+                <span className="text-xs font-medium uppercase tracking-[0.18em] text-white/85">
                   Same-day appointments — Central Florida
                 </span>
               </div>
