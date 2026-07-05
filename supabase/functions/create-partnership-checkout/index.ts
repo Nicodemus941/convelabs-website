@@ -79,17 +79,18 @@ Deno.serve(async (req) => {
 
     console.log('Request parameters:', { planId, billingFrequency, amount, isGuestCheckout });
 
-    // Partnership plans are fixed and not in the database
+    // Partnership plans are fixed and not in the database.
+    // Amounts are in CENTS (Stripe unit_amount) — $5,000 setup = 500000.
     const partnershipPlans = {
       'standard-package': {
         name: 'Standard Package',
-        price: 5000,
-        maintenance_fee: 400,
+        setup_cents: 500000,       // $5,000 one-time
+        maintenance_cents: 40000,  // $400 / month
       },
       'express-package': {
         name: 'Express Package',
-        price: 10000,
-        maintenance_fee: 400,
+        setup_cents: 1000000,      // $10,000 one-time
+        maintenance_cents: 40000,  // $400 / month
       },
     };
 
@@ -156,26 +157,14 @@ Deno.serve(async (req) => {
     
     console.log('Redirect URLs:', { successUrl, cancelUrl });
 
-    // Create a Stripe checkout session for partnership
+    // Create a Stripe checkout session for partnership.
+    // NOTE: the client-supplied `amount` is intentionally ignored — pricing
+    // is server-authoritative from the plan table to prevent tampering.
     try {
-      // Use the amount provided in the request or fallback to the plan price
-      const finalAmount = amount || plan.price;
-      
-      let sessionConfig = {
+      const sessionConfig = {
         payment_method_types: ['card'],
         line_items: [
-          {
-            price_data: {
-              currency: 'usd',
-              product_data: {
-                name: `${plan.name} - One-time Setup Fee`,
-                description: `Initial setup fee for ${plan.name} partnership software`,
-              },
-              unit_amount: finalAmount,
-            },
-            quantity: 1,
-          },
-          // Include maintenance fee as a subscription
+          // Recurring maintenance fee (the subscription itself)
           {
             price_data: {
               currency: 'usd',
@@ -183,10 +172,21 @@ Deno.serve(async (req) => {
                 name: 'Monthly Maintenance Fee',
                 description: 'Ongoing support and maintenance for your software platform',
               },
-              unit_amount: plan.maintenance_fee,
-              recurring: {
-                interval: 'month',
+              unit_amount: plan.maintenance_cents,
+              recurring: { interval: 'month' },
+            },
+            quantity: 1,
+          },
+          // One-time setup fee — added to the first invoice. Modern Stripe
+          // Checkout allows one-time line items in subscription mode.
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: {
+                name: `${plan.name} — One-time Setup Fee`,
+                description: `Initial setup fee for ${plan.name} partnership software`,
               },
+              unit_amount: plan.setup_cents,
             },
             quantity: 1,
           },
@@ -195,12 +195,22 @@ Deno.serve(async (req) => {
         success_url: successUrl,
         cancel_url: cancelUrl,
         customer: stripeCustomer,
+        // Top-level metadata is on the Session; also stamp the Subscription so
+        // recurring invoice.* webhooks can classify renewals.
         metadata: {
-          ...metadata,
+          ...(metadata ?? {}),
+          type: 'partnership',
           partnership_plan: planId,
-          user_id: user?.id || 'guest',
+          user_id: user?.id ?? 'guest',
           is_guest_checkout: isGuestCheckout ? 'true' : 'false',
-          guest_email: isGuestCheckout ? guestEmail : null,
+          guest_email: guestEmail ?? '',
+        },
+        subscription_data: {
+          metadata: {
+            type: 'partnership',
+            partnership_plan: planId,
+            user_id: user?.id ?? 'guest',
+          },
         },
       };
 

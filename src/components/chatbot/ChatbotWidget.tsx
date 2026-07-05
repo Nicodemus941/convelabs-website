@@ -261,13 +261,17 @@ const ChatbotWidget: React.FC = () => {
   };
 
   const handleActionClick = (url: string) => {
-    if (url.startsWith('sms:') || url.startsWith('tel:') || url.startsWith('mailto:')) {
-      window.location.href = url;
-    } else if (url.startsWith('http')) {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } else {
-      window.location.href = url;
+    const u = (url || '').trim();
+    if (u.startsWith('sms:') || u.startsWith('tel:') || u.startsWith('mailto:')) {
+      window.location.href = u;
+    } else if (/^https?:\/\//i.test(u)) {
+      window.open(u, '_blank', 'noopener,noreferrer');
+    } else if (u.startsWith('/')) {
+      // Same-site relative path only — never navigate to arbitrary schemes
+      // (blocks a model-emitted javascript:/data: action from executing).
+      window.location.href = u;
     }
+    // anything else (javascript:, data:, bare text) is ignored
   };
 
   return (

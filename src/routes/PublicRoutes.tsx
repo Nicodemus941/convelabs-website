@@ -26,6 +26,7 @@ const PartnershipOnboarding = lazy(() => import('../pages/PartnershipOnboarding'
 const PartnershipSuccess = lazy(() => import('../pages/PartnershipSuccess'));
 const PartnerWithUs = lazy(() => import('../pages/PartnerWithUs'));
 const PartnerWithUsThanks = lazy(() => import('../pages/PartnerWithUsThanks'));
+const ProviderDrawPlan = lazy(() => import('../pages/ProviderDrawPlan'));
 const BookNow = lazy(() => import('../pages/BookNow'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 const ProviderAuthPage = lazy(() => import('../pages/ProviderAuthPage'));
@@ -78,6 +79,7 @@ export const routes = [
   <Route key="partnership-onboarding" path="/partnership-onboarding" element={<PartnershipOnboarding />} />,
   <Route key="partnership-success" path="/partnership-success" element={<PartnershipSuccess />} />,
   <Route key="partner-with-us" path="/partner-with-us" element={<PartnerWithUs />} />,
+  <Route key="provider-draw-plan" path="/providers/draw-plan" element={<ProviderDrawPlan />} />,
   <Route key="partner-with-us-thanks" path="/partner-with-us/thanks" element={<PartnerWithUsThanks />} />,
   
   // Corporate Routes

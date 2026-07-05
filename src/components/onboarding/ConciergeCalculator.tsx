@@ -81,34 +81,25 @@ const ConciergeCalculator: React.FC = () => {
         });
       }
       
-      try {
-        // Create Stripe checkout session
-        const response = await fetch('/api/create-checkout-session', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email,
-            name: fullName,
-            phone: mobileNumber,
-            planType: 'concierge',
-            billingFrequency: selectedBilling,
-            patientCount,
-            userId
-          }),
-        });
-        
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        
-        const data = await response.json();
-        return data.url;
-      } catch (error) {
+      // Create the Stripe checkout via the Supabase edge function.
+      // (This is a Vite SPA — there is no /api server; the old fetch 404'd
+      // and silently left the "Continue to Payment" button dead.)
+      const { data, error } = await supabase.functions.invoke('create-concierge-checkout', {
+        body: {
+          practiceName: fullName ? `${fullName}'s Practice` : 'Concierge Practice',
+          fullName,
+          email,
+          phone: mobileNumber,
+          numPatients: patientCount,
+          additionalInfo: `Billing: ${selectedBilling}`,
+        },
+      });
+
+      if (error || !data?.url) {
         console.error('Error creating checkout session:', error);
-        throw error;
+        throw error ?? new Error('No checkout URL returned');
       }
+      return data.url as string;
     },
     onSuccess: (checkoutUrl) => {
       // Set the selected plan in the onboarding context
