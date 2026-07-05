@@ -48,11 +48,11 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
   }
 
   return (
-    <footer className="bg-gray-900 text-white py-12">
+    <footer className="bg-conve-black text-white py-12 border-t border-brand-gold/20">
       <Container>
         {/* Quick Links Section */}
-        <div className="mb-12 pb-8 border-b border-gray-800">
-          <h3 className="text-lg font-semibold mb-4 text-center">Quick Access</h3>
+        <div className="mb-12 pb-8 border-b border-white/10">
+          <h3 className="text-xs font-medium uppercase tracking-[0.2em] text-brand-gold-soft mb-5 text-center">Quick Access</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             <button
               onClick={() => {
@@ -111,7 +111,12 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="md:col-span-1">
-            <h3 className="text-xl font-bold mb-3">ConveLabs<span className="text-conve-red">.</span></h3>
+            <h3 className="font-playfair text-2xl font-semibold mb-3 flex items-center gap-2">
+              <svg viewBox="0 0 24 32" className="h-5 w-auto" aria-hidden="true">
+                <path d="M12 1C12 1 3 12 3 20a9 9 0 0 0 18 0C21 12 12 1 12 1Z" fill="#B91C1C" />
+              </svg>
+              ConveLabs<span className="text-brand-gold">.</span>
+            </h3>
             <p className="text-gray-400 mb-4 text-sm leading-relaxed">
               Concierge mobile phlebotomy — a licensed phlebotomist at your door, in a window you pick, with lab results you actually get back. Central Florida.
             </p>

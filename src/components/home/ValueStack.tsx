@@ -75,12 +75,12 @@ const ValueStack: React.FC = () => {
   };
 
   return (
-    <section className="py-14 sm:py-20 bg-white relative overflow-hidden">
-      <div className="absolute inset-0 opacity-[0.03]">
+    <section className="py-14 sm:py-20 bg-brand-cream relative overflow-hidden">
+      <div className="absolute inset-0 opacity-[0.04]">
         <div
           className="absolute inset-0"
           style={{
-            backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(185,28,28,0.4) 1px, transparent 0)',
+            backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(201,169,97,0.5) 1px, transparent 0)',
             backgroundSize: '32px 32px',
           }}
         />
@@ -94,14 +94,14 @@ const ValueStack: React.FC = () => {
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
         >
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-conve-red mb-3">
+          <p className="text-xs font-medium tracking-[0.24em] uppercase text-brand-gold-deep mb-3">
             Here's Everything Included
           </p>
-          <h2 className="text-3xl md:text-5xl font-bold mb-4 leading-tight text-gray-900">
-            A {fmt(TOTAL_VALUE)} Experience for{' '}
+          <h2 className="font-playfair text-3xl md:text-5xl font-medium mb-4 leading-tight text-conve-black">
+            A {fmt(TOTAL_VALUE)} experience for{' '}
             <span className="text-conve-red">{fmt(PRICE)}.</span>
           </h2>
-          <p className="text-base md:text-lg text-gray-600">
+          <p className="text-base md:text-lg text-brand-gray-warm">
             Every ConveLabs mobile visit includes all of the following — no add-ons, no surprise fees.
           </p>
         </motion.div>

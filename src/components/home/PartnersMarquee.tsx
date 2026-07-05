@@ -70,13 +70,17 @@ const LOOP = [...PARTNERS, ...PARTNERS];
 
 const PartnersMarquee: React.FC = () => {
   return (
-    <section className="py-10 sm:py-12 bg-gradient-to-b from-white to-gray-50 border-y border-gray-100 overflow-hidden">
+    <section className="py-12 sm:py-16 bg-brand-cream border-y border-brand-gold/20 overflow-hidden">
       <div className="container mx-auto px-4">
-        <div className="text-center mb-5 sm:mb-6">
-          <p className="text-[10px] sm:text-[11px] uppercase tracking-widest text-gray-500 font-bold mb-1">
-            Organizations we serve
-          </p>
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 leading-tight px-2">
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="flex items-center justify-center gap-3 mb-3">
+            <span className="h-px w-8 bg-brand-gold/50" />
+            <span className="text-[10px] sm:text-[11px] uppercase tracking-[0.24em] text-brand-gold-deep font-medium">
+              Organizations we serve
+            </span>
+            <span className="h-px w-8 bg-brand-gold/50" />
+          </div>
+          <h2 className="font-playfair text-2xl sm:text-3xl md:text-4xl font-medium text-conve-black leading-tight px-2">
             The providers who trust us with their patients' blood work
           </h2>
         </div>
@@ -86,8 +90,8 @@ const PartnersMarquee: React.FC = () => {
           aria-label="Trusted partners — swipe or tap to visit"
         >
           {/* Edge fade masks — desktop only (mobile uses snap scrolling) */}
-          <div className="hidden md:block pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-gray-50 to-transparent z-10" />
-          <div className="hidden md:block pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-gray-50 to-transparent z-10" />
+          <div className="hidden md:block pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-brand-cream to-transparent z-10" />
+          <div className="hidden md:block pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-brand-cream to-transparent z-10" />
 
           {/* Single row. Mobile: user swipes (native scroll + snap).
               Desktop: auto-animates via CSS. Same markup, CSS decides. */}
@@ -102,9 +106,9 @@ const PartnersMarquee: React.FC = () => {
                 title={`Visit ${p.name}`}
                 style={{ width: '224px', flexShrink: 0, whiteSpace: 'normal' }}
               >
-                <div className="bg-white border border-gray-200 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-conve-red/40 hover:shadow-md transition-all">
+                <div className="bg-brand-cream-soft border border-brand-gold/20 rounded-xl px-4 sm:px-5 py-3 sm:py-4 h-full hover:border-brand-gold/50 hover:shadow-luxury transition-all">
                   <div className="flex items-center min-h-[2.5rem] mb-1.5 sm:mb-2">
-                    <span className="font-bold text-gray-900 text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
+                    <span className="font-semibold text-conve-black text-sm sm:text-[15px] leading-tight group-hover:text-conve-red transition-colors">
                       {p.name}
                     </span>
                   </div>
