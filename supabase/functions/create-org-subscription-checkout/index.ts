@@ -49,7 +49,13 @@ Deno.serve(async (req) => {
       });
     }
     const user = userData.user;
-    const orgId = (user.user_metadata?.org_id as string) || (user.app_metadata?.organization_id as string);
+    // app_metadata is server-controlled (service-role only). user_metadata is
+    // CLIENT-writable via supabase.auth.updateUser — never trust it alone to
+    // scope billing. Prefer the trusted source; if we must fall back to the
+    // client-supplied org_id, we verify ownership by email below.
+    const trustedOrgId = (user.app_metadata?.organization_id as string) || null;
+    const claimedOrgId = (user.user_metadata?.org_id as string) || null;
+    const orgId = trustedOrgId || claimedOrgId;
     if (!orgId) {
       return new Response(JSON.stringify({ error: 'no_org_scope', message: 'Your login isn\'t tied to an organization yet.' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -73,6 +79,21 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'org_not_found' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // If the org scope came from the client-writable user_metadata (not the
+    // trusted app_metadata), verify the caller actually owns this org by
+    // matching their email to the org's contact/billing email. Prevents a user
+    // from pointing checkout at another org's Stripe customer.
+    if (!trustedOrgId) {
+      const email = (user.email || '').toLowerCase();
+      const orgEmails = [org.contact_email, org.billing_email]
+        .filter(Boolean).map((e: string) => e.toLowerCase());
+      if (!email || !orgEmails.includes(email)) {
+        return new Response(JSON.stringify({ error: 'not_authorized_for_org' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     if (org.subscription_status === 'active') {
