@@ -580,6 +580,58 @@ async function handleOrgSubscriptionActivated(session: any) {
 }
 
 /**
+ * Mirrors a Stripe subscription's lifecycle onto its organizations row and
+ * returns true when the subscription belongs to an org (so the caller skips
+ * the membership / recurring-booking logic that follows).
+ *
+ * Before this, subscription.updated/.deleted only touched user_memberships and
+ * recurring_bookings — a canceled or past-due PRACTICE subscription never
+ * flipped organizations.subscription_status, so a lapsed org kept full access.
+ *
+ * Status-only + confirmed columns to stay safe against schema drift. Seat/price
+ * re-sync and org_invoices dunning rows land with the quantity-based Phase-1
+ * checkout (TODO: on 'past_due', open an org_invoices dunning row so
+ * process-org-invoice-dunning escalates it).
+ */
+async function syncOrgSubscription(subscription: any): Promise<boolean> {
+  try {
+    const subId = subscription?.id;
+    if (!subId) return false;
+
+    const { data: org } = await supabaseClient
+      .from('organizations')
+      .select('id, subscription_status')
+      .eq('stripe_subscription_id', subId)
+      .maybeSingle();
+    if (!org) return false; // not an org subscription — let membership logic run
+
+    const s = subscription.status;
+    const orgStatus =
+      (s === 'active' || s === 'trialing') ? 'active'
+      : (s === 'past_due' || s === 'unpaid') ? 'past_due'
+      : (s === 'canceled' || s === 'incomplete_expired') ? 'canceled'
+      : s;
+
+    await supabaseClient
+      .from('organizations')
+      .update({ subscription_status: orgStatus })
+      .eq('id', (org as any).id);
+
+    if (orgStatus === 'past_due') {
+      console.warn(`[org-sub-sync] org=${(org as any).id} PAST_DUE (stripe=${s}) — dunning TODO`);
+    } else {
+      console.log(`[org-sub-sync] org=${(org as any).id} stripe=${s} → ${orgStatus}`);
+    }
+    return true;
+  } catch (e: any) {
+    console.error('[org-sub-sync] error:', e?.message);
+    // Return true so a transient org-update failure doesn't fall through and
+    // corrupt a membership row with an unrelated org subscription's status.
+    return true;
+  }
+}
+
+/**
  * Records a paid partnership (custom-software) purchase. This is the safety
  * net that stops the purchase being misclassified as a membership. It stamps
  * the partnership_onboarding row (if the post-redirect form already created
@@ -1004,6 +1056,9 @@ async function handleSubscriptionUpdate(subscription: any) {
   try {
     const subscriptionId = subscription.id;
     const status = subscription.status;
+    // Org practice subscription? Mirror status onto the org row and stop —
+    // the membership/credit logic below must not run on an org sub.
+    if (await syncOrgSubscription(subscription)) return null;
     // 2026-05-28: Nicholas Chaillan signup crashed with "Invalid time
     // value" because `current_period_end` was undefined on the
     // subscription.created/updated event that fired first. Coerce
@@ -1159,6 +1214,8 @@ async function handleSubscriptionUpdate(subscription: any) {
 async function handleSubscriptionCancellation(subscription: any) {
   try {
     const subscriptionId = subscription.id;
+    // Org practice subscription? Flip the org to canceled and stop.
+    if (await syncOrgSubscription(subscription)) return { org: true, matched: 1 };
     const results: { recurring_booking?: any; membership?: any; matched: number } = { matched: 0 };
 
     // 1. recurring_bookings (Tier 3 patient-paid recurring plan)
@@ -1433,6 +1490,28 @@ async function handlePaymentFailure(invoice: any) {
         console.log(`[invoice.payment_failed] appointment ${appointmentId} enrolled in reminder cascade`);
       } catch (e) {
         console.error('[invoice.payment_failed] appointment update error:', e);
+      }
+    }
+
+    // Path (a2): org practice subscription invoice — mark the org past_due
+    // and stop (a lapsed practice plan must gate the org, not a patient row).
+    if (subscriptionId) {
+      try {
+        const { data: org } = await supabaseClient
+          .from('organizations')
+          .select('id')
+          .eq('stripe_subscription_id', subscriptionId)
+          .maybeSingle();
+        if (org) {
+          await supabaseClient
+            .from('organizations')
+            .update({ subscription_status: 'past_due' })
+            .eq('id', (org as any).id);
+          console.warn(`[invoice.payment_failed] org ${(org as any).id} → past_due`);
+          return; // org handled — skip the membership path below
+        }
+      } catch (e) {
+        console.error('[invoice.payment_failed] org check error:', e);
       }
     }
 
