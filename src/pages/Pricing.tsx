@@ -73,8 +73,8 @@ const TIERS: Tier[] = [
     annualPrice: 99,
     tagline: 'Morning lab access whenever you need it',
     ctaLabel: 'Become a Regular Member',
-    color: 'border-emerald-200',
-    gradient: 'from-emerald-50 to-white',
+    color: 'border-brand-gold/25',
+    gradient: 'from-brand-cream-soft to-white',
     features: [
       { label: 'Fasting booking window', value: 'Mon–Fri 6–9am', highlight: true },
       { label: 'Non-fasting booking window', value: 'Mon–Fri 6am–12pm', highlight: true },
@@ -121,8 +121,8 @@ const TIERS: Tier[] = [
     tagline: 'Your own phleb, anytime, zero friction',
     highlight: 'Best Value',
     ctaLabel: 'Become Concierge',
-    color: 'border-amber-400 ring-2 ring-amber-200',
-    gradient: 'from-amber-50 to-white',
+    color: 'border-brand-gold ring-2 ring-brand-gold/30',
+    gradient: 'from-brand-gold/10 to-white',
     features: [
       { label: 'Fasting booking window', value: 'Anytime (6am–8pm)', highlight: true },
       { label: 'Non-fasting booking window', value: 'Anytime (6am–8pm)', highlight: true },
@@ -286,15 +286,15 @@ const Pricing: React.FC = () => {
       <Header />
 
       {/* Hero */}
-      <section className="py-16 md:py-20 bg-gradient-to-b from-gray-50 to-background">
+      <section className="py-16 md:py-20 bg-brand-cream">
         <div className="container mx-auto px-4 text-center max-w-3xl">
-          <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 py-2 mb-5">
-            <Sparkles className="h-4 w-4 text-amber-700" />
-            <span className="text-sm font-semibold text-amber-800">
+          <div className="inline-flex items-center gap-2 bg-brand-gold/10 border border-brand-gold/30 rounded-full px-4 py-2 mb-5">
+            <Sparkles className="h-4 w-4 text-brand-gold-deep" />
+            <span className="text-xs font-medium uppercase tracking-[0.16em] text-brand-gold-deep">
               Founding Member pricing — lock today's rates forever
             </span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-4">Pick the morning that fits your life.</h1>
+          <h1 className="font-playfair text-4xl md:text-5xl font-medium text-conve-black mb-4">Pick the morning that fits your life.</h1>
           <p className="text-lg text-muted-foreground">
             Annual memberships unlock earlier mornings, Saturday access, lower family-add-on pricing,
             referral rewards, and more. Billed once a year — full refund for 30 days.
@@ -316,18 +316,18 @@ const Pricing: React.FC = () => {
             {TIERS.map((tier) => (
               <Card key={tier.key} className={`border-2 ${tier.color} bg-gradient-to-b ${tier.gradient} relative flex flex-col`}>
                 {tier.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#B91C1C] text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wide">
+                  <div className={`absolute -top-3 left-1/2 -translate-x-1/2 ${tier.key === 'concierge' ? 'bg-brand-gold-deep' : 'bg-[#B91C1C]'} text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-[0.12em]`}>
                     {tier.highlight}
                   </div>
                 )}
                 <CardContent className="p-5 flex flex-col flex-1">
                   {/* Icon + name */}
                   <div className="flex items-center gap-2 mb-1">
-                    {tier.key === 'concierge' && <Crown className="h-5 w-5 text-amber-500" />}
+                    {tier.key === 'concierge' && <Crown className="h-5 w-5 text-brand-gold-deep" />}
                     {tier.key === 'vip' && <Star className="h-5 w-5 text-[#B91C1C]" />}
-                    {tier.key === 'member' && <Sparkles className="h-5 w-5 text-emerald-600" />}
+                    {tier.key === 'member' && <Sparkles className="h-5 w-5 text-brand-gray-warm" />}
                     {tier.key === 'none' && <Heart className="h-5 w-5 text-gray-500" />}
-                    <h3 className="text-xl font-bold">{tier.name}</h3>
+                    <h3 className="font-playfair text-2xl font-medium text-conve-black">{tier.name}</h3>
                   </div>
                   <p className="text-xs text-muted-foreground mb-3">{tier.tagline}</p>
 
@@ -350,8 +350,8 @@ const Pricing: React.FC = () => {
                           const savePerVisit = visitNonMember - visitMemberPrice;
                           const breakEven = savePerVisit > 0 ? Math.ceil(tier.annualPrice / savePerVisit) : null;
                           return (
-                            <div className="mt-2 rounded-md bg-emerald-50/60 border border-emerald-200 p-2 text-[10.5px] leading-relaxed">
-                              <p className="font-semibold text-emerald-900 mb-0.5">Today: just ${tier.annualPrice} (one charge)</p>
+                            <div className="mt-2 rounded-md bg-brand-gold/10 border border-brand-gold/30 p-2 text-[10.5px] leading-relaxed">
+                              <p className="font-semibold text-conve-black mb-0.5">Today: just ${tier.annualPrice} (one charge)</p>
                               <p className="text-gray-700">
                                 Future mobile draws: <span className="line-through text-gray-400">$150</span>{' '}
                                 <strong>${visitMemberPrice}</strong> each (save ${savePerVisit}/visit)
@@ -376,12 +376,12 @@ const Pricing: React.FC = () => {
                       <div key={f.label} className="flex items-start gap-2 text-xs">
                         {typeof f.value === 'boolean' ? (
                           f.value ? (
-                            <Check className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? 'text-emerald-600' : 'text-gray-500'}`} />
+                            <Check className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? 'text-brand-gold-deep' : 'text-gray-500'}`} />
                           ) : (
                             <X className="h-3.5 w-3.5 text-gray-300 flex-shrink-0 mt-0.5" />
                           )
                         ) : (
-                          <Check className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? 'text-emerald-600' : 'text-gray-400'}`} />
+                          <Check className={`h-3.5 w-3.5 flex-shrink-0 mt-0.5 ${f.highlight ? 'text-brand-gold-deep' : 'text-gray-400'}`} />
                         )}
                         <div className="min-w-0 flex-1">
                           <div className={`${f.highlight ? 'font-semibold text-gray-900' : 'text-gray-700'}`}>
@@ -405,12 +405,12 @@ const Pricing: React.FC = () => {
                   <Button
                     className={`w-full ${
                       tier.key === 'concierge'
-                        ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                        ? 'bg-brand-gold-deep hover:bg-brand-gold text-white'
                         : tier.key === 'vip'
                         ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
                         : tier.key === 'member'
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                        : 'bg-gray-800 hover:bg-gray-900 text-white'
+                        ? 'bg-conve-black hover:bg-conve-black/90 text-white'
+                        : 'bg-conve-black hover:bg-conve-black/90 text-white'
                     }`}
                     onClick={() => {
                       if (tier.key === 'none') {
@@ -436,14 +436,14 @@ const Pricing: React.FC = () => {
 
           {/* Concierge Promise callout */}
           <div className="max-w-3xl mx-auto mt-12">
-            <Card className="border-amber-300 bg-gradient-to-br from-amber-50 to-white">
+            <Card className="border-brand-gold/40 bg-gradient-to-br from-brand-gold/10 to-white">
               <CardContent className="p-6 flex items-start gap-4">
-                <div className="h-12 w-12 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <Shield className="h-6 w-6 text-amber-700" />
+                <div className="h-12 w-12 rounded-full bg-brand-gold/20 flex items-center justify-center flex-shrink-0">
+                  <Shield className="h-6 w-6 text-brand-gold-deep" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-amber-900 mb-1">The Concierge Promise</h3>
-                  <p className="text-sm text-amber-900">
+                  <h3 className="font-playfair text-xl font-medium text-conve-black mb-1">The Concierge Promise</h3>
+                  <p className="text-sm text-brand-charcoal">
                     If <strong>any visit</strong> during your Concierge year isn't 5-star, we refund your
                     entire annual fee AND your next 3 visits are complimentary. No arbitration. No fine print.
                     This is what premium should mean.

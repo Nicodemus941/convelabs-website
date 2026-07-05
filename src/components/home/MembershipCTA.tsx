@@ -57,9 +57,9 @@ const MembershipCTA = () => {
 
   return (
     <section className="py-12 sm:py-16 md:py-20 lg:py-24 luxury-gradient-bg relative overflow-hidden">
-      <div className="absolute inset-0 opacity-[0.03]">
+      <div className="absolute inset-0 opacity-[0.04]">
         <div className="absolute top-20 right-20 w-96 h-96 bg-conve-red rounded-full blur-3xl"></div>
-        <div className="absolute bottom-20 left-20 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-20 left-20 w-96 h-96 bg-brand-gold rounded-full blur-3xl"></div>
       </div>
 
       <div className="relative container mx-auto px-4">
@@ -72,9 +72,9 @@ const MembershipCTA = () => {
         >
           {/* Header Section */}
           <motion.div variants={itemVariants} className="text-center mb-8 sm:mb-12 md:mb-16">
-            <div className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-conve-gold/10 to-amber-100/80 backdrop-blur-sm text-conve-red rounded-full text-sm font-semibold mb-8 shadow-luxury">
-              <Sparkles className="h-5 w-5 text-conve-gold" />
-              Recurring Revenue — The Core of Our Business
+            <div className="inline-flex items-center gap-2.5 px-6 py-3 bg-white/70 backdrop-blur-sm text-brand-charcoal rounded-full text-xs font-medium uppercase tracking-[0.18em] mb-8 shadow-luxury border border-brand-gold/30">
+              <Sparkles className="h-4 w-4 text-brand-gold-deep" />
+              Membership · One Charge a Year
             </div>
             
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-playfair font-bold mb-6 sm:mb-8 luxury-heading">

@@ -113,7 +113,7 @@ const GOOGLE_REVIEWS = [
 
 const TestimonialsSection: React.FC = () => {
   return (
-    <section id="testimonials" className="py-12 sm:py-16 md:py-20 bg-gradient-to-b from-gray-50 to-white">
+    <section id="testimonials" className="py-12 sm:py-16 md:py-20 bg-brand-cream">
       <div className="container mx-auto px-4">
         {/* Header */}
         <motion.div
@@ -132,10 +132,10 @@ const TestimonialsSection: React.FC = () => {
             <span className="text-muted-foreground text-sm">(164 reviews)</span>
           </div>
 
-          <h2 className="text-3xl md:text-5xl font-bold mb-4 leading-tight">
-            From the NFL to Your Neighbor.
+          <h2 className="font-playfair text-3xl md:text-5xl font-medium mb-4 leading-tight text-conve-black">
+            From the NFL to your <span className="italic text-brand-gold-deep">neighbor.</span>
           </h2>
-          <p className="text-lg text-muted-foreground">
+          <p className="text-lg text-brand-gray-warm">
             Athletes, entrepreneurs, and everyday patients on why they chose ConveLabs.
           </p>
         </motion.div>

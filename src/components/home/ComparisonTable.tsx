@@ -39,10 +39,10 @@ const ROWS: Row[] = [
 
 const ComparisonTable: React.FC = () => {
   return (
-    <section className="py-14 sm:py-20 bg-gray-950 text-white relative overflow-hidden">
+    <section className="py-14 sm:py-20 bg-conve-black text-white relative overflow-hidden">
       {/* Decorative gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-gray-900 via-gray-950 to-black" />
-      <div className="absolute -top-32 -right-20 w-96 h-96 bg-conve-red/10 rounded-full blur-3xl" />
+      <div className="absolute inset-0 bg-gradient-to-br from-[#1a1416] via-conve-black to-black" />
+      <div className="absolute -top-32 -right-20 w-96 h-96 bg-brand-gold/10 rounded-full blur-3xl" />
 
       <div className="relative container mx-auto px-4">
         <motion.div
@@ -52,11 +52,11 @@ const ComparisonTable: React.FC = () => {
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
         >
-          <p className="text-xs font-semibold tracking-[0.2em] uppercase text-conve-red mb-3">
+          <p className="text-xs font-medium tracking-[0.24em] uppercase text-brand-gold-soft mb-3">
             Why Patients Switch
           </p>
-          <h2 className="text-3xl md:text-5xl font-bold mb-4 leading-tight">
-            The Lab vs. <span className="text-conve-red">ConveLabs.</span>
+          <h2 className="font-playfair text-3xl md:text-5xl font-medium mb-4 leading-tight">
+            The lab vs. <span className="italic text-brand-gold">ConveLabs.</span>
           </h2>
           <p className="text-base md:text-lg text-gray-300">
             Here's exactly what you gain when the phlebotomist comes to you.

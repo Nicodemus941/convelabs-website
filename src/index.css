@@ -117,7 +117,7 @@
   }
 
   .luxury-heading {
-    @apply bg-gradient-to-r from-conve-red via-conve-red-dark to-purple-800 bg-clip-text text-transparent;
+    @apply font-playfair font-medium bg-gradient-to-r from-conve-red via-conve-red-dark to-brand-burgundy-darker bg-clip-text text-transparent;
   }
 
   .luxury-card {
@@ -133,7 +133,7 @@
   }
 
   .luxury-gradient-bg {
-    @apply bg-gradient-to-br from-gray-50 via-white to-gray-50 relative;
+    @apply bg-gradient-to-br from-brand-cream via-brand-cream-soft to-brand-cream relative;
   }
 
   .luxury-input {

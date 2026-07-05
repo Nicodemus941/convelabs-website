@@ -66,8 +66,8 @@ const HowItWorks = () => {
   };
   return <section id="how-it-works" className="py-12 sm:py-16 md:py-20 lg:py-24 luxury-gradient-bg relative overflow-hidden">
       {/* Background decoration */}
-      <div className="absolute inset-0 opacity-[0.03]">
-        <div className="absolute top-20 left-1/4 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
+      <div className="absolute inset-0 opacity-[0.04]">
+        <div className="absolute top-20 left-1/4 w-96 h-96 bg-brand-gold rounded-full blur-3xl"></div>
         <div className="absolute bottom-20 right-1/4 w-96 h-96 bg-conve-red rounded-full blur-3xl"></div>
       </div>
 
@@ -77,8 +77,8 @@ const HowItWorks = () => {
       }}>
           {/* Header */}
           <motion.div variants={itemVariants} className="text-center mb-12 sm:mb-16 md:mb-20">
-            <div className="inline-flex items-center gap-3 px-6 py-3 bg-white/80 backdrop-blur-sm rounded-full border border-gray-200/60 text-sm font-semibold mb-8 shadow-luxury">
-              <Star className="h-5 w-5 text-conve-red" />
+            <div className="inline-flex items-center gap-2.5 px-6 py-3 bg-white/80 backdrop-blur-sm rounded-full border border-brand-gold/30 text-xs font-medium uppercase tracking-[0.18em] mb-8 shadow-luxury">
+              <Star className="h-4 w-4 text-brand-gold-deep" />
               How to Get Blood Work at Home
             </div>
             

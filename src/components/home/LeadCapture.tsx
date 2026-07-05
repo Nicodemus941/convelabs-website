@@ -47,7 +47,7 @@ const LeadCapture = () => {
 
   if (isSubmitted) {
     return (
-      <section className="py-12 bg-gradient-to-r from-conve-red/5 to-red-50">
+      <section className="py-12 bg-brand-cream border-y border-brand-gold/20">
         <div className="container mx-auto px-4 max-w-xl text-center">
           <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
           <h3 className="text-xl font-bold mb-2">You're In!</h3>
@@ -73,7 +73,7 @@ const LeadCapture = () => {
             <span className="font-medium">Get 10% off your first visit</span>
           </div>
 
-          <h3 className="text-2xl md:text-3xl font-bold mb-2">
+          <h3 className="font-playfair text-2xl md:text-3xl font-medium text-conve-black mb-2">
             Not ready to book yet?
           </h3>
           <p className="text-muted-foreground mb-3">

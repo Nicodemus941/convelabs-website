@@ -33,9 +33,17 @@ const Header = () => {
   return (
     <header className={`bg-white py-4 sticky top-0 z-50 transition-shadow duration-300 ${isScrolled ? 'shadow-md' : 'shadow-sm'}`}>
       <div className="container mx-auto px-4 flex items-center justify-between">
-        {/* Logo Section */}
-        <Link to="/" className="text-2xl font-bold text-conve-red">
-          ConveLabs
+        {/* Logo Section — blood-drop mark + editorial serif wordmark */}
+        <Link to="/" className="flex items-center gap-2.5 group">
+          <svg viewBox="0 0 24 32" className="h-6 w-auto" aria-hidden="true">
+            <path
+              d="M12 1C12 1 3 12 3 20a9 9 0 0 0 18 0C21 12 12 1 12 1Z"
+              fill="#B91C1C"
+            />
+          </svg>
+          <span className="font-playfair text-2xl font-semibold tracking-tight text-conve-black">
+            Conve<span className="text-conve-red">Labs</span>
+          </span>
         </Link>
 
         {/* Mobile Menu Button */}
@@ -51,13 +59,13 @@ const Header = () => {
         <div className="hidden lg:flex items-center space-x-3">
           <Link
             to="/pricing"
-            className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-conve-red transition-colors"
+            className="px-4 py-2 text-sm font-medium tracking-wide text-conve-black/70 hover:text-conve-red transition-colors"
           >
             Membership
           </Link>
           <button
             onClick={() => bookingModal?.openModal('header_cta')}
-            className="px-5 py-2 text-sm font-semibold bg-conve-red text-white rounded-md hover:bg-red-700 transition-colors"
+            className="px-6 py-2.5 text-xs font-semibold uppercase tracking-[0.14em] bg-conve-red text-white rounded-lg hover:bg-conve-red-dark transition-colors shadow-luxury-red"
           >
             Book Now
           </button>
