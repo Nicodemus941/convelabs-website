@@ -39,9 +39,12 @@ Deno.serve(async (req) => {
         await admin.from('patient_referring_providers').update({ status: 'portal_viewed' }).eq('id', row.id);
       }
       // Count referred patients for the preview badge
+      // Sanitize OR-reserved chars ( , ( ) " ) — an unescaped comma/paren in a
+      // practice email/name would corrupt the PostgREST .or() filter (injection).
+      const orSafe = (v: string) => (v || '').replace(/[,()"]/g, ' ').trim();
       const { count: referredCount } = await admin.from('patient_referring_providers')
         .select('id', { count: 'exact', head: true })
-        .or(`practice_email.ilike.${row.practice_email || ''},claim_token.eq.${token}`);
+        .or(`practice_email.ilike.${orSafe(row.practice_email)},claim_token.eq.${orSafe(token)}`);
       return new Response(JSON.stringify({
         ok: true,
         provider: {
@@ -51,7 +54,7 @@ Deno.serve(async (req) => {
           practice_phone: row.practice_phone,
           practice_city: row.practice_city,
         },
-        referred_patient_count: referredCount || 1,
+        referred_patient_count: referredCount || 0,
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -61,9 +64,12 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ ok: true, patients: [] }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       // Every referral row that matches this practice (email OR name+city) AND not yet org-attached
+      // Sanitize OR-reserved chars to prevent a comma/paren in the practice
+      // name/email from corrupting the PostgREST .or() filter (injection).
+      const orSafe = (v: string) => (v || '').replace(/[,()"]/g, ' ').trim();
       const { data: referrals } = await admin.from('patient_referring_providers')
         .select('patient_email, patient_name, appointment_id')
-        .or(`practice_email.ilike.${row.practice_email || ''}${row.practice_name ? `,practice_name.ilike.${row.practice_name}` : ''}`)
+        .or(`practice_email.ilike.${orSafe(row.practice_email)}${row.practice_name ? `,practice_name.ilike.${orSafe(row.practice_name)}` : ''}`)
         .order('discovered_at', { ascending: false });
 
       const uniqueEmails = new Set<string>();
