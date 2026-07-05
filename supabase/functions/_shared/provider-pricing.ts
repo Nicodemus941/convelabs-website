@@ -7,13 +7,14 @@
 
 export type DrawFrequency = 'one_time' | 'monthly' | 'biweekly' | 'weekly' | 'custom';
 
-// Draws per patient per MONTH implied by each cadence. Averaged so billing is
-// stable month to month (52 weeks / 12 months = 4.333; 26 biweekly / 12 = 2.1667).
+// Draws per patient per MONTH implied by each cadence. Use EXACT fractions
+// (not rounded decimals) so exact boundaries don't over-provision by one:
+// 26 biweekly periods / 12 months, 52 weeks / 12 months.
 export const FREQUENCY_DRAWS_PER_MONTH: Record<DrawFrequency, number> = {
   one_time: 1,   // treated as a single cycle
   monthly: 1,
-  biweekly: 2.1667,
-  weekly: 4.3333,
+  biweekly: 26 / 12,   // 2.16667
+  weekly: 52 / 12,     // 4.33333
   custom: 1,     // caller must supply drawsPerCycle explicitly
 };
 
@@ -64,8 +65,10 @@ export function computeQuote(input: QuoteInput, tiers: RateTier[]): Quote {
       ? Math.max(0, input.customDrawsPerMonthPerPatient ?? 1)
       : FREQUENCY_DRAWS_PER_MONTH[input.frequency];
 
-  // Round up so a fractional cadence never under-provisions the cycle.
-  const drawsPerCycle = Math.max(1, Math.ceil(patients * perPatientPerMonth));
+  // Round up so a fractional cadence never under-provisions the cycle. The
+  // 1e-9 epsilon absorbs floating-point dust so an exact integer (e.g. 30 *
+  // 26/12 = 65) doesn't get pushed to 66.
+  const drawsPerCycle = Math.max(1, Math.ceil(patients * perPatientPerMonth - 1e-9));
   const tier = resolveTier(drawsPerCycle, tiers);
   const perDrawCents = tier.per_draw_cents;
   const monthlyTotalCents = drawsPerCycle * perDrawCents;
