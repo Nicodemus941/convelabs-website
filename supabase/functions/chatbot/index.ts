@@ -69,10 +69,14 @@ Help visitors understand if ConveLabs is right for them, answer their questions,
 - Be honest if you don't know something. Say so and offer to get Nico.
 
 # CORE FACTS YOU KNOW COLD
-- Standard mobile blood draw: $150
+- Standard mobile (at-home) blood draw: $150 (member $130 / VIP $115 / concierge $99)
+- In-office draw (come to us): $55 (member $49 / VIP $45 / concierge $39)
+- Senior rate (age 65+): $110 — automatically applied, no code needed
+- Additional patient at the same address/visit: $75 (less for members)
 - Member tier: $99/yr membership → $130/visit
 - VIP Founding tier: $199/yr → $115/visit + free family add-on + priority booking + Founding Member badge. First 50 seats locked at $199 for life.
 - Concierge tier: $399/yr → $99/visit
+- NEW-PATIENT PROMO — WELCOME25: first-time patients get $25 off their first visit with code WELCOME25 at checkout. This is DIFFERENT from the $25 referral credit (that's for referring a friend). Offer WELCOME25 to anyone booking their first draw.
 - Results available via the patient's lab portal (LabCorp / Quest / AdventHealth) typically in 48 hours
 - Booking hours (Mon–Sun, all 7 days):
    • 6:00 AM – 9:00 AM = fasting-friendly window (everyone)
@@ -148,7 +152,7 @@ This is critical.
 Say "typically 48 hours" — but not "guaranteed by Tuesday at 3pm." The reference labs own that timeline, not us.
 
 ## Never commit on Nico's behalf to a specific time or discount
-You can offer publicly-advertised promotions (Founding 50 VIP pricing, the $25 referral) but not bespoke deals.
+You can offer publicly-advertised promotions (Founding 50 VIP pricing, WELCOME25 first-visit $25 off, the $25 referral credit) but not bespoke deals.
 
 # SIGNAL TO ESCALATE TO NICO (return escalate:true in the structured output)
 - Visitor asks to speak to a human / "let me talk to someone"
@@ -178,11 +182,15 @@ Now: respond to the visitor.`;
 const TECH_LEAK_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\b(supabase|postgrest|anthropic|claude(?!\slabs)|openai|gpt-\d)\b/i, reason: 'tech-name' },
   { pattern: /\b(stripe|mailgun|twilio|sendgrid|resend)\b/i, reason: 'vendor-name' },
-  { pattern: /\b(vercel|aws|netlify|cloudflare|gcp|azure)\b/i, reason: 'infra-name' },
-  { pattern: /\b(react|vite|nextjs|deno|typescript|tailwind)\b/i, reason: 'framework-name' },
-  { pattern: /\bedge[\s-]function|postgres|pg_cron|service[\s-]role|rls\b/i, reason: 'infra-concept' },
-  { pattern: /\bapi[\s-]?key|secret[\s-]?key|anon[\s-]?key|jwt\b/i, reason: 'secret-reference' },
-  { pattern: /\b(founding_member_number|user_memberships|tenant_patients|appointments|stripe_qb_sync_log)\b/i, reason: 'table-name' },
+  // NOTE: dropped 'azure' and 'react' — they collide with ordinary prose
+  // ("azure blue", "react to") and were replacing legitimate answers.
+  { pattern: /\b(vercel|netlify|cloudflare)\b/i, reason: 'infra-name' },
+  { pattern: /\b(vite|nextjs|deno|typescript|tailwind)\b/i, reason: 'framework-name' },
+  { pattern: /\bedge[\s-]function|pg_cron|service[\s-]role\b/i, reason: 'infra-concept' },
+  { pattern: /\bapi[\s-]?key|secret[\s-]?key|anon[\s-]?key\b/i, reason: 'secret-reference' },
+  // Only literal internal table names (with underscores) — NOT the plain
+  // English word "appointments", which a booking bot uses constantly.
+  { pattern: /\b(founding_member_number|user_memberships|tenant_patients|stripe_qb_sync_log)\b/i, reason: 'table-name' },
 ];
 
 function findLeakViolation(text: string): { found: boolean; reason?: string } {
@@ -190,6 +198,17 @@ function findLeakViolation(text: string): { found: boolean; reason?: string } {
     if (pattern.test(text)) return { found: true, reason };
   }
   return { found: false };
+}
+
+// Allow-list for model-suggested action URLs. Blocks javascript:/data: and
+// any other scheme — only same-site relative paths, http(s), and the
+// contact schemes are permitted. Prevents a model-emitted `javascript:` URL
+// from executing when the widget navigates to it.
+function isSafeActionUrl(url: string): boolean {
+  const u = (url || '').trim();
+  if (!u) return false;
+  if (u.startsWith('/')) return true;                 // same-site relative path
+  return /^(https?:|sms:|tel:|mailto:)/i.test(u);
 }
 
 // ═══════ SUGGESTED-ACTIONS + ESCALATION PARSER ═══════════════════════
@@ -209,7 +228,7 @@ function parseActionsAndEscalation(rawText: string): {
     const parts = actionsMatch[1].split(',').map(s => s.trim());
     for (const p of parts.slice(0, 3)) {
       const [label, url] = p.split('|').map(s => s.trim());
-      if (label && url) actions.push({ label, url });
+      if (label && url && isSafeActionUrl(url)) actions.push({ label, url });
     }
     reply = reply.replace(actionsMatch[0], '').trim();
   }
@@ -222,6 +241,20 @@ function parseActionsAndEscalation(rawText: string): {
   }
 
   return { reply, actions, escalate, escalationReason };
+}
+
+// ═══════ DETERMINISTIC ESCALATION BACKSTOP ═══════════════════════════
+// The model must not be the ONLY thing that decides to loop in a human.
+// If the visitor's own message contains a hard trigger (asking for a human,
+// legal/PR words, refund/complaint), escalate regardless of whether the LLM
+// emitted the [[ESCALATE]] marker — otherwise a missed marker silently
+// swallows a lawsuit threat or a "let me talk to someone".
+const HARD_ESCALATION_TRIGGERS = /\b(speak|talk)\s+(to\s+)?(a\s+)?(human|person|someone|nico|rep|representative|agent)\b|\b(human|real\s+person)\s+(please|now)\b|\blawyer\b|\bsue\b|\bsuing\b|\battorney\b|\blawsuit\b|\bcomplaint\b|\brefund\b|\bmedia\b|\bpress\b|\breporter\b|\bscam\b|\bfraud\b/i;
+
+function keywordEscalation(userText: string): string | null {
+  return HARD_ESCALATION_TRIGGERS.test(userText || '')
+    ? 'hard keyword trigger in visitor message'
+    : null;
 }
 
 // ═══════ LIVE CONTEXT BUILDER ═══════════════════════════════════════
@@ -539,6 +572,13 @@ Deno.serve(async (req) => {
     // ── PARSE ACTIONS + ESCALATION MARKERS ───────────────────────
     const parsed = parseActionsAndEscalation(finalText);
 
+    // Backstop: OR the model's decision with a deterministic keyword check on
+    // the VISITOR's own message, so a "talk to a human" / legal / refund
+    // request escalates even when the LLM omits the [[ESCALATE]] marker.
+    const kwReason = keywordEscalation(userMessage);
+    const escalate = parsed.escalate || !!kwReason;
+    const escalationReason = parsed.escalationReason || kwReason;
+
     // ── LOG ASSISTANT MESSAGE + UPDATE COUNTERS ──────────────────
     await supabase.from('chatbot_messages').insert({
       conversation_id: conversationId,
@@ -547,7 +587,7 @@ Deno.serve(async (req) => {
       suggested_actions: parsed.actions,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      escalation_triggered: parsed.escalate,
+      escalation_triggered: escalate,
       guardrail_triggered: guardrailTriggered,
     });
 
@@ -557,22 +597,22 @@ Deno.serve(async (req) => {
         total_input_tokens: totalInputTokens + inputTokens,
         total_output_tokens: totalOutputTokens + outputTokens,
         message_count: messageCount + 2, // user + assistant
-        escalated_at: parsed.escalate ? new Date().toISOString() : undefined,
-        escalation_reason: parsed.escalate ? parsed.escalationReason : undefined,
-        status: parsed.escalate ? 'escalated' : 'active',
+        escalated_at: escalate ? new Date().toISOString() : undefined,
+        escalation_reason: escalate ? escalationReason : undefined,
+        status: escalate ? 'escalated' : 'active',
       })
       .eq('id', conversationId);
 
     // ── FIRE ESCALATION SMS (non-blocking) ──────────────────────
-    if (parsed.escalate && parsed.escalationReason) {
-      sendEscalationSMS(supabase, conversationId, parsed.escalationReason, userMessage).catch(() => {});
+    if (escalate && escalationReason) {
+      sendEscalationSMS(supabase, conversationId, escalationReason, userMessage).catch(() => {});
     }
 
     return new Response(JSON.stringify({
       conversationId,
       reply: parsed.reply,
       suggestedActions: parsed.actions,
-      escalated: parsed.escalate,
+      escalated: escalate,
       guardrailTriggered,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
