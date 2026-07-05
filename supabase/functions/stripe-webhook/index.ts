@@ -85,6 +85,7 @@ Deno.serve(async (req) => {
         'credit_pack',
         'org_subscription',
         'partnership',
+        'provider_plan',
       ]);
       if (metadata.type && !KNOWN_TYPES.has(metadata.type)) {
         throw new Error(
@@ -147,6 +148,10 @@ Deno.serve(async (req) => {
       // explicitly so it is recorded, never misclassified.
       else if (metadata.type === 'partnership') {
         await handlePartnershipPaid(session);
+      }
+      // Handle provider draw-plan (self-serve recurring per-draw subscription).
+      else if (metadata.type === 'provider_plan') {
+        await handleProviderPlanActivated(session);
       }
       // Handle membership upgrades
       else if (isUpgrade) {
@@ -590,6 +595,39 @@ async function handleOrgSubscriptionActivated(session: any) {
     console.log(`[org-subscription] activated org=${orgId} seats=${seatCap} $${priceCents/100}/mo`);
   } catch (e: any) {
     console.error('[org-subscription-activated] error:', e?.message);
+  }
+}
+
+/**
+ * Activates a self-serve provider draw plan once the first cycle is paid.
+ * Flips the pending provider_plans row to active, stamps the subscription id,
+ * and marks the org active so the portal + cadence engine pick it up.
+ */
+async function handleProviderPlanActivated(session: any) {
+  try {
+    const meta = session.metadata || {};
+    const planId = meta.provider_plan_id;
+    const orgId = meta.organization_id;
+    if (!planId) { console.error('[provider-plan] missing provider_plan_id', session.id); return; }
+
+    await supabaseClient.from('provider_plans').update({
+      status: 'active',
+      stripe_subscription_id: session.subscription || null,
+      stripe_customer_id: session.customer || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', planId);
+
+    if (orgId) {
+      await supabaseClient.from('organizations').update({
+        subscription_status: 'active',
+        subscription_tier: 'draw_plan',
+        stripe_subscription_id: session.subscription || null,
+        stripe_customer_id: session.customer || null,
+      }).eq('id', orgId);
+    }
+    console.log(`[provider-plan] activated plan=${planId} org=${orgId} sub=${session.subscription}`);
+  } catch (e: any) {
+    console.error('[provider-plan] activation error:', e?.message);
   }
 }
 
