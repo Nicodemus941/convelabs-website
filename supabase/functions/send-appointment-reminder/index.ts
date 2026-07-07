@@ -3,7 +3,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { getRenderedTemplate, sendEmail, logEmailSend, userHasOptedIn } from "../_shared/email/index.ts";
 import { shouldSendNow } from "../_shared/quiet-hours.ts";
-import { formatApptDateLong, formatApptTime } from "../_shared/format-appt-date.ts";
+import { formatApptDateLong, formatApptTime, todayInETPlusDays } from "../_shared/format-appt-date.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,20 +46,21 @@ serve(async (req: Request) => {
       return await processSingleAppointment(appointmentId, supabaseClient);
     }
     
-    // Otherwise, find all appointments happening in the next 24 hours.
-    // This cron is scheduled once daily in the early ET evening (see the
-    // `process-appointment-reminders` pg_cron job — 0 22 * * * UTC ≈ 6 PM ET),
-    // so a 24h look-ahead lands a single "night before" reminder. It used to
-    // run hourly, which (combined with appointment_date stored at UTC-midnight
-    // for online bookings — 8 PM ET the prior evening) fired the reminder ~1.5
-    // days early. Melissa Neptune got a July-1 reminder on June 29. (2026-06-29)
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
+    // Otherwise, send the night-before reminder for TOMORROW's calendar
+    // date in ET — never today's. The cron runs once daily in the early ET
+    // evening (`process-appointment-reminders` pg_cron — 0 22 * * * UTC ≈
+    // 6 PM ET). Targeting tomorrow's DATE (rather than a rolling [now,+24h]
+    // window) makes it structurally impossible for a mid-day invocation to
+    // send a "tomorrow" reminder for a same-day visit. (2026-07-07 audit —
+    // also the fix for the rolling window firing ~1.5 days early when the
+    // cron ran hourly; Melissa Neptune got a July-1 reminder on June 29.)
+    const targetDateStr = todayInETPlusDays(1);
 
-    // Get appointments in the next 24 hours. Include `confirmed` — most
-    // appointments are confirmed by the day before, so filtering to only
-    // `scheduled` meant confirmed patients got no reminder at all.
+    // Include `confirmed` — most appointments are confirmed by the day
+    // before, so filtering to only `scheduled` meant confirmed patients got
+    // no reminder at all. (This fix was in-repo since 2026-06-29 but never
+    // deployed — deployed v286 still had .eq('status','scheduled'), which is
+    // why zero reminders went out after 6/30.)
     const { data: appointments, error } = await supabaseClient
       .from('appointments')
       .select(`
@@ -68,8 +69,8 @@ serve(async (req: Request) => {
         patient_id
       `)
       .in('status', ['scheduled', 'confirmed'])
-      .gte('appointment_date', now.toISOString())
-      .lte('appointment_date', tomorrow.toISOString());
+      .gte('appointment_date', `${targetDateStr}T00:00:00`)
+      .lte('appointment_date', `${targetDateStr}T23:59:59`);
     
     if (error) {
       throw new Error(`Error fetching appointments: ${error.message}`);
@@ -199,7 +200,7 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
   const templateData = {
     appointmentDate: formattedDate,
     appointmentTime: formattedTime,
-    appointmentLocation: appointment.address.includes('ConveLabs Office') ? 'ConveLabs Office' : 'Your Home',
+    appointmentLocation: (appointment.address || '').includes('ConveLabs Office') ? 'ConveLabs Office' : 'Your Home',
     serviceType: 'Lab Draw', // You may want to fetch the actual service type
     phlebotomistAssigned: !!appointment.phlebotomist_id,
     phlebotomistName: appointment.phlebotomist ? 

@@ -85,13 +85,42 @@ function tomorrowET(): { iso: string; label: string } {
   return { iso, label };
 }
 
-Deno.serve(async (_req) => {
+// Evening send window (ET hours, inclusive). The fasting reminder is a
+// NIGHT-BEFORE message — it must land in the evening (before the 9 PM
+// quiet-hours floor), not the morning. Before this guard, the every-30-min
+// public-endpoint smoke test POSTed this function and the first allowed
+// run after 8 AM ET fired tomorrow's batch at 8 AM — 12 hours early
+// (2026-07-07 audit). Now ANY invocation outside 4-8:59 PM ET no-ops.
+// Pass { force: true } in the body for a deliberate manual run.
+const SEND_WINDOW_START_ET = 16; // 4 PM
+const SEND_WINDOW_END_ET = 21;   // exclusive — 9 PM (quiet hours floor)
+
+function hourET(): number {
+  return parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })
+      .format(new Date()),
+    10,
+  );
+}
+
+Deno.serve(async (req) => {
   // Quiet-hours guardrail — no patient SMS/email 9pm-8am ET. Reminders
   // deferred; the next cron tick after 8am picks up the backlog.
   const gate = shouldSendNow('reminder');
   if (!gate.allow) {
     console.log(`[quiet-hours] send-fasting-reminders deferred: ${gate.reason}; resume ${gate.nextAllowedAt}`);
     return new Response(JSON.stringify({ deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Evening-window guard — fasting reminders only go out 4-9 PM ET.
+  let force = false;
+  try { force = !!(await req.json())?.force; } catch { /* no body */ }
+  const h = hourET();
+  if (!force && (h < SEND_WINDOW_START_ET || h >= SEND_WINDOW_END_ET)) {
+    console.log(`[evening-window] send-fasting-reminders no-op: ET hour ${h} outside ${SEND_WINDOW_START_ET}-${SEND_WINDOW_END_ET}`);
+    return new Response(JSON.stringify({ skipped: true, reason: 'outside-evening-send-window', etHour: h }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     });
   }

@@ -38,9 +38,13 @@ const PUBLIC_ENDPOINTS = [
   { name: 'member-otp-verify', method: 'POST', body: { email: 'smoketest@invalid.local', code: '000000' } },
   { name: 'update-user-password', method: 'POST', body: { token: 'smoke-test-bogus', password: 'x' } },
 
-  // pg_cron endpoints — invoked from Postgres, no JWT
-  { name: 'send-fasting-reminders', method: 'POST', body: {} },
-  { name: 'remind-lab-request-patients', method: 'POST', body: {} },
+  // NOTE (2026-07-07): send-fasting-reminders and remind-lab-request-patients
+  // were REMOVED from this list. They are LIVE-SEND crons — POSTing them with
+  // {} executed real patient sends: the first smoke tick after 8 AM ET fired
+  // the whole fasting batch 12 hours before the intended 8 PM evening cron.
+  // A smoke probe must never trigger side effects. If those two ever regress
+  // to 401, the symptom is their pg_cron runs stop producing sends —
+  // cron-health monitoring covers that.
 
   // Note: backfill-provider-phone-auth, dev-test-lab-sms, dev-twilio-recent
   // are intentionally NOT smoke-tested. They are one-shot ops / dev tools
