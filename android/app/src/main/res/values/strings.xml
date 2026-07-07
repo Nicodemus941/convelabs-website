@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">ConveLabs</string>
-    <string name="title_activity_main">ConveLabs</string>
+    <string name="app_name">ConveLabs Pro</string>
+    <string name="title_activity_main">ConveLabs Pro</string>
     <string name="package_name">com.convelabs.patient</string>
     <string name="custom_url_scheme">com.convelabs.patient</string>
 </resources>
