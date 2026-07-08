@@ -1,24 +1,18 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { Upload, FileText, Loader2, CheckCircle2, AlertTriangle, Trash2, ExternalLink, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
-import { Document, Page, pdfjs } from 'react-pdf';
 import { resizeImageForUpload } from '@/lib/imageResize';
 import AdminErrorBoundary from '@/components/admin/AdminErrorBoundary';
 
-// Wire up the pdfjs worker. If pdfjs.version comes back undefined under
-// some bundler tree-shake configs, fall back to a pinned version so we
-// never ship a /undefined/pdf.worker.min.js URL that 404s + crashes the
-// whole component. (Naquala 2026-05-12: blank screen + lab orders won't
-// upload — likely root cause was the bad worker URL on her Edge browser.)
-try {
-  const v = (pdfjs as any).version && (pdfjs as any).version !== 'undefined'
-    ? (pdfjs as any).version
-    : '3.11.174'; // safe fallback — matches react-pdf 7.x's bundled pdfjs
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${v}/pdf.worker.min.js`;
-} catch {
-  /* swallow — render path doesn't depend on pdfjs being ready */
-}
+// react-pdf is CODE-SPLIT + lazy — it only loads when an admin expands a PDF
+// row to see the thumbnail, and it renders inside an AdminErrorBoundary. The
+// critical UPLOAD path (dropzone + doUpload) has ZERO dependency on react-pdf,
+// so a react-pdf/pdfjs failure can never take the upload UI down again.
+// (Naquala 2026-05-12: blank screen + "lab orders won't upload" — root cause was
+// react-pdf blowing up at module load on her Edge browser and crashing the whole
+// panel including the dropzone. Splitting it out permanently prevents recurrence.)
+const PdfLabThumbnail = React.lazy(() => import('./PdfLabThumbnail'));
 
 /**
  * Hormozi-structured appointment lab-order panel.
@@ -94,7 +88,11 @@ async function reportUploadFailure(opts: {
 
 async function pdfPageCount(file: File): Promise<number | null> {
   if (file.type !== 'application/pdf') return 1;
+  // Dynamically import pdfjs so page-counting is best-effort and can NEVER throw
+  // synchronously into the upload loop. Page count is a nicety, not a gate — if
+  // pdfjs fails to load (e.g. Edge/network), we just record null and upload anyway.
   try {
+    const { pdfjs } = await import('react-pdf');
     const buf = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
     return doc.numPages;
@@ -430,7 +428,9 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
                   <div className="border-t border-gray-100 bg-gray-50 p-3 space-y-2">
                     {r.mime_type === 'application/pdf' && (
                       <AdminErrorBoundary surface="PDF thumbnail">
-                        <PdfThumbnail filePath={r.file_path} pages={Math.min(r.page_count || 1, 4)} />
+                        <Suspense fallback={<div className="h-20 bg-gray-100 rounded animate-pulse" />}>
+                          <PdfLabThumbnail filePath={r.file_path} pages={Math.min(r.page_count || 1, 4)} />
+                        </Suspense>
                       </AdminErrorBoundary>
                     )}
                     {panels.length > 0 && (
@@ -496,32 +496,6 @@ const AppointmentLabOrdersPanel: React.FC<Props> = ({ appointmentId, patientName
           />
         </div>
       )}
-    </div>
-  );
-};
-
-/**
- * Small PDF thumbnail strip — shows up to N pages side-by-side.
- * Uses react-pdf's Document + Page with scale tuned for 80px tall.
- */
-const PdfThumbnail: React.FC<{ filePath: string; pages: number }> = ({ filePath, pages }) => {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.storage.from('lab-orders').createSignedUrl(filePath, 3600);
-      setUrl(data?.signedUrl || null);
-    })();
-  }, [filePath]);
-  if (!url) return <div className="h-20 bg-gray-100 rounded animate-pulse" />;
-  return (
-    <div className="flex gap-1.5 overflow-x-auto">
-      <Document file={url} loading={<div className="h-20 w-16 bg-gray-100 rounded animate-pulse" />}>
-        {Array.from({ length: pages }, (_, i) => (
-          <div key={i} className="border border-gray-200 rounded overflow-hidden flex-shrink-0 bg-white">
-            <Page pageNumber={i + 1} height={80} renderTextLayer={false} renderAnnotationLayer={false} />
-          </div>
-        ))}
-      </Document>
     </div>
   );
 };
