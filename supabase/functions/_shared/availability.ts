@@ -346,8 +346,6 @@ export async function getAvailableSlotsForDate(
     // Orlando phleb base than Kissimmee. Joshua Hoskins case (3004 Ella Way
     // 34771) was checking out with $0 travel surcharge.
     'st cloud', 'st. cloud', 'saint cloud',
-    // Added 2026-07-08 — Oakland (34760), west-edge Orange by Clermont/Montverde.
-    'oakland',
   ];
   // Zip fallback for free-text addresses that fail the city substring match.
   // Kept in sync with get_busy_slots() RPC + src/lib/bookingBuffer.ts.
@@ -360,7 +358,6 @@ export async function getAvailableSlotsForDate(
     '32726','32727','32736',
     '34711','34712','34713','34714','34715',
     '34756','32725','32738','32732','32778','32757',
-    '34760', // Oakland (added 2026-07-08)
     '34748','34788','34789','34736','34753',
     '32114','32115','32117','32118','32119','32120','32121','32122','32123','32124','32125','32126','32127','32128','32129',
     '32720','32721','32722','32723','32724','32713','32763',
