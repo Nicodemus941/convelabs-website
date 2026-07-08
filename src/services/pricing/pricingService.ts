@@ -169,8 +169,6 @@ export const EXTENDED_AREA_CITIES = [
   'deltona', 'debary', 'orange city', 'deland', 'lake helen',
   // Polk County (in-radius)
   'davenport', 'champions gate', 'haines city',
-  // Extended-area Orange edge (owner add 2026-07-08 — as near as Clermont/Montverde)
-  'oakland',
 ];
 
 export const DEFAULT_APPOINTMENT_DURATION = 60;

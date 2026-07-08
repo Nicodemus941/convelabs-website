@@ -16,8 +16,8 @@ export const ORANGE_ZIPS = [
   "32836", "32837", "32839",
   // Winter Park / Maitland
   "32789", "32790", "32792", "32793", "32751", "32794",
-  // Windermere / Apopka / Winter Garden / Ocoee
-  "34786", "32703", "32712", "34787", "34761",
+  // Windermere / Apopka / Winter Garden / Ocoee / Oakland
+  "34786", "32703", "32712", "34787", "34761", "34760",
   // Lake Buena Vista / Celebration / Lake Nona / Christmas / Zellwood / Gotha
   "34747", "32709", "32798", "34734",
 ];
@@ -94,27 +94,13 @@ export const BREVARD_ZIPS = [
   "32952", "32953", "32954", "32937", "32940", "32920", "32754", "32949",
 ];
 
-// === EXTENDED-AREA ORANGE ZIPs (covered, but carry the travel fee) ===
-// Orange-County ZIPs on the far west edge, adjacent to Lake County
-// (Montverde / Clermont). They fall within the 39-mile radius but are far
-// enough that the owner applies the Extended Service Area surcharge, so they
-// live in their own bucket rather than in the core (no-fee) ORANGE_ZIPS.
-// Owner add 2026-07-08: Oakland (34760) — as near as Clermont / Montverde.
-export const EXTENDED_ORANGE_ZIPS = [
-  "34760", // Oakland
-];
-
 export const SERVICE_ZIP_CODES = [
   ...ORANGE_ZIPS, ...SEMINOLE_ZIPS, ...OSCEOLA_ZIPS,
   ...LAKE_ZIPS, ...VOLUSIA_ZIPS, ...POLK_ZIPS, ...BREVARD_ZIPS,
-  ...EXTENDED_ORANGE_ZIPS,
 ];
 
-// Travel-fee zones — visits here carry the Extended Service Area surcharge.
-// Lake / Volusia / Polk counties + explicit extended-area Orange edge ZIPs.
-const TRAVEL_FEE_ZIP_SET = new Set([
-  ...LAKE_ZIPS, ...VOLUSIA_ZIPS, ...POLK_ZIPS, ...EXTENDED_ORANGE_ZIPS,
-]);
+// Travel-fee counties — visits here carry the Extended Service Area surcharge.
+const TRAVEL_FEE_ZIP_SET = new Set([...LAKE_ZIPS, ...VOLUSIA_ZIPS, ...POLK_ZIPS]);
 
 // ZIPs we explicitly DO NOT serve even though they fall within the 39-mile
 // radius (owner exclusions 2026-06): Leesburg, Tavares, Groveland.
