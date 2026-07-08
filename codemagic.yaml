@@ -33,9 +33,8 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.convelabs.patient
+      vars:
+        BUNDLE_ID: "com.convelabs.patient"
     cache: *cache_cfg
     scripts:
       - name: Install deps
@@ -46,8 +45,31 @@ workflows:
         script: |
           cd ios/App
           agvtool new-version -all "$BUILD_NUMBER"
-      - name: Set up code signing
-        script: xcode-project use-profiles
+      - name: Set up code signing (permanent shared cert — never revoke)
+        script: |
+          # Reuses the ONE permanent team-wide distribution key (IOS_DIST_CERT_KEY,
+          # base64 PEM) already shared by E-Labus / GHS / ConveLabs Pro — see the
+          # ios-phleb workflow for the ITMS-90035 post-mortem. fetch-signing-files
+          # REUSES the existing cert; --create makes the App Store provisioning
+          # profile for this bundle id on first run (com.convelabs.patient had none
+          # → the earlier "No matching profiles found" failure). This workflow
+          # NEVER revokes certs and NEVER regenerates the key — the shared cert
+          # already exists team-wide, so no legacy-cert cleanup is needed here.
+          set -e
+          if [ -z "$IOS_DIST_CERT_KEY" ]; then
+            echo "FATAL: IOS_DIST_CERT_KEY env var is not set (Codemagic app → Environment variables, mark Secure)."
+            exit 1
+          fi
+          keychain initialize
+          echo "IOS_DIST_CERT_KEY length: ${#IOS_DIST_CERT_KEY}"
+          printf '%s' "$IOS_DIST_CERT_KEY" | shasum -a 256 | cut -c1-16
+          printf '%s' "$IOS_DIST_CERT_KEY" | tr -d ' \t\r\n' | base64 --decode > /tmp/convelabs_cert_key.pem
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/convelabs_cert_key.pem \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
       - name: Build IPA
         script: |
           xcode-project build-ipa \
