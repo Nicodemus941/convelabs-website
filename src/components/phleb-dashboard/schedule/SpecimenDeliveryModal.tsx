@@ -763,8 +763,17 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl w-[95vw] max-h-[92vh] overflow-y-auto p-0">
-        <DialogHeader className="px-5 py-4 border-b sticky top-0 bg-white z-10">
+      {/* iOS fix (2026-07-08): was `max-h-[92vh] overflow-y-auto` with sticky
+          header + sticky footer. On iOS `vh` = the LARGE viewport (toolbar
+          hidden), so a centered 92vh modal spills below the visible screen and
+          the sticky "Done" bar sits off-screen; focusing an input raises the
+          keyboard, shrinking the visual viewport further, but the container
+          stays vh-locked (scrollHeight ≤ clientHeight → "nothing to scroll"),
+          leaving Done permanently unreachable. Fix: `dvh` (shrinks with
+          toolbar + keyboard) + real flex column where ONLY the middle scrolls
+          and the footer is a normal flow child with safe-area padding. */}
+      <DialogContent className="max-w-2xl w-[95vw] max-h-[92dvh] p-0 flex flex-col overflow-hidden">
+        <DialogHeader className="px-5 py-4 border-b flex-shrink-0 bg-white z-10">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Package className="h-5 w-5 text-[#B91C1C]" />
             Specimen Delivery
@@ -781,7 +790,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           )}
         </DialogHeader>
 
-        <div className="px-5 py-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
           {loading ? (
             <div className="py-12 text-center text-sm text-gray-500">
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" /> Loading patients…
@@ -961,8 +970,10 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           )}
         </div>
 
-        {/* Sticky action bar */}
-        <div className="px-5 py-3 border-t bg-white sticky bottom-0 flex flex-wrap gap-2 justify-between items-center">
+        {/* Action bar — normal flex child (NOT sticky) so it's always laid out
+            at the end of the flex column and can never spill below the iOS
+            fold. Safe-area padding keeps "Done" clear of the home indicator. */}
+        <div className="px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] border-t bg-white flex-shrink-0 flex flex-wrap gap-2 justify-between items-center">
           <div className="text-xs text-gray-500">
             {totalRows > 0 && (
               <>
