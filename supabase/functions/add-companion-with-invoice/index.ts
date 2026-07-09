@@ -57,8 +57,10 @@ Deno.serve(async (req) => {
     const token = authHeader.replace(/^Bearer\s+/i, '');
     let authorized = false;
     if (token && token !== ANON_KEY) {
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
-      const { data: { user } } = await userClient.auth.getUser();
+      // Validate the caller's token explicitly with the service client — a
+      // no-arg getUser() doesn't resolve reliably server-side. Role source of
+      // truth = user_roles table.
+      const { data: { user } } = await admin.auth.getUser(token);
       if (user) {
         const { data: roles } = await admin.from('user_roles').select('role').eq('user_id', user.id);
         authorized = (roles || []).some((r: any) => ADMIN_ROLES.includes(String(r.role)));
