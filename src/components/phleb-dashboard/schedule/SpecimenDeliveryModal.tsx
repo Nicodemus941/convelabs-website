@@ -26,9 +26,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Package, Loader2, Send, MapPin, Check, Users, Building2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Package, Loader2, Send, MapPin, Check, Users, Building2, AlertTriangle, CheckCircle2, Camera } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
+import { resizeImageForUpload } from '@/lib/imageResize';
 import SignaturePad, { type SignaturePadHandle } from './SignaturePad';
 import TubeConfirmation from './TubeConfirmation';
 
@@ -95,6 +96,24 @@ interface RowState {
   // Local UX flags
   saving: boolean;
   confirming: boolean;
+  // Label-scan state (📷 snap the label → OCR prefills the fields)
+  scanning: boolean;
+  scanCodes: Array<{ value: string; format: string; kind: string; confidence: string }>;
+  scanPatientName: string | null;
+  scanLab: string | null;
+  labelPath: string | null;
+}
+
+/** Loose person-name match: ≥2 shared name tokens (handles "Brittany Owle" vs
+ *  "OWLE, BRITTANY A"). Sharing ONLY a last name does NOT match — family
+ *  members share surnames and mixing up their specimen IDs is exactly the
+ *  mistake this gate exists to catch. */
+function namesLooselyMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+  const ta = norm(String(a || '')), tb = norm(String(b || ''));
+  if (ta.length === 0 || tb.length === 0) return true; // no signal → don't warn
+  const shared = ta.filter(w => tb.includes(w)).length;
+  return shared >= 2 || (Math.min(ta.length, tb.length) === 1 && shared >= 1);
 }
 
 /**
@@ -303,6 +322,11 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             deliveryNotes: '',
             saving: false,
             confirming: false,
+            scanning: false,
+            scanCodes: [],
+            scanPatientName: null,
+            scanLab: null,
+            labelPath: null,
           };
         });
       } else {
@@ -334,6 +358,11 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             deliveryNotes: '',
             saving: false,
             confirming: false,
+            scanning: false,
+            scanCodes: [],
+            scanPatientName: null,
+            scanLab: null,
+            labelPath: null,
           };
         });
       }
@@ -420,6 +449,116 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
   // Keep a live ref of rows so persistRow always reads the latest state inside its setTimeout
   const rowsRef = useRef<RowState[]>([]);
   useEffect(() => { rowsRef.current = rows; }, [rows]);
+
+  // ─── 📷 LABEL SCAN — snap the specimen/shipping label, OCR prefills ──────
+  // Flow: photo → (BarcodeDetector fast path, on-device) → upload to the
+  // PRIVATE specimen-labels bucket (proof of delivery) → ocr-specimen-label
+  // edge fn (Claude Vision) → prefill lab + specimen ID + code chips.
+  // PREFILLS ONLY — the phleb always confirms; a blurry photo degrades to
+  // today's manual typing, never below it.
+  const scanInputsRef = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const handleScanFile = async (id: string, rawFile: File) => {
+    const row = rowsRef.current.find(r => rowKey(r) === id);
+    if (!row) return;
+    setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, scanning: true } : r));
+    try {
+      // 1. On-device barcode decode (instant + exact when supported)
+      const barcodeValues: string[] = [];
+      try {
+        const BD: any = (window as any).BarcodeDetector;
+        if (BD) {
+          const bitmap = await createImageBitmap(rawFile);
+          const detector = new BD({ formats: ['code_128', 'code_39', 'qr_code', 'itf', 'ean_13', 'data_matrix'] });
+          const found = await detector.detect(bitmap);
+          for (const b of (found || [])) {
+            const v = String(b?.rawValue || '').trim();
+            if (v && !barcodeValues.includes(v)) barcodeValues.push(v);
+          }
+        }
+      } catch { /* BarcodeDetector unsupported/failed — Vision covers it */ }
+
+      // 2. Upload (resized) to the private bucket — kept as proof of delivery
+      const file = await resizeImageForUpload(rawFile);
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `appointments/${row.appointmentId}/${Date.now()}-label.${ext === 'heic' ? 'jpg' : ext}`;
+      const { error: upErr } = await supabase.storage.from('specimen-labels').upload(path, file, {
+        contentType: file.type || 'image/jpeg', upsert: false,
+      });
+      if (upErr) throw new Error(`Photo upload failed: ${upErr.message}`);
+
+      // Stamp the proof-of-delivery path on the backing record right away
+      try {
+        if (row.labOrderId) {
+          await supabase.from('appointment_lab_orders' as any).update({ delivery_label_path: path }).eq('id', row.labOrderId);
+        } else {
+          await supabase.from('appointments').update({ specimen_label_path: path }).eq('id', row.appointmentId);
+        }
+      } catch { /* non-blocking — OCR still runs */ }
+
+      // 3. Vision OCR for lab name / patient name / printed codes
+      let ocr: any = null;
+      try {
+        const { data, error } = await supabase.functions.invoke('ocr-specimen-label', { body: { path } });
+        if (!error) ocr = data;
+      } catch { /* fall through to barcode-only results */ }
+
+      // 4. Merge codes (barcode hits first — they're exact), dedupe by value
+      const seen = new Set<string>();
+      const codes: RowState['scanCodes'] = [];
+      for (const v of barcodeValues) {
+        const key = v.replace(/\s+/g, '').toUpperCase();
+        if (seen.has(key)) continue; seen.add(key);
+        codes.push({ value: v, format: 'barcode', kind: 'barcode', confidence: 'high' });
+      }
+      for (const c of (ocr?.codes || [])) {
+        const key = String(c.value || '').replace(/\s+/g, '').toUpperCase();
+        if (!key || seen.has(key)) continue; seen.add(key);
+        codes.push({ value: c.value, format: c.format || 'other', kind: c.kind || 'other', confidence: c.confidence || 'medium' });
+      }
+
+      // 5. Prefill — pick the code that matches the destination TYPE:
+      // shipping (UPS/FedEx) → carrier tracking number; lab drop-off →
+      // accession/requisition. Both stay available as chips either way.
+      const carrierCode = codes.find(c => ['ups', 'fedex', 'usps'].includes(c.format));
+      const labCode = codes.find(c => !['ups', 'fedex', 'usps'].includes(c.format) && c.confidence === 'high')
+        || codes.find(c => !['ups', 'fedex', 'usps'].includes(c.format));
+      const prefersCarrier = ['ups', 'fedex'].includes(row.labName)
+        || /\b(ups|fedex)\b/i.test(String(row.labDestination || ''));
+      const best = (prefersCarrier ? (carrierCode || labCode) : (labCode || carrierCode)) || codes[0];
+      const patch: Partial<RowState> = {
+        scanning: false,
+        scanCodes: codes,
+        scanPatientName: ocr?.patient_name || null,
+        scanLab: ocr?.lab_company || null,
+      };
+      const current = rowsRef.current.find(r => rowKey(r) === id);
+      if (best && !(current?.specimenId || '').trim()) patch.specimenId = best.value;
+      // Map the OCR'd lab/carrier onto the dropdown when it's still unset
+      const labVal = labValueFromDestination(ocr?.lab_company);
+      if (labVal && !current?.labName) patch.labName = labVal;
+      updateRow(id, patch);
+
+      // 6. Safety gates — surface, never block silently
+      if (ocr?.patient_name && !namesLooselyMatch(ocr.patient_name, row.patientName)) {
+        toast.error(`⚠️ Label reads "${ocr.patient_name}" but this row is ${row.patientName} — double-check before confirming!`, { duration: 10000 });
+      }
+      if (labVal && row.labDestination) {
+        const orderedVal = labValueFromDestination(row.labDestination);
+        if (orderedVal && orderedVal !== labVal) {
+          toast.error(`⚠️ Label looks like ${ocr.lab_company}, but the order says ${row.labDestination}.`, { duration: 10000 });
+        }
+      }
+      if (codes.length === 0) {
+        toast.info('No codes legible on the photo — type the specimen ID manually. (Photo saved as proof of delivery.)');
+      } else {
+        toast.success(`Label scanned — ${codes.length} code${codes.length === 1 ? '' : 's'} found`);
+      }
+    } catch (e: any) {
+      setRows(rs => rs.map(r => rowKey(r) === id ? { ...r, scanning: false } : r));
+      toast.error(e?.message || 'Label scan failed — type the ID manually');
+    }
+  };
 
   const captureGeo = async () => {
     setGeoCapturing(true);
@@ -815,11 +954,38 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                   {/* Inputs */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
-                      <Label className="text-[11px]">
-                        Specimen / Tracking ID {labRequiresSpecimenId(row.labName)
-                          ? '*'
-                          : <span className="text-gray-400 font-normal">(optional — {labLabel(row.labName)} doesn't issue one)</span>}
-                      </Label>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px]">
+                          Specimen / Tracking ID {labRequiresSpecimenId(row.labName)
+                            ? '*'
+                            : <span className="text-gray-400 font-normal">(optional — {labLabel(row.labName)} doesn't issue one)</span>}
+                        </Label>
+                        {!row.alreadyDelivered && (
+                          <button
+                            type="button"
+                            onClick={() => scanInputsRef.current[rowKey(row)]?.click()}
+                            disabled={row.scanning}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 hover:text-blue-900 border border-blue-200 hover:border-blue-400 bg-blue-50 rounded px-2 py-0.5 disabled:opacity-60"
+                          >
+                            {row.scanning
+                              ? <><Loader2 className="h-3 w-3 animate-spin" /> Reading…</>
+                              : <><Camera className="h-3 w-3" /> Scan label</>}
+                          </button>
+                        )}
+                      </div>
+                      {/* Hidden camera input — capture=environment opens the rear camera on mobile */}
+                      <input
+                        ref={(el) => { scanInputsRef.current[rowKey(row)] = el; }}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) handleScanFile(rowKey(row), f);
+                          if (e.target) e.target.value = '';
+                        }}
+                      />
                       <Input
                         className="h-9 text-sm"
                         value={row.specimenId}
@@ -827,6 +993,29 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
                         placeholder={labRequiresSpecimenId(row.labName) ? 'e.g. LC-2026-04131' : 'Leave blank — not provided'}
                         disabled={row.alreadyDelivered}
                       />
+                      {/* Scanned-code chips — tap to use a different code from the label */}
+                      {row.scanCodes.length > 1 && !row.alreadyDelivered && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {row.scanCodes.slice(0, 5).map((c, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => updateRow(rowKey(row), { specimenId: c.value })}
+                              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${row.specimenId === c.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400'}`}
+                              title={`${c.kind}${c.confidence !== 'high' ? ` · ${c.confidence} confidence` : ''}`}
+                            >
+                              {['ups', 'fedex', 'usps'].includes(c.format) ? '🚚 ' : ''}{c.value.length > 22 ? `${c.value.slice(0, 22)}…` : c.value}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {/* Wrong-patient gate — label name ≠ this row's patient */}
+                      {row.scanPatientName && !namesLooselyMatch(row.scanPatientName, row.patientName) && (
+                        <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 mt-1 flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 flex-shrink-0" />
+                          Label reads "{row.scanPatientName}" — this row is {row.patientName}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <Label className="text-[11px]">Lab Destination *</Label>
