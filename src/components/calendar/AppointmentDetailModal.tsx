@@ -69,6 +69,11 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const [staffName, setStaffName] = useState<string>('');
   const [showInsurance, setShowInsurance] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  // Add-companion link result shown INLINE in the modal. Toasts render
+  // bottom-right — behind this right-side sheet — so admins saw nothing
+  // happen and re-clicked (2026-07-09: 12 duplicate link-sends to a patient).
+  const [companionLinkBusy, setCompanionLinkBusy] = useState(false);
+  const [companionLink, setCompanionLink] = useState<{ url: string; sms: boolean; em: boolean } | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
   const [noShowCount, setNoShowCount] = useState(0);
@@ -580,8 +585,11 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             <Button
               size="sm"
               variant="outline"
+              disabled={companionLinkBusy}
               className="text-xs h-8 gap-1.5 border-purple-300 text-purple-700 hover:bg-purple-50"
               onClick={async () => {
+                if (companionLinkBusy) return; // no double-fire → no duplicate texts
+                setCompanionLinkBusy(true);
                 try {
                   const { data, error } = await supabase.functions.invoke('add-companion', {
                     body: { action: 'create', primaryAppointmentId: appt.id },
@@ -599,22 +607,46 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
                   const url = (data as any)?.url;
                   if (!url) throw new Error('No link returned');
                   try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
-                  const sms = (data as any)?.sent_sms, em = (data as any)?.sent_email;
-                  if (sms || em) {
-                    toast.success(`Add-companion link sent to patient${sms && em ? ' (SMS + email)' : sms ? ' (SMS)' : ' (email)'} — copied too`, { description: url, duration: 12000 });
-                  } else {
-                    toast.success('Add-companion link copied — paste it to the patient', { description: url, duration: 15000 });
-                  }
+                  // Show the result INLINE (toasts hide behind this sheet).
+                  setCompanionLink({ url, sms: !!(data as any)?.sent_sms, em: !!(data as any)?.sent_email });
                 } catch (e: any) {
                   toast.error(e?.message || 'Failed to create add-companion link');
+                } finally {
+                  setCompanionLinkBusy(false);
                 }
               }}
             >
               <UserPlus className="h-3.5 w-3.5" />
-              Add Companion Link
+              {companionLinkBusy ? 'Sending…' : companionLink ? 'Resend Companion Link' : 'Add Companion Link'}
             </Button>
           )}
         </div>
+
+        {/* Inline add-companion result — visible INSIDE the sheet (success
+            toasts render bottom-right, hidden behind this panel). */}
+        {companionLink && (
+          <div className="mx-5 mt-2 rounded-lg border border-purple-200 bg-purple-50 p-3">
+            <p className="text-xs font-semibold text-purple-900">
+              ✓ Companion link created
+              {companionLink.sms || companionLink.em
+                ? ` — sent to patient (${companionLink.sms && companionLink.em ? 'SMS + email' : companionLink.sms ? 'SMS' : 'email'})`
+                : ' — sending failed, share it manually'}
+            </p>
+            <div className="flex items-center gap-2 mt-1.5">
+              <code className="flex-1 min-w-0 truncate text-[11px] text-purple-800 bg-white border border-purple-200 rounded px-2 py-1">{companionLink.url}</code>
+              <button
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(companionLink.url); toast.success('Copied'); }
+                  catch { window.prompt('Copy the link:', companionLink.url); }
+                }}
+                className="text-[11px] font-semibold text-purple-700 hover:text-purple-900 border border-purple-300 rounded px-2 py-1 bg-white"
+              >
+                Copy
+              </button>
+            </div>
+            <p className="text-[11px] text-purple-700 mt-1.5">Patient adds the companion + pays the difference at this link (same visit = discounted fee, different day = full price).</p>
+          </div>
+        )}
 
         {/* Patient name + contact */}
         <div className="px-5 pt-4 pb-3">
