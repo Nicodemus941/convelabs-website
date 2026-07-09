@@ -287,6 +287,46 @@ Deno.serve(async (req) => {
         ? `Companion visit${companions.length > 1 ? `s ×${companions.length}` : ''} — ${primary.service_name || serviceType}`
         : `Add ${companions.length} companion${companions.length > 1 ? 's' : ''} to your visit`;
 
+      // ─── PHLEB CUT — route the extra portion to the phlebotomist ────────
+      // Owner rule (bundle floor, once per family): phleb take = bundle total
+      // − $87 business floor, applied ONCE per bundle. The primary payment
+      // already consumed the floor, so this ADD-ON payment's take is the
+      // incremental difference:
+      //   max(0, bundleAfter − 8700) − max(0, bundleBefore − 8700), capped at
+      // this payment. For a $150 primary + $75 companion that's the FULL $75.
+      // Without this, companion payments routed $0 to the phleb (Owle 2026-07-09).
+      let phlebTransferCents = 0;
+      let phlebConnectId: string | null = null;
+      try {
+        const { data: connected } = await admin
+          .from('staff_profiles')
+          .select('id, stripe_connect_account_id')
+          .not('stripe_connect_account_id', 'is', null)
+          .eq('stripe_connect_charges_enabled', true)
+          .eq('stripe_connect_payouts_enabled', true)
+          .limit(2);
+        if (connected && connected.length === 1) {
+          phlebConnectId = (connected[0] as any).stripe_connect_account_id;
+          const { data: bundleRows } = await admin
+            .from('appointments')
+            .select('total_amount, payment_status, status')
+            .eq('family_group_id', primary.family_group_id || primary.id)
+            .neq('status', 'cancelled');
+          let bundleBeforeCents = 0;
+          for (const r of (bundleRows || []) as any[]) {
+            if (r.payment_status === 'completed') bundleBeforeCents += Math.round((r.total_amount || 0) * 100);
+          }
+          const FLOOR_CENTS = 8700; // $87 business floor, once per bundle
+          const bundleAfterCents = bundleBeforeCents + totalCents;
+          const takeAfter = Math.max(0, bundleAfterCents - FLOOR_CENTS);
+          const takeBefore = Math.max(0, bundleBeforeCents - FLOOR_CENTS);
+          phlebTransferCents = Math.max(0, Math.min(totalCents, takeAfter - takeBefore));
+          console.log(`[add-companion] phleb cut: bundle ${bundleBeforeCents}¢ → ${bundleAfterCents}¢, transfer ${phlebTransferCents}¢`);
+        }
+      } catch (e: any) {
+        console.warn('[add-companion] phleb-cut computation failed (non-blocking):', e?.message);
+      }
+
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         customer_email: primary.patient_email || undefined,
@@ -297,6 +337,13 @@ Deno.serve(async (req) => {
         }],
         success_url: `${SITE}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${SITE}/add-companion/${token}`,
+        // Destination transfer: the phleb's incremental cut auto-routes on
+        // payment (same mechanism as invoice transfer_data).
+        ...(phlebConnectId && phlebTransferCents > 0 ? {
+          payment_intent_data: {
+            transfer_data: { destination: phlebConnectId, amount: phlebTransferCents },
+          },
+        } : {}),
         metadata: {
           flow: 'add_companion',
           add_token: token,
@@ -305,6 +352,7 @@ Deno.serve(async (req) => {
           new_date: when === 'different' ? newDate : '',
           new_time: when === 'different' ? newTime : '',
           service_type: serviceType,
+          phleb_take_cents: String(phlebTransferCents || 0),
           companions_json: JSON.stringify(normalized).slice(0, 480),
         },
       });
