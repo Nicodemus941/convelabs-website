@@ -45,6 +45,18 @@ interface Body {
   organizationId?: string;
 }
 
+/** Carrier tracking URL for a specimen/shipping code, or null for lab
+ *  accession numbers (those aren't publicly trackable). Label-scanner
+ *  enrichment 2026-07-09: patients get a CLICKABLE link, not just digits. */
+function carrierTrackingUrl(code: string | null | undefined): string | null {
+  const s = String(code || '').replace(/\s+/g, '').toUpperCase();
+  if (!s) return null;
+  if (/^1Z[A-Z0-9]{16}$/.test(s)) return `https://www.ups.com/track?tracknum=${s}`;
+  if (/^\d{12}$/.test(s) || /^\d{15}$/.test(s)) return `https://www.fedex.com/fedextrack/?trknbr=${s}`;
+  if (/^(94|93|92)\d{18,24}$/.test(s)) return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${s}`;
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -122,7 +134,7 @@ Deno.serve(async (req) => {
               : 'recently';
             const svc = appt.service_name || appt.service_type || 'lab draw';
             const labLine = body.labName ? `<p style="margin:6px 0 0;"><strong>Delivered to:</strong> ${body.labName}</p>` : '';
-            const trackingLine = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${body.specimenId}</p>` : '';
+            const trackingLine = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${carrierTrackingUrl(body.specimenId) ? `<a href="${carrierTrackingUrl(body.specimenId)}">${body.specimenId}</a>` : body.specimenId}</p>` : '';
             const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
   <div style="background:#059669;color:white;padding:20px;border-radius:10px 10px 0 0;text-align:center;">
     <h2 style="margin:0;font-size:20px;">Specimen Delivered ✓</h2>
@@ -188,7 +200,8 @@ Deno.serve(async (req) => {
         const phone = appt.patient_phone.startsWith('+')
           ? appt.patient_phone
           : `+1${String(appt.patient_phone).replace(/\D/g, '')}`;
-        const smsBody = `ConveLabs: Your specimens have been delivered to ${body.labName || 'the lab'}${body.specimenId ? ` (tracking: ${body.specimenId})` : ''}. Results will come through your lab's patient portal. Thanks!`;
+        const trackUrl = carrierTrackingUrl(body.specimenId);
+        const smsBody = `ConveLabs: Your specimens have been delivered to ${body.labName || 'the lab'}${body.specimenId ? ` (tracking: ${body.specimenId})` : ''}.${trackUrl ? ` Track it: ${trackUrl}` : ''} Results will come through your lab's patient portal. Thanks!`;
 
         const form = new URLSearchParams();
         form.append('To', phone);
@@ -289,7 +302,7 @@ Deno.serve(async (req) => {
           ? new Date(String(appt.appointment_date).substring(0, 10) + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' })
           : 'recently';
         const labLineRp = body.labName ? `<p style="margin:6px 0 0;"><strong>Delivered to:</strong> ${body.labName}</p>` : '';
-        const trackingRp = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${body.specimenId}</p>` : '';
+        const trackingRp = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${carrierTrackingUrl(body.specimenId) ? `<a href="${carrierTrackingUrl(body.specimenId)}">${body.specimenId}</a>` : body.specimenId}</p>` : '';
         const greet = (rp as any).provider_name || (rp as any).practice_name || 'Doctor';
         const html = `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
   <div style="background:#059669;color:white;padding:20px;border-radius:10px 10px 0 0;text-align:center;">
@@ -397,7 +410,7 @@ Deno.serve(async (req) => {
     const svc = appt.service_name || appt.service_type || 'lab draw';
 
     let sent = 0, skipped = 0;
-    const trackingLink = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${body.specimenId}</p>` : '';
+    const trackingLink = body.specimenId ? `<p style="margin:6px 0 0;"><strong>Tracking:</strong> ${carrierTrackingUrl(body.specimenId) ? `<a href="${carrierTrackingUrl(body.specimenId)}">${body.specimenId}</a>` : body.specimenId}</p>` : '';
     const labLine = body.labName ? `<p style="margin:6px 0 0;"><strong>Delivered to:</strong> ${body.labName}</p>` : '';
 
     for (const org of (orgs || [])) {
