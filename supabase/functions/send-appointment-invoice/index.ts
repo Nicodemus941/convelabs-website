@@ -358,9 +358,37 @@ Deno.serve(async (req) => {
           if (t > 0) totalTakeCents += t;
         }
 
-        // Cap at total invoice amount (Stripe requires transfer <= charge).
         const primaryCents = Math.round((servicePrice || appt.total_amount || 0) * 100);
         const totalInvoiceCents = primaryCents + companionTotalCents;
+
+        // BUNDLE-FLOOR BACKSTOP (Owle family 2026-07-09): when the INVOICED
+        // total exceeds what the per-row take math can see — e.g. admin passed
+        // a custom servicePrice that bakes in a family-bundle "+$75" whose
+        // companion row doesn't exist yet — the per-row sum shorts the phleb
+        // by the whole extra (Owle: $225 invoiced, rows saw $150 → phleb got
+        // $63 instead of 225−87=$138). Recompute against the ACTUAL invoiced
+        // total with the canonical $87-once-per-bundle floor and use the max,
+        // so the extra portion always flows to the phlebotomist.
+        try {
+          const { data: bundleRes } = await supabase.rpc('compute_phleb_take_v2_inline' as any, {
+            p_staff_id: phlebStaffId,
+            p_service_type: appt.service_type || 'mobile',
+            p_total_paid_cents: totalInvoiceCents,
+            p_surcharge_cents: 0,
+            p_tip_cents: 0,
+            p_has_companion: companionTotalCents > 0 || !!appt.family_group_id,
+          });
+          const bRow = Array.isArray(bundleRes) ? bundleRes[0] : bundleRes;
+          const bundleTake = parseInt(String(bRow?.take_cents || 0), 10);
+          if (bundleTake > totalTakeCents) {
+            console.log(`[send-invoice] bundle-floor take ${bundleTake}¢ > per-row sum ${totalTakeCents}¢ (invoiced ${totalInvoiceCents}¢) — using bundle-floor`);
+            totalTakeCents = bundleTake;
+          }
+        } catch (bfErr) {
+          console.warn('[send-invoice] bundle-floor backstop failed (non-blocking):', bfErr);
+        }
+
+        // Cap at total invoice amount (Stripe requires transfer <= charge).
         if (totalTakeCents > totalInvoiceCents) totalTakeCents = totalInvoiceCents;
 
         if (totalTakeCents > 0) {

@@ -171,7 +171,7 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
       const groupId = appt.family_group_id || appt.id;
       const { data: sibs } = await supabase
         .from('appointments')
-        .select('id, patient_name, appointment_time, fasting_required, lab_order_file_path, companion_role, status, patient_phone')
+        .select('id, patient_name, appointment_time, fasting_required, lab_order_file_path, companion_role, status, patient_phone, total_amount, payment_status, service_name')
         .eq('family_group_id', groupId)
         .neq('status', 'cancelled')
         .order('appointment_time', { ascending: true });
@@ -354,6 +354,16 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const statusCfg = STATUS_CONFIG[appt.status] || STATUS_CONFIG.scheduled;
   const paymentCfg = PAYMENT_BADGE[appt.payment_status] || PAYMENT_BADGE.pending;
 
+  // FAMILY-BUNDLE ROLL-UP (Owle 2026-07-09): the patient was invoiced $225
+  // ($150 draw + $75 companion) but the card showed "$150.00 paid" because the
+  // badge + Services read ONLY the primary row. Companion charges live on
+  // sibling appointment rows — sum them so the card shows what was actually
+  // billed. pricing_breakdown-only companions carry no row total (their fee is
+  // already baked into the primary's total_amount), so they're excluded.
+  const companionRowTotal = familyMembers.reduce((s: number, m: any) =>
+    s + ((m as any)._source === 'pricing_breakdown' ? 0 : Number((m as any).total_amount) || 0), 0);
+  const bundleTotal = (Number(appt.total_amount) || 0) + companionRowTotal;
+
   // Calculate end time for display
   const getTimeRange = () => {
     if (!timeStr) return 'Time TBD';
@@ -424,7 +434,9 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
         <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
           <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${paymentCfg.className}`}>
             <span>{paymentCfg.icon}</span>
-            {appt.total_amount > 0 ? `$${(appt.total_amount || 0).toFixed(2)} ${paymentCfg.label.toLowerCase()}` : paymentCfg.label}
+            {bundleTotal > 0
+              ? `$${bundleTotal.toFixed(2)} ${paymentCfg.label.toLowerCase()}${companionRowTotal > 0 ? ' · family bundle' : ''}`
+              : paymentCfg.label}
           </div>
           {/* Sprint 4: recurring-series badge + cancel-series button */}
           {appt.recurrence_group_id && appt.recurrence_total > 1 && (
@@ -882,6 +894,19 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             <p className="text-sm font-medium">${(appt.service_price || appt.total_amount || 0).toFixed(2)}</p>
           </div>
 
+          {/* Companion charges — sibling family-group rows billed with this
+              visit (e.g. "+$75 additional patient"). Shown so the card's total
+              matches what the patient was actually invoiced. */}
+          {familyMembers.filter((m: any) => !(m as any)._source && (Number((m as any).total_amount) || 0) > 0).map((m: any) => (
+            <div key={m.id} className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{(m as any).service_name || 'Companion visit'} — {m.patient_name}</p>
+                <p className="text-xs text-gray-500">Family member · same visit</p>
+              </div>
+              <p className="text-sm font-medium">${(Number((m as any).total_amount) || 0).toFixed(2)}</p>
+            </div>
+          ))}
+
           {appt.tip_amount > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Tip</span>
@@ -894,14 +919,15 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
           <div className="flex justify-between text-sm">
             <span className="text-gray-500">Subtotal</span>
             {/* total_amount is the grand total INCLUDING tip (set as
-                servicePrice + tip in stripe-webhook). Subtotal = pre-tip. */}
-            <span>${Math.max(0, (appt.total_amount || 0) - (appt.tip_amount || 0)).toFixed(2)}</span>
+                servicePrice + tip in stripe-webhook). Subtotal = pre-tip.
+                bundleTotal folds in companion sibling-row charges. */}
+            <span>${Math.max(0, bundleTotal - (appt.tip_amount || 0)).toFixed(2)}</span>
           </div>
           <div className="flex justify-between text-sm font-bold">
-            <span>Total</span>
+            <span>Total{companionRowTotal > 0 ? ' (family bundle)' : ''}</span>
             {/* Use total_amount directly — it already includes the tip, so
                 adding tip_amount again double-counted it ($210 vs real $180). */}
-            <span>${(appt.total_amount || 0).toFixed(2)}</span>
+            <span>${bundleTotal.toFixed(2)}</span>
           </div>
 
           {/* Stripe invoice id — admin/audit-only, hidden behind history toggle */}
