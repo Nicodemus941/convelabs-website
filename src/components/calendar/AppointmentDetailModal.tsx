@@ -586,7 +586,16 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
                   const { data, error } = await supabase.functions.invoke('add-companion', {
                     body: { action: 'create', primaryAppointmentId: appt.id },
                   });
-                  if (error) throw error;
+                  if (error) {
+                    // Surface the function's real error body ({ error: '...' })
+                    // instead of the generic "non-2xx status code" message.
+                    let detail = error.message || '';
+                    try {
+                      const b = await (error as any)?.context?.json?.();
+                      if (b?.error) detail = b.error;
+                    } catch { /* body not JSON — keep generic */ }
+                    throw new Error(detail || 'request failed');
+                  }
                   const url = (data as any)?.url;
                   if (!url) throw new Error('No link returned');
                   try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
