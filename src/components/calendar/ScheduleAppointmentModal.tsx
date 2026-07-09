@@ -984,50 +984,67 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
 
       console.log('Appointment created:', newAppt.id);
 
-      // Companion visits — for each named companion in the array, create a
-      // separate appointment row linked to the primary via family_group_id.
+      // Companion visits — create a separate appointment row for EVERY
+      // companion, NAMED OR NOT, linked to the primary via family_group_id.
       // Same address, same time slot, tier-aware price. Phleb handles all in
       // one visit window; each companion gets their own clinical chart.
-      const namedCompanions = companions.filter(c => c.name.trim());
-      if (namedCompanions.length > 0) {
+      //
+      // ROOT-CAUSE FIX (Owle family 2026-07-09): the old filter
+      // `companions.filter(c => c.name.trim())` meant an UNNAMED "+1
+      // additional patient" was CHARGED via the family-bundle note but no
+      // appointment row ever existed — so the invoice payout math, the
+      // appointment card roll-up, and the phleb's specimen view all missed
+      // the $75 companion (phleb got shorted, card showed $150 not $225).
+      // Unnamed companions now get a placeholder row the admin renames later.
+      if (companions.length > 0) {
         try {
           const familyGroupId = newAppt.id;
           await supabase.from('appointments').update({ family_group_id: familyGroupId }).eq('id', newAppt.id);
-          for (const comp of namedCompanions) {
+          let compIdx = 0;
+          for (const comp of companions) {
+            const compName = comp.name.trim() || `${patientName} — family member ${compIdx + 1} (name TBD)`;
+            // First N companion slots ride free (founding VIP = 1, Concierge
+            // = 2) — those rows carry $0 so send-appointment-invoice's
+            // per-companion line items can't double-bill a waived slot.
+            const compAmount = compIdx < freeCompanionSlots ? 0 : companionPrice;
+            compIdx++;
             const compPayload: any = {
               ...appointmentPayload,
-              patient_name: comp.name.trim(),
+              patient_name: compName,
               patient_email: null,
               patient_phone: null,
               patient_id: null,
-              total_amount: companionPrice,
-              service_price: companionPrice,
+              total_amount: compAmount,
+              service_price: compAmount,
               surcharge_amount: 0,
               invoice_status: 'not_required',
               payment_status: 'completed',
               family_group_id: familyGroupId,
-              companion_role: comp.relationship,
-              notes: `Companion of ${patientName}${comp.dob ? ` · DOB ${comp.dob}` : ''} · rel: ${comp.relationship} · billed on primary appt ${newAppt.id}`,
+              // companion_role is the STRUCTURAL role — sibling/split lookups
+              // filter on 'companion'. The human relationship goes in notes.
+              // (Same fix as add-companion-with-invoice, 2026-07-01.)
+              companion_role: 'companion',
+              notes: `Companion of ${patientName}${comp.dob ? ` · DOB ${comp.dob}` : ''}${comp.relationship ? ` · rel: ${comp.relationship}` : ''}${comp.name.trim() ? '' : ' · name TBD — update before the visit'} · billed on primary appt ${newAppt.id}`,
             };
             delete compPayload.stripe_checkout_session_id;
             const { error: compErr } = await supabase.from('appointments').insert([compPayload]);
             if (compErr) {
-              console.error(`Companion appointment failed for ${comp.name}:`, compErr);
-              toast.error(`Couldn't add ${comp.name}: ${compErr.message}`);
+              console.error(`Companion appointment failed for ${compName}:`, compErr);
+              toast.error(`Couldn't add ${compName}: ${compErr.message}`);
             } else {
               await supabase.from('upgrade_events' as any).insert({
                 event_type: 'companion_click', status: 'converted',
                 patient_email: patientEmail?.toLowerCase() || null,
                 patient_name: patientName || null,
                 appointment_id: newAppt.id,
-                revenue_cents: Math.round(companionPrice * 100),
-                discount_cents: Math.round((75 - companionPrice) * 100),
-                metadata: { source: 'admin_manual', companion_name: comp.name, companion_role: comp.relationship, tier: detectedTier, family_size: namedCompanions.length + 1 },
+                revenue_cents: Math.round(compAmount * 100),
+                discount_cents: Math.round((75 - compAmount) * 100),
+                metadata: { source: 'admin_manual', companion_name: compName, companion_relationship: comp.relationship || null, tier: detectedTier, family_size: companions.length + 1 },
                 converted_at: new Date().toISOString(),
               }).catch(() => {});
             }
           }
-          console.log(`Created ${namedCompanions.length} companion appointment(s) under family_group ${familyGroupId}`);
+          console.log(`Created ${companions.length} companion appointment(s) under family_group ${familyGroupId}`);
         } catch (e) {
           console.warn('Companion creation exception (non-blocking):', e);
         }
