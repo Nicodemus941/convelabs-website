@@ -144,13 +144,22 @@ Deno.serve(async (req) => {
     // ─── CREATE (admin) ──────────────────────────────────────────────────
     if (action === 'create') {
       const authHeader = req.headers.get('Authorization') || '';
-      if (!authHeader) return json({ error: 'auth_required' }, 401);
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
-      const { data: u } = await userClient.auth.getUser();
-      const role = String((u?.user?.user_metadata as any)?.role || '').toLowerCase();
-      if (!['super_admin', 'admin', 'owner', 'office_manager'].includes(role)) {
-        return json({ error: 'forbidden' }, 403);
-      }
+      const jwt = authHeader.replace(/^Bearer\s+/i, '');
+      if (!jwt) return json({ error: 'auth_required' }, 401);
+      // Authorize against the user_roles TABLE — the app's source of truth
+      // (same signal is_admin() uses), NOT user_metadata.role. The old
+      // metadata check + no-arg getUser() 403'd legitimate admins because the
+      // role claim drifts / getUser() doesn't resolve reliably server-side.
+      // Validate the caller's token explicitly with the service client, then
+      // look up their role. Mirrors add-companion-with-invoice.
+      const { data: u } = await admin.auth.getUser(jwt);
+      const uid = u?.user?.id;
+      if (!uid) return json({ error: 'auth_required' }, 401);
+      const { data: roleRows } = await admin.from('user_roles').select('role').eq('user_id', uid);
+      const isAdmin = (roleRows || []).some((r: any) =>
+        ['super_admin', 'admin', 'owner', 'office_manager'].includes(String(r.role).toLowerCase()));
+      if (!isAdmin) return json({ error: 'forbidden' }, 403);
+      const role = String((roleRows || [])[0]?.role || 'admin');
       const primaryAppointmentId = String(body?.primaryAppointmentId || '');
       if (!primaryAppointmentId) return json({ error: 'appointment_required' }, 400);
       const { data: appt } = await admin.from('appointments')
