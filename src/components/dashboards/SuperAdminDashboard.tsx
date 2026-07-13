@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Users, Calendar, DollarSign, TrendingUp, Clock, Settings,
-  Briefcase, Mail, Package, ArrowRight, Activity, AlertTriangle,
-  MessageSquare, FileText, CalendarPlus, ChevronRight, UserPlus,
+  Users, Calendar, DollarSign, TrendingUp, TrendingDown, Clock, Settings,
+  Briefcase, Mail, Package, ArrowRight, AlertTriangle,
+  MessageSquare, ChevronRight, UserPlus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from '@/integrations/supabase/client';
-import { format, startOfWeek, endOfWeek, startOfMonth, subWeeks } from 'date-fns';
+import {
+  format, startOfWeek, endOfWeek, startOfMonth, subWeeks, subMonths, getDate,
+} from 'date-fns';
 import RevenueChart from './charts/RevenueChart';
 import ServiceBreakdown from './charts/ServiceBreakdown';
 import TodayExecutionView from './admin/TodayExecutionView';
@@ -19,25 +21,54 @@ const SERVICE_COLORS: Record<string, string> = {
   therapeutic: '#0D9488', 'specialty-kit': '#D97706', other: '#6B7280',
 };
 
+// 2026-07-14 (Fable 5 redesign): the whole "money" side of this dashboard now
+// reads a SINGLE source of truth — stripe_qb_sync_log (actual Stripe deposits).
+// Before, the headline MTD read Stripe ($3,205) while the weekly chart summed
+// appointments.total_amount ($4,999) and the "avg revenue" card divided by a
+// third denominator — three numbers, three sources, none agreeing on one screen.
+// Operational counts (visits, patients, cancellations) still come from
+// `appointments`, which is correct: those are unit counts, not dollars.
+type Stats = {
+  // money — from stripe_qb_sync_log (collected) + appointments (booked)
+  collectedMTD: number;
+  collectedToday: number;
+  bookedMTD: number;
+  avgCharge: number;
+  lastMonthPaceDelta: number; // % vs same day-of-month last month
+  // operational — from appointments
+  totalAppointments: number;
+  thisWeekAppointments: number;
+  todayAppointments: number;
+  totalPatients: number;
+  newPatientsMonth: number;
+  overdueInvoices: number;
+  cancelledMonth: number;
+  completedMonth: number;
+  repeatRate: number;
+  onlineBookings: number;
+  manualBookings: number;
+};
+
+const EMPTY_STATS: Stats = {
+  collectedMTD: 0, collectedToday: 0, bookedMTD: 0, avgCharge: 0, lastMonthPaceDelta: 0,
+  totalAppointments: 0, thisWeekAppointments: 0, todayAppointments: 0,
+  totalPatients: 0, newPatientsMonth: 0, overdueInvoices: 0,
+  cancelledMonth: 0, completedMonth: 0, repeatRate: 0, onlineBookings: 0, manualBookings: 0,
+};
+
 const SuperAdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [phlebPayoutsDisabled, setPhlebPayoutsDisabled] = useState(false);
-  const [stats, setStats] = useState({
-    totalAppointments: 0, thisWeekAppointments: 0, completedToday: 0,
-    revenueMTD: 0, totalPatients: 0, newPatientsMonth: 0,
-    overdueInvoices: 0, todayAppointments: 0, cancelledMonth: 0, completedMonth: 0,
-    avgRevenue: 0, repeatRate: 0, onlineBookings: 0, manualBookings: 0,
-  });
+  const [stats, setStats] = useState<Stats>(EMPTY_STATS);
   const [recentAppointments, setRecentAppointments] = useState<any[]>([]);
   const [weeklyRevenue, setWeeklyRevenue] = useState<{ label: string; revenue: number; tips: number }[]>([]);
   const [serviceData, setServiceData] = useState<{ name: string; value: number; color: string }[]>([]);
 
   useEffect(() => {
     fetchAll();
-    // 2026-05-26: realtime subscriptions to mirror the Hormozi Dashboard so
-    // BOTH owner-facing dashboards stay in sync within ~1s of any payment,
-    // booking, membership, or refund event. Unique channel name per mount
-    // avoids the StrictMode collision that bit the Hormozi page.
+    // Realtime: any charge, booking, membership, or patient change re-pulls the
+    // whole dashboard within ~1s. Unique channel name per mount avoids the
+    // StrictMode double-subscribe collision.
     const channelName = `super-admin-dashboard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const channel = supabase.channel(channelName);
     const tables = ['stripe_qb_sync_log', 'appointments', 'user_memberships', 'tenant_patients'];
@@ -55,92 +86,101 @@ const SuperAdminDashboard = () => {
       const todayStr = format(now, 'yyyy-MM-dd');
       const weekStartStr = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
       const monthStartStr = format(startOfMonth(now), 'yyyy-MM-dd');
+      // The 6-week chart window starts at the Monday 5 weeks before this week's
+      // Monday. We also need all of last month for the pace comparison, so pull
+      // Stripe rows from whichever is earlier.
+      const sixWeeksAgoStr = format(startOfWeek(subWeeks(now, 5), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const lastMonthStartStr = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
+      const stripeSinceStr = sixWeeksAgoStr < lastMonthStartStr ? sixWeeksAgoStr : lastMonthStartStr;
 
-      // Parallel queries
       const [
+        { data: stripeRows },
         { count: totalAppts },
         { count: weekAppts },
         { count: todayAppts },
-        { count: todayCompleted },
         { count: totalPatients },
         { count: newPatients },
         { count: overdueInvoices },
         { count: cancelledMonth },
-        { data: revenueAppts },
+        { count: completedMonth },
+        { data: bookedRows },
         { data: recent },
         { data: allMonthAppts },
         { data: allCompletedForRepeat },
-        { count: completedMonth },
       ] = await Promise.all([
+        // SINGLE money source — actual Stripe deposits since the window start.
+        supabase.from('stripe_qb_sync_log' as any)
+          .select('amount_gross_cents, charge_date')
+          .gte('charge_date', stripeSinceStr),
         supabase.from('appointments').select('*', { count: 'exact', head: true }),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('appointment_date', weekStartStr),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('appointment_date', `${todayStr}T00:00:00`).lte('appointment_date', `${todayStr}T23:59:59`).not('status', 'eq', 'cancelled'),
-        supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed').gte('appointment_date', todayStr),
         supabase.from('tenant_patients').select('*', { count: 'exact', head: true }),
         supabase.from('tenant_patients').select('*', { count: 'exact', head: true }).gte('created_at', monthStartStr),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).in('invoice_status', ['sent', 'reminded']).eq('is_vip', false),
         supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'cancelled').gte('appointment_date', monthStartStr),
-        // 2026-05-26: added booking_source — the "Online vs Manual" card was
-        // showing 0/0 because this SELECT didn't include it. The filter at
-        // line 90-91 hit undefined for every row.
-        supabase.from('appointments').select('total_amount, tip_amount, service_type, appointment_date, booking_source').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
-        // 2026-05-26: was ordering by appointment_date DESC which surfaced
-        // future-dated bundle visits (e.g. Lawrence Carpenter's 8 prepaid
-        // Mobile draws) at the top and buried today's actual activity.
-        // Recent Activity should reflect what JUST HAPPENED, so sort by
-        // created_at (when the row was inserted, regardless of when the
-        // appointment is scheduled for).
-        supabase.from('appointments').select('*').order('created_at', { ascending: false }).limit(10),
+        supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed').gte('appointment_date', monthStartStr),
+        // "Booked MTD" + booking-source split — appointment dollars this month.
+        supabase.from('appointments').select('total_amount, booking_source').eq('payment_status', 'completed').gte('appointment_date', monthStartStr),
+        supabase.from('appointments').select('*').order('created_at', { ascending: false }).limit(8),
         supabase.from('appointments').select('service_type').gte('appointment_date', monthStartStr).not('status', 'eq', 'cancelled'),
         supabase.from('appointments').select('patient_email').eq('status', 'completed'),
-        supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed').gte('appointment_date', monthStartStr),
       ]);
 
-      // 2026-05-26: revenueMTD now reads from stripe_qb_sync_log to match the
-      // Hormozi Dashboard's source of truth. The two dashboards previously
-      // diverged ($11,987 here vs $10,601 there) because this one summed
-      // appointments.total_amount (counts each visit even when paid via a
-      // bundle) while Hormozi sums actual Stripe charges. Unifying so they
-      // never disagree.
-      const { data: syncRows } = await supabase
-        .from('stripe_qb_sync_log' as any)
-        .select('amount_gross_cents')
-        .gte('charge_date', monthStartStr);
-      const revenueMTD = ((syncRows as any[] | null) || [])
-        .reduce((s, r: any) => s + (r.amount_gross_cents || 0), 0) / 100;
-      const completedCount = revenueAppts?.length || 1;
+      const charges = (stripeRows as any[] | null) || [];
+      const centsToDollars = (c: number) => (c || 0) / 100;
 
-      // Calculate repeat rate from ALL completed appointments (patients with 2+ visits / total unique patients)
+      // Collected MTD / today — real deposits.
+      const collectedMTD = charges
+        .filter((r) => (r.charge_date || '') >= monthStartStr)
+        .reduce((s, r) => s + centsToDollars(r.amount_gross_cents), 0);
+      const collectedToday = charges
+        .filter((r) => (r.charge_date || '').startsWith(todayStr))
+        .reduce((s, r) => s + centsToDollars(r.amount_gross_cents), 0);
+      const chargeCountMTD = charges.filter((r) => (r.charge_date || '') >= monthStartStr).length;
+      const avgCharge = chargeCountMTD > 0 ? Math.round(collectedMTD / chargeCountMTD) : 0;
+
+      // Pace vs last month: same-day-of-month window so we compare like-for-like.
+      const dayOfMonth = getDate(now);
+      const prevMonth = subMonths(now, 1);
+      const lastMonthCutoff = format(
+        new Date(prevMonth.getFullYear(), prevMonth.getMonth(), dayOfMonth, 23, 59, 59),
+        "yyyy-MM-dd'T'HH:mm:ss"
+      );
+      const lastMonthPaceTotal = charges
+        .filter((r) => (r.charge_date || '') >= lastMonthStartStr && (r.charge_date || '') < monthStartStr && (r.charge_date || '') <= lastMonthCutoff)
+        .reduce((s, r) => s + centsToDollars(r.amount_gross_cents), 0);
+      const lastMonthPaceDelta = lastMonthPaceTotal > 0
+        ? Math.round(((collectedMTD - lastMonthPaceTotal) / lastMonthPaceTotal) * 100)
+        : 0;
+
+      const bookedMTD = (bookedRows || []).reduce((s: number, a: any) => s + (a.total_amount || 0), 0);
+      const onlineBookings = (bookedRows || []).filter((a: any) => a.booking_source === 'online').length;
+      const manualBookings = (bookedRows || []).filter((a: any) => a.booking_source === 'manual').length;
+
+      // Repeat rate — patients with 2+ completed visits / all patients with a completed visit.
       const visitCounts = new Map<string, number>();
       (allCompletedForRepeat || []).forEach((a: any) => {
-        const email = a.patient_email;
-        if (email) visitCounts.set(email, (visitCounts.get(email) || 0) + 1);
+        if (a.patient_email) visitCounts.set(a.patient_email, (visitCounts.get(a.patient_email) || 0) + 1);
       });
-      let patientsWithRepeatVisits = 0;
-      visitCounts.forEach((count) => { if (count >= 2) patientsWithRepeatVisits++; });
-      const repeatRate = visitCounts.size > 0 ? Math.round((patientsWithRepeatVisits / visitCounts.size) * 100) : 0;
-
-      // Booking source breakdown
-      const onlineBookings = (revenueAppts || []).filter((a: any) => a.booking_source === 'online').length;
-      const manualBookings = (revenueAppts || []).filter((a: any) => a.booking_source === 'manual').length;
+      let repeatN = 0;
+      visitCounts.forEach((c) => { if (c >= 2) repeatN++; });
+      const repeatRate = visitCounts.size > 0 ? Math.round((repeatN / visitCounts.size) * 100) : 0;
 
       setStats({
+        collectedMTD, collectedToday, bookedMTD, avgCharge, lastMonthPaceDelta,
         totalAppointments: totalAppts || 0,
         thisWeekAppointments: weekAppts || 0,
         todayAppointments: todayAppts || 0,
-        completedToday: todayCompleted || 0,
-        revenueMTD,
         totalPatients: totalPatients || 0,
         newPatientsMonth: newPatients || 0,
         overdueInvoices: overdueInvoices || 0,
         cancelledMonth: cancelledMonth || 0,
         completedMonth: completedMonth || 0,
-        avgRevenue: Math.round(revenueMTD / completedCount),
         repeatRate, onlineBookings, manualBookings,
       });
 
-      // Read kill-switch flag so Profit First card reflects current cash flow
-      // model (kill-switch ON = 100% to business, NO phleb cut).
+      // Kill-switch flag → Profit First splits.
       try {
         const { data: ks } = await supabase
           .from('system_settings' as any)
@@ -153,25 +193,26 @@ const SuperAdminDashboard = () => {
 
       setRecentAppointments(recent || []);
 
-      // Build weekly revenue chart (last 6 weeks)
+      // Weekly collected revenue (last 6 weeks) — real deposits bucketed by week.
+      // This is the fix for the old bug where every week before the 1st of the
+      // month rendered as $0 (the source query was filtered to >= month start).
       const weeklyData: { label: string; revenue: number; tips: number }[] = [];
       for (let i = 5; i >= 0; i--) {
         const wStart = subWeeks(startOfWeek(now, { weekStartsOn: 1 }), i);
         const wEnd = endOfWeek(wStart, { weekStartsOn: 1 });
-        const wLabel = format(wStart, 'MMM d');
-        const weekRevAppts = revenueAppts?.filter(a => {
-          const d = a.appointment_date?.substring(0, 10);
-          return d >= format(wStart, 'yyyy-MM-dd') && d <= format(wEnd, 'yyyy-MM-dd');
-        }) || [];
-        weeklyData.push({
-          label: wLabel,
-          revenue: weekRevAppts.reduce((s, a) => s + (a.total_amount || 0), 0),
-          tips: weekRevAppts.reduce((s, a) => s + (a.tip_amount || 0), 0),
-        });
+        const wStartStr = format(wStart, 'yyyy-MM-dd');
+        const wEndStr = format(wEnd, 'yyyy-MM-dd');
+        const revenue = charges
+          .filter((r) => {
+            const d = (r.charge_date || '').substring(0, 10);
+            return d >= wStartStr && d <= wEndStr;
+          })
+          .reduce((s, r) => s + centsToDollars(r.amount_gross_cents), 0);
+        weeklyData.push({ label: format(wStart, 'MMM d'), revenue: Math.round(revenue), tips: 0 });
       }
       setWeeklyRevenue(weeklyData);
 
-      // Build service breakdown
+      // Service breakdown (this month, non-cancelled).
       const serviceCounts: Record<string, number> = {};
       (allMonthAppts || []).forEach((a: any) => {
         const type = a.service_type || 'other';
@@ -179,9 +220,7 @@ const SuperAdminDashboard = () => {
       });
       setServiceData(
         Object.entries(serviceCounts).map(([name, value]) => ({
-          name,
-          value,
-          color: SERVICE_COLORS[name] || SERVICE_COLORS.other,
+          name, value, color: SERVICE_COLORS[name] || SERVICE_COLORS.other,
         })).sort((a, b) => b.value - a.value)
       );
     } catch (err) {
@@ -197,25 +236,70 @@ const SuperAdminDashboard = () => {
     return appt.service_name || 'Appointment';
   };
 
+  const uncollected = Math.max(0, stats.bookedMTD - stats.collectedMTD);
+  const cancellationRate = (stats.completedMonth + stats.cancelledMonth) > 0
+    ? Math.round((stats.cancelledMonth / (stats.completedMonth + stats.cancelledMonth)) * 100)
+    : 0;
+
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold">Owner Dashboard</h1>
-          <p className="text-muted-foreground text-sm">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+          <p className="text-muted-foreground text-sm flex items-center gap-1.5">
+            {format(new Date(), 'EEEE, MMMM d, yyyy')}
+            <span className="inline-flex items-center gap-1 text-emerald-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+            </span>
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" asChild>
             <Link to="/dashboard/super_admin/calendar"><Calendar className="h-4 w-4 mr-1" /> Calendar</Link>
           </Button>
           <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white" asChild>
-            <Link to="/dashboard/super_admin/calendar"><CalendarPlus className="h-4 w-4 mr-1" /> Schedule</Link>
+            <Link to="/dashboard/super_admin/calendar"><Calendar className="h-4 w-4 mr-1" /> Schedule</Link>
           </Button>
         </div>
       </div>
 
-      {/* Today's Execution — Hormozi "money dashboard" */}
+      {/* MONEY BAND — one source of truth (Stripe deposits) */}
+      <div className="rounded-2xl bg-gradient-to-br from-[#7F1D1D] to-[#B91C1C] text-white p-5 md:p-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-red-200">Collected · Month to Date</p>
+            <p className="text-3xl md:text-4xl font-bold leading-tight">{loading ? '—' : money(stats.collectedMTD)}</p>
+            <p className="text-xs text-red-200 flex items-center gap-1.5 mt-1">
+              Stripe deposits
+              {!loading && stats.lastMonthPaceDelta !== 0 && (
+                <span className={`inline-flex items-center gap-0.5 font-medium ${stats.lastMonthPaceDelta > 0 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  {stats.lastMonthPaceDelta > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  {Math.abs(stats.lastMonthPaceDelta)}% vs last month pace
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="md:border-l md:border-white/20 md:pl-5">
+            <p className="text-[11px] uppercase tracking-wide text-red-200">Booked MTD</p>
+            <p className="text-2xl md:text-3xl font-bold leading-tight">{loading ? '—' : money(stats.bookedMTD)}</p>
+            <p className="text-xs mt-1">
+              {uncollected > 0
+                ? <span className="text-amber-200">{money(uncollected)} not yet collected</span>
+                : <span className="text-emerald-200">Fully collected</span>}
+            </p>
+          </div>
+          <div className="md:border-l md:border-white/20 md:pl-5">
+            <p className="text-[11px] uppercase tracking-wide text-red-200">Collected Today</p>
+            <p className="text-2xl md:text-3xl font-bold leading-tight">{loading ? '—' : money(stats.collectedToday)}</p>
+            <p className="text-xs text-red-200 mt-1">Avg {loading ? '—' : money(stats.avgCharge)} / charge</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Today's Execution */}
       <TodayExecutionView basePath="/dashboard/super_admin" />
 
       {/* Alerts */}
@@ -236,16 +320,16 @@ const SuperAdminDashboard = () => {
         </div>
       )}
 
-      {/* Stats Row */}
+      {/* KPI strip — operational counts */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label: 'Today', value: stats.todayAppointments, icon: Clock, color: 'text-blue-600 bg-blue-50' },
-          { label: 'This Week', value: stats.thisWeekAppointments, icon: Calendar, color: 'text-indigo-600 bg-indigo-50' },
-          { label: 'Revenue MTD', value: `$${stats.revenueMTD.toLocaleString()}`, icon: DollarSign, color: 'text-emerald-600 bg-emerald-50' },
-          { label: 'Patients', value: stats.totalPatients, icon: Users, color: 'text-purple-600 bg-purple-50' },
-          { label: 'New This Month', value: stats.newPatientsMonth, icon: UserPlus, color: 'text-teal-600 bg-teal-50' },
-          { label: 'Avg Revenue', value: `$${stats.avgRevenue}`, icon: TrendingUp, color: 'text-amber-600 bg-amber-50' },
-        ].map(({ label, value, icon: Icon, color }) => (
+          { label: 'Today', value: stats.todayAppointments, icon: Clock, color: 'text-blue-600 bg-blue-50', hint: 'visits', highlight: '' },
+          { label: 'This Week', value: stats.thisWeekAppointments, icon: Calendar, color: 'text-indigo-600 bg-indigo-50', hint: 'appointments', highlight: '' },
+          { label: 'New Patients', value: stats.newPatientsMonth, icon: UserPlus, color: 'text-teal-600 bg-teal-50', hint: 'this month', highlight: '' },
+          { label: 'Patients', value: stats.totalPatients, icon: Users, color: 'text-purple-600 bg-purple-50', hint: 'total', highlight: '' },
+          { label: 'Repeat Rate', value: `${stats.repeatRate}%`, icon: TrendingUp, color: 'text-emerald-600 bg-emerald-50', hint: stats.repeatRate >= 30 ? 'healthy' : 'grow this', highlight: stats.repeatRate >= 30 ? 'text-emerald-600' : 'text-amber-600' },
+          { label: 'Cancel Rate', value: `${cancellationRate}%`, icon: AlertTriangle, color: 'text-amber-600 bg-amber-50', hint: `${stats.cancelledMonth} this month`, highlight: cancellationRate > 15 ? 'text-red-600' : '' },
+        ].map(({ label, value, icon: Icon, color, hint, highlight }) => (
           <Card key={label} className="shadow-sm">
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-2">
@@ -254,57 +338,19 @@ const SuperAdminDashboard = () => {
                   <Icon className="h-4 w-4" />
                 </div>
               </div>
-              <p className="text-xl font-bold">{loading ? '—' : value}</p>
+              <p className={`text-xl font-bold ${highlight || ''}`}>{loading ? '—' : value}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      {/* Business Intelligence Row — Hormozi metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="shadow-sm border-l-4 border-l-emerald-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Repeat Rate</p>
-            <p className={`text-2xl font-bold ${stats.repeatRate >= 30 ? 'text-emerald-600' : 'text-amber-600'}`}>{loading ? '—' : `${stats.repeatRate}%`}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">{stats.repeatRate >= 30 ? 'Healthy retention' : 'Needs improvement'}</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-l-4 border-l-blue-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Online vs Manual</p>
-            <p className="text-2xl font-bold">{loading ? '—' : `${stats.onlineBookings}/${stats.manualBookings}`}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">Online / Admin booked</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-l-4 border-l-purple-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Cancellation Rate</p>
-            <p className={`text-2xl font-bold ${stats.cancelledMonth > 5 ? 'text-red-600' : 'text-emerald-600'}`}>
-              {loading ? '—' : `${(stats.completedMonth + stats.cancelledMonth) > 0 ? Math.round((stats.cancelledMonth / (stats.completedMonth + stats.cancelledMonth)) * 100) : 0}%`}
-            </p>
-            <p className="text-[10px] text-muted-foreground mt-1">{stats.cancelledMonth} this month</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-sm border-l-4 border-l-amber-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground mb-1">Revenue per Visit</p>
-            {/* 2026-05-26: Was "Revenue per Patient" using totalPatients (510)
-                as denominator — but only ~17% of those ever booked. The
-                resulting $24/patient was misleading. Switched to per-visit
-                (revenueMTD / completedMonth) which is the actual unit
-                economic — what you take in for each draw performed. */}
-            <p className="text-2xl font-bold">{loading ? '—' : `$${stats.completedMonth > 0 ? Math.round(stats.revenueMTD / stats.completedMonth) : 0}`}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">Per completed visit (MTD)</p>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Charts Row */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Revenue Chart */}
         <Card className="lg:col-span-2 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Weekly Revenue & Tips</CardTitle>
+            <CardTitle className="text-base">Collected Revenue — Last 6 Weeks</CardTitle>
+            <p className="text-xs text-muted-foreground">Actual Stripe deposits, bucketed by week</p>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -315,10 +361,10 @@ const SuperAdminDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Service Breakdown */}
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Services This Month</CardTitle>
+            <p className="text-xs text-muted-foreground">{stats.onlineBookings} online · {stats.manualBookings} admin-booked</p>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -330,8 +376,8 @@ const SuperAdminDashboard = () => {
         </Card>
       </div>
 
-      {/* Profit First Allocations */}
-      {!loading && stats.revenueMTD > 0 && (
+      {/* Profit First Allocations — on real collected revenue */}
+      {!loading && stats.collectedMTD > 0 && (
         <Card className="shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
@@ -341,27 +387,20 @@ const SuperAdminDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className={`grid grid-cols-2 ${phlebPayoutsDisabled ? 'md:grid-cols-3' : 'md:grid-cols-4'} gap-4`}>
-              {/* 2026-05-26: Profit First splits now respond to the kill-switch
-                  flag. When phleb payouts are disabled (current state: owner is
-                  the phleb), the 30% Phlebotomist Pay bucket is redistributed
-                  to Owner's Pay (now 40%) + Profit (now 25%) — same ratio the
-                  owner actually pockets. Card hides the phleb bucket entirely.
-                  When kill-switch flips back ON for franchisees etc., the
-                  full 4-bucket Hormozi split returns. */}
               {(phlebPayoutsDisabled
                 ? [
                     { label: "Owner's Pay", pct: 40, color: 'bg-[#B91C1C]' },
-                    { label: 'Profit',       pct: 25, color: 'bg-emerald-500' },
+                    { label: 'Profit', pct: 25, color: 'bg-emerald-500' },
                     { label: 'Operating Expenses', pct: 35, color: 'bg-blue-500' },
                   ]
                 : [
                     { label: "Owner's Pay", pct: 25, color: 'bg-[#B91C1C]' },
-                    { label: 'Profit',       pct: 15, color: 'bg-emerald-500' },
+                    { label: 'Profit', pct: 15, color: 'bg-emerald-500' },
                     { label: 'Operating Expenses', pct: 30, color: 'bg-blue-500' },
-                    { label: 'Phlebotomist Pay',   pct: 30, color: 'bg-purple-500' },
+                    { label: 'Phlebotomist Pay', pct: 30, color: 'bg-purple-500' },
                   ]
               ).map(({ label, pct, color }) => {
-                const amount = (stats.revenueMTD * pct) / 100;
+                const amount = (stats.collectedMTD * pct) / 100;
                 return (
                   <div key={label} className="text-center">
                     <div className={`h-2 ${color} rounded-full mb-2`} style={{ width: `${pct}%`, minWidth: '40%', margin: '0 auto' }} />
@@ -372,14 +411,14 @@ const SuperAdminDashboard = () => {
               })}
             </div>
             <div className="mt-3 pt-3 border-t flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Based on ${stats.revenueMTD.toLocaleString()} MTD revenue</span>
+              <span className="text-xs text-muted-foreground">Based on {money(stats.collectedMTD)} collected MTD</span>
               <span className="text-[10px] text-muted-foreground">Recommended allocations — adjust in Settings</span>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Recent Appointments + Quick Actions */}
+      {/* Recent Activity + Quick Actions */}
       <div className="grid lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 shadow-sm">
           <CardHeader className="pb-3">
@@ -392,7 +431,7 @@ const SuperAdminDashboard = () => {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="space-y-3">{[1,2,3,4].map(i => <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />)}</div>
+              <div className="space-y-3">{[1, 2, 3, 4].map(i => <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />)}</div>
             ) : recentAppointments.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No appointments yet</p>
             ) : (
