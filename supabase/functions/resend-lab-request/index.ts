@@ -20,6 +20,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { renderEmail, okBlock, warnBlock, card, paragraph } from '../_shared/emailTemplates.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -149,14 +150,21 @@ Deno.serve(async (req) => {
     const MG_KEY = Deno.env.get('MAILGUN_API_KEY'), MG_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
     if (MG_KEY && reqRow.patient_email) {
       try {
-        const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:540px;margin:0 auto;">
-  <div style="background:#B91C1C;color:#fff;padding:18px 22px;border-radius:12px 12px 0 0;"><h2 style="margin:0;font-size:18px;">Your bloodwork still needs scheduling</h2></div>
-  <div style="padding:22px;border:1px solid #eee;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111;">
-    <p>Hi ${firstName},</p>
-    <p><strong>${orgName}</strong> has asked us to complete your bloodwork by <strong>${fmtDate(newDate)}</strong>.${coveredLine ? ` <strong>${coveredLine.trim()}</strong>` : ''}${fastingLine}</p>
-    <p style="margin:22px 0;"><a href="${patientUrl}" style="background:#B91C1C;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;">Schedule my draw</a></p>
-    <p style="font-size:13px;color:#666;">This link is private to you. Questions? Call (941) 527-9169.</p>
-  </div></div>`;
+        // A1-family template (approved email system 2026-07-13).
+        const html = renderEmail({
+          eyebrow: 'Bloodwork still needs scheduling',
+          headline: `${orgName} still needs your bloodwork, ${firstName}`,
+          greeting: `Hi ${firstName},`,
+          bodyHtml: [
+            paragraph(`<strong>${orgName}</strong> has asked us to complete your bloodwork — we come to your home, and the visit takes about 20 minutes.`),
+            card([['Draw by', fmtDate(newDate)]]),
+            covered ? okBlock('✓ Already covered', 'No payment needed at booking. Just pick a time that works for you.') : '',
+            reqRow.fasting_required ? warnBlock('⚠ Fasting required', 'No food or drink except water for 12 hours before your draw.') : '',
+          ].join(''),
+          cta: { label: '📅 Pick my time (90 seconds) →', url: patientUrl },
+          ctaNote: 'This link is private to you.',
+          footerReason: "You're receiving this because your medical provider ordered bloodwork through ConveLabs.",
+        });
         const fd = new FormData();
         fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
         fd.append('to', reqRow.patient_email);
