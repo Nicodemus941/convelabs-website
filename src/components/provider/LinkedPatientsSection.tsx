@@ -38,6 +38,24 @@ interface LinkedPatient {
   last_service: string | null;
   last_lab_order_file_path: string | null;
   pending_request_count: number;
+  // v2 chart fields (get_org_linked_patients v2) — power the "needs info"
+  // sort/filter + missing-field badges.
+  tenant_patient_id: string | null;
+  date_of_birth: string | null;
+  address: string | null;
+  city: string | null;
+  zipcode: string | null;
+}
+
+type SortKey = 'recent' | 'name' | 'needs_info' | 'visits';
+
+/** Which schedulable fields are missing on a patient row. */
+function missingFields(p: LinkedPatient): string[] {
+  const m: string[] = [];
+  if (!p.patient_phone) m.push('Phone');
+  if (!p.date_of_birth) m.push('DOB');
+  if (!p.address) m.push('Address');
+  return m;
 }
 
 interface EnrollmentRow {
@@ -70,6 +88,9 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   const [submitting, setSubmitting] = useState(false);
   // Search + add-patient — shipped alongside the admin Org drawer Patients tab
   const [searchQ, setSearchQ] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('recent');
+  const [needsInfoOnly, setNeedsInfoOnly] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
@@ -376,8 +397,8 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             </Button>
           </div>
         </CardHeader>
-        {/* Search — filters the list in-place */}
-        <div className="px-6 pb-3">
+        {/* Search + sort + needs-info filter — long-roster toolkit */}
+        <div className="px-6 pb-3 space-y-2">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
             <Input
@@ -387,20 +408,63 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               className="pl-9 h-9 text-sm"
             />
           </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              className="h-8 text-xs border border-gray-200 rounded-md px-2 bg-white text-gray-700"
+              title="Sort the patient list"
+            >
+              <option value="recent">Sort: Recent activity</option>
+              <option value="name">Sort: Name A–Z</option>
+              <option value="needs_info">Sort: Needs info first</option>
+              <option value="visits">Sort: Most visits</option>
+            </select>
+            {(() => {
+              const n = patients.filter(p => missingFields(p).length > 0).length;
+              if (n === 0) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={() => setNeedsInfoOnly(v => !v)}
+                  className={`h-8 text-xs px-2.5 rounded-full border font-semibold transition ${needsInfoOnly ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'}`}
+                  title="Show only patients missing phone, DOB, or address — complete them so they can be scheduled"
+                >
+                  ⚠ Needs info ({n})
+                </button>
+              );
+            })()}
+          </div>
         </div>
         <CardContent className="p-0">
           <div className="divide-y">
-            {patients
-              .filter(p => {
-                const q = searchQ.trim().toLowerCase();
+            {(() => {
+              const q = searchQ.trim().toLowerCase();
+              let list = patients.filter(p => {
+                if (needsInfoOnly && missingFields(p).length === 0) return false;
                 if (!q) return true;
                 return (
                   (p.patient_name || '').toLowerCase().includes(q) ||
                   (p.patient_email || '').toLowerCase().includes(q) ||
                   (p.patient_phone || '').replace(/\D/g, '').includes(q.replace(/\D/g, ''))
                 );
-              })
-              .map(p => {
+              });
+              list = [...list].sort((a, b) => {
+                if (sortKey === 'name') return (a.patient_name || '').localeCompare(b.patient_name || '');
+                if (sortKey === 'visits') return (b.visit_count || 0) - (a.visit_count || 0);
+                if (sortKey === 'needs_info') {
+                  const d = missingFields(b).length - missingFields(a).length;
+                  if (d !== 0) return d;
+                  return (a.patient_name || '').localeCompare(b.patient_name || '');
+                }
+                // recent (default): last activity desc
+                return new Date(b.last_visit_date || 0).getTime() - new Date(a.last_visit_date || 0).getTime();
+              });
+              const CAP = 100;
+              const capped = showAll ? list : list.slice(0, CAP);
+              return (
+                <>
+                  {capped.map(p => {
               const isSelected = selected.has(p.patient_name);
               return (
                 <label
@@ -414,6 +478,21 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                       <Badge variant="outline" className="text-[10px]">
                         {p.visit_count} visit{p.visit_count === 1 ? '' : 's'}
                       </Badge>
+                      {missingFields(p).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setFocusedPatient(p.patient_name);
+                            setDetailOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5 hover:bg-amber-100 transition"
+                          title={`Missing ${missingFields(p).join(', ')} — click to complete their chart so they can be scheduled`}
+                        >
+                          <AlertCircle className="h-2.5 w-2.5" /> Missing: {missingFields(p).join(' · ')}
+                        </button>
+                      )}
                       {p.pending_request_count > 0 && (
                         <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-800 border-amber-200">
                           <AlertCircle className="h-2.5 w-2.5 mr-0.5" /> {p.pending_request_count} pending
@@ -489,6 +568,23 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                 </label>
               );
             })}
+                  {list.length > CAP && !showAll && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAll(true)}
+                      className="w-full py-3 text-xs font-semibold text-[#B91C1C] hover:bg-red-50 transition"
+                    >
+                      Show all {list.length} patients ({list.length - CAP} more)
+                    </button>
+                  )}
+                  {list.length === 0 && (
+                    <p className="p-6 text-center text-xs text-gray-400">
+                      {needsInfoOnly ? 'No patients are missing info — everyone is complete 🎉' : 'No patients match your search.'}
+                    </p>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </CardContent>
       </Card>
