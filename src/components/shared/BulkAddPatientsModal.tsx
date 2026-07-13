@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
+import { DEFAULT_TENANT_ID } from '@/lib/tenantConstants';
 import { toast } from 'sonner';
 import { Loader2, Users, AlertCircle, CheckCircle2 } from 'lucide-react';
 
@@ -125,6 +126,9 @@ const BulkAddPatientsModal: React.FC<Props> = ({ open, onOpenChange, organizatio
       deadlineAt.setDate(deadlineAt.getDate() + days);
 
       const rows = valid.map(r => ({
+        // tenant_id is NOT NULL with no DB default — omitting it 23502s every
+        // insert (fixed 2026-07-13 alongside the CSV importer).
+        tenant_id: DEFAULT_TENANT_ID,
         first_name: r.firstName,
         last_name: r.lastName,
         email: r.email,

@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 import { supabase } from '@/integrations/supabase/client';
+import { DEFAULT_TENANT_ID } from '@/lib/tenantConstants';
 import { toast } from 'sonner';
 import { Loader2, UserPlus } from 'lucide-react';
 
@@ -60,6 +61,9 @@ const AddPatientModal: React.FC<Props> = ({ open, onOpenChange, organizationId, 
       deadlineAt.setDate(deadlineAt.getDate() + days);
 
       const { data: newPatient, error } = await supabase.from('tenant_patients').insert({
+        // tenant_id is NOT NULL with no DB default — omitting it 23502s every
+        // insert (the Elite Medical Concierge "can't add patients" complaint).
+        tenant_id: DEFAULT_TENANT_ID,
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         email: email.trim() || null,

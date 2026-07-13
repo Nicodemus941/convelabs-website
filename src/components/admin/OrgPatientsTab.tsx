@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import PatientSearchList, { PatientListRow } from '@/components/shared/PatientSearchList';
 import AddPatientModal from '@/components/shared/AddPatientModal';
+import PatientCsvImportModal from '@/components/shared/PatientCsvImportModal';
+import { Button } from '@/components/ui/button';
+import { FileSpreadsheet } from 'lucide-react';
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -26,6 +29,7 @@ const OrgPatientsTab: React.FC<Props> = ({ orgId, orgName }) => {
   const [patients, setPatients] = useState<PatientListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [focusedPatient, setFocusedPatient] = useState<string | null>(null);
 
@@ -51,9 +55,14 @@ const OrgPatientsTab: React.FC<Props> = ({ orgId, orgName }) => {
           <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Patients for</p>
           <h3 className="text-lg font-bold text-gray-900">{orgName}</h3>
         </div>
-        <p className="text-xs text-muted-foreground">
-          {patients.length} total · status dot shows visit recency + pending requests
-        </p>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setCsvImportOpen(true)} className="text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" title="Upload the practice's patient-export CSV">
+            <FileSpreadsheet className="h-3.5 w-3.5" /> Import CSV
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            {patients.length} total · status dot shows visit recency + pending requests
+          </p>
+        </div>
       </div>
 
       <PatientSearchList
@@ -67,6 +76,13 @@ const OrgPatientsTab: React.FC<Props> = ({ orgId, orgName }) => {
       <AddPatientModal
         open={addOpen}
         onOpenChange={setAddOpen}
+        organizationId={orgId}
+        onCreated={load}
+      />
+
+      <PatientCsvImportModal
+        open={csvImportOpen}
+        onOpenChange={setCsvImportOpen}
         organizationId={orgId}
         onCreated={load}
       />

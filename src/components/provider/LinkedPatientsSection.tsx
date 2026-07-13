@@ -13,6 +13,7 @@ import { Users, FileSignature, Loader2, Upload, Repeat, AlertCircle, RotateCw, S
 import { format, formatDistanceToNow } from 'date-fns';
 import AddPatientModal from '@/components/shared/AddPatientModal';
 import BulkAddPatientsModal from '@/components/shared/BulkAddPatientsModal';
+import PatientCsvImportModal from '@/components/shared/PatientCsvImportModal';
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 
 /**
@@ -71,6 +72,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   const [searchQ, setSearchQ] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [focusedPatient, setFocusedPatient] = useState<string | null>(null);
 
@@ -306,6 +308,15 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               >
                 <Users className="h-3.5 w-3.5" /> Bulk paste a list
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                onClick={() => setCsvImportOpen(true)}
+                title="Upload your patient-export CSV — imports the whole roster at once"
+              >
+                <Users className="h-3.5 w-3.5" /> Import CSV
+              </Button>
             </div>
             <p className="text-[10px] text-gray-400 mt-2">~30 seconds per patient · or paste 30+ at once</p>
           </CardContent>
@@ -319,6 +330,12 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
         <BulkAddPatientsModal
           open={bulkAddOpen}
           onOpenChange={setBulkAddOpen}
+          organizationId={orgId}
+          onCreated={load}
+        />
+        <PatientCsvImportModal
+          open={csvImportOpen}
+          onOpenChange={setCsvImportOpen}
           organizationId={orgId}
           onCreated={load}
         />
@@ -342,6 +359,9 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             </Button>
             <Button size="sm" variant="outline" onClick={() => setBulkAddOpen(true)} className="text-xs gap-1.5" title="Paste a list of patients to add many at once">
               <Users className="h-3.5 w-3.5" /> Bulk add
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setCsvImportOpen(true)} className="text-xs gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50" title="Upload your patient-export CSV — imports the whole roster at once">
+              <Users className="h-3.5 w-3.5" /> Import CSV
             </Button>
             <Button size="sm" variant="outline" onClick={toggleAll} className="text-xs">
               {selected.size === patients.length ? 'Deselect all' : 'Select all'}
@@ -539,6 +559,14 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
       <BulkAddPatientsModal
         open={bulkAddOpen}
         onOpenChange={setBulkAddOpen}
+        organizationId={orgId}
+        onCreated={load}
+      />
+
+      {/* CSV roster import — Elite Medical Concierge request 2026-07-13 */}
+      <PatientCsvImportModal
+        open={csvImportOpen}
+        onOpenChange={setCsvImportOpen}
         organizationId={orgId}
         onCreated={load}
       />
