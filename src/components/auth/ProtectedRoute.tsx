@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuthSession } from '@/hooks/useAuthSession';
+import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface ProtectedRouteProps {
@@ -9,11 +9,17 @@ interface ProtectedRouteProps {
   redirectPath?: string;
 }
 
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ 
+export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   redirectPath = "/login"
 }) => {
-  const { session, isLoading } = useAuthSession();
+  // SINGLE SOURCE OF TRUTH (2026-07-14 login-loop fix): guards must read the
+  // same AuthContext instance as the Login page. Each useAuthSession() call
+  // used to create its OWN auth listener with independent state — under a
+  // rate-limited token refresh the guard saw session=null while Login still
+  // saw user, and the two Navigate()s ping-ponged forever, hammering the
+  // refresh endpoint into a sustained 429 that locked the owner out.
+  const { session, isLoading } = useAuth();
   
   if (isLoading) {
     // Show a better loading state with skeleton UI
