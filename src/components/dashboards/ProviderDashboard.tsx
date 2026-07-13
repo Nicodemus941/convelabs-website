@@ -973,16 +973,41 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
     toast.success('Link copied — paste to patient');
   };
 
-  const handleResend = async (requestId: string) => {
+  // "Send new request" — restore/re-arm a request whose patient never booked
+  // (works on cancelled rows too). Payment carries over: paid stays paid, the
+  // fresh link has no payment step. (Michael McHale / Elite case 2026-07-13.)
+  const [resendTarget, setResendTarget] = useState<any | null>(null);
+  const [resendDate, setResendDate] = useState('');
+  const [resendBusy, setResendBusy] = useState(false);
+
+  const openResend = (r: any) => {
+    const d = new Date(); d.setDate(d.getDate() + 14);
+    setResendDate(d.toISOString().slice(0, 10));
+    setResendTarget(r);
+  };
+
+  const doResend = async () => {
+    if (!resendTarget || !resendDate) return;
+    setResendBusy(true);
     try {
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
       if (!token) throw new Error('No session');
-      // For Phase 1, 'resend' is the same as re-triggering notifications by simply
-      // asking the user to copy the link manually — full reminder edge fn is Phase 2.
-      toast.info('Use "Copy link" to share directly, or the nightly reminder will fire tomorrow.');
+      const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/resend-lab-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ request_id: resendTarget.id, new_draw_by_date: resendDate }),
+      });
+      const j = await resp.json();
+      if (!resp.ok) throw new Error(j.error || 'Resend failed');
+      const sent = j.sent_sms && j.sent_email ? 'SMS + email' : j.sent_sms ? 'SMS' : j.sent_email ? 'email' : 'no message (missing contact info — copy the link instead)';
+      toast.success(`New request sent to ${resendTarget.patient_name} via ${sent}${j.payment_carried_over ? ' · payment carried over' : ''}`, { duration: 8000 });
+      setResendTarget(null);
+      onRefresh();
     } catch (e: any) {
-      toast.error(e?.message || 'Failed');
+      toast.error(e?.message || 'Resend failed');
+    } finally {
+      setResendBusy(false);
     }
   };
 
@@ -1083,6 +1108,11 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                     </Button>
                     {r.status === 'pending_schedule' && (
                       <>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
+                          title="Send the patient a fresh link with a new needed-by date — payment carries over"
+                          onClick={() => openResend(r)}>
+                          ⟳ Resend
+                        </Button>
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Copy link" onClick={() => handleCopyLink(r.access_token)}>
                           <Copy className="h-3.5 w-3.5" />
                         </Button>
@@ -1096,6 +1126,13 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                       <Button variant="ghost" size="sm" className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs"
                         title="Cancel this request + appointment" onClick={() => handleCancelRequest(r.id, r.patient_name)}>
                         Cancel
+                      </Button>
+                    )}
+                    {(r.status === 'cancelled' || r.status === 'expired') && (
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
+                        title="Restore this request and send the patient a fresh link — no new payment needed"
+                        onClick={() => openResend(r)}>
+                        ⟳ Restore & resend
                       </Button>
                     )}
                   </div>
@@ -1113,6 +1150,48 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
           </div>
         )}
       </CardContent>
+
+      {/* Send-new-request dialog — one decision: the new needed-by date. */}
+      <Dialog open={!!resendTarget} onOpenChange={(v) => { if (!resendBusy && !v) setResendTarget(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Send new request</DialogTitle>
+          </DialogHeader>
+          {resendTarget && (
+            <div className="space-y-3 pt-1">
+              <p className="text-sm text-gray-700">
+                <span className="font-semibold">{resendTarget.patient_name}</span> gets a fresh scheduling link by text + email. The old link stops working and reminders start over.
+              </p>
+              {(resendTarget.provider_payment_status === 'completed' || resendTarget.billed_to === 'org') && (
+                <p className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1.5">
+                  💳 Already paid — the payment carries over. The patient won't be asked to pay.
+                </p>
+              )}
+              {resendTarget.status === 'cancelled' && (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                  This request was cancelled — sending will restore it.
+                </p>
+              )}
+              <div>
+                <label className="text-xs font-semibold text-gray-700">Bloodwork needed by</label>
+                <input
+                  type="date"
+                  value={resendDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setResendDate(e.target.value)}
+                  className="mt-1 w-full h-9 text-sm border border-gray-300 rounded-md px-2"
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="outline" size="sm" disabled={resendBusy} onClick={() => setResendTarget(null)}>Cancel</Button>
+                <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={resendBusy || !resendDate} onClick={doResend}>
+                  {resendBusy ? 'Sending…' : 'Send new request'}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

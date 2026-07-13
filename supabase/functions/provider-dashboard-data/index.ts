@@ -184,7 +184,7 @@ Deno.serve(async (req) => {
     // ── LAB REQUESTS (provider-initiated patient bookings) ───────────────
     const { data: labRequests } = await admin
       .from('patient_lab_requests')
-      .select('id, patient_name, patient_email, patient_phone, draw_by_date, next_doctor_appt_date, status, appointment_id, patient_notified_at, patient_scheduled_at, created_at, access_token, lab_order_panels, fasting_required')
+      .select('id, patient_name, patient_email, patient_phone, draw_by_date, next_doctor_appt_date, status, appointment_id, patient_notified_at, patient_scheduled_at, created_at, access_token, lab_order_panels, fasting_required, provider_payment_status, billed_to, cancelled_at')
       .eq('organization_id', orgId)
       .order('created_at', { ascending: false })
       .limit(100);
