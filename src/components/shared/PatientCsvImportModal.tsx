@@ -125,7 +125,7 @@ function splitFullAddress(s: string): { address: string; city: string | null; st
   return { address, city, state, zipcode };
 }
 
-type Verdict = 'ready' | 'duplicate_db' | 'duplicate_file' | 'no_contact' | 'no_name';
+type Verdict = 'ready' | 'merge' | 'duplicate_db' | 'duplicate_file' | 'no_contact' | 'no_name';
 
 interface ImportRow {
   idx: number;                 // 1-based CSV data row number (for error report)
@@ -141,10 +141,15 @@ interface ImportRow {
   patient_notes: string | null;
   verdict: Verdict;
   detail: string;
+  /** When verdict==='merge': the same-org patient row to enrich + which
+   *  blank fields this CSV row fills (never overwrites existing data). */
+  mergeTargetId?: string;
+  mergeFields?: Partial<Record<'phone' | 'email' | 'date_of_birth' | 'address' | 'city' | 'state' | 'zipcode', string>>;
 }
 
 const VERDICT_BADGE: Record<Verdict, { label: string; cls: string }> = {
   ready:          { label: 'Ready',            cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  merge:          { label: 'Will update',      cls: 'bg-blue-50 text-blue-700 border-blue-200' },
   duplicate_db:   { label: 'Already on file',  cls: 'bg-gray-100 text-gray-600 border-gray-300' },
   duplicate_file: { label: 'Duplicate in file', cls: 'bg-gray-100 text-gray-600 border-gray-300' },
   no_contact:     { label: 'No email/phone',   cls: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -160,10 +165,16 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
   const [includeNoContact, setIncludeNoContact] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<{ added: number; skipped: number; failed: Array<{ row: ImportRow; error: string }> } | null>(null);
+  const [result, setResult] = useState<{ added: number; updated: number; skipped: number; failed: Array<{ row: ImportRow; error: string }> } | null>(null);
   // Existing-patient keys for DB dedupe, loaded at parse time.
   const [existingEmails, setExistingEmails] = useState<Set<string>>(new Set());
   const [existingPhones, setExistingPhones] = useState<Set<string>>(new Set());
+  // Full SAME-ORG rows keyed by email/phone — duplicates in the provider's
+  // own roster get MERGED (fill blanks) instead of skipped. Other-org
+  // matches stay skip-only (privacy + RLS: providers can only update rows
+  // in their own org).
+  const [orgByEmail, setOrgByEmail] = useState<Map<string, any>>(new Map());
+  const [orgByPhone, setOrgByPhone] = useState<Map<string, any>>(new Map());
   const [loadingExisting, setLoadingExisting] = useState(false);
 
   const reset = () => {
@@ -199,18 +210,28 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
         // 23505s, so we must dedupe against everyone, not just this org.
         setLoadingExisting(true);
         try {
-          const { data } = await supabase
-            .from('tenant_patients')
-            .select('email, phone')
-            .is('deleted_at', null)
-            .limit(10000);
+          const [{ data: allKeys }, { data: orgRows }] = await Promise.all([
+            supabase.from('tenant_patients').select('email, phone').is('deleted_at', null).limit(10000),
+            supabase.from('tenant_patients')
+              .select('id, email, phone, date_of_birth, address, city, state, zipcode')
+              .eq('organization_id', organizationId)
+              .is('deleted_at', null)
+              .limit(10000),
+          ]);
           const em = new Set<string>(); const ph = new Set<string>();
-          for (const r of (data || []) as any[]) {
+          for (const r of (allKeys || []) as any[]) {
             if (r.email) em.add(String(r.email).trim().toLowerCase());
             const p = normPhone(r.phone);
             if (p) ph.add(p);
           }
           setExistingEmails(em); setExistingPhones(ph);
+          const byE = new Map<string, any>(); const byP = new Map<string, any>();
+          for (const r of (orgRows || []) as any[]) {
+            if (r.email) byE.set(String(r.email).trim().toLowerCase(), r);
+            const p = normPhone(r.phone);
+            if (p && !byP.has(p)) byP.set(p, r);
+          }
+          setOrgByEmail(byE); setOrgByPhone(byP);
         } catch { /* dedupe degrades to server unique-index errors */ }
         setLoadingExisting(false);
       },
@@ -270,12 +291,34 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
 
       let verdict: Verdict = 'ready';
       let detail = '';
+      let mergeTargetId: string | undefined;
+      let mergeFields: ImportRow['mergeFields'];
+      // Same-org match -> candidate for MERGE (fill blanks, never overwrite).
+      const orgMatch = (email && orgByEmail.get(email)) || (phone && orgByPhone.get(phone)) || null;
+      if (orgMatch) {
+        const fills: NonNullable<ImportRow['mergeFields']> = {};
+        if (!orgMatch.phone && phone) fills.phone = phone;
+        if (!orgMatch.email && email) fills.email = email;
+        if (!orgMatch.date_of_birth && dob) fills.date_of_birth = dob;
+        if (!orgMatch.address && address) fills.address = address;
+        if (!orgMatch.city && city) fills.city = city;
+        if (!orgMatch.state && state) fills.state = state;
+        if (!orgMatch.zipcode && zipcode) fills.zipcode = zipcode;
+        if (Object.keys(fills).length > 0) {
+          mergeTargetId = orgMatch.id;
+          mergeFields = fills;
+        }
+      }
       if (!first) { verdict = 'no_name'; detail = 'No name found on this row'; }
-      else if (email && existingEmails.has(email)) { verdict = 'duplicate_db'; detail = 'Email already in the system'; }
-      else if (!email && phone && existingPhones.has(phone)) { verdict = 'duplicate_db'; detail = 'Phone already in the system'; }
+      else if (mergeTargetId) {
+        verdict = 'merge';
+        detail = `Adds ${Object.keys(mergeFields!).map(f => f === 'date_of_birth' ? 'DOB' : f).join(', ')} to the existing patient`;
+      }
+      else if (email && existingEmails.has(email)) { verdict = 'duplicate_db'; detail = orgMatch ? 'Already on file - nothing new to add' : 'Email already in the system (another practice)'; }
+      else if (!email && phone && existingPhones.has(phone)) { verdict = 'duplicate_db'; detail = orgMatch ? 'Already on file - nothing new to add' : 'Phone already in the system (another practice)'; }
       else if (email && seenEmail.has(email)) { verdict = 'duplicate_file'; detail = 'Same email appears earlier in this file'; }
       else if (!email && phone && seenPhone.has(phone)) { verdict = 'duplicate_file'; detail = 'Same phone appears earlier in this file'; }
-      else if (!email && !phone) { verdict = 'no_contact'; detail = 'No email or phone — can\'t contact or dedupe'; }
+      else if (!email && !phone) { verdict = 'no_contact'; detail = 'No email or phone - cannot contact or dedupe'; }
 
       if (email) seenEmail.add(email);
       if (phone) seenPhone.add(phone);
@@ -286,16 +329,17 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
         email, phone, date_of_birth: dob,
         address, city, state, zipcode,
         patient_notes: get('notes') || null,
-        verdict, detail,
+        verdict, detail, mergeTargetId, mergeFields,
       });
     });
     return out;
-  }, [rawRows, headers, mapping, existingEmails, existingPhones]);
+  }, [rawRows, headers, mapping, existingEmails, existingPhones, orgByEmail, orgByPhone]);
 
   const counts = useMemo(() => {
-    const c = { ready: 0, duplicate: 0, no_contact: 0, no_name: 0 };
+    const c = { ready: 0, merge: 0, duplicate: 0, no_contact: 0, no_name: 0 };
     for (const r of rows) {
       if (r.verdict === 'ready') c.ready++;
+      else if (r.verdict === 'merge') c.merge++;
       else if (r.verdict === 'duplicate_db' || r.verdict === 'duplicate_file') c.duplicate++;
       else if (r.verdict === 'no_contact') c.no_contact++;
       else c.no_name++;
@@ -304,7 +348,7 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
   }, [rows]);
 
   const importable = useMemo(
-    () => rows.filter(r => r.verdict === 'ready' || (includeNoContact && r.verdict === 'no_contact')),
+    () => rows.filter(r => r.verdict === 'ready' || r.verdict === 'merge' || (includeNoContact && r.verdict === 'no_contact')),
     [rows, includeNoContact],
   );
 
@@ -314,6 +358,7 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
     setProgress(0);
     const failed: Array<{ row: ImportRow; error: string }> = [];
     let added = 0;
+    let updated = 0;
 
     const toPayload = (r: ImportRow) => ({
       tenant_id: DEFAULT_TENANT_ID,
@@ -333,9 +378,26 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
       lab_reminder_deadline_at: new Date(Date.now() + 7 * 86400_000).toISOString(),
     });
 
+    // MERGE rows first: fill ONLY the blank fields on the existing same-org
+    // patient (RLS tp_update_org permits providers to update their own org's
+    // rows). Existing values are never overwritten.
+    const mergeRows = importable.filter(r => r.verdict === 'merge');
+    const insertRows = importable.filter(r => r.verdict !== 'merge');
+    let done = 0;
+    const total = importable.length || 1;
+    for (const r of mergeRows) {
+      const { error } = await supabase.from('tenant_patients')
+        .update({ ...(r.mergeFields as any), updated_at: new Date().toISOString() })
+        .eq('id', r.mergeTargetId!);
+      if (error) failed.push({ row: r, error: error.message });
+      else updated += 1;
+      done += 1;
+      setProgress(Math.round((done / total) * 100));
+    }
+
     const CHUNK = 25;
-    for (let i = 0; i < importable.length; i += CHUNK) {
-      const chunk = importable.slice(i, i + CHUNK);
+    for (let i = 0; i < insertRows.length; i += CHUNK) {
+      const chunk = insertRows.slice(i, i + CHUNK);
       const { error: batchErr } = await supabase.from('tenant_patients').insert(chunk.map(toPayload) as any);
       if (!batchErr) {
         added += chunk.length;
@@ -350,14 +412,15 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
           else failed.push({ row: r, error: msg });
         }
       }
-      setProgress(Math.round(((i + chunk.length) / importable.length) * 100));
+      done += chunk.length;
+      setProgress(Math.round((done / total) * 100));
     }
 
     const skipped = rows.length - importable.length;
-    setResult({ added, skipped, failed });
+    setResult({ added, updated, skipped, failed });
     setImporting(false);
-    if (added > 0) {
-      toast.success(`Imported ${added} patient${added === 1 ? '' : 's'}`);
+    if (added > 0 || updated > 0) {
+      toast.success(`${added} imported${updated > 0 ? ` · ${updated} updated with new info` : ''}`);
       onCreated?.();
     }
   };
@@ -448,7 +511,8 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
             {/* Verdict summary */}
             {hasName && (
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant="outline" className={VERDICT_BADGE.ready.cls}>✓ {counts.ready} ready</Badge>
+                <Badge variant="outline" className={VERDICT_BADGE.ready.cls}>✓ {counts.ready} new</Badge>
+                {counts.merge > 0 && <Badge variant="outline" className={VERDICT_BADGE.merge.cls}>⇄ {counts.merge} will be updated with new info</Badge>}
                 {counts.duplicate > 0 && <Badge variant="outline" className={VERDICT_BADGE.duplicate_db.cls}><SkipForward className="h-3 w-3 mr-1" />{counts.duplicate} already on file — will skip</Badge>}
                 {counts.no_contact > 0 && <Badge variant="outline" className={VERDICT_BADGE.no_contact.cls}><AlertTriangle className="h-3 w-3 mr-1" />{counts.no_contact} missing email + phone</Badge>}
                 {counts.no_name > 0 && <Badge variant="outline" className={VERDICT_BADGE.no_name.cls}>{counts.no_name} missing name — can't import</Badge>}
@@ -524,7 +588,9 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
               >
                 {importing
                   ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Importing…</>
-                  : `Import ${importable.length} patient${importable.length === 1 ? '' : 's'}`}
+                  : counts.merge > 0
+                    ? `Import ${importable.length - counts.merge} + update ${counts.merge}`
+                    : `Import ${importable.length} patient${importable.length === 1 ? '' : 's'}`}
               </Button>
             </DialogFooter>
           </div>
@@ -535,10 +601,10 @@ const PatientCsvImportModal: React.FC<Props> = ({ open, onOpenChange, organizati
           <div className="space-y-3">
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
               <p className="text-sm font-semibold text-emerald-900 flex items-center gap-1.5">
-                <CheckCircle2 className="h-4 w-4" /> {result.added} patient{result.added === 1 ? '' : 's'} imported
+                <CheckCircle2 className="h-4 w-4" /> {result.added} added{result.updated > 0 ? ` · ${result.updated} updated with new info` : ''}
               </p>
               <p className="text-xs text-emerald-800 mt-1">
-                {result.skipped > 0 ? `${result.skipped} skipped (already on file / excluded) · ` : ''}
+                {result.skipped > 0 ? `${result.skipped} skipped (already complete / excluded) · ` : ''}
                 {result.failed.length > 0 ? `${result.failed.length} failed` : 'no failures'}
               </p>
             </div>
