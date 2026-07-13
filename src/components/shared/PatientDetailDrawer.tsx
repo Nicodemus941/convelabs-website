@@ -67,6 +67,11 @@ interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   patientName: string;
+  // Exact tenant_patients.id when the caller knows it (org list rows carry it
+  // from get_org_linked_patients v2). Guarantees the chart loads for
+  // CSV-imported patients whose names don't split cleanly into first/last —
+  // the ilike name guess below missed them (Elite complaint 2026-07-13).
+  tenantPatientId?: string | null;
   organizationId: string;
   canEdit?: boolean;      // admin passes true; provider view may hide edit
 }
@@ -82,7 +87,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const PatientDetailDrawer: React.FC<Props> = ({
-  open, onOpenChange, patientName, organizationId, canEdit = true,
+  open, onOpenChange, patientName, tenantPatientId = null, organizationId, canEdit = true,
 }) => {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<PatientProfile | null>(null);
@@ -96,17 +101,29 @@ const PatientDetailDrawer: React.FC<Props> = ({
     if (!open || !patientName) return;
     setLoading(true);
     try {
-      // 1. Patient profile — match by name + org_id scope.
-      //    Fallback: match by name only if org_id column isn't populated on the patient row yet.
-      const nameParts = patientName.trim().split(/\s+/);
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.slice(1).join(' ') || '';
-      const { data: tp } = await supabase.from('tenant_patients')
-        .select('id, first_name, last_name, email, phone, date_of_birth, lab_reminder_cadence_days, lab_reminder_deadline_at, lab_reminder_last_sent_at, overdue_flagged_at')
-        .ilike('first_name', firstName)
-        .ilike('last_name', lastName || '%')
-        .limit(1)
-        .maybeSingle();
+      // 1. Patient profile — exact id when the caller has it (always correct),
+      //    else fall back to the historical first/last name guess.
+      const PROFILE_COLS = 'id, first_name, last_name, email, phone, date_of_birth, lab_reminder_cadence_days, lab_reminder_deadline_at, lab_reminder_last_sent_at, overdue_flagged_at';
+      let tp: any = null;
+      if (tenantPatientId) {
+        const { data } = await supabase.from('tenant_patients')
+          .select(PROFILE_COLS)
+          .eq('id', tenantPatientId)
+          .maybeSingle();
+        tp = data;
+      }
+      if (!tp) {
+        const nameParts = patientName.trim().split(/\s+/);
+        const firstName = nameParts[0] || '';
+        const lastName = nameParts.slice(1).join(' ') || '';
+        const { data } = await supabase.from('tenant_patients')
+          .select(PROFILE_COLS)
+          .ilike('first_name', firstName)
+          .ilike('last_name', lastName || '%')
+          .limit(1)
+          .maybeSingle();
+        tp = data;
+      }
       setProfile((tp as PatientProfile) || null);
       if (tp) {
         setEditForm({
@@ -155,7 +172,7 @@ const PatientDetailDrawer: React.FC<Props> = ({
     } finally {
       setLoading(false);
     }
-  }, [open, patientName, organizationId]);
+  }, [open, patientName, tenantPatientId, organizationId]);
 
   useEffect(() => { load(); }, [load]);
 
