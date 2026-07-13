@@ -67,16 +67,15 @@ export const LoginForm = ({ handleSuperAdminLogin, redirectPath = "/dashboard" }
     setIsSubmitting(true);
 
     try {
-      // Check for super admin login
+      // Authenticate only. Post-login navigation is owned by the Login page
+      // effect (single navigator) — calling navigate() here raced it and
+      // helped storm the auth endpoint (2026-07-14 lockout).
       if (email.toLowerCase() === "admin@convelabs.com") {
         await handleSuperAdminLogin(email, password);
         toast.success("Logged in as admin");
-        navigate(returnPath);
       } else {
-        // Regular user login
         await login(email, password);
         toast.success("Logged in successfully");
-        navigate(returnPath);
       }
     } catch (error: any) {
       console.error("Login error:", error);

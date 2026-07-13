@@ -44,28 +44,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(async (email: string, password: string): Promise<void> => {
     try {
       await authLogin(email, password);
-      
-      // If we reach here, login was successful
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData && sessionData.session) {
-        // Check if this user has completed onboarding if they paid
-        const { data: userData } = await supabase.auth.getUser();
-        const hasPaid = userData?.user?.user_metadata?.hasPaid;
-        const onboardingCompleted = userData?.user?.user_metadata?.onboarding_completed;
-        
-        if (hasPaid && !onboardingCompleted) {
-          navigate('/onboarding/post-payment');
-        } else {
-          // Navigate based on user role
-          const role = userData?.user?.user_metadata?.role || 'patient';
-          navigate(`/dashboard/${role}`);
-        }
-      }
+      // Navigation is handled reactively by the Login page once `user` is set
+      // (single source of truth — see Login.tsx). Navigating here too, plus the
+      // extra getSession/getUser round-trips, raced the other navigators and
+      // helped storm the auth endpoint into a 429 (2026-07-14 lockout).
     } catch (err: any) {
       setError(err.message || "Login failed");
       throw err; // Re-throw to allow components to handle the error
     }
-  }, [authLogin, navigate]);
+  }, [authLogin]);
 
   // Custom logout function with redirect
   const logout = useCallback(async () => {

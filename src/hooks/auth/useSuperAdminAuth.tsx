@@ -2,12 +2,10 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
-import { useNavigate } from "react-router-dom";
 
 export const useSuperAdminAuth = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
   const { toast } = useToast();
   
   const handleSuperAdminLogin = async (email: string, password: string) => {
@@ -33,37 +31,22 @@ export const useSuperAdminAuth = () => {
       }
       
       if (data.user) {
-        console.log("Super admin login successful, updating role");
-        // Ensure super admin role
-        try {
-          const { error: updateError } = await supabase.auth.updateUser({
-            data: { 
-              role: 'super_admin',
-              firstName: data.user.user_metadata?.firstName || 'Super',
-              lastName: data.user.user_metadata?.lastName || 'Admin',
-              full_name: 'Super Admin'
-            }
-          });
-          
-          if (updateError) {
-            console.warn("Failed to update super admin role:", updateError);
-          } else {
-            console.log("Successfully updated super admin role");
+        // STAMP the role only the FIRST time. Writing it on every login
+        // reissues a token, which fires a cascade of auth events; combined
+        // with multi-device refresh-token rotation that storms /token into a
+        // 429 and locks the account out (2026-07-14 desktop lockout). Skip
+        // when the role is already correct — which it is after login #1.
+        if (data.user.user_metadata?.role !== 'super_admin') {
+          try {
+            await supabase.auth.updateUser({ data: { role: 'super_admin' } });
+          } catch (updateErr) {
+            console.warn("Could not stamp super_admin role (non-blocking):", updateErr);
           }
-        } catch (updateErr) {
-          console.error("Error updating user role:", updateErr);
         }
-        
-        toast({
-          title: "Login successful",
-          description: "Welcome back, Super Admin",
-        });
-        
-        // Short delay to ensure auth state is properly updated
-        setTimeout(() => {
-          console.log("Navigating to super admin dashboard");
-          navigate(`/dashboard/super_admin`);
-        }, 300);
+        toast({ title: "Login successful", description: "Welcome back, Super Admin" });
+        // Navigation is owned solely by the Login page effect (see Login.tsx).
+        // This hook must NOT navigate — four competing navigators thrashed the
+        // router and multiplied auth calls into the storm above.
       }
     } catch (err: any) {
       console.error("Super admin login error:", err);

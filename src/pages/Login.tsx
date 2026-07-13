@@ -1,5 +1,5 @@
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LoginForm } from "@/components/auth/LoginForm";
@@ -7,6 +7,7 @@ import { useSuperAdminLogin } from "@/utils/auth/superAdminLogin";
 import { useToast } from "@/components/ui/use-toast";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Loader2, ArrowLeft } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 const Login = () => {
   const { resetError, error: authError, user, isLoading } = useAuth();
@@ -18,17 +19,39 @@ const Login = () => {
   // Extract redirect path from query params if exists
   const redirectPath = searchParams.get('redirect') || '/dashboard';
   
-  // Redirect logged in users
+  // ── THE SINGLE POST-LOGIN NAVIGATOR (2026-07-14 lockout fix) ──────────────
+  // Every other navigate() on the login path was removed (LoginForm,
+  // AuthContext.login, useSuperAdminAuth). Four navigators used to fire at
+  // once, thrashing the router into remount cycles that multiplied auth calls
+  // and — with multi-device refresh-token rotation — stormed /token into a 429
+  // that locked out the whole office. This effect is now the ONLY place a
+  // successful login (or an already-signed-in visit to /login) navigates, and
+  // a ref guards it to fire at most once per mount.
+  const navigatedRef = useRef(false);
   useEffect(() => {
-    if (user) {
-      // Prevent redirect loops - don't redirect back to login or auth pages
-      const targetPath = redirectPath.includes('/login') || redirectPath.includes('/auth') 
-        ? '/dashboard' 
-        : redirectPath;
-      
-      console.log('User already logged in, redirecting to:', targetPath);
-      navigate(targetPath, { replace: true });
-    }
+    if (!user || navigatedRef.current) return;
+    navigatedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      let target: string;
+      try {
+        const { data } = await supabase.auth.getUser();
+        const meta = (data?.user?.user_metadata || {}) as Record<string, any>;
+        if (meta.hasPaid && !meta.onboarding_completed) {
+          target = '/onboarding/post-payment';
+        } else {
+          const role = meta.role || user.role || 'patient';
+          const honorRedirect = redirectPath && redirectPath !== '/dashboard'
+            && !redirectPath.includes('/login') && !redirectPath.includes('/auth');
+          target = honorRedirect ? redirectPath : `/dashboard/${role}`;
+        }
+      } catch {
+        target = (redirectPath.includes('/login') || redirectPath.includes('/auth'))
+          ? '/dashboard' : redirectPath;
+      }
+      if (!cancelled) navigate(target, { replace: true });
+    })();
+    return () => { cancelled = true; };
   }, [user, navigate, redirectPath]);
 
   // Handle auth context errors
