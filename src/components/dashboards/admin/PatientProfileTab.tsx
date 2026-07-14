@@ -110,6 +110,9 @@ const PatientProfileTab: React.FC = () => {
 
   const [allPatients, setAllPatients] = useState<any[]>([]);
   const [patientsWithAppts, setPatientsWithAppts] = useState<Set<string>>(new Set());
+  // Patients with at least one is_vip appointment — protected from auto-cancel
+  // but NOT paying members. Shown as a distinct "Protected" chip, never a crown.
+  const [protectedIds, setProtectedIds] = useState<Set<string>>(new Set());
   // Map of user_id -> membership tier label ('member', 'vip', 'concierge').
   // Used to show the crown icon + tier next to member patients.
   const [memberTiers, setMemberTiers] = useState<Map<string, string>>(new Map());
@@ -134,24 +137,39 @@ const PatientProfileTab: React.FC = () => {
       // like "Valli Ritenour" vanished from search and the count read 500).
       const [pts, { data: appts }, { data: mems }] = await Promise.all([
         fetchAllTenantPatients(),
-        supabase.from('appointments').select('patient_id').not('patient_id', 'is', null),
+        supabase.from('appointments').select('patient_id, is_vip').not('patient_id', 'is', null),
         supabase.from('user_memberships' as any)
-          .select('user_id, status, membership_plans(name)')
+          .select('user_id, status, stripe_subscription_id, membership_plans(name)')
           .eq('status', 'active'),
       ]);
       const activeIds = new Set<string>();
-      for (const a of appts || []) if (a.patient_id) activeIds.add(a.patient_id);
+      // "Protected" = appointments.is_vip flag (the operational no-auto-cancel
+      // marker). Distinct from a paid membership — kept separate on purpose.
+      const protectedSet = new Set<string>();
+      for (const a of appts || []) {
+        if (a.patient_id) {
+          activeIds.add(a.patient_id);
+          if ((a as any).is_vip) protectedSet.add(a.patient_id);
+        }
+      }
       const tiers = new Map<string, string>();
       for (const m of (mems as any[]) || []) {
         const planName = String(m?.membership_plans?.name || '').toLowerCase();
-        let tier = 'member';
+        let tier: string | null = 'member';
         if (planName.includes('concierge')) tier = 'concierge';
-        else if (planName.includes('vip')) tier = 'vip';
-        if (m.user_id) tiers.set(m.user_id, tier);
+        else if (planName.includes('vip')) {
+          // TRUE VIP = a real paid subscription. 2026-07-14: a VIP-named
+          // membership with NO Stripe subscription is an operational
+          // "don't auto-cancel" hack (belongs on appointments.is_vip), not a
+          // paying member — never crown it as VIP.
+          tier = m.stripe_subscription_id ? 'vip' : null;
+        }
+        if (tier && m.user_id) tiers.set(m.user_id, tier);
       }
       setAllPatients(pts || []);
       setPatients(pts || []);
       setPatientsWithAppts(activeIds);
+      setProtectedIds(protectedSet);
       setMemberTiers(tiers);
     };
     loadAll();
@@ -302,6 +320,14 @@ const PatientProfileTab: React.FC = () => {
                 {p.user_id && memberTiers.has(p.user_id) && (
                   <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide ${tierBadgeClass(memberTiers.get(p.user_id))}`}>
                     <Crown className="h-3 w-3" /> {memberTiers.get(p.user_id)}
+                  </span>
+                )}
+                {protectedIds.has(p.id) && !(p.user_id && memberTiers.has(p.user_id)) && (
+                  <span
+                    title="Protected from auto-cancel — not a paid member"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-300"
+                  >
+                    <Shield className="h-3 w-3" /> Protected
                   </span>
                 )}
               </div>
@@ -1291,6 +1317,14 @@ const PatientProfileTab: React.FC = () => {
                             className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${tierBadgeClass(memberTiers.get(p.user_id))}`}
                           >
                             <Crown className="h-2.5 w-2.5" /> {memberTiers.get(p.user_id)}
+                          </span>
+                        )}
+                        {protectedIds.has(p.id) && !(p.user_id && memberTiers.has(p.user_id)) && (
+                          <span
+                            title="Protected from auto-cancel — not a paid member"
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-600 border border-slate-300"
+                          >
+                            <Shield className="h-2.5 w-2.5" /> Protected
                           </span>
                         )}
                         {!patientsWithAppts.has(p.id) && (
