@@ -27,6 +27,41 @@ import PatientCommsTimeline from '@/components/admin/PatientCommsTimeline';
 import FamilyHouseholdCard from '@/components/admin/FamilyHouseholdCard';
 import { Zap } from 'lucide-react';
 
+/**
+ * Load EVERY non-deleted patient, paging past PostgREST's per-response row cap.
+ *
+ * 2026-07-14 bug: a single `.limit(1000)` was silently truncated to 500 rows by
+ * the server cap, so with 710 active patients only the first 500 alphabetical
+ * names loaded into memory. The list is filtered/searched client-side, so
+ * late-alphabet patients (e.g. "Valli Ritenour", #683) simply vanished — the
+ * "500 total" counter was the truncated array length, not the real count.
+ *
+ * Paging by the ACTUAL returned count (not a fixed step) makes this correct
+ * regardless of what the server cap is, and stops when a page comes back empty.
+ */
+const fetchAllTenantPatients = async (): Promise<any[]> => {
+  const all: any[] = [];
+  let from = 0;
+  const REQUEST = 1000; // asks for up to 1000; the server hands back at most its cap
+  // Advance the window by the ACTUAL number of rows returned and stop only when
+  // a page comes back empty — correct for any server cap (500, 1000, …), with a
+  // hard iteration ceiling as a runaway backstop.
+  for (let guard = 0; guard < 50; guard++) {
+    const { data, error } = await supabase
+      .from('tenant_patients')
+      .select('*')
+      .is('deleted_at', null)
+      .order('first_name', { ascending: true })
+      .range(from, from + REQUEST - 1);
+    if (error) { console.warn('[patients] page load failed:', error); break; }
+    const rows = data || [];
+    all.push(...rows);
+    if (rows.length === 0) break; // past the last row
+    from += rows.length;
+  }
+  return all;
+};
+
 const PatientProfileTab: React.FC = () => {
   const bookingModal = useBookingModalSafe();
   // Hormozi: clicking Schedule on a patient chart opens the in-app
@@ -90,12 +125,15 @@ const PatientProfileTab: React.FC = () => {
   // Load all patients + appointment activity + active memberships on mount
   useEffect(() => {
     const loadAll = async () => {
-      const [{ data: pts }, { data: appts }, { data: mems }] = await Promise.all([
-        // BUG FIX 2026-05-05: was filtering by is_active=true AND deleted_at IS NULL.
-        // The is_active column is legacy — deleted_at is the canonical
-        // soft-delete signal. Filtering by is_active hid 2 live patients
-        // (incl. "nicq test") that admin couldn't find via search.
-        supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name', { ascending: true }).limit(1000),
+      // BUG FIX 2026-05-05: was filtering by is_active=true AND deleted_at IS NULL.
+      // The is_active column is legacy — deleted_at is the canonical soft-delete
+      // signal. Filtering by is_active hid 2 live patients that admin couldn't
+      // find via search.
+      // BUG FIX 2026-07-14: fetchAllTenantPatients pages past the server row cap
+      // so all 710+ patients load (was truncated to 500 → late-alphabet names
+      // like "Valli Ritenour" vanished from search and the count read 500).
+      const [pts, { data: appts }, { data: mems }] = await Promise.all([
+        fetchAllTenantPatients(),
         supabase.from('appointments').select('patient_id').not('patient_id', 'is', null),
         supabase.from('user_memberships' as any)
           .select('user_id, status, membership_plans(name)')
@@ -807,14 +845,12 @@ const PatientProfileTab: React.FC = () => {
                       toast.success(`Patient soft-deleted${(data as any)?.note ? ` · ${(data as any).note}` : ''}`);
                     }
                     setEditModalOpen(false);
-                    const { data: refreshed, error: refErr } = await supabase
-                      .from('tenant_patients').select('*').is('deleted_at', null)
-                      .order('first_name').limit(500);
-                    if (refErr) {
+                    try {
+                      const refreshed = await fetchAllTenantPatients();
+                      setAllPatients(refreshed);
+                    } catch (refErr) {
                       console.error('[delete-patient] refresh failed', refErr);
                       toast.warning('Delete succeeded but list refresh failed — reload the page');
-                    } else {
-                      setAllPatients(refreshed || []);
                     }
                     setSelectedPatient(null);
                   } catch (err: any) {
@@ -983,8 +1019,8 @@ const PatientProfileTab: React.FC = () => {
                   });
                   setEditModalOpen(false);
                   try {
-                    const { data: refreshed } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
-                    setAllPatients(refreshed || []);
+                    const refreshed = await fetchAllTenantPatients();
+                    setAllPatients(refreshed);
                   } catch (refreshErr: any) {
                     console.warn('[patient-save] refresh failed (save itself OK):', refreshErr);
                     toast.warning('Saved, but list refresh failed — reload to see the latest.');
@@ -1390,9 +1426,9 @@ const PatientProfileTab: React.FC = () => {
                   setNewPatient({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
                   setCreatePatientOpen(false);
 
-                  const { data: refreshed } = await supabase.from('tenant_patients').select('*').is('deleted_at', null).order('first_name').limit(500);
-                  setAllPatients(refreshed || []);
-                  setPatients(refreshed || []);
+                  const refreshed = await fetchAllTenantPatients();
+                  setAllPatients(refreshed);
+                  setPatients(refreshed);
 
                   if (data) loadPatientData(data);
                 } catch (err: any) {
