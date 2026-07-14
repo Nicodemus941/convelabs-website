@@ -108,6 +108,9 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [focusedPatient, setFocusedPatient] = useState<string | null>(null);
+  // Exact chart-row id (v2 RPC) — lets the drawer load imported patients by id
+  // instead of guessing by name.
+  const [focusedPatientId, setFocusedPatientId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -516,7 +519,24 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                   <Checkbox checked={isSelected} onCheckedChange={() => toggle(p.patient_name)} className="mt-0.5 sm:mt-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium truncate">{p.patient_name}</p>
+                      {/* The row is a <label> for the request-labs checkbox, so a plain
+                          name just toggled selection — Elite couldn't open imported
+                          patients at all (2026-07-13). Name is now a real click target
+                          that opens the chart drawer. */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setFocusedPatient(p.patient_name);
+                          setFocusedPatientId(p.tenant_patient_id || null);
+                          setDetailOpen(true);
+                        }}
+                        className="font-medium truncate text-left hover:text-[#B91C1C] hover:underline underline-offset-2 transition"
+                        title="Open patient chart"
+                      >
+                        {p.patient_name}
+                      </button>
                       <Badge variant="outline" className="text-[10px]">
                         {p.visit_count} visit{p.visit_count === 1 ? '' : 's'}
                       </Badge>
@@ -527,6 +547,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                             e.preventDefault();
                             e.stopPropagation();
                             setFocusedPatient(p.patient_name);
+                            setFocusedPatientId(p.tenant_patient_id || null);
                             setDetailOpen(true);
                           }}
                           className="inline-flex items-center gap-1 text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-300 rounded-full px-2 py-0.5 hover:bg-amber-100 transition"
@@ -602,6 +623,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                         e.preventDefault();
                         e.stopPropagation();
                         setFocusedPatient(p.patient_name);
+                        setFocusedPatientId(p.tenant_patient_id || null);
                         setDetailOpen(true);
                       }}
                       title="View full history + edit patient"
@@ -732,6 +754,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
           open={detailOpen}
           onOpenChange={(v) => { setDetailOpen(v); if (!v) setTimeout(load, 300); }}
           patientName={focusedPatient}
+          tenantPatientId={focusedPatientId}
           organizationId={orgId}
           canEdit={true}
         />
