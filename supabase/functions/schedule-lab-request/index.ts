@@ -12,6 +12,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 import { isSlotStillAvailable } from '../_shared/availability.ts';
+import { renderEmail, okBlock, warnBlock, badBlock, card, paragraph, BRAND } from '../_shared/emailTemplates.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -244,18 +245,27 @@ Deno.serve(async (req) => {
             // Notify the org (billing inbox) + owner — booking stands.
             const orgBillEmail = org.billing_email || org.contact_email;
             if (MAILGUN_API_KEY) {
+              // B3 template — card declined at booking (approved system 2026-07-13).
               const notify = async (to: string, isOwner: boolean) => {
                 try {
+                  const html = renderEmail({
+                    eyebrow: 'Action needed · Billing',
+                    headline: `Card declined — ${request.patient_name}'s visit is still confirmed`,
+                    greeting: isOwner ? 'Heads up Nico,' : 'Hi,',
+                    bodyHtml: [
+                      okBlock('✓ The appointment is unaffected', `${request.patient_name} is confirmed for ${fmtDate(appointment_date)} at ${appointment_time}. A billing hiccup is never your patient's problem.`),
+                      paragraph(`When they booked, we attempted the saved card for this draw and it didn't go through:`),
+                      badBlock(`<strong>$${(chargeCents / 100).toFixed(2)} now due</strong> · Reason: ${errMsg}`),
+                      isOwner ? '' : paragraph(`<span style="color:${BRAND.muted};font-size:13px;">Reply to this email and we'll send a payment link, or call ${BRAND.phone} — we'll sort it in two minutes.</span>`),
+                    ].join(''),
+                    cta: isOwner ? undefined : { label: 'Sign in to your dashboard →', url: BRAND.providerLogin },
+                    footerReason: isOwner ? 'Owner copy of a partner billing exception.' : "You're receiving this because your practice covers this patient's draws.",
+                  });
                   const fd = new FormData();
                   fd.append('from', 'ConveLabs Billing <info@convelabs.com>');
                   fd.append('to', to);
                   fd.append('subject', `⚠ Card declined — ${request.patient_name}'s draw is still booked ($${(chargeCents / 100).toFixed(2)} due)`);
-                  fd.append('html', `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:540px;margin:0 auto;line-height:1.6;color:#111;">
-<p>${isOwner ? `Heads up Nico — ${org.name}'s` : 'Hi — your'} saved card was declined when <strong>${request.patient_name}</strong> booked their draw (${fmtDate(appointment_date)} at ${appointment_time}).</p>
-<p><strong>The appointment is confirmed and will happen as scheduled.</strong> The balance of <strong>$${(chargeCents / 100).toFixed(2)}</strong> is now due.</p>
-<p>Decline reason: <em>${errMsg}</em></p>
-${isOwner ? '' : `<p>Please update your card or reply to this email and we'll send a payment link. Questions? (941) 527-9169.</p>`}
-<p>— ConveLabs Billing</p></div>`);
+                  fd.append('html', html);
                   fd.append('o:tracking-clicks', 'no');
                   await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
                     method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd,
@@ -456,25 +466,26 @@ ${isOwner ? '' : `<p>Please update your card or reply to this email and we'll se
     const providerEmail = org.contact_email || org.billing_email;
     if (providerEmail && MAILGUN_API_KEY) {
       try {
-        const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
-  <div style="background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;font-size:19px;">✓ ${request.patient_name} just booked</h1>
-  </div>
-  <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;">
-    <p>Hi ${org.contact_name || org.name},</p>
-    <p><strong>${request.patient_name}</strong> scheduled their lab draw.</p>
-    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;">
-      <p style="margin:0;font-size:14px;"><strong>When:</strong> ${fmtDate(appointment_date)} at ${appointment_time}</p>
-      <p style="margin:6px 0 0;font-size:14px;"><strong>Where:</strong> At patient's address (mobile)</p>
-      ${request.next_doctor_appt_date ? `<p style="margin:6px 0 0;font-size:13px;color:#166534;">In time for their ${fmtDate(request.next_doctor_appt_date)} visit with you ✓</p>` : ''}
-    </div>
-    <div style="text-align:center;margin:22px 0;">
-      <a href="${PUBLIC_SITE_URL}/dashboard/provider" style="display:inline-block;background:#B91C1C;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">View in your portal →</a>
-    </div>
-    <p style="font-size:13px;color:#6b7280;">You'll get another notification when the draw is completed and the specimen is delivered to the reference lab.</p>
-    <p style="margin-top:18px;">— Nico</p>
-  </div>
-</div>`;
+        // B1 template — "Your patient just booked" (approved system 2026-07-13).
+        const html = renderEmail({
+          eyebrow: 'Patient scheduled',
+          headline: `✓ ${request.patient_name} just booked`,
+          greeting: `Hi ${org.contact_name || org.name},`,
+          bodyHtml: [
+            card([
+              ['Patient', String(request.patient_name)],
+              ['When', `${fmtDate(appointment_date)} · ${appointment_time}`],
+              ['Where', "Patient's home (mobile)"],
+            ]),
+            request.next_doctor_appt_date
+              ? okBlock('✓ In time for their visit with you', `Results will be in your hands before their ${fmtDate(request.next_doctor_appt_date)} consult.`)
+              : '',
+            paragraph(`<span style="color:${BRAND.muted};font-size:13px;">You'll get another notification when the draw is completed and the specimen reaches the lab.</span>`),
+          ].join(''),
+          cta: { label: 'Sign in to your dashboard →', url: BRAND.providerLogin },
+          ctaNote: `Use your ${org.name} organization login.`,
+          footerReason: `You're receiving this because ${org.name} has a registered provider account with ConveLabs.`,
+        });
         const fd = new FormData();
         fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', providerEmail);
@@ -494,33 +505,31 @@ ${isOwner ? '' : `<p>Please update your card or reply to this email and we'll se
     // ── PATIENT CONFIRMATION EMAIL ──────────────────────────────────────
     if (patientEmail && MAILGUN_API_KEY) {
       try {
-        const fastingBlock = request.fasting_required
-          ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px;margin:14px 0;"><strong style="color:#78350f;">🍽️ Fasting required</strong><p style="margin:4px 0 0;font-size:13px;color:#92400e;">Stop eating and drinking 8 hrs before your draw. Water is fine. We'll text you a full reminder at 8 PM the night before.</p></div>`
+        // A2 template — booking confirmation (approved system 2026-07-13).
+        const panelPills = (Array.isArray(request.lab_order_panels) && request.lab_order_panels.length > 0)
+          ? `<div style="margin:0 0 14px;"><span style="display:block;font-size:11px;letter-spacing:.1em;color:#9ca3af;text-transform:uppercase;margin-bottom:6px;">Panels ordered</span>${request.lab_order_panels.slice(0, 6).map((p: any) => `<span style="display:inline-block;background:#fef2f2;color:#B91C1C;padding:3px 11px;border-radius:999px;font-size:12px;font-weight:600;margin:0 4px 5px 0;">${typeof p === 'string' ? p : p.name || ''}</span>`).join('')}</div>`
           : '';
-        const panelBlock = (Array.isArray(request.lab_order_panels) && request.lab_order_panels.length > 0)
-          ? `<p style="font-size:13px;color:#6b7280;margin:14px 0 4px;">PANELS ORDERED</p><div>${request.lab_order_panels.slice(0, 6).map((p: any) => `<span style="display:inline-block;background:#fef2f2;color:#B91C1C;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;margin:2px 3px 0 0;">${typeof p === 'string' ? p : p.name || ''}</span>`).join(' ')}</div>`
-          : '';
-        const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
-  <div style="background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:22px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;font-size:20px;">✓ Your ConveLabs draw is booked</h1>
-  </div>
-  <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111827;">
-    <p>Hi ${String(request.patient_name).split(' ')[0]},</p>
-    <p>You're all set. Here's the recap:</p>
-    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px;">
-      <p style="margin:0;"><strong>When:</strong> ${fmtDate(appointment_date)} at ${appointment_time}</p>
-      <p style="margin:6px 0 0;"><strong>Where:</strong> ${String(address).trim()}</p>
-      <p style="margin:6px 0 0;"><strong>Ordered by:</strong> ${org.name}</p>
-    </div>
-    ${fastingBlock}
-    ${panelBlock}
-    <p style="font-size:13px;color:#6b7280;margin-top:20px;">Need to reschedule? Email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or call (941) 527-9169.</p>
-    <div style="background:#f9fafb;border-radius:8px;padding:12px 14px;margin-top:14px;font-size:12px;color:#6b7280;">
-      <strong>Our recollection guarantee:</strong> if ConveLabs causes a redraw, it's free. If the reference lab causes it, 50% off.
-    </div>
-    <p style="margin-top:20px;">— Nico at ConveLabs</p>
-  </div>
-</div>`;
+        const html = renderEmail({
+          eyebrow: 'Appointment confirmed',
+          headline: `You're all set, ${String(request.patient_name).split(' ')[0]} — we come to you`,
+          greeting: `Hi ${String(request.patient_name).split(' ')[0]},`,
+          bodyHtml: [
+            card([
+              ['When', `${fmtDate(appointment_date)} · ${appointment_time}`],
+              ['Where', String(address).trim()],
+              ['Ordered by', String(org.name)],
+              ['Visit length', 'About 20 minutes'],
+            ]),
+            request.fasting_required
+              ? warnBlock('🍽 Fasting required', "Stop eating 8 hours before your draw. Water is fine — please drink plenty. We'll text a full reminder the night before.")
+              : '',
+            panelPills,
+            okBlock('Our recollection guarantee', "If ConveLabs ever causes a redraw, it's free. If the reference lab causes it, it's 50% off."),
+            paragraph(`<span style="color:${BRAND.muted};font-size:13px;">Need to reschedule? Email <a href="mailto:info@convelabs.com" style="color:${BRAND.crimson};">info@convelabs.com</a> or call ${BRAND.phone}.</span>`),
+          ].join(''),
+          cta: { label: 'View my appointment', url: `${PUBLIC_SITE_URL}/lab-request/${access_token}` },
+          footerReason: "You're receiving this because you booked a ConveLabs visit.",
+        });
         const fd = new FormData();
         fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
         fd.append('to', patientEmail);
@@ -571,23 +580,25 @@ ${isOwner ? '' : `<p>Please update your card or reply to this email and we'll se
     for (const c of companionsCreated) {
       try {
         if (c.patient_email && MAILGUN_API_KEY) {
-          const fastingNote = c.fasting_required
-            ? `<p style="margin:10px 0 0;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px;font-size:13px;color:#78350f;"><strong>🍽️ Fasting required</strong> — stop eating/drinking (water OK) 8 hrs before your draw.</p>`
-            : '';
-          const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;">
-  <div style="background:linear-gradient(135deg,#059669,#047857);color:#fff;padding:22px;border-radius:12px 12px 0 0;text-align:center;"><h1 style="margin:0;font-size:20px;">✓ Your ConveLabs draw is booked</h1></div>
-  <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111827;">
-    <p>Hi ${String(c.patient_name).split(' ')[0]},</p>
-    <p>You're booked alongside ${request.patient_name} at the same address — one trip for both of you.</p>
-    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin:16px 0;font-size:14px;">
-      <p style="margin:0;"><strong>When:</strong> ${fmtDate(appointment_date)} at ${appointment_time}</p>
-      <p style="margin:6px 0 0;"><strong>Where:</strong> ${String(address).trim()}</p>
-      <p style="margin:6px 0 0;"><strong>Ordered by:</strong> ${org.name}</p>
-    </div>
-    ${fastingNote}
-    <p style="font-size:13px;color:#6b7280;margin-top:18px;">Need to reschedule? Email <a href="mailto:info@convelabs.com" style="color:#B91C1C;">info@convelabs.com</a> or call (941) 527-9169.</p>
-  </div>
-</div>`;
+          // A2 variant — companion confirmation (approved system 2026-07-13).
+          const html = renderEmail({
+            eyebrow: 'Appointment confirmed',
+            headline: `You're all set, ${String(c.patient_name).split(' ')[0]} — one trip for your household`,
+            greeting: `Hi ${String(c.patient_name).split(' ')[0]},`,
+            bodyHtml: [
+              paragraph(`You're booked alongside ${request.patient_name} at the same address — one visit for both of you.`),
+              card([
+                ['When', `${fmtDate(appointment_date)} · ${appointment_time}`],
+                ['Where', String(address).trim()],
+                ['Ordered by', String(org.name)],
+              ]),
+              c.fasting_required
+                ? warnBlock('🍽 Fasting required', 'Stop eating 8 hours before your draw. Water is fine — please drink plenty.')
+                : '',
+              paragraph(`<span style="color:${BRAND.muted};font-size:13px;">Need to reschedule? Email <a href="mailto:info@convelabs.com" style="color:${BRAND.crimson};">info@convelabs.com</a> or call ${BRAND.phone}.</span>`),
+            ].join(''),
+            footerReason: "You're receiving this because you booked a ConveLabs visit.",
+          });
           const fd = new FormData();
           fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
           fd.append('to', c.patient_email);
