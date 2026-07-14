@@ -121,6 +121,13 @@ Deno.serve(async (req) => {
       else if (metadata.convelabs_flow === 'lab_request_org_pay' && metadata.lab_request_id) {
         await handleLabRequestProviderPayment(session);
       }
+      // CHARGE-AT-BOOKING (2026-07-13): the org saved a card via a setup-mode
+      // Checkout instead of paying up-front. Store the customer+payment method,
+      // mark 'card_on_file', and notify the patient exactly as if paid — the
+      // actual charge fires in schedule-lab-request when the patient books.
+      else if (metadata.convelabs_flow === 'lab_request_card_setup' && metadata.lab_request_id) {
+        await handleLabRequestProviderPayment(session, { cardSetup: true });
+      }
       // Handle lab-request unlock (membership + visit bundled in one checkout)
       else if (metadata.type === 'lab_request_unlock') {
         await handleLabRequestUnlock(session);
@@ -3433,7 +3440,13 @@ async function handleLabRequestUnlock(session: any) {
 // The patient lands on the lab-request page seeing "covered by your
 // provider — just pick a time" and books for free.
 // ─────────────────────────────────────────────────────────────────────────
-async function handleLabRequestProviderPayment(session: any) {
+// opts.cardSetup=true → the session was a SETUP-mode Checkout (charge-at-
+// booking flow): no money moved yet. We store the saved card (customer +
+// payment method), mark provider_payment_status='card_on_file', and run the
+// SAME patient-notify chain — "covered by your provider" is still true; the
+// org's card is charged off-session by schedule-lab-request when they book.
+async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?: boolean } = {}) {
+  const cardSetup = !!opts.cardSetup;
   try {
     const metadata = session.metadata || {};
     const labRequestId = metadata.lab_request_id;
@@ -3452,7 +3465,8 @@ async function handleLabRequestProviderPayment(session: any) {
       console.error(`[lab-request-org-pay] lab_request ${labRequestId} not found`);
       return;
     }
-    if (existing.provider_payment_status === 'completed' && existing.patient_notified_at) {
+    const doneStatus = cardSetup ? 'card_on_file' : 'completed';
+    if (existing.provider_payment_status === doneStatus && existing.patient_notified_at) {
       console.log(`[lab-request-org-pay] already processed ${labRequestId}, skipping`);
       return;
     }
@@ -3460,7 +3474,35 @@ async function handleLabRequestProviderPayment(session: any) {
     const paymentIntentId = typeof session.payment_intent === 'string'
       ? session.payment_intent
       : session.payment_intent?.id || null;
-    const amountCents = Number(session.amount_total || 0) || null;
+    // Setup sessions have no amount_total — the intended charge was stashed
+    // in metadata by create-lab-request.
+    const amountCents = cardSetup
+      ? (Number(metadata.amount_cents || 0) || null)
+      : (Number(session.amount_total || 0) || null);
+
+    // For card setup: resolve the saved payment method from the SetupIntent
+    // so schedule-lab-request can charge it off-session later.
+    let savedCustomerId: string | null = null;
+    let savedPaymentMethodId: string | null = null;
+    if (cardSetup) {
+      savedCustomerId = typeof session.customer === 'string' ? session.customer : session.customer?.id || null;
+      const setupIntentId = typeof session.setup_intent === 'string' ? session.setup_intent : session.setup_intent?.id || null;
+      if (setupIntentId) {
+        try {
+          const si = await stripe.setupIntents.retrieve(setupIntentId);
+          savedPaymentMethodId = typeof si.payment_method === 'string' ? si.payment_method : (si.payment_method as any)?.id || null;
+          if (!savedCustomerId) savedCustomerId = typeof si.customer === 'string' ? si.customer : (si.customer as any)?.id || null;
+        } catch (siErr: any) {
+          console.error(`[lab-request-card-setup] SetupIntent retrieve failed for ${labRequestId}: ${siErr?.message}`);
+        }
+      }
+      if (!savedCustomerId || !savedPaymentMethodId) {
+        // Without both we can't charge later — surface loudly but still
+        // notify the patient (the org completed setup in good faith; owner
+        // can collect manually).
+        console.error(`[lab-request-card-setup] MISSING customer/payment_method for ${labRequestId} (customer=${savedCustomerId}, pm=${savedPaymentMethodId})`);
+      }
+    }
 
     // CRITICAL: provider_payment_status has a CHECK constraint allowing only
     // ('none','pending','completed','failed','refunded'). Writing 'paid' here
@@ -3471,15 +3513,28 @@ async function handleLabRequestProviderPayment(session: any) {
     //
     // Also stamp provider_stripe_session_id so the reconciler can match the
     // Stripe session.id to a DB row and avoid the orphan-detection path.
-    const { error: lrUpdErr } = await supabaseClient.from('patient_lab_requests').update({
-      provider_payment_status: 'completed',
-      provider_paid_at: new Date().toISOString(),
-      provider_stripe_session_id: session.id,
-      provider_stripe_payment_intent_id: paymentIntentId,
-      provider_payment_cents: amountCents,
-      status: 'pending_schedule',
-      billed_to: 'org',
-    }).eq('id', labRequestId);
+    const stampFields: Record<string, unknown> = cardSetup
+      ? {
+          // Card saved, NOT charged. provider_paid_at stays null until
+          // schedule-lab-request actually charges at booking time.
+          provider_payment_status: 'card_on_file',
+          provider_stripe_session_id: session.id,
+          provider_stripe_customer_id: savedCustomerId,
+          provider_stripe_payment_method_id: savedPaymentMethodId,
+          provider_payment_cents: amountCents,
+          status: 'pending_schedule',
+          billed_to: 'org',
+        }
+      : {
+          provider_payment_status: 'completed',
+          provider_paid_at: new Date().toISOString(),
+          provider_stripe_session_id: session.id,
+          provider_stripe_payment_intent_id: paymentIntentId,
+          provider_payment_cents: amountCents,
+          status: 'pending_schedule',
+          billed_to: 'org',
+        };
+    const { error: lrUpdErr } = await supabaseClient.from('patient_lab_requests').update(stampFields).eq('id', labRequestId);
     if (lrUpdErr) {
       // Log loudly + surface so the alert daemon catches it. Don't swallow.
       console.error(`[lab-request-org-pay] CRITICAL: lab_request UPDATE failed for ${labRequestId}: ${lrUpdErr.message}`);
@@ -3492,12 +3547,21 @@ async function handleLabRequestProviderPayment(session: any) {
     const postAction = (existing as any).post_payment_action === 'provider_schedule' ? 'provider_schedule' : 'send_link';
     const householdGroupId = (existing as any).household_group_id || null;
     if (householdGroupId) {
-      await supabaseClient.from('patient_lab_requests').update({
-        provider_payment_status: 'completed',
-        provider_paid_at: new Date().toISOString(),
-        billed_to: 'org',
-        status: 'pending_schedule',
-      }).eq('household_group_id', householdGroupId).neq('id', labRequestId);
+      await supabaseClient.from('patient_lab_requests').update(cardSetup
+        ? {
+            provider_payment_status: 'card_on_file',
+            provider_stripe_customer_id: savedCustomerId,
+            provider_stripe_payment_method_id: savedPaymentMethodId,
+            billed_to: 'org',
+            status: 'pending_schedule',
+          }
+        : {
+            provider_payment_status: 'completed',
+            provider_paid_at: new Date().toISOString(),
+            billed_to: 'org',
+            status: 'pending_schedule',
+          }
+      ).eq('household_group_id', householdGroupId).neq('id', labRequestId);
     }
 
     // 'provider_schedule' → the provider books the slot themselves. Do NOT

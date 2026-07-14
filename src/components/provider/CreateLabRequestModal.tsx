@@ -528,11 +528,12 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
             {/* Org pays → upfront via Stripe (net-30 invoicing retired 2026-06-15) */}
             {billedTo === 'org' && (
               <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg space-y-2.5">
-                <p className="text-xs font-semibold text-gray-900">Your practice pays now · card</p>
+                <p className="text-xs font-semibold text-gray-900">Save a card now — charged only when the patient books</p>
+                <p className="text-[11px] text-gray-600 -mt-1.5">If they never schedule, your card is never charged.</p>
 
-                {/* After payment: who schedules? */}
+                {/* After the card is saved: who schedules? */}
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">After payment</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">After your card is saved</p>
                   <div className="grid grid-cols-2 gap-1.5">
                     <button type="button" onClick={() => setPostPaymentAction('send_link')}
                       className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'send_link' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
@@ -542,7 +543,7 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                     <button type="button" onClick={() => setPostPaymentAction('provider_schedule')}
                       className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'provider_schedule' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
                       <div className="text-xs font-semibold">I'll schedule them</div>
-                      <div className="text-[10px] text-gray-500">Book the slot yourself after paying</div>
+                      <div className="text-[10px] text-gray-500">Book the slot yourself</div>
                     </button>
                   </div>
                 </div>
@@ -563,8 +564,8 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                 </div>
 
                 <p className="text-[11px] text-gray-600">
-                  You'll pay for {householdMembers.filter(m => m.name.trim()).length + 1} draw{householdMembers.filter(m => m.name.trim()).length ? 's' : ''} on Stripe.
-                  {postPaymentAction === 'send_link' ? ' Booking link sends on payment.' : ' You schedule after paying.'}
+                  You'll save a card on Stripe covering {householdMembers.filter(m => m.name.trim()).length + 1} draw{householdMembers.filter(m => m.name.trim()).length ? 's' : ''} — charged only when the patient books.
+                  {postPaymentAction === 'send_link' ? ' Booking link sends the moment your card is saved.' : ' You schedule once your card is saved.'}
                 </p>
               </div>
             )}
