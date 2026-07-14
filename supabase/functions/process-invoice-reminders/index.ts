@@ -141,6 +141,36 @@ Deno.serve(async (req) => {
       appt?.payment_status === 'org_billed' ||
       (appt?.organization_id && orgBilledIds.has(appt.organization_id));
 
+    // ── CONSOLIDATED-INVOICE GUARDRAIL (added 2026-07-14) ─────────
+    // When a recurring series (weekly draws, monthly physicals, etc.) is
+    // billed as ONE Stripe invoice, every visit row in the series carries
+    // that SAME stripe_invoice_id but its own per-visit total_amount. The
+    // dunning cascade would then treat each row as a separate unpaid
+    // invoice and message the patient once PER ROW, per run — with the
+    // wrong amount ($150/visit instead of the real invoice total). That is
+    // exactly what buried Lawrence Carpenter under 9 emails + SMS in one
+    // evening for a series we'd already invoiced once (he was mailing a
+    // check). A stripe_invoice_id shared across 2+ still-open rows means
+    // ONE bill that belongs to relationship/manual follow-up
+    // (send-manual-invoice-reminder) — NEVER the automated per-visit
+    // cascade. Build that set once and skip those rows in every phase.
+    const { data: openInvoiceRows } = await supabase
+      .from('appointments')
+      .select('stripe_invoice_id')
+      .not('stripe_invoice_id', 'is', null)
+      .not('status', 'eq', 'cancelled')
+      .not('payment_status', 'in', '("paid","succeeded","completed","org_billed")');
+    const invoiceRowCounts = new Map<string, number>();
+    for (const r of (openInvoiceRows || [])) {
+      const id = (r as any).stripe_invoice_id;
+      if (id) invoiceRowCounts.set(id, (invoiceRowCounts.get(id) || 0) + 1);
+    }
+    const consolidatedInvoiceIds = new Set<string>();
+    for (const [id, n] of invoiceRowCounts) { if (n >= 2) consolidatedInvoiceIds.add(id); }
+    const isConsolidatedInvoice = (appt: any): boolean =>
+      !!appt?.stripe_invoice_id && consolidatedInvoiceIds.has(appt.stripe_invoice_id);
+    let skippedConsolidated = 0;
+
     // ── Helper: resolve patient contact info ──────────────────────
     const getContact = (appt: any) => {
       let name = appt.patient_name || '';
@@ -308,6 +338,7 @@ Deno.serve(async (req) => {
 
     for (const appt of sentApptsDedup) {
       if (isOrgBilled(appt)) { console.log(`Skipping reminder for appt ${appt.id} — org-billed partner, patient owes nothing`); continue; }
+      if (isConsolidatedInvoice(appt)) { console.log(`Skipping reminder for appt ${appt.id} — consolidated series invoice ${appt.stripe_invoice_id}, billed once (manual follow-up only)`); skippedConsolidated++; continue; }
       const tier = getApptTier(appt.appointment_date, appt.appointment_time);
       const thresholdHours = REMINDER_THRESHOLDS[tier];
       const invoiceSentAt = new Date(appt.invoice_sent_at).getTime();
@@ -383,6 +414,7 @@ Deno.serve(async (req) => {
 
     for (const appt of (remindedAppts || [])) {
       if (isOrgBilled(appt)) { console.log(`Skipping final-warning for appt ${appt.id} — org-billed partner, patient owes nothing`); continue; }
+      if (isConsolidatedInvoice(appt)) { console.log(`Skipping final-warning for appt ${appt.id} — consolidated series invoice ${appt.stripe_invoice_id}, billed once (manual follow-up only)`); skippedConsolidated++; continue; }
       // Use time since the REMINDER was sent, not since original invoice.
       // This prevents the tier-shift bug where a relaxed→urgent transition
       // would immediately satisfy thresholds based on invoice age.
@@ -477,6 +509,7 @@ Deno.serve(async (req) => {
       // ORG-BILLED HARD GUARDRAIL: never cancel a partner-org-billed visit.
       // The org pays at order time; the patient owes nothing.
       if (isOrgBilled(appt)) { console.log(`Skipping CANCEL for appt ${appt.id} — org-billed partner, patient owes nothing`); skippedRelaxed++; continue; }
+      if (isConsolidatedInvoice(appt)) { console.log(`Skipping CANCEL for appt ${appt.id} — consolidated series invoice ${appt.stripe_invoice_id}, never auto-cancel a relationship-billed series`); skippedConsolidated++; continue; }
       const apptTimeMs = getApptTimeMs(appt);
       const hoursUntilAppt = (apptTimeMs - now) / (1000 * 60 * 60);
 
@@ -589,7 +622,7 @@ Deno.serve(async (req) => {
       cancellations++;
     }
 
-    console.log(`Invoice processing: ${gentleReminders} reminders, ${finalWarnings} final warnings, ${cancellations} cancellations, ${skippedRelaxed} not yet due`);
+    console.log(`Invoice processing: ${gentleReminders} reminders, ${finalWarnings} final warnings, ${cancellations} cancellations, ${skippedRelaxed} not yet due, ${skippedConsolidated} skipped (consolidated series invoice)`);
 
     return new Response(
       JSON.stringify({
@@ -598,6 +631,7 @@ Deno.serve(async (req) => {
         finalWarnings,
         cancellations,
         skippedRelaxed,
+        skippedConsolidated,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
