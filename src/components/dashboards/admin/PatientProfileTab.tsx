@@ -24,6 +24,7 @@ import RecurringGapsCard from './RecurringGapsCard';
 import ScheduleAppointmentModal from '@/components/calendar/ScheduleAppointmentModal';
 import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
 import PatientCommsTimeline from '@/components/admin/PatientCommsTimeline';
+import FamilyHouseholdCard from '@/components/admin/FamilyHouseholdCard';
 import { Zap } from 'lucide-react';
 
 const PatientProfileTab: React.FC = () => {
@@ -531,6 +532,14 @@ const PatientProfileTab: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Family / Household — add + link family members, feeds one-click
+            family booking (companions) downstream. */}
+        <FamilyHouseholdCard
+          patient={p}
+          onChanged={() => loadPatientData(p)}
+          onOpenPatient={(m) => loadPatientData(m)}
+        />
 
         {/* Tabs */}
         <Tabs defaultValue="appointments">
