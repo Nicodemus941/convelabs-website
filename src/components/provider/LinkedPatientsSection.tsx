@@ -34,7 +34,9 @@ interface LinkedPatient {
   patient_email: string | null;
   patient_phone: string | null;
   visit_count: number;
-  last_visit_date: string;
+  // v3: NULL unless the patient has REAL appointments — imported/added
+  // patients no longer masquerade their import time as a "visit".
+  last_visit_date: string | null;
   last_service: string | null;
   last_lab_order_file_path: string | null;
   pending_request_count: number;
@@ -45,6 +47,13 @@ interface LinkedPatient {
   address: string | null;
   city: string | null;
   zipcode: string | null;
+  // v3: when the patient was added to the roster (CSV import / manual add).
+  added_at: string | null;
+}
+
+/** Most recent activity of any kind — real visit, else roster-added date. */
+function lastActivity(p: LinkedPatient): number {
+  return new Date(p.last_visit_date || p.added_at || 0).getTime();
 }
 
 type SortKey = 'recent' | 'name' | 'needs_info' | 'visits';
@@ -90,7 +99,10 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   const [searchQ, setSearchQ] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('recent');
   const [needsInfoOnly, setNeedsInfoOnly] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  // Compact-list toolkit: paginate instead of dumping the whole roster down
+  // the page, plus an A–Z jump strip for long lists.
+  const [page, setPage] = useState(0);
+  const [letterFilter, setLetterFilter] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [bulkAddOpen, setBulkAddOpen] = useState(false);
   const [csvImportOpen, setCsvImportOpen] = useState(false);
@@ -403,7 +415,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
             <Input
               value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
+              onChange={(e) => { setSearchQ(e.target.value); setPage(0); }}
               placeholder="Search by name, email, or phone…"
               className="pl-9 h-9 text-sm"
             />
@@ -411,7 +423,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={sortKey}
-              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              onChange={(e) => { setSortKey(e.target.value as SortKey); setPage(0); }}
               className="h-8 text-xs border border-gray-200 rounded-md px-2 bg-white text-gray-700"
               title="Sort the patient list"
             >
@@ -426,7 +438,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               return (
                 <button
                   type="button"
-                  onClick={() => setNeedsInfoOnly(v => !v)}
+                  onClick={() => { setNeedsInfoOnly(v => !v); setPage(0); }}
                   className={`h-8 text-xs px-2.5 rounded-full border font-semibold transition ${needsInfoOnly ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'}`}
                   title="Show only patients missing phone, DOB, or address — complete them so they can be scheduled"
                 >
@@ -435,6 +447,30 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               );
             })()}
           </div>
+          {/* A–Z jump strip — appears once the roster is big enough that
+              scrolling is the pain (the CSV-import complaint). One tap
+              filters to that first letter; tap again (or All) to clear. */}
+          {patients.length > 15 && (() => {
+            const letters = new Set(patients.map(p => (p.patient_name || '').trim().charAt(0).toUpperCase()).filter(c => /[A-Z]/.test(c)));
+            return (
+              <div className="flex items-center gap-0.5 flex-wrap text-[11px]" role="navigation" aria-label="Jump to letter">
+                <button
+                  type="button"
+                  onClick={() => { setLetterFilter(null); setPage(0); }}
+                  className={`px-1.5 py-0.5 rounded font-semibold transition ${letterFilter === null ? 'bg-[#B91C1C] text-white' : 'text-gray-500 hover:bg-gray-100'}`}
+                >All</button>
+                {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(l => (
+                  <button
+                    key={l}
+                    type="button"
+                    disabled={!letters.has(l)}
+                    onClick={() => { setLetterFilter(f => f === l ? null : l); setPage(0); }}
+                    className={`px-1.5 py-0.5 rounded font-semibold transition ${letterFilter === l ? 'bg-[#B91C1C] text-white' : letters.has(l) ? 'text-gray-600 hover:bg-gray-100' : 'text-gray-300 cursor-default'}`}
+                  >{l}</button>
+                ))}
+              </div>
+            );
+          })()}
         </div>
         <CardContent className="p-0">
           <div className="divide-y">
@@ -442,6 +478,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
               const q = searchQ.trim().toLowerCase();
               let list = patients.filter(p => {
                 if (needsInfoOnly && missingFields(p).length === 0) return false;
+                if (letterFilter && (p.patient_name || '').trim().charAt(0).toUpperCase() !== letterFilter) return false;
                 if (!q) return true;
                 return (
                   (p.patient_name || '').toLowerCase().includes(q) ||
@@ -457,11 +494,16 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                   if (d !== 0) return d;
                   return (a.patient_name || '').localeCompare(b.patient_name || '');
                 }
-                // recent (default): last activity desc
-                return new Date(b.last_visit_date || 0).getTime() - new Date(a.last_visit_date || 0).getTime();
+                // recent (default): real visits first (recency), then
+                // roster-added dates — never mixes the two up (v3 fix).
+                return lastActivity(b) - lastActivity(a);
               });
-              const CAP = 100;
-              const capped = showAll ? list : list.slice(0, CAP);
+              // Paginate: the list stays one screen tall instead of running
+              // half the page (the scroll complaint that drove this rework).
+              const PAGE_SIZE = 15;
+              const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+              const safePage = Math.min(page, pageCount - 1);
+              const capped = list.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
               return (
                 <>
                   {capped.map(p => {
@@ -508,8 +550,11 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                       })()}
                     </div>
                     <p className="text-[11px] text-gray-500 truncate mt-0.5">
-                      Last visit {formatDistanceToNow(new Date(p.last_visit_date), { addSuffix: true })}
-                      {p.last_service && ` · ${p.last_service}`}
+                      {p.visit_count > 0 && p.last_visit_date ? (
+                        <>Last visit {formatDistanceToNow(new Date(p.last_visit_date), { addSuffix: true })}{p.last_service && ` · ${p.last_service}`}</>
+                      ) : (
+                        <>No visits yet{p.added_at && ` · Added ${format(new Date(p.added_at), 'MMM d, yyyy')}`}</>
+                      )}
                     </p>
                     {(p.patient_email || p.patient_phone) && (
                       <p className="text-[10px] text-gray-400 truncate mt-0.5">
@@ -568,14 +613,28 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                 </label>
               );
             })}
-                  {list.length > CAP && !showAll && (
-                    <button
-                      type="button"
-                      onClick={() => setShowAll(true)}
-                      className="w-full py-3 text-xs font-semibold text-[#B91C1C] hover:bg-red-50 transition"
-                    >
-                      Show all {list.length} patients ({list.length - CAP} more)
-                    </button>
+                  {pageCount > 1 && (
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50/60">
+                      <button
+                        type="button"
+                        onClick={() => setPage(Math.max(0, safePage - 1))}
+                        disabled={safePage === 0}
+                        className="text-xs font-semibold text-[#B91C1C] disabled:text-gray-300 px-2 py-1 rounded hover:bg-red-50 disabled:hover:bg-transparent transition"
+                      >
+                        ← Previous
+                      </button>
+                      <span className="text-[11px] text-gray-500">
+                        {safePage * PAGE_SIZE + 1}–{Math.min(list.length, (safePage + 1) * PAGE_SIZE)} of {list.length} patients · Page {safePage + 1}/{pageCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage(Math.min(pageCount - 1, safePage + 1))}
+                        disabled={safePage >= pageCount - 1}
+                        className="text-xs font-semibold text-[#B91C1C] disabled:text-gray-300 px-2 py-1 rounded hover:bg-red-50 disabled:hover:bg-transparent transition"
+                      >
+                        Next →
+                      </button>
+                    </div>
                   )}
                   {list.length === 0 && (
                     <p className="p-6 text-center text-xs text-gray-400">
