@@ -87,7 +87,19 @@ const AdminCalendar: React.FC = () => {
    * operates on.
    */
   const computeProposedSlots = useCallback((): ProposedSlot[] => {
-    const occurrences = parseInt(recurringForm.occurrences || '1');
+    // Occurrence count resolution (Lawrence Carpenter bug 2026-07-13): staff
+    // cleared the "# Occurrences" box intending "weekly until the end date",
+    // and parseInt('' || '1') silently produced a ONE-visit series — the
+    // invoice then "totaled" a single $150 draw. Rules now:
+    //   - explicit count 1..52 → honored (end date still caps it)
+    //   - blank count + end date → FILL the whole range (cap 52)
+    //   - blank count + no end date → 0 slots (submit blocks with an error
+    //     instead of silently booking one visit)
+    const parsed = parseInt(recurringForm.occurrences, 10);
+    const hasExplicitCount = Number.isFinite(parsed) && parsed >= 1;
+    const occurrences = hasExplicitCount
+      ? Math.min(parsed, 52)
+      : (recurringForm.endDate ? 52 : 0);
     const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30, bimonthly: 60 };
     const daysBetween = freqDays[recurringForm.frequency] || 7;
 
@@ -1153,36 +1165,48 @@ const AdminCalendar: React.FC = () => {
               )}
             </div>
 
-            {recurringForm.startDate && recurringForm.time && (
+            {recurringForm.startDate && recurringForm.time && (() => {
+              // Preview from the ACTUAL computed slot list — the same list the
+              // create button books — never from the raw occurrences string.
+              // (The raw string showed "4" while a cleared box booked 1 visit
+              // and invoiced $150 for a whole weekly series.)
+              const slots = computeProposedSlots();
+              const n = slots.length;
+              const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 110, therapeutic: 200 };
+              const p = prices[recurringForm.serviceType] || 150;
+              const full = p * n;
+              return (
               <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1">
-                <p className="font-semibold">Preview: {recurringForm.occurrences} appointments</p>
+                <p className="font-semibold">
+                  Preview: {n} appointment{n === 1 ? '' : 's'}
+                  {n > 0 && <span className="font-normal text-muted-foreground"> · {slots[0].dateIso} → {slots[n - 1].dateIso}</span>}
+                </p>
+                {n === 0 && (
+                  <p className="text-[#B91C1C] font-medium">Enter a # of occurrences or an end date to build the series.</p>
+                )}
+                {n === 1 && (
+                  <p className="text-amber-700 font-medium">⚠ Only ONE visit will be booked (and invoiced). For a weekly series, raise # Occurrences or set a later end date.</p>
+                )}
                 <p className="text-muted-foreground">
                   {recurringForm.frequency === 'weekly' ? 'Every week' : recurringForm.frequency === 'biweekly' ? 'Every 2 weeks' : recurringForm.frequency === 'monthly' ? 'Every month' : 'Every 2 months'}
                   {' '}starting {recurringForm.startDate} at {recurringForm.time}
                 </p>
-                {!recurringForm.waiveFee && recurringForm.paymentMode === 'prepaid_bundle' && (
+                {!recurringForm.waiveFee && recurringForm.paymentMode === 'prepaid_bundle' && n > 0 && (
                   <p className="mt-1 font-medium text-emerald-700">
                     {(() => {
-                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 110, therapeutic: 200 };
-                      const p = prices[recurringForm.serviceType] || 150;
-                      const n = parseInt(recurringForm.occurrences || '1');
-                      const full = p * n;
                       const disc = full * (BUNDLE_DISCOUNT_PCT / 100);
                       return `Prepaid: $${(full - disc).toFixed(2)} (saves $${disc.toFixed(2)} vs $${full.toFixed(2)} list)`;
                     })()}
                   </p>
                 )}
-                {!recurringForm.waiveFee && recurringForm.paymentMode === 'per_visit' && (
+                {!recurringForm.waiveFee && recurringForm.paymentMode === 'per_visit' && n > 0 && (
                   <p className="font-medium text-[#B91C1C]">
-                    Total: ${(() => {
-                      const prices: Record<string, number> = { mobile: 150, 'in-office': 55, senior: 110, therapeutic: 200 };
-                      return ((prices[recurringForm.serviceType] || 150) * parseInt(recurringForm.occurrences || '1')).toFixed(2);
-                    })()}
-                    {' '}(invoice sent to patient)
+                    Total: ${full.toFixed(2)} ({n} × ${p.toFixed(2)} — invoice sent to patient)
                   </p>
                 )}
               </div>
-            )}
+              );
+            })()}
 
             <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!recurringForm.patientName || !recurringForm.startDate || !recurringForm.time || isRecurringSubmitting}
               onClick={async () => {
@@ -1214,7 +1238,12 @@ const AdminCalendar: React.FC = () => {
                   setIsRecurringSubmitting(false);
                 }
               }}>
-              {isRecurringSubmitting ? 'Creating...' : `Create ${recurringForm.occurrences} Appointments`}
+              {isRecurringSubmitting
+                ? 'Creating...'
+                : (() => {
+                    const n = recurringForm.startDate ? computeProposedSlots().length : 0;
+                    return n > 0 ? `Create ${n} Appointment${n === 1 ? '' : 's'}` : 'Create Appointments';
+                  })()}
             </Button>
           </div>
         </DialogContent>
