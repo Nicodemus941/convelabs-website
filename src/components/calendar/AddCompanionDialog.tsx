@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Loader2, UserPlus } from 'lucide-react';
+import { Loader2, UserPlus, Users } from 'lucide-react';
 
 interface Props {
   appt: any;            // the PRIMARY appointment the companion is added to
@@ -36,6 +36,41 @@ export default function AddCompanionDialog({ appt, open, onOpenChange, onDone }:
   const [kitPrice, setKitPrice] = useState(150);
   const [billingEmail, setBillingEmail] = useState(appt?.patient_email || '');
   const [busy, setBusy] = useState(false);
+
+  // One-click family booking (2026-07-14): pull the primary patient's household
+  // so their linked family can be added as a companion without re-typing.
+  // Household lives on tenant_patients (household_id); we find the primary by
+  // the appointment's patient email, then list the other members.
+  const [household, setHousehold] = useState<any[]>([]);
+  useEffect(() => {
+    if (!open || !appt?.patient_email) { setHousehold([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data: primary } = await supabase
+        .from('tenant_patients' as any)
+        .select('id, household_id')
+        .ilike('email', appt.patient_email)
+        .not('household_id', 'is', null)
+        .maybeSingle();
+      if (cancelled || !primary?.household_id) { setHousehold([]); return; }
+      const { data: members } = await supabase
+        .from('tenant_patients' as any)
+        .select('id, first_name, last_name, date_of_birth, phone, household_relation')
+        .eq('household_id', primary.household_id)
+        .is('deleted_at', null)
+        .neq('id', primary.id);
+      if (!cancelled) setHousehold(members || []);
+    })();
+    return () => { cancelled = true; };
+  }, [open, appt?.patient_email]);
+
+  const prefillFromMember = (m: any) => {
+    setFirstName(m.first_name || '');
+    setLastName(m.last_name || '');
+    setDob(m.date_of_birth || '');
+    setRelationship(m.household_relation || 'Family member');
+    if (m.phone) setPhone(m.phone);
+  };
 
   const lines = useMemo(() => {
     const out: Array<{ description: string; amountCents: number }> = [];
@@ -94,6 +129,25 @@ export default function AddCompanionDialog({ appt, open, onOpenChange, onDone }:
         </DialogHeader>
 
         <div className="grid gap-3 py-1">
+          {household.length > 0 && (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <p className="text-xs font-medium flex items-center gap-1.5">
+                <Users className="h-3.5 w-3.5 text-[#B91C1C]" /> Add from household
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {household.map((m) => (
+                  <button
+                    key={m.id} type="button" onClick={() => prefillFromMember(m)}
+                    className="text-xs px-2.5 py-1 rounded-full border bg-white hover:bg-[#B91C1C]/5 hover:border-[#B91C1C]/40 transition-colors"
+                  >
+                    {`${m.first_name || ''} ${m.last_name || ''}`.trim()}
+                    {m.household_relation && <span className="text-muted-foreground"> · {m.household_relation}</span>}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Click to prefill their details, then set the fee below.</p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>First name</Label>
