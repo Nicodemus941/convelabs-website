@@ -181,11 +181,18 @@ Deno.serve(async (req) => {
     }
 
     if (body.mode === 'preview') {
+      // Sends one org's tailored email to an arbitrary inbox. org_id picks
+      // which org's version (default: largest roster); greet_name overrides
+      // the greeting for additional stakeholders at that practice (e.g. a
+      // co-owner who isn't the contact on file — Tony Renta / TRP case).
       if (!body.to) return json({ error: 'to required for preview' }, 400);
-      const sample = targets[0]; // largest roster first (RPC orders by size)
-      if (!sample) return json({ error: 'no targets' }, 404);
-      const ok = await sendMail(body.to, sample.name, emailHtml(sample));
-      return json({ ok, mode: 'preview', sample_org: sample.name, sent_to: body.to, target_count: targets.length, targets: targets.map(t => ({ name: t.name, email: t.contact_email })) });
+      const sample = body.org_id
+        ? targets.find(t => t.id === body.org_id)
+        : targets[0];
+      if (!sample) return json({ error: 'org not in target list' }, 404);
+      const org = body.greet_name ? { ...sample, contact_name: String(body.greet_name) } : sample;
+      const ok = await sendMail(body.to, org.name, emailHtml(org));
+      return json({ ok, mode: 'preview', sample_org: org.name, greeted_as: firstName(org.contact_name), sent_to: body.to, target_count: targets.length });
     }
 
     if (body.mode !== 'send') return json({ error: 'mode must be preview or send' }, 400);
