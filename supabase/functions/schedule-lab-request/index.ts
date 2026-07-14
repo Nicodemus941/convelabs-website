@@ -181,6 +181,99 @@ Deno.serve(async (req) => {
       patient_scheduled_at: needsPayment ? null : new Date().toISOString(),
     }).eq('id', request.id);
 
+    // ── CHARGE-AT-BOOKING (2026-07-13) ────────────────────────────────────
+    // The org saved a card at request creation (setup-mode Checkout) instead
+    // of paying up-front; the patient just booked, so charge it off-session
+    // NOW. Household: the PRIMARY row (id === household_group_id) holds the
+    // combined amount + card — one charge covers the group, fired by
+    // whichever member books first, then the whole group flips 'completed'
+    // so later sibling bookings never re-charge.
+    //
+    // DECLINE POLICY: the booking STANDS. A card failure is the org's
+    // problem, never the patient's — mark 'charge_failed', record the error,
+    // and email the org + owner to collect. Do not block or unwind the appt.
+    try {
+      const anchorId = request.household_group_id || request.id;
+      const anchor = anchorId === request.id
+        ? request
+        : (await admin.from('patient_lab_requests')
+            .select('id, provider_payment_status, provider_payment_cents, provider_stripe_customer_id, provider_stripe_payment_method_id, patient_name')
+            .eq('id', anchorId).maybeSingle()).data;
+
+      if (anchor && anchor.provider_payment_status === 'card_on_file') {
+        const groupFilter = (q: any) =>
+          request.household_group_id
+            ? q.eq('household_group_id', request.household_group_id)
+            : q.eq('id', anchorId);
+        const chargeCents = Number(anchor.provider_payment_cents || 0);
+        const custId = anchor.provider_stripe_customer_id;
+        const pmId = anchor.provider_stripe_payment_method_id;
+
+        if (chargeCents > 0 && custId && pmId) {
+          try {
+            const pi = await stripe.paymentIntents.create({
+              amount: chargeCents,
+              currency: 'usd',
+              customer: custId,
+              payment_method: pmId,
+              off_session: true,
+              confirm: true,
+              description: `Mobile Blood Draw — ${anchor.patient_name || request.patient_name} (covered by ${org.name}, charged at booking)`,
+              metadata: {
+                lab_request_id: anchorId,
+                organization_id: org.id,
+                convelabs_flow: 'lab_request_charge_at_booking',
+              },
+            });
+            await groupFilter(admin.from('patient_lab_requests').update({
+              provider_payment_status: 'completed',
+              provider_paid_at: new Date().toISOString(),
+              provider_stripe_payment_intent_id: pi.id,
+              provider_charge_attempted_at: new Date().toISOString(),
+              provider_charge_error: null,
+            }));
+            console.log(`[charge-at-booking] charged ${chargeCents}c for group ${anchorId} (pi ${pi.id})`);
+          } catch (chargeErr: any) {
+            const errMsg = String(chargeErr?.message || chargeErr).slice(0, 500);
+            console.error(`[charge-at-booking] DECLINED for ${anchorId}: ${errMsg}`);
+            await groupFilter(admin.from('patient_lab_requests').update({
+              provider_payment_status: 'charge_failed',
+              provider_charge_attempted_at: new Date().toISOString(),
+              provider_charge_error: errMsg,
+            }));
+            // Notify the org (billing inbox) + owner — booking stands.
+            const orgBillEmail = org.billing_email || org.contact_email;
+            if (MAILGUN_API_KEY) {
+              const notify = async (to: string, isOwner: boolean) => {
+                try {
+                  const fd = new FormData();
+                  fd.append('from', 'ConveLabs Billing <info@convelabs.com>');
+                  fd.append('to', to);
+                  fd.append('subject', `⚠ Card declined — ${request.patient_name}'s draw is still booked ($${(chargeCents / 100).toFixed(2)} due)`);
+                  fd.append('html', `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:540px;margin:0 auto;line-height:1.6;color:#111;">
+<p>${isOwner ? `Heads up Nico — ${org.name}'s` : 'Hi — your'} saved card was declined when <strong>${request.patient_name}</strong> booked their draw (${fmtDate(appointment_date)} at ${appointment_time}).</p>
+<p><strong>The appointment is confirmed and will happen as scheduled.</strong> The balance of <strong>$${(chargeCents / 100).toFixed(2)}</strong> is now due.</p>
+<p>Decline reason: <em>${errMsg}</em></p>
+${isOwner ? '' : `<p>Please update your card or reply to this email and we'll send a payment link. Questions? (941) 527-9169.</p>`}
+<p>— ConveLabs Billing</p></div>`);
+                  fd.append('o:tracking-clicks', 'no');
+                  await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+                    method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd,
+                  });
+                } catch (e) { console.warn('[charge-at-booking] decline notify failed:', e); }
+              };
+              if (orgBillEmail) await notify(orgBillEmail, false);
+              await notify('info@convelabs.com', true);
+            }
+          }
+        } else if (chargeCents > 0) {
+          console.error(`[charge-at-booking] card_on_file but missing customer/pm for ${anchorId} — cannot charge`);
+        }
+      }
+    } catch (cabErr: any) {
+      console.error('[charge-at-booking] non-blocking error:', cabErr?.message || cabErr);
+    }
+
     // ─── NORMALIZED LAB-ORDER ROW ─────────────────────────────────
     // The phleb appointment card (PhlebAppointmentCard + AppointmentLabOrdersPanel)
     // reads from BOTH appointments.lab_order_file_path (legacy) AND

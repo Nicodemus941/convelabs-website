@@ -1098,6 +1098,17 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                         ✓ Booked {formatDistanceToNow(new Date(r.patient_scheduled_at), { addSuffix: true })}
                       </p>
                     )}
+                    {/* Charge-at-booking payment state (2026-07-13) */}
+                    {r.provider_payment_status === 'card_on_file' && (
+                      <p className="text-[11px] text-sky-700 font-semibold mt-0.5">
+                        💳 Card on file — charged only when they book
+                      </p>
+                    )}
+                    {r.provider_payment_status === 'charge_failed' && (
+                      <p className="text-[11px] text-red-700 font-semibold mt-0.5">
+                        ⚠ Card declined at booking — balance due, check your email
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Badge variant="outline" className="text-[10px] capitalize">{r.status.replace(/_/g, ' ')}</Badge>
@@ -1162,7 +1173,11 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
               <p className="text-sm text-gray-700">
                 <span className="font-semibold">{resendTarget.patient_name}</span> gets a fresh scheduling link by text + email. The old link stops working and reminders start over.
               </p>
-              {(resendTarget.provider_payment_status === 'completed' || resendTarget.billed_to === 'org') && (
+              {resendTarget.provider_payment_status === 'card_on_file' ? (
+                <p className="text-xs font-semibold text-sky-800 bg-sky-50 border border-sky-200 rounded px-2.5 py-1.5">
+                  💳 Your saved card carries over — charged only when the patient books. They won't be asked to pay.
+                </p>
+              ) : (resendTarget.provider_payment_status === 'completed' || resendTarget.billed_to === 'org') && (
                 <p className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1.5">
                   💳 Already paid — the payment carries over. The patient won't be asked to pay.
                 </p>

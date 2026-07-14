@@ -593,26 +593,34 @@ Deno.serve(async (req) => {
           ? `${patient_name} + ${siblingIds.length} household member${siblingIds.length === 1 ? '' : 's'}`
           : patient_name;
 
+        // ── CHARGE-AT-BOOKING (owner decision 2026-07-13) ────────────────
+        // Instead of charging the org up-front (money stranded if the patient
+        // never books — the Michael McHale case), we SAVE the org's card via a
+        // setup-mode Checkout and charge it off-session only when the patient
+        // actually books (schedule-lab-request). Expiry/cancel = never charged.
+        // Off-session charging requires the payment method attached to a
+        // customer, so guarantee one exists even if the org had no email.
+        if (!customerId) {
+          const c = await stripe.customers.create({
+            name: org.name,
+            metadata: { convelabs_org_id: organization_id, source: 'create_lab_request_card_setup' },
+          });
+          customerId = c.id;
+        }
         const sessionParams: any = {
-          mode: 'payment',
-          customer: customerId || undefined,
-          customer_email: customerId ? undefined : orgEmail || undefined,
-          line_items: [{
-            price_data: {
-              currency: 'usd',
-              product_data: { name: `Mobile Blood Draw — ${patientLabel}`, description: `Covered by ${org.name}` },
-              unit_amount: orgChargeCents,
-            },
-            quantity: memberCount,
-          }],
+          mode: 'setup',
+          currency: 'usd',
+          customer: customerId,
           metadata: {
             lab_request_id: inserted.id, organization_id, patient_name, org_pays: 'true',
-            convelabs_flow: 'lab_request_org_pay',
+            convelabs_flow: 'lab_request_card_setup',
             post_payment_action: postPaymentAction,
             household_group_id: householdGroupId || '',
+            amount_cents: String(combinedCents),
+            member_count: String(memberCount),
           },
-          payment_intent_data: {
-            metadata: { lab_request_id: inserted.id, organization_id, convelabs_flow: 'lab_request_org_pay' },
+          setup_intent_data: {
+            metadata: { lab_request_id: inserted.id, organization_id, convelabs_flow: 'lab_request_card_setup' },
           },
         };
         // Embedded on-page Payment Element vs hosted redirect.
@@ -630,12 +638,15 @@ Deno.serve(async (req) => {
         await admin.from('patient_lab_requests').update({
           provider_payment_status: 'pending',
           provider_stripe_session_id: session.id,
+          provider_stripe_customer_id: customerId,
           provider_payment_cents: combinedCents,
           billed_to: 'org',
           status: 'pending_payment',
         }).eq('id', inserted.id);
 
-        // Return EARLY — patient(s) notified by the webhook on payment.
+        // Return EARLY — patient(s) notified by the webhook once the card
+        // is saved (setup session completed). The charge itself fires later,
+        // at booking time.
         return new Response(JSON.stringify({
           success: true,
           request_id: inserted.id,
@@ -651,8 +662,8 @@ Deno.serve(async (req) => {
           post_payment_action: postPaymentAction,
           amount_cents: combinedCents,
           message: useEmbedded
-            ? 'Pay to confirm — patient(s) notified the moment payment completes.'
-            : 'Redirecting to Stripe to collect organization payment.',
+            ? 'Save your card to confirm — it is only charged when the patient books. Patient(s) notified the moment the card is saved.'
+            : 'Redirecting to Stripe to save your card — charged only when the patient books.',
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } // end pay_now branch
       } catch (stripeErr: any) {
