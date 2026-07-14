@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { useAuthSession } from '@/hooks/useAuthSession';
+import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from '@/integrations/supabase/client';
 import { loginRouteForTarget } from '@/lib/appTarget';
@@ -58,7 +58,10 @@ export const RoleProtectedRoute: React.FC<RoleProtectedRouteProps> = ({
   children,
   allowedRoles
 }) => {
-  const { session, isLoading, userRole } = useAuthSession();
+  // Shared AuthContext, NOT a fresh useAuthSession instance — see
+  // ProtectedRoute for the 2026-07-14 login-loop rationale.
+  const { session, isLoading, user } = useAuth();
+  const userRole = user?.role ?? null;
   // Target-aware login route: the phleb field app sends unauthenticated users
   // to its own /phleb-login (no marketing chrome); web/patient is unchanged.
   const loginRoute = loginRouteForTarget();
