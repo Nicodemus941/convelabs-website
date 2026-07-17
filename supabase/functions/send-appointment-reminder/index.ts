@@ -4,6 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { getRenderedTemplate, sendEmail, logEmailSend, userHasOptedIn } from "../_shared/email/index.ts";
 import { shouldSendNow } from "../_shared/quiet-hours.ts";
 import { formatApptDateLong, formatApptTime } from "../_shared/format-appt-date.ts";
+import { elabusAppPromo } from "../_shared/patient-email-templates.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -249,12 +250,22 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
 
   // Inject the nudge near the top of the rendered HTML body — between
   // <body> and the actual content. Falls back to prepending if no <body>.
-  const finalHtml = nudgeHtml
+  const baseHtml = nudgeHtml
     ? (renderedTemplate.html.includes('<body')
         ? renderedTemplate.html.replace(/(<body[^>]*>)/i, `$1${nudgeHtml}`)
         : nudgeHtml + renderedTemplate.html)
     : renderedTemplate.html;
-  const finalText = (renderedTemplate.text || '') + nudgeText;
+
+  // E-Labus companion-app cross-promo — appended to the bottom of every
+  // reminder (before </body> if the DB template is a full doc, else
+  // appended). Same block the branded confirmation/specimen emails use,
+  // so the app CTA is consistent across all three patient touchpoints.
+  const promoHtml = elabusAppPromo();
+  const finalHtml = baseHtml.includes('</body>')
+    ? baseHtml.replace('</body>', `${promoHtml}</body>`)
+    : baseHtml + promoHtml;
+  const finalText = (renderedTemplate.text || '') + nudgeText
+    + '\n\nWant to understand your lab results? Download E-Labus — App Store: https://apps.apple.com/app/id6784433707 · Google Play: https://play.google.com/store/apps/details?id=com.elabus.app\n';
 
   // Send the reminder email
   const result = await sendEmail({
