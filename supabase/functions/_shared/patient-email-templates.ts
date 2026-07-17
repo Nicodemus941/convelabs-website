@@ -104,6 +104,53 @@ function detailRow(label: string, value: string): string {
 }
 
 // ──────────────────────────────────────────────────────────────────
+// E-LABUS APP CROSS-PROMO
+// Sits at the bottom of every patient touchpoint email (confirmation,
+// reminder, specimen-delivered). E-Labus is our companion app that
+// turns raw lab results into plain-language insights — the natural
+// next step once the draw is done. Badges are first-party PNGs hosted
+// on convelabs.com (same host as the email logo) so they render in
+// every client, including Gmail/Outlook that strip SVG.
+//
+//   iOS App Store  → app id 6784433707
+//   Google Play    → package com.elabus.app
+//
+// Exported so senders that render from a DB/Handlebars template (e.g.
+// the nightly send-appointment-reminder) can inject the same block.
+export function elabusAppPromo(): string {
+  const IOS_URL = 'https://apps.apple.com/app/id6784433707';
+  const ANDROID_URL = 'https://play.google.com/store/apps/details?id=com.elabus.app';
+  const APPLE_BADGE = 'https://www.convelabs.com/app-store-badge.png';
+  const GOOGLE_BADGE = 'https://www.convelabs.com/google-play-badge.png';
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:28px 0 4px;">
+      <tr><td style="border-top:1px solid #eee2e0;padding-top:26px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fdfbfa;border:1px solid #eee2e0;border-radius:14px;">
+          <tr><td style="padding:24px 24px 26px;text-align:center;">
+            <div style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#B91C1C;font-weight:bold;margin-bottom:10px;">New from ConveLabs</div>
+            <p style="margin:0 0 6px;font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:1.35;color:#111827;">Want to understand your lab results?</p>
+            <p style="margin:0 0 18px;color:#4b5563;font-size:14px;line-height:1.6;">Download our newest app, <strong>E-Labus</strong> — it turns your lab results into clear, plain-language insights you can actually understand.</p>
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto;">
+              <tr>
+                <td style="padding:0 6px;" valign="middle">
+                  <a href="${IOS_URL}" style="text-decoration:none;">
+                    <img src="${APPLE_BADGE}" alt="Download E-Labus on the App Store" width="132" height="44" style="display:block;border:0;width:132px;height:44px;">
+                  </a>
+                </td>
+                <td style="padding:0 6px;" valign="middle">
+                  <a href="${ANDROID_URL}" style="text-decoration:none;">
+                    <img src="${GOOGLE_BADGE}" alt="Get E-Labus on Google Play" width="114" height="44" style="display:block;border:0;width:114px;height:44px;">
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>`;
+}
+
+// ──────────────────────────────────────────────────────────────────
 // 1. APPOINTMENT CONFIRMATION
 // ──────────────────────────────────────────────────────────────────
 export function renderAppointmentConfirmation(p: CommonPatientParams & {
@@ -204,6 +251,8 @@ export function renderAppointmentConfirmation(p: CommonPatientParams & {
 
     <p style="margin:0 0 4px;color:#6b7280;font-size:13px;line-height:1.7;text-align:center;">Need to reschedule? Call <strong style="color:#111827;">${phone}</strong></p>
     <p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">We answer within 1 hour during business hours.</p>
+
+    ${elabusAppPromo()}
   `;
 
   return shell({
@@ -268,6 +317,8 @@ export function renderAppointmentReminder(p: CommonPatientParams & {
     ` : ''}
 
     <p style="margin:0 0 4px;color:#6b7280;font-size:13px;line-height:1.7;text-align:center;">Need to reschedule? Call <strong style="color:#111827;">${phone}</strong></p>
+
+    ${elabusAppPromo()}
   `;
 
   return shell({
@@ -449,6 +500,8 @@ export function renderSpecimenDelivered(p: CommonPatientParams & {
 
     <p style="margin:0 0 4px;color:#6b7280;font-size:13px;line-height:1.7;text-align:center;">Save your tracking ID. If results don't appear, share it with your provider — they can locate your sample instantly.</p>
     <p style="margin:12px 0 0;color:#9ca3af;font-size:12px;text-align:center;">Questions? Call <strong style="color:#111827;">${phone}</strong></p>
+
+    ${elabusAppPromo()}
   `;
 
   return shell({
