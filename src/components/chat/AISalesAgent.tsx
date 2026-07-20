@@ -4,7 +4,11 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { BOOKING_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
+import { Turnstile } from '@/components/security/Turnstile';
 
+// Cloudflare Turnstile — bot gate on the paid LLM endpoint. Inert until the
+// site key is configured, so the widget never renders in that case.
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
 
 interface Message {
   role: 'user' | 'assistant';
@@ -21,6 +25,11 @@ export const AISalesAgent: React.FC = () => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Turnstile: single-use token per request; nonce remounts the widget for a
+  // fresh token after each send. captchaFailed fails OPEN (server is the gate).
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaFailed, setCaptchaFailed] = useState(false);
+  const [captchaNonce, setCaptchaNonce] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const bookingModal = useBookingModalSafe();
@@ -43,6 +52,10 @@ export const AISalesAgent: React.FC = () => {
     const textToSend = messageText || input;
     if (!textToSend.trim() || isLoading) return;
 
+    // Turnstile guard: wait for a token before spending on the model, unless
+    // the widget itself errored (fail open — the server is the real gate).
+    if (TURNSTILE_SITE_KEY && !captchaToken && !captchaFailed) return;
+
     const userMessage: Message = { role: 'user', content: textToSend };
     setMessages(prev => [...prev, userMessage]);
     setInput('');
@@ -61,7 +74,8 @@ export const AISalesAgent: React.FC = () => {
             messages: [...messages, userMessage].map(m => ({
               role: m.role,
               content: m.content
-            }))
+            })),
+            captchaToken,
           }),
         }
       );
@@ -125,6 +139,11 @@ export const AISalesAgent: React.FC = () => {
       }]);
     } finally {
       setIsLoading(false);
+      // Token is single-use — remount the widget for a fresh one next send.
+      if (TURNSTILE_SITE_KEY) {
+        setCaptchaToken(null);
+        setCaptchaNonce(n => n + 1);
+      }
     }
   };
 
@@ -276,6 +295,15 @@ export const AISalesAgent: React.FC = () => {
 
         {/* Input */}
         <div className="p-4 border-t border-border bg-background rounded-b-2xl">
+          {TURNSTILE_SITE_KEY && (
+            <Turnstile
+              key={captchaNonce}
+              siteKey={TURNSTILE_SITE_KEY}
+              onToken={setCaptchaToken}
+              onError={() => setCaptchaFailed(true)}
+              className="mb-2 flex justify-center"
+            />
+          )}
           <div className="flex gap-2">
             <input
               ref={inputRef}
