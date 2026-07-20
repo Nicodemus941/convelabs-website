@@ -400,6 +400,37 @@ async function checkRateLimit(supabase: any, bucket: string, windowSeconds: numb
   }
 }
 
+// ── CLOUDFLARE TURNSTILE (bot gate on the paid Sonnet call) ──────────
+// Fail-CLOSED on a missing/forged token (the abuse case). Fail-OPEN on a
+// siteverify network error OR our OWN secret misconfig, so a config slip
+// never breaks the funnel. Mirrors the E-Labus / ai-sales-chat pattern.
+async function verifyTurnstile(secret: string, token: string | undefined, ip?: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const form = new URLSearchParams();
+    form.append('secret', secret);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await resp.json();
+    if (data?.success === true) return true;
+    const codes: string[] = Array.isArray(data?.['error-codes']) ? data['error-codes'] : [];
+    console.warn('[turnstile] failed:', JSON.stringify(codes.length ? codes : data));
+    if (codes.some(c => ['invalid-input-secret', 'missing-input-secret', 'bad-request', 'internal-error'].includes(c))) {
+      console.error('[turnstile] CONFIG ERROR — failing open. Fix TURNSTILE_SECRET_KEY.');
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('[turnstile] siteverify unreachable, failing open');
+    return true;
+  }
+}
+
 // ═══════ HANDLER ═════════════════════════════════════════════════════
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -468,6 +499,42 @@ Deno.serve(async (req) => {
         escalated: false,
         rateLimited: true,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── TURNSTILE BOT GATE (anon callers only) ───────────────────
+    // This is the LIVE chatbot — its widget must be sending captchaToken
+    // before we enforce, or every real visitor 403s. TURNSTILE_SECRET_KEY is
+    // project-wide (shared with ai-sales-chat), so enforcement here is gated
+    // behind a SEPARATE opt-in flag. Rollout: (1) deploy the frontend that
+    // sends captchaToken, (2) set TURNSTILE_ENFORCE_CHATBOT=1. Gates anon
+    // visitors before the paid Sonnet call; logged-in users skip.
+    const TURNSTILE_SECRET = Deno.env.get('TURNSTILE_SECRET_KEY');
+    const enforceFlag = (Deno.env.get('TURNSTILE_ENFORCE_CHATBOT') || '').toLowerCase();
+    const TURNSTILE_ENFORCE = enforceFlag === '1' || enforceFlag === 'true';
+    if (TURNSTILE_SECRET && TURNSTILE_ENFORCE) {
+      let isAnon = false;
+      try {
+        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+        if (jwt) {
+          const { data: { user } } = await supabase.auth.getUser(jwt);
+          isAnon = (user as any)?.is_anonymous === true || !user;
+        } else {
+          isAnon = true;
+        }
+      } catch { isAnon = true; }
+      if (isAnon) {
+        const ip = req.headers.get('CF-Connecting-IP') || clientIp || undefined;
+        const ok = await verifyTurnstile(TURNSTILE_SECRET, (body as any)?.captchaToken, ip);
+        if (!ok) {
+          return new Response(JSON.stringify({
+            conversationId: conversationId || null,
+            reply: "Quick security check didn't clear — please refresh the page and try again, or text Nico at (941) 527-9169.",
+            suggestedActions: [{ label: 'Text Nico', url: 'sms:+19415279169' }],
+            escalated: false,
+            securityCheckFailed: true,
+          }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
     }
 
     // ── CONVERSATION SETUP ───────────────────────────────────────

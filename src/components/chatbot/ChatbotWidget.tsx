@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageCircle, X, Send, Loader2, Sparkles, Heart, Building2, Link as LinkIcon, Phone, ExternalLink, Crown } from 'lucide-react';
 import { trackEvent } from '@/lib/posthog';
+import { Turnstile } from '@/components/security/Turnstile';
+
+// Cloudflare Turnstile — bot gate on the paid Sonnet endpoint. Inert (widget
+// never renders, token never required) until the site key is configured.
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
 
 /**
  * ChatbotWidget — "Ask Nico" landing-page assistant.
@@ -93,6 +98,35 @@ const ChatbotWidget: React.FC = () => {
     return window.localStorage.getItem(LS_CONVO_KEY);
   });
 
+  // ── Turnstile token (single-use per request) ──
+  // Refs mirror state so the async send reads the freshest token/flag without
+  // a stale closure. captchaFailed fails OPEN client-side (server is the gate).
+  const [captchaNonce, setCaptchaNonce] = useState(0);
+  const captchaTokenRef = useRef<string | null>(null);
+  const captchaFailedRef = useRef<boolean>(false);
+  const onCaptchaToken = (t: string | null) => { captchaTokenRef.current = t; };
+  const onCaptchaError = () => { captchaFailedRef.current = true; };
+  // Wait briefly for a fresh token before spending on the model. Managed mode
+  // usually resolves in ~1s; we cap the wait so a real user never hangs.
+  const waitForToken = (ms = 4000): Promise<void> => {
+    if (!TURNSTILE_SITE_KEY) return Promise.resolve();
+    if (captchaTokenRef.current || captchaFailedRef.current) return Promise.resolve();
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const iv = setInterval(() => {
+        if (captchaTokenRef.current || captchaFailedRef.current || Date.now() - start > ms) {
+          clearInterval(iv);
+          resolve();
+        }
+      }, 150);
+    });
+  };
+  const resetCaptcha = () => {
+    if (!TURNSTILE_SITE_KEY) return;
+    captchaTokenRef.current = null;
+    setCaptchaNonce(n => n + 1); // remount widget → fresh single-use token
+  };
+
   // Smart auto-scroll to newest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -162,14 +196,17 @@ const ChatbotWidget: React.FC = () => {
     setShowContact(false);
     setMessages(prev => [...prev, { role: 'human', content: `Thanks${cName ? `, ${cName.split(' ')[0]}` : ''}! Nico will follow up personally — you'll hear back here, and by text/email too.`, ts: Date.now() }]);
     try {
+      await waitForToken();
       await supabase.functions.invoke('chatbot', {
         body: {
           visitorId, conversationId,
           message: '[contact submitted]',
           contact: { name: cName.trim() || null, phone: cPhone.trim() || null, email: cEmail.trim() || null },
           landingUrl: window.location.pathname,
+          captchaToken: captchaTokenRef.current,
         },
       });
+      resetCaptcha();
     } catch { /* non-blocking — owner still gets pinged on next poll/escalation */ }
   };
 
@@ -201,6 +238,7 @@ const ChatbotWidget: React.FC = () => {
   const sendToBackend = async (message: string, leadPath?: 'patient' | 'provider' | 'lab_request') => {
     setSending(true);
     try {
+      await waitForToken();
       const utm = new URLSearchParams(window.location.search);
       const { data, error } = await supabase.functions.invoke('chatbot', {
         body: {
@@ -212,6 +250,7 @@ const ChatbotWidget: React.FC = () => {
           utmSource: utm.get('utm_source') || null,
           utmCampaign: utm.get('utm_campaign') || null,
           referrer: document.referrer || null,
+          captchaToken: captchaTokenRef.current,
         },
       });
       if (error || (data as any)?.error) {
@@ -243,6 +282,7 @@ const ChatbotWidget: React.FC = () => {
       ]);
     } finally {
       setSending(false);
+      resetCaptcha(); // token is single-use — mint a fresh one for next send
     }
   };
 
@@ -452,6 +492,19 @@ const ChatbotWidget: React.FC = () => {
               >
                 {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               </button>
+            </div>
+          )}
+
+          {/* Turnstile bot gate — mounts on open so a token is ready before
+              the first send. Managed mode is invisible for normal traffic. */}
+          {TURNSTILE_SITE_KEY && (
+            <div className="bg-gray-50 border-t border-gray-100 px-4 pt-2 flex justify-center flex-shrink-0">
+              <Turnstile
+                key={captchaNonce}
+                siteKey={TURNSTILE_SITE_KEY}
+                onToken={onCaptchaToken}
+                onError={onCaptchaError}
+              />
             </div>
           )}
 
