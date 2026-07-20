@@ -85,6 +85,31 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // ─── ABUSE VELOCITY CAP (card-testing defense) ──────────────────
+    // The anon key is public, so a bot can POST here in a loop to create
+    // Stripe Checkout Sessions and validate stolen cards (real fees + fraud
+    // flags). Cap session creation per-IP (catches single-source loops) and
+    // globally (catches distributed botnets). Fail-OPEN so a limiter hiccup
+    // never blocks a real booking. Turnstile + Stripe Radar are the full fix.
+    const _clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+    try {
+      const [ipHit, globalHit] = await Promise.all([
+        supabaseClient.rpc('hit_rate_limit', { p_bucket: `checkout:ip:${_clientIp}`, p_window_seconds: 600, p_max: 8 }),   // 8 / 10min / IP
+        supabaseClient.rpc('hit_rate_limit', { p_bucket: `checkout:global`, p_window_seconds: 600, p_max: 100 }),          // 100 / 10min total
+      ]);
+      const ipOk = ipHit.error ? true : !!(ipHit.data as any)?.allowed;
+      const globalOk = globalHit.error ? true : !!(globalHit.data as any)?.allowed;
+      if (!ipOk || !globalOk) {
+        console.warn(`[checkout] rate-limited ip=${_clientIp} ipOk=${ipOk} globalOk=${globalOk}`);
+        return new Response(JSON.stringify({
+          error: "Too many booking attempts from your connection. Please wait a minute and try again, or call us at (941) 527-9169.",
+        }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    } catch (rlErr) {
+      console.warn('[checkout] rate-limit check failed (fail-open):', rlErr);
+    }
+
     let {
       serviceType,
       serviceName,

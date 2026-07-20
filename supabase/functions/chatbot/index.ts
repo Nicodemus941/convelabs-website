@@ -375,6 +375,31 @@ async function sendEscalationSMS(supabase: any, conversationId: string, reason: 
   await sendOwnerSms(`🔥 Ask-Nico escalation\nReason: ${reason}\nLast msg: ${lastUserMsg.substring(0, 120)}\n\nOpen & reply: ${PUBLIC_SITE_URL}/c/${token}`);
 }
 
+// ═══════ ABUSE RATE LIMITING ═════════════════════════════════════════
+// The anon key is in the page JS, so a bot can POST here directly and each
+// POST is one paid Sonnet call. hit_rate_limit() enforces per-IP + global
+// caps in the DB (see 20260720_abuse_rate_limits.sql). Fail-OPEN on any RPC
+// error so a limiter hiccup never takes the chatbot down — Turnstile is the
+// hard gate; this is defense-in-depth against volume.
+function getClientIp(req: Request): string {
+  const xff = req.headers.get('x-forwarded-for') || '';
+  const first = xff.split(',')[0].trim();
+  return first || req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+}
+
+async function checkRateLimit(supabase: any, bucket: string, windowSeconds: number, max: number): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc('hit_rate_limit', {
+      p_bucket: bucket, p_window_seconds: windowSeconds, p_max: max,
+    });
+    if (error) { console.warn('[rate-limit] rpc error (fail-open):', error.message); return true; }
+    return !!(data as any)?.allowed;
+  } catch (e) {
+    console.warn('[rate-limit] exception (fail-open):', e);
+    return true;
+  }
+}
+
 // ═══════ HANDLER ═════════════════════════════════════════════════════
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -421,6 +446,29 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // ── ABUSE RATE LIMITS (per-IP + global) ──────────────────────
+    // Each POST is one paid Sonnet call. A bot that omits conversationId
+    // opens a fresh convo every time, sailing past the per-conversation
+    // caps below — so gate on IP and a global daily ceiling up front.
+    const clientIp = getClientIp(req);
+    const [ipOk, globalOk] = await Promise.all([
+      checkRateLimit(supabase, `chatbot:ip:${clientIp}`, 3600, 30),   // 30 msgs / hour / IP
+      checkRateLimit(supabase, `chatbot:global`, 86400, 1500),        // 1500 LLM calls / day total
+    ]);
+    if (!ipOk || !globalOk) {
+      console.warn(`[chatbot] rate-limited ip=${clientIp} ipOk=${ipOk} globalOk=${globalOk}`);
+      return new Response(JSON.stringify({
+        conversationId: conversationId || null,
+        reply: "I'm getting a lot of questions right now. Please call or text Nico directly at (941) 527-9169 and he'll help you personally.",
+        suggestedActions: [
+          { label: 'Call Nico', url: 'tel:+19415279169' },
+          { label: 'Book now', url: '/book-now' },
+        ],
+        escalated: false,
+        rateLimited: true,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     // ── CONVERSATION SETUP ───────────────────────────────────────
     let history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -603,9 +651,20 @@ Deno.serve(async (req) => {
       })
       .eq('id', conversationId);
 
-    // ── FIRE ESCALATION SMS (non-blocking) ──────────────────────
+    // ── FIRE ESCALATION SMS (non-blocking, throttled) ───────────
+    // A bot can loop trigger words (refund/lawyer/…) across fresh convos to
+    // SMS-bomb Nico. Throttle owner escalation texts per-IP and globally so
+    // real escalations still reach him but a flood is capped.
     if (escalate && escalationReason) {
-      sendEscalationSMS(supabase, conversationId, escalationReason, userMessage).catch(() => {});
+      const [escIpOk, escGlobalOk] = await Promise.all([
+        checkRateLimit(supabase, `chatbot:esc:ip:${clientIp}`, 600, 3),   // ≤3 / 10 min / IP
+        checkRateLimit(supabase, `chatbot:esc:global`, 3600, 20),         // ≤20 / hour total
+      ]);
+      if (escIpOk && escGlobalOk) {
+        sendEscalationSMS(supabase, conversationId, escalationReason, userMessage).catch(() => {});
+      } else {
+        console.warn(`[chatbot] escalation SMS throttled ip=${clientIp}`);
+      }
     }
 
     return new Response(JSON.stringify({

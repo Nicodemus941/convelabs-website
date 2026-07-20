@@ -1,12 +1,39 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Abuse guardrails — this endpoint is public (verify_jwt=false) and each call
+// hits a paid LLM gateway. Cap conversation size and rate-limit per IP + global.
+const MAX_MESSAGES = 30;
+const MAX_CHARS_PER_MESSAGE = 4000;
+
+function getClientIp(req: Request): string {
+  const xff = req.headers.get('x-forwarded-for') || '';
+  const first = xff.split(',')[0].trim();
+  return first || req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+}
+
+async function checkRateLimit(supabase: any, bucket: string, windowSeconds: number, max: number): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc('hit_rate_limit', {
+      p_bucket: bucket, p_window_seconds: windowSeconds, p_max: max,
+    });
+    if (error) { console.warn('[rate-limit] rpc error (fail-open):', error.message); return true; }
+    return !!(data as any)?.allowed;
+  } catch (e) {
+    console.warn('[rate-limit] exception (fail-open):', e);
+    return true;
+  }
+}
 
 const SYSTEM_PROMPT = `You are ConveLabs' AI Sales Assistant - a friendly, knowledgeable representative helping patients schedule appointments and answer questions about our premium mobile phlebotomy services in Central Florida.
 
@@ -112,7 +139,38 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    console.log('AI Sales Chat request received:', { messageCount: messages?.length });
+    // ── INPUT CAPS ───────────────────────────────────────────────
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return new Response(JSON.stringify({ error: 'messages required' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (messages.length > MAX_MESSAGES) {
+      return new Response(JSON.stringify({
+        error: "This chat has gotten long — please call us at (941) 527-9169 to continue.",
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const safeMessages = messages.slice(-MAX_MESSAGES).map((m: any) => ({
+      role: m?.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m?.content || '').slice(0, MAX_CHARS_PER_MESSAGE),
+    }));
+
+    // ── ABUSE RATE LIMITS (per-IP + global) ──────────────────────
+    // Public endpoint hitting a paid LLM gateway — gate volume before spend.
+    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const clientIp = getClientIp(req);
+    const [ipOk, globalOk] = await Promise.all([
+      checkRateLimit(supabase, `aisales:ip:${clientIp}`, 3600, 30),   // 30 / hour / IP
+      checkRateLimit(supabase, `aisales:global`, 86400, 1500),        // 1500 / day total
+    ]);
+    if (!ipOk || !globalOk) {
+      console.warn(`[ai-sales-chat] rate-limited ip=${clientIp} ipOk=${ipOk} globalOk=${globalOk}`);
+      return new Response(JSON.stringify({
+        error: "We're getting a lot of questions right now. Please call us at (941) 527-9169.",
+      }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    console.log('AI Sales Chat request received:', { messageCount: safeMessages.length });
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -124,7 +182,7 @@ serve(async (req) => {
         model: 'google/gemini-2.5-flash',
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          ...messages,
+          ...safeMessages,
         ],
         stream: true,
       }),

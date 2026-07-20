@@ -21,6 +21,13 @@ interface VerificationResult {
   safe: boolean;
   reason?: string;
   flagged?: boolean;
+  /**
+   * True  = recipient resolves to a real patient in tenant_patients.
+   * False = recipient is NOT in the registry (unknown number/email).
+   * undefined = could not determine (empty registry / lookup error).
+   * Callers use this to block anonymous sends to arbitrary recipients.
+   */
+  inRegistry?: boolean;
 }
 
 /**
@@ -130,8 +137,10 @@ export async function verifyRecipientPhone(
     });
 
     if (!match) {
-      // Phone not in registry — new patient, allow but flag
-      return { safe: true, flagged: true, reason: 'Phone not found in patient registry' };
+      // Phone not in registry — new patient, allow but flag.
+      // inRegistry:false lets anti-abuse callers block anonymous sends to
+      // arbitrary numbers (toll-fraud / smishing via the public anon key).
+      return { safe: true, flagged: true, inRegistry: false, reason: 'Phone not found in patient registry' };
     }
 
     // Compare names
@@ -162,11 +171,12 @@ export async function verifyRecipientPhone(
       return {
         safe: false,
         flagged: true,
+        inRegistry: true,
         reason: `Phone belongs to "${registryName}" but appointment is for "${apptName}"`,
       };
     }
 
-    return { safe: true };
+    return { safe: true, inRegistry: true };
   } catch (err) {
     console.error('Phone verification error (allowing send):', err);
     return { safe: true, flagged: true, reason: 'Verification check failed' };
