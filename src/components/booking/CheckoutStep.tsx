@@ -20,6 +20,12 @@ import { Shield, Gift, Tag, Plus, Layers, X, UserPlus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
+import { Turnstile } from '@/components/security/Turnstile';
+
+// Cloudflare Turnstile — bot gate on the checkout edge fn (card-testing
+// defense). Inert (widget never renders, no token written) until the site
+// key is configured at build time.
+const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined;
 
 interface FamilyMember {
   name: string;
@@ -82,6 +88,19 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const methods = useFormContext<BookingFormValues>();
   const { watch, getValues } = methods;
   const [tipAmount, setTipAmount] = useState(0);
+  // Turnstile: widget writes its single-use token to sessionStorage; the
+  // checkout service reads + clears it. Remount (nonce) after any checkout
+  // error so a retry gets a fresh token.
+  const [captchaNonce, setCaptchaNonce] = useState(0);
+  const onCaptchaToken = (t: string | null) => {
+    try {
+      if (t) sessionStorage.setItem('convelabs_captcha_token', t);
+      else sessionStorage.removeItem('convelabs_captcha_token');
+    } catch { /* private mode — server fails open on network, this is best-effort */ }
+  };
+  React.useEffect(() => {
+    if (checkoutError && TURNSTILE_SITE_KEY) setCaptchaNonce((n) => n + 1);
+  }, [checkoutError]);
   const [termsFlashing, setTermsFlashing] = useState(false);
   const [showMismatchDialog, setShowMismatchDialog] = useState(false);
   const [referralCode, setReferralCode] = useState('');
@@ -1042,6 +1061,18 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
                 </a>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Turnstile bot gate — mounts here so a token is ready before Pay.
+            Managed mode is invisible for normal traffic. */}
+        {TURNSTILE_SITE_KEY && (
+          <div className="flex justify-center">
+            <Turnstile
+              key={captchaNonce}
+              siteKey={TURNSTILE_SITE_KEY}
+              onToken={onCaptchaToken}
+            />
           </div>
         )}
 

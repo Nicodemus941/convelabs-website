@@ -7,6 +7,37 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+// ── CLOUDFLARE TURNSTILE (bot gate on checkout / card-testing) ───────
+// Fail-CLOSED on a missing/forged token (the abuse case). Fail-OPEN on a
+// siteverify network error OR our OWN secret misconfig, so a config slip
+// never blocks a real booking. Mirrors the E-Labus / chatbot pattern.
+async function verifyTurnstile(secret: string, token: string | undefined, ip?: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const form = new URLSearchParams();
+    form.append('secret', secret);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await resp.json();
+    if (data?.success === true) return true;
+    const codes: string[] = Array.isArray(data?.['error-codes']) ? data['error-codes'] : [];
+    console.warn('[turnstile] checkout failed:', JSON.stringify(codes.length ? codes : data));
+    if (codes.some((c) => ['invalid-input-secret', 'missing-input-secret', 'bad-request', 'internal-error'].includes(c))) {
+      console.error('[turnstile] CONFIG ERROR — failing open. Fix TURNSTILE_SECRET_KEY.');
+      return true;
+    }
+    return false;
+  } catch (_e) {
+    console.warn('[turnstile] siteverify unreachable, failing open');
+    return true;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // SERVER-SIDE MEMBERSHIP PRICING (source of truth)
 // If the frontend forgets to apply the member discount — OR a malicious
@@ -176,7 +207,43 @@ Deno.serve(async (req) => {
       // request flow. Normal patient bookings never send this, so the radius
       // guard below applies.
       allowOutOfArea = false,
+      // Cloudflare Turnstile token from the booking pay step (bot gate).
+      captchaToken = null,
     } = await req.json();
+
+    // ── TURNSTILE BOT GATE (anon callers only, flag-gated) ──────────
+    // create-appointment-checkout is the revenue path; enforcing before the
+    // token-sending frontend is live would block real bookings. So enforce
+    // ONLY when TURNSTILE_ENFORCE_CHECKOUT=1 (AND the secret is set). Gates
+    // anonymous bookers before a Stripe session is created; logged-in
+    // patients skip. Fail-closed on missing/forged token; the helper
+    // fails-open on siteverify network error / our own misconfig.
+    const TURNSTILE_SECRET = Deno.env.get('TURNSTILE_SECRET_KEY');
+    const _enforceCheckout = (Deno.env.get('TURNSTILE_ENFORCE_CHECKOUT') || '').toLowerCase();
+    if (TURNSTILE_SECRET && (_enforceCheckout === '1' || _enforceCheckout === 'true')) {
+      let isAnon = false;
+      try {
+        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+        if (jwt) {
+          const { data: { user } } = await supabaseClient.auth.getUser(jwt);
+          isAnon = (user as any)?.is_anonymous === true || !user;
+        } else {
+          isAnon = true;
+        }
+      } catch { isAnon = true; }
+      if (isAnon) {
+        const ip = req.headers.get('CF-Connecting-IP')
+          || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+          || undefined;
+        const ok = await verifyTurnstile(TURNSTILE_SECRET, captchaToken || undefined, ip);
+        if (!ok) {
+          return new Response(JSON.stringify({
+            error: 'security_check_failed',
+            message: 'Security check failed. Please refresh the page and try again, or call (941) 527-9169.',
+          }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+    }
 
     // ─── Senior auto-pricing safety net (65+) ───────────────────────
     // If the client sent a standard mobile visit but the patient's DOB shows

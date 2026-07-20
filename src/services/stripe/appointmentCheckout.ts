@@ -103,6 +103,12 @@ export async function createAppointmentCheckoutSession(
     // is stamped with the acquisition channel. Drives CAC-per-channel report.
     const attribution = attributionForBooking();
 
+    // Cloudflare Turnstile token — the CheckoutStep widget writes it here on
+    // solve (single-use). Sent to the edge fn's bot gate; cleared after the
+    // request so each attempt uses a fresh token.
+    let captchaToken: string | null = null;
+    try { captchaToken = sessionStorage.getItem('convelabs_captcha_token'); } catch { /* private mode */ }
+
     // Read auth token DIRECTLY from localStorage — no SDK calls, no auth
     // refresh, no async lock that can hang on mobile. Guests proceed with
     // just the anon key, exactly like the rest of the public booking flow.
@@ -158,6 +164,7 @@ export async function createAppointmentCheckoutSession(
           ...params,
           userId,
           attribution,
+          captchaToken,
         }),
         signal: controller.signal,
       });
@@ -173,6 +180,9 @@ export async function createAppointmentCheckoutSession(
       return { error: `Network error: ${netErr?.message || 'unknown'}. Please try again.` };
     }
     clearTimeout(timeoutId);
+    // Single-use: drop the consumed Turnstile token so a retry mints a fresh
+    // one (CheckoutStep remounts the widget on error).
+    try { sessionStorage.removeItem('convelabs_captcha_token'); } catch { /* private mode */ }
 
     // Parse body even on non-2xx so we can surface structured errors
     // (slot_unavailable suggestions, friendly promo failure messages, etc.)
