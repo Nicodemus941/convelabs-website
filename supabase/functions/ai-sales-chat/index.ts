@@ -35,6 +35,38 @@ async function checkRateLimit(supabase: any, bucket: string, windowSeconds: numb
   }
 }
 
+// ── CLOUDFLARE TURNSTILE (bot gate on the paid LLM call) ─────────────
+// Fail-CLOSED on a missing/forged token (the abuse case). Fail-OPEN on a
+// siteverify network error OR our OWN secret misconfig, so a config slip
+// never breaks the funnel. Mirrors the E-Labus pattern.
+async function verifyTurnstile(secret: string, token: string | undefined, ip?: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const form = new URLSearchParams();
+    form.append('secret', secret);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await resp.json();
+    if (data?.success === true) return true;
+    const codes: string[] = Array.isArray(data?.['error-codes']) ? data['error-codes'] : [];
+    console.warn('[turnstile] failed:', JSON.stringify(codes.length ? codes : data));
+    // Fail OPEN on OUR misconfig (bad/missing secret) so a config slip never breaks the app:
+    if (codes.some(c => ['invalid-input-secret', 'missing-input-secret', 'bad-request', 'internal-error'].includes(c))) {
+      console.error('[turnstile] CONFIG ERROR — failing open. Fix TURNSTILE_SECRET_KEY.');
+      return true;
+    }
+    return false; // genuine bad/expired/duplicate token -> block
+  } catch (e) {
+    console.warn('[turnstile] siteverify unreachable, failing open');
+    return true;
+  }
+}
+
 const SYSTEM_PROMPT = `You are ConveLabs' AI Sales Assistant - a friendly, knowledgeable representative helping patients schedule appointments and answer questions about our premium mobile phlebotomy services in Central Florida.
 
 **CRITICAL INFORMATION:**
@@ -133,7 +165,8 @@ serve(async (req) => {
   }
 
   try {
-    const { messages } = await req.json();
+    const body = await req.json();
+    const messages = body?.messages;
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
@@ -168,6 +201,34 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         error: "We're getting a lot of questions right now. Please call us at (941) 527-9169.",
       }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── TURNSTILE BOT GATE (anon callers only) ───────────────────
+    // Inert until TURNSTILE_SECRET_KEY is set, so shipping is safe. Gates
+    // anonymous visitors before the paid model call; logged-in users skip.
+    const TURNSTILE_SECRET = Deno.env.get('TURNSTILE_SECRET_KEY');
+    if (TURNSTILE_SECRET) {
+      let isAnon = false;
+      try {
+        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+        if (jwt) {
+          const { data: { user } } = await supabase.auth.getUser(jwt);
+          isAnon = (user as any)?.is_anonymous === true || !user;
+        } else {
+          isAnon = true;
+        }
+      } catch { isAnon = true; }
+      if (isAnon) {
+        const ip = req.headers.get('CF-Connecting-IP')
+          || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+          || undefined;
+        const ok = await verifyTurnstile(TURNSTILE_SECRET, body?.captchaToken, ip);
+        if (!ok) {
+          return new Response(JSON.stringify({ error: 'Security check failed. Please refresh and try again.' }), {
+            status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
     }
 
     console.log('AI Sales Chat request received:', { messageCount: safeMessages.length });
