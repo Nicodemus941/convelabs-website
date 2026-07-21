@@ -665,7 +665,10 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
     setLookupStatus('found');
   };
 
-  const canGoToStep2 = patientName.trim() && serviceType;
+  // Phone is required so the booking confirmation + reminder SMS have a
+  // destination (phone-less bookings silently get no texts).
+  const patientPhoneDigits = (patientPhone || '').replace(/\D/g, '');
+  const canGoToStep2 = patientName.trim() && serviceType && patientPhoneDigits.length >= 10;
   const canGoToStep3 = date && time;
 
   // Compute surcharges for preview (same logic as handleSubmit)
@@ -1335,8 +1338,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                     )}
                   </div>
                   <div>
-                    <Label>Phone</Label>
+                    <Label>Phone <span className="text-red-500">*</span></Label>
                     <Input type="tel" value={patientPhone} onChange={e => setPatientPhone(e.target.value)} placeholder="(555) 123-4567" />
+                    <p className="text-xs text-muted-foreground mt-1">Required — used for the confirmation &amp; reminder texts</p>
                   </div>
                 </div>
                 <div>

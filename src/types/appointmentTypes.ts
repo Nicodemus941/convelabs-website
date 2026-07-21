@@ -126,7 +126,14 @@ export const bookingFormSchema = z.object({
     firstName: z.string().min(1, "First name is required"),
     lastName: z.string().min(1, "Last name is required"),
     email: z.string().email("Invalid email address"),
-    phone: z.string().optional(),
+    // Phone is REQUIRED — the booking confirmation + reminder SMS have no
+    // destination without it, so a phone-less booking silently gets no texts
+    // (root cause of missed confirmations). Lenient 10-digit check so real
+    // formats like "(407) 617-2064" pass. Companions below stay optional.
+    phone: z.string()
+      .trim()
+      .min(1, "Phone number is required")
+      .refine((v) => v.replace(/\D/g, "").length >= 10, "Enter a valid 10-digit phone number"),
     // DOB is REQUIRED — the phleb card + NIIMBOT tube label both depend on
     // it for patient identification at the visit. Previously optional →
     // dropped silently on bookings like Shaun Chambers (2026-05-11), forcing
