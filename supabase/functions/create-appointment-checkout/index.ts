@@ -223,8 +223,16 @@ Deno.serve(async (req) => {
     if (TURNSTILE_SECRET && (_enforceCheckout === '1' || _enforceCheckout === 'true')) {
       let isAnon = false;
       try {
-        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-        if (jwt) {
+        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+        const internalSecret = Deno.env.get('INTERNAL_FUNCTION_SECRET') || '';
+        const providedSecret = req.headers.get('x-internal-secret') || '';
+        if ((serviceKey && jwt === serviceKey) || (internalSecret && providedSecret === internalSecret)) {
+          // Trusted server-to-server caller (smoke tests, monitors, internal
+          // automation) — never Turnstile-gated. A bot only has the public
+          // anon key, never the service-role key or internal secret.
+          isAnon = false;
+        } else if (jwt) {
           const { data: { user } } = await supabaseClient.auth.getUser(jwt);
           isAnon = (user as any)?.is_anonymous === true || !user;
         } else {
