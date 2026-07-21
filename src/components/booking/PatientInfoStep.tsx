@@ -469,16 +469,16 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                 name="patientDetails.phone"
                 render={({ field, fieldState }) => (
                   <FormItem className="space-y-2">
-                    <label className="text-sm font-medium">Phone Number</label>
+                    <label className="text-sm font-medium">Phone Number <span className="text-red-500">*</span></label>
                     <FormControl>
-                      <Input 
-                        {...field} 
+                      <Input
+                        {...field}
                         placeholder="(555) 123-4567"
                         type="tel"
                       />
                     </FormControl>
                     <p className="text-xs text-muted-foreground">
-                      We'll text you 30 minutes before arrival
+                      Required — we'll text your appointment confirmation and a heads-up 30 minutes before arrival
                     </p>
                     {fieldState.error && (
                       <FormMessage>
