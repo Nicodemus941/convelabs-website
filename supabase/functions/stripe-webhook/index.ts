@@ -843,12 +843,22 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     }
 
     // Calculate the next renewal date
+    // Normalize the frequency string. The frontend stamps metadata.billing_frequency
+    // as 'annual', but this block used to check === 'annually' — no branch matched,
+    // nextRenewal stayed "new Date()" and the member looked instantly expired
+    // (hit on the 2026-07-17 live sale). Unknown values default to +1 year; the
+    // subscription.updated handler later syncs the exact date from Stripe's
+    // current_period_end either way.
+    const freqNorm = String(billingFrequency || '').toLowerCase();
     let nextRenewal = new Date();
-    if (billingFrequency === 'monthly') {
+    if (freqNorm.startsWith('month')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 1);
-    } else if (billingFrequency === 'quarterly') {
+    } else if (freqNorm.startsWith('quarter')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 3);
-    } else if (billingFrequency === 'annually') {
+    } else {
+      if (!freqNorm.startsWith('annual') && freqNorm !== 'yearly') {
+        console.warn(`[membership] unrecognized billing_frequency '${billingFrequency}' — defaulting next_renewal to +1 year`);
+      }
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
@@ -1091,6 +1101,9 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       await supabaseClient.functions.invoke('send-membership-welcome', {
         body: {
           userId,
+          // send-membership-welcome requires patient_email — this dispatch
+          // sent only `email` since birth, so every welcome 400'd silently.
+          patient_email: customerEmail,
           email: customerEmail,
           tier: welcomeTier,
           annualPriceCents,
@@ -1222,11 +1235,22 @@ async function handleSubscriptionUpdate(subscription: any) {
       .update(updatePayload)
       .eq('stripe_subscription_id', subscriptionId)
       .select('id, user_id, stripe_customer_id, stripe_subscription_id, founding_member, founding_locked_rate_cents')
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Error updating membership:', error);
       throw error;
+    }
+
+    // Benign event-order race: on a fresh purchase Stripe can deliver
+    // customer.subscription.updated BEFORE checkout.session.completed has
+    // created the user_memberships row. The old .single() threw "Cannot
+    // coerce the result to a single JSON object" here (hit twice on the
+    // 2026-07-17 live sale). Zero rows just means "not created yet" — the
+    // checkout handler creates it, and the next subscription event syncs it.
+    if (!data) {
+      console.warn(`[handleSubscriptionUpdate] no membership row yet for ${subscriptionId} — skipping (creation handler owns this)`);
+      return;
     }
 
     console.log(`Updated subscription ${subscriptionId} status to ${status}`);
@@ -1940,6 +1964,30 @@ async function handleAppointmentPayment(session: any) {
       }
     }
 
+    // PHONE FALLBACK: the booking form's phone field is optional, so metadata
+    // can arrive blank — which lands a phone-less appointment and the
+    // confirmation SMS below then has no destination and silently never sends
+    // (root cause of "I never got a confirmation text"). If we have no phone
+    // from checkout, pull it from the patient's chart record so every booking
+    // stores a phone whenever we have one on file. Non-fatal.
+    let resolvedPhone: string | null = (metadata.patient_phone && String(metadata.patient_phone).trim()) || null;
+    if (!resolvedPhone && patientId) {
+      try {
+        const { data: tp } = await supabaseClient
+          .from('tenant_patients')
+          .select('phone')
+          .eq('id', patientId)
+          .maybeSingle();
+        const regPhone = (tp as any)?.phone;
+        if (regPhone && String(regPhone).trim()) {
+          resolvedPhone = String(regPhone).trim();
+          console.log('[webhook] patient_phone backfilled from registry for new booking');
+        }
+      } catch (phoneErr) {
+        console.warn('[webhook] registry phone fallback failed (non-fatal):', phoneErr);
+      }
+    }
+
     // SLOT VALIDATION: Check if this time slot is already booked
     if (appointmentDate && appointmentTime) {
       const { count } = await supabaseClient
@@ -1968,7 +2016,7 @@ async function handleAppointmentPayment(session: any) {
         patient_id: patientId,
         patient_name: patientName,
         patient_email: metadata.patient_email || null,
-        patient_phone: metadata.patient_phone || null,
+        patient_phone: resolvedPhone,
         // When account holder booked for a saved family member, link the
         // appointment to that family_members row. The billing/booker stays
         // on patient_id; family_member_id is the visit subject.
@@ -3011,6 +3059,12 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
     displayDate = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   } catch {}
 
+  // Tracks whether we reached the patient on any channel, so we can stamp a
+  // lightweight audit on the appointment (used to answer "did they get a
+  // confirmation?"). Intentionally does NOT touch confirmation_send_count, so
+  // the 48h confirm/reschedule reminder cron keeps working unchanged.
+  let confirmationChannelSent = false;
+
   // 1. Send confirmation EMAIL via Mailgun
   if (email && MAILGUN_API_KEY) {
     const emailCheck = await verifyRecipientEmail(appointment.id, email, patientName);
@@ -3058,6 +3112,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 
         if (mgRes.ok) {
           console.log(`Confirmation email sent to ${email}`);
+          confirmationChannelSent = true;
         } else {
           const errText = await mgRes.text();
           console.error(`Mailgun error: ${mgRes.status} ${errText}`);
@@ -3097,6 +3152,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 
         if (twilioRes.ok) {
           console.log(`Confirmation SMS sent to ${phone}`);
+          confirmationChannelSent = true;
         } else {
           const errText = await twilioRes.text();
           console.error(`Twilio error: ${twilioRes.status} ${errText}`);
@@ -3104,6 +3160,22 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
       } catch (smsErr) {
         console.error('SMS send error:', smsErr);
       }
+    }
+  } else if (!phone) {
+    console.warn(`[webhook] no phone on appointment ${appointment.id} — confirmation SMS skipped`);
+  }
+
+  // Audit stamp: record that a booking confirmation went out (SMS and/or
+  // email). Non-blocking; leaves confirmation_send_count untouched so the
+  // 48h reminder cron is unaffected.
+  if (confirmationChannelSent && appointment.id) {
+    try {
+      const nowIso = new Date().toISOString();
+      await supabaseClient.from('appointments')
+        .update({ patient_confirmation_sent_at: nowIso, last_confirmation_sent_at: nowIso })
+        .eq('id', appointment.id);
+    } catch (stampErr) {
+      console.warn('[webhook] confirmation audit stamp failed (non-fatal):', stampErr);
     }
   }
 
@@ -3237,12 +3309,22 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
     }
     
     // Calculate the next renewal date
+    // Normalize the frequency string. The frontend stamps metadata.billing_frequency
+    // as 'annual', but this block used to check === 'annually' — no branch matched,
+    // nextRenewal stayed "new Date()" and the member looked instantly expired
+    // (hit on the 2026-07-17 live sale). Unknown values default to +1 year; the
+    // subscription.updated handler later syncs the exact date from Stripe's
+    // current_period_end either way.
+    const freqNorm = String(billingFrequency || '').toLowerCase();
     let nextRenewal = new Date();
-    if (billingFrequency === 'monthly') {
+    if (freqNorm.startsWith('month')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 1);
-    } else if (billingFrequency === 'quarterly') {
+    } else if (freqNorm.startsWith('quarter')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 3);
-    } else if (billingFrequency === 'annually') {
+    } else {
+      if (!freqNorm.startsWith('annual') && freqNorm !== 'yearly') {
+        console.warn(`[membership] unrecognized billing_frequency '${billingFrequency}' — defaulting next_renewal to +1 year`);
+      }
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
