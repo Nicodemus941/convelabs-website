@@ -164,7 +164,7 @@ function getAdditionalPatientPrice(visitType: string, tier: MembershipTier = 'no
 // travel fee. Leesburg / Tavares / Groveland are no longer served at all.
 export const EXTENDED_AREA_CITIES = [
   // Lake County (served towns)
-  'clermont', 'minneola', 'montverde', 'mount dora', 'eustis', 'mascotte',
+  'clermont', 'minneola', 'montverde', 'mount dora', 'eustis', 'mascotte', 'grand island',
   // Volusia County (in-radius)
   'deltona', 'debary', 'orange city', 'deland', 'lake helen',
   // Polk County (in-radius)
