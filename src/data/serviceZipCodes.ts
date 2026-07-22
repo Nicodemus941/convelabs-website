@@ -48,8 +48,8 @@ export const LAKE_ZIPS = [
   "34711", "34714", "34715", "34756",
   // Fruitland Park / Lady Lake / The Villages (Lake portion)
   "34731", "32159", "32162", "32163",
-  // Mount Dora / Eustis / Sorrento / Umatilla
-  "32757", "32726", "32727", "32776", "32784",
+  // Mount Dora / Eustis / Sorrento / Umatilla / Grand Island
+  "32757", "32726", "32727", "32776", "32784", "32735",
   // Mascotte / Howey / Astatula
   "34753", "34737", "34705",
   // NOTE: Leesburg (34748/34749/34788), Tavares (32778), and Groveland (34736)

@@ -671,10 +671,13 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
   const canGoToStep2 = patientName.trim() && serviceType && patientPhoneDigits.length >= 10;
   const canGoToStep3 = date && time;
 
-  // Compute surcharges for preview (same logic as handleSubmit)
-  const EXTENDED_CITIES_LIST = ['lake nona','celebration','kissimmee','sanford','eustis','clermont','montverde','deltona','geneva','tavares','mount dora','leesburg','groveland','mascotte','minneola','daytona beach','deland','debary','orange city'];
+  // Compute surcharges for preview — MUST mirror handleSubmit exactly.
+  // Use the shared, zip-aware isExtendedArea(city, zip) — the single source of
+  // truth (same helper handleSubmit uses). The old inline city-name list here
+  // silently drifted from that helper and missed zip-only matches (e.g. Grand
+  // Island 32735 with no city typed), under-charging the $75 distance fee.
   const previewSurcharges: { label: string; amount: number }[] = [];
-  if (city && EXTENDED_CITIES_LIST.some(c => city.toLowerCase().includes(c))) previewSurcharges.push({ label: 'Extended Area', amount: 75 });
+  if (isExtendedArea(city, zipcode)) previewSurcharges.push({ label: 'Extended Area', amount: 75 });
   if (date && [0, 6].includes(new Date(date + 'T12:00:00').getDay())) previewSurcharges.push({ label: 'Weekend', amount: 75 });
   if (time && (() => { const [t, p] = time.split(' '); const h = parseInt(t); return (p === 'PM' && h !== 12 ? h + 12 : h) >= 17; })()) previewSurcharges.push({ label: 'After-Hours', amount: 50 });
   if (date === new Date().toISOString().split('T')[0]) previewSurcharges.push({ label: 'Same-Day', amount: 100 });
