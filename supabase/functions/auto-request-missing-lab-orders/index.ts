@@ -25,6 +25,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { sendOwnerAlert } from '../_shared/alert-recipients.ts';
+import { serviceRequiresLabOrder, labOrderSkipReason } from '../_shared/lab-order-required.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -183,9 +184,12 @@ Deno.serve(async (req) => {
         skipped.push({ id: appt.id, reason: 'has_lab_order' });
         continue;
       }
-      // Skip in-office visits — they typically arrive WITH the requisition
-      if (appt.service_type === 'in-office') {
-        skipped.push({ id: appt.id, reason: 'in_office' });
+      // Services that never need a patient-supplied requisition (therapeutic
+      // phlebotomy runs on a standing order; in-office visits arrive WITH the
+      // paperwork). Ring C owner escalation is skipped too — there is nothing
+      // for the owner to rescue.
+      if (!serviceRequiresLabOrder(appt.service_type)) {
+        skipped.push({ id: appt.id, reason: labOrderSkipReason(appt.service_type) });
         continue;
       }
 

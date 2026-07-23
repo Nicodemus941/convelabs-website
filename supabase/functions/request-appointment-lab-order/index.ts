@@ -19,6 +19,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
+import { serviceRequiresLabOrder, labOrderSkipReason } from '../_shared/lab-order-required.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -97,6 +98,22 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'appointment_not_found' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // SERVICE GATE — therapeutic phlebotomy and in-office visits never need a
+    // patient-supplied requisition, so we never text/email them to upload one.
+    // Enforced here rather than only in the cron so the manual "Request lab
+    // order" button on the phleb card can't send one either.
+    if (!serviceRequiresLabOrder(appt.service_type)) {
+      const reason = labOrderSkipReason(appt.service_type);
+      console.log(`[request-lab-order] skipped appt ${appt.id} (${appt.service_type}): ${reason}`);
+      return new Response(JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason,
+        service_type: appt.service_type,
+        message: 'This service does not require the patient to upload a lab order — no message sent.',
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     let patientEmail = (appt.patient_email || '').toLowerCase().trim() || null;
