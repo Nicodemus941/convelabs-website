@@ -35,6 +35,7 @@ import NoShowAppointmentModal from './NoShowAppointmentModal';
 import AppointmentLabOrdersPanel from './AppointmentLabOrdersPanel';
 import StaffRefundButton from '@/components/admin/StaffRefundButton';
 import AssignOrgButton from '@/components/admin/AssignOrgButton';
+import AppointmentBillingPanel from '@/components/admin/AppointmentBillingPanel';
 import MarkSpecimenDeliveredButton from '@/components/admin/MarkSpecimenDeliveredButton';
 import RequestLabOrderButton from '@/components/phleb-dashboard/schedule/RequestLabOrderButton';
 import LabOrderRequestStatus from '@/components/phleb-dashboard/schedule/LabOrderRequestStatus';
@@ -484,6 +485,11 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
             currentOrgName={appt.organization_name || null}
             onAssigned={onUpdate}
           />
+
+          {/* Billing & invoice — bill-to target, editable price, send/reissue.
+              Previously there was NO way to bill an existing appointment to a
+              linked org or correct its price, forcing manual Stripe edits. */}
+          <AppointmentBillingPanel appointmentId={appt.id} onUpdate={onUpdate} />
 
           {/* Mark specimen delivered — fires org notification via DB trigger */}
           {['completed', 'specimen_delivered', 'in_progress', 'en_route'].includes(appt.status) && (
