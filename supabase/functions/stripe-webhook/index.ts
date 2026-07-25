@@ -1164,6 +1164,36 @@ async function handleSubscriptionCreated(subscription: any) {
       billingEmail: email, nextRenewal,
     });
     console.log(`[sub.created] membership ${res.created ? 'created' : 'ensured'} for ${userId} (${resolved.plan.name}, matched by ${resolved.matchedBy})`);
+
+    // ── FOUNDING-50 SEAT CLAIM (VIP) ───────────────────────────────
+    // This is the DETERMINISTIC provisioning path for /pricing purchases,
+    // and it previously never claimed a founding seat — so VIP buyers via
+    // /pricing got no seat number, badge, or $199 rate-lock even with seats
+    // open (proven live: the 2026-06-01 VIP fell through). handleMembershipSignup
+    // and the booking-bundled path both claim; this must too, at parity.
+    //
+    // claim_founding_seat is idempotent + cap-safe: it row-locks the settings
+    // row, no-ops (returns NULL) if the membership already has a number or the
+    // 50-cap is reached, and stamps founding_member_number +
+    // founding_locked_rate_cents on the row. Non-blocking — a claim failure
+    // never breaks membership creation. NO email/SMS here by design.
+    try {
+      const isVipPlan = String(resolved.plan?.name || '').toLowerCase() === 'vip';
+      const membershipId = (res as any)?.membershipId || (res as any)?.id || null;
+      if (isVipPlan && membershipId) {
+        const { data: seatNumber, error: claimErr } = await supabaseClient
+          .rpc('claim_founding_seat' as any, { p_membership_id: membershipId });
+        if (claimErr) {
+          console.warn('[sub.created][founding-50] claim RPC error (non-blocking):', claimErr.message);
+        } else if (seatNumber) {
+          console.log(`[sub.created][founding-50] assigned seat #${seatNumber} to membership ${membershipId} (user ${userId})`);
+        } else {
+          console.log(`[sub.created][founding-50] no seat assigned (cap reached or already numbered) for membership ${membershipId}`);
+        }
+      }
+    } catch (e: any) {
+      console.warn('[sub.created][founding-50] claim exception (non-blocking):', e?.message || e);
+    }
   } catch (e: any) {
     console.error('[sub.created] failed:', e?.message);
   }
