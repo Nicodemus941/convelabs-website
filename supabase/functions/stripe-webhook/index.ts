@@ -65,11 +65,10 @@ Deno.serve(async (req) => {
       // Check if this is an upgrade
       const isUpgrade = metadata.is_upgrade === 'true';
 
-      // isFoundingMember is INTENT only — the webhook calls claim_founding_seat
-      // RPC post-insert to actually assign seat number 1-50 atomically.
-      // The real "is this person a founder?" truth is founding_member_number
-      // IS NOT NULL in user_memberships. See Founding 50 system (2026-04-19).
-      const isFoundingMember = metadata.founding_member === 'true';
+      // Founding-50 is NOT driven by a checkout flag. Any VIP membership claims
+      // the next seat server-side via claim_founding_seat (cap-safe + idempotent),
+      // in handleMembershipSignup / handleSubscriptionCreated / the bundled path.
+      // Truth = user_memberships.founding_member_number IS NOT NULL.
 
       // Whitelist of known metadata.type values. Anything not on this list
       // with metadata.type SET is a client-side bug or a malicious/stale
@@ -162,11 +161,11 @@ Deno.serve(async (req) => {
       }
       // Handle membership upgrades
       else if (isUpgrade) {
-        await handleMembershipUpgrade(session, isFoundingMember, isSupernovaMember);
+        await handleMembershipUpgrade(session, isSupernovaMember);
       }
       // Handle regular membership signups (no metadata.type — legacy path)
       else {
-        await handleMembershipSignup(session, isFoundingMember, isSupernovaMember);
+        await handleMembershipSignup(session, isSupernovaMember);
       }
     }
     // Handle subscription created — deterministic, real-time membership create.
@@ -797,7 +796,7 @@ async function handleCreditPackPurchase(session: any) {
 }
 
 // Handle membership signup
-async function handleMembershipSignup(session: any, isFoundingMember = false, isSupernovaMember = false) {
+async function handleMembershipSignup(session: any, isSupernovaMember = false) {
   try {
     const customerId = session.customer;
     const subscriptionId = session.subscription;
@@ -889,8 +888,10 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
         credits_allocated_annual: planData.credits_per_year,
         next_renewal: nextRenewal.toISOString(),
         is_primary_member: true,
-        founding_member: isFoundingMember,
-        founding_member_signup_date: isFoundingMember ? new Date().toISOString() : null,
+        // founding status is owned by claim_founding_seat below (VIP only) —
+        // insert defaults, let the RPC flip them on a successful claim.
+        founding_member: false,
+        founding_member_signup_date: null,
         next_billing_override: nextBillingOverride ? nextBillingOverride.toISOString() : null,
         is_supernova_member: isSupernovaMember,
         bonus_credits: bonusCredits,
@@ -998,17 +999,17 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     }
 
     // ── FOUNDING 50 SEAT CLAIM ─────────────────────────────────────
-    // If (a) the checkout flagged this as founding intent AND (b) the
-    // plan is VIP, atomically claim the next founding seat number.
-    // The RPC serializes via row-lock on system_settings, enforces the
-    // 50-cap server-side, and sets founding_member_number +
+    // Any VIP membership claims the next founding seat. No checkout flag —
+    // "plan is VIP" is the sole signal (parity with handleSubscriptionCreated
+    // and the bundled path). The RPC serializes via row-lock on system_settings,
+    // enforces the 50-cap, and sets founding_member_number +
     // founding_locked_rate_cents on the row we just upserted.
     //
     // If the cap is already reached: RPC returns NULL, the membership
     // is still active, but the user doesn't get founding status. No
     // error thrown — graceful degradation.
     const isVipPlan = String(planData?.name || '').toLowerCase() === 'vip';
-    if (isFoundingMember && isVipPlan && (membershipData as any)?.id) {
+    if (isVipPlan && (membershipData as any)?.id) {
       try {
         const { data: seatNumber, error: claimErr } = await supabaseClient
           .rpc('claim_founding_seat' as any, { p_membership_id: (membershipData as any).id });
@@ -1065,10 +1066,6 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       }
     }
     
-    if (isFoundingMember) {
-      console.log(`User ${userId} registered as Founding Member with next billing on ${nextBillingOverride?.toISOString()}`);
-    }
-
     if (isSupernovaMember) {
       console.log(`User ${userId} registered as Supernova Member with ${bonusCredits} bonus credits`);
     }
@@ -3281,7 +3278,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 }
 
 // New function to handle upgrades
-async function handleMembershipUpgrade(session: any, isFoundingMember = false, isSupernovaMember = false) {
+async function handleMembershipUpgrade(session: any, isSupernovaMember = false) {
   try {
     const customerId = session.customer;
     const subscriptionId = session.subscription;
@@ -3430,8 +3427,11 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
           credits_allocated_annual: planData.credits_per_year,
           next_renewal: nextRenewal.toISOString(),
           is_primary_member: true,
-          founding_member: isFoundingMember,
-          founding_member_signup_date: isFoundingMember ? new Date().toISOString() : null,
+          // Founding status for an upgrade-to-VIP is claimed by
+          // handleSubscriptionCreated when the new subscription's
+          // customer.subscription.created event fires. Insert defaults here.
+          founding_member: false,
+          founding_member_signup_date: null,
           is_supernova_member: isSupernovaMember,
           bonus_credits: bonusCredits,
           promotion_locked_price: promotionLockedPrice

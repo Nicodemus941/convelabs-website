@@ -238,13 +238,12 @@ Deno.serve(async (req) => {
       return corsResponse(500, { error: 'Failed to create customer' });
     }
     
-    // NOTE (2026-04-19): removed the pre-Aug-1-2025 launch-window check.
-    // "Founding Member" status is now determined server-side via the
-    // Founding 50 seat-claim RPC in stripe-webhook (claim_founding_seat),
-    // not a date window. Membership begins the moment payment clears —
-    // no more "begins August 1st" messaging anywhere.
-    const isFoundingMember = false; // kept only to satisfy downstream references; stale concept
-    console.log('Legacy isFoundingMember flag (unused — real check now in webhook):', isFoundingMember);
+    // FOUNDING 50: there is intentionally NO founding flag on the checkout.
+    // Founding status is claimed entirely server-side in stripe-webhook — for
+    // any VIP plan — via the claim_founding_seat RPC (cap-safe + idempotent).
+    // The truth is user_memberships.founding_member_number IS NOT NULL. Do NOT
+    // reintroduce a checkout-level founding_member flag: it would be a second,
+    // divergent source of truth that the webhook ignores.
 
     // Define success and cancel URLs with origin or fallback
     const origin = req.headers.get('origin') || 'https://www.convelabs.com';
@@ -345,7 +344,7 @@ Deno.serve(async (req) => {
           billing_frequency: billingFrequency,
           is_concierge_plan: isConciergePlan ? 'true' : 'false',
           patient_count: patientCount?.toString() || '0',
-          founding_member: isFoundingMember ? 'true' : 'false',
+          // (no founding_member flag — claimed server-side for VIP; see above)
           is_guest_checkout: isGuestCheckout ? 'true' : 'false',
           guest_email: isGuestCheckout ? guestEmail : null,
           is_supernova_member: isSupernovaMember && billingFrequency === 'annual' && !isEssentialCare ? 'true' : 'false',
