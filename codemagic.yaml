@@ -227,3 +227,34 @@ workflows:
       google_play:
         credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
         track: internal
+
+  # ---------------- PHLEB (ConveLabs Pro) · OTA web bundle ----------------
+  # Ships web/UI fixes to already-installed ConveLabs Pro apps over-the-air
+  # (no store submission). Build the phleb web bundle, then publish it to the
+  # self-hosted Capgo registry. GRACEFUL: publish-ota.mjs exits 0 if
+  # SUPABASE_SERVICE_ROLE_KEY is empty, so the lane never breaks a build before
+  # the secret is wired into the `ota_publish` env group.
+  #
+  # Env group `ota_publish` must provide (mark Secure):
+  #   SUPABASE_URL=https://yluyonhrxxtyuiyrdixl.supabase.co
+  #   SUPABASE_SERVICE_ROLE_KEY=<service role key>
+  # Never OTA a change Apple/Google must review (new native plugin, permission,
+  # IAP, or core-purpose change) — cut a native build instead and bump
+  # OTA_MIN_NATIVE_BUILD to that build number.
+  phleb-web-ota:
+    name: ConveLabs Pro · Web OTA
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+        - ota_publish
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build phleb web bundle (prod)
+        script: npm run build:phleb
+      - name: Publish OTA bundle
+        script: npm run ota:publish:phleb

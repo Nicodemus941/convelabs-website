@@ -9,6 +9,16 @@ import { Capacitor } from '@capacitor/core';
 export async function initNativeApp(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
 
+  // OTA brick-protection handshake — must run every launch, as early as
+  // possible, so a freshly applied bundle isn't auto-rolled-back. Safe no-op
+  // if the updater plugin isn't present.
+  try {
+    const { initOta } = await import('@/lib/native/ota');
+    await initOta();
+  } catch (err) {
+    console.warn('[native] initOta skipped:', err);
+  }
+
   try {
     const [{ SplashScreen }, { StatusBar, Style }, { App }, { Keyboard }] = await Promise.all([
       import('@capacitor/splash-screen'),

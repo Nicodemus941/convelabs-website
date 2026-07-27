@@ -23,6 +23,26 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   backgroundColor: '#ffffff',
   plugins: {
+    // ── Over-the-air updates (self-hosted Capgo on Supabase) ──────────────
+    // Ships web/UI fixes to installed apps without a store submission. The
+    // bundle is the same client JS already inside the store binary, so this is
+    // not a "core purpose"/IAP/permission change (never OTA those — App Store
+    // 3.3.1 requires a native review for that).
+    //   updateUrl  -> app-ota-check edge fn (returns newest compatible bundle)
+    //   statsUrl:'' -> no Capgo cloud; we self-host entirely
+    //   autoUpdate  -> check on launch/foreground automatically
+    //   directUpdate:false -> apply on NEXT cold start, never mid-session
+    //   appReadyTimeout -> if a new bundle never calls notifyAppReady() within
+    //                      10s it is auto-rolled-back to the last good bundle
+    CapacitorUpdater: {
+      updateUrl: 'https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/app-ota-check',
+      statsUrl: '',
+      autoUpdate: true,
+      directUpdate: false,
+      appReadyTimeout: 10000,
+      autoDeleteFailed: true,
+      autoDeletePrevious: true,
+    },
     SplashScreen: {
       // We hide the splash manually from initNativeApp() once React has booted,
       // so the user never sees a white flash between splash and the dashboard.
