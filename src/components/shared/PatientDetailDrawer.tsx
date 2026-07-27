@@ -141,19 +141,29 @@ const PatientDetailDrawer: React.FC<Props> = ({
         .ilike('patient_name', patientName)
         .order('appointment_date', { ascending: false })
         .limit(50);
-      // Filter client-side to this org (or include ones via junction too)
-      const apptIds = (appts || []).map((a: any) => a.id);
-      let junctionApptIds: Set<string> = new Set();
-      if (apptIds.length > 0) {
-        const { data: junction } = await supabase.from('appointment_organizations')
-          .select('appointment_id')
-          .in('appointment_id', apptIds)
-          .eq('organization_id', organizationId);
-        junctionApptIds = new Set((junction || []).map((j: any) => j.appointment_id));
+      // Scope to org ONLY when an org is provided (admin org-drawer case).
+      // The phleb directory opens this drawer with NO org (direct/mobile
+      // patients have organization_id = null), and the old code filtered
+      // every visit out → the chart always showed "No visits yet". When
+      // organizationId is empty we show ALL of the patient's visits
+      // (patient-centric) — which is what the phleb needs.
+      let filtered: any[];
+      if (!organizationId) {
+        filtered = (appts || []);
+      } else {
+        const apptIds = (appts || []).map((a: any) => a.id);
+        let junctionApptIds: Set<string> = new Set();
+        if (apptIds.length > 0) {
+          const { data: junction } = await supabase.from('appointment_organizations')
+            .select('appointment_id')
+            .in('appointment_id', apptIds)
+            .eq('organization_id', organizationId);
+          junctionApptIds = new Set((junction || []).map((j: any) => j.appointment_id));
+        }
+        filtered = (appts || []).filter((a: any) =>
+          a.organization_id === organizationId || junctionApptIds.has(a.id)
+        );
       }
-      const filtered = (appts || []).filter((a: any) =>
-        a.organization_id === organizationId || junctionApptIds.has(a.id)
-      );
       setAppointments(filtered as Appointment[]);
 
       // 3. Specimen deliveries for those appointments (optional — enriches timeline)
@@ -361,7 +371,7 @@ const PatientDetailDrawer: React.FC<Props> = ({
                 {appointments.length === 0 ? (
                   <div className="bg-white border border-dashed rounded-lg p-8 text-center">
                     <Calendar className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-sm text-gray-500">No visits yet for this org.</p>
+                    <p className="text-sm text-gray-500">{organizationId ? 'No visits yet for this org.' : 'No visits on file yet.'}</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
