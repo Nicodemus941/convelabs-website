@@ -235,7 +235,9 @@ workflows:
   # SUPABASE_SERVICE_ROLE_KEY is empty, so the lane never breaks a build before
   # the secret is wired into the `ota_publish` env group.
   #
-  # Env group `ota_publish` must provide (mark Secure):
+  # Add these two vars to the EXISTING `convelabs_web` env group (mark Secure)
+  # so no new group is needed (a reference to a non-existent group hard-fails
+  # the build at parse time, before the graceful script gate can run):
   #   SUPABASE_URL=https://yluyonhrxxtyuiyrdixl.supabase.co
   #   SUPABASE_SERVICE_ROLE_KEY=<service role key>
   # Never OTA a change Apple/Google must review (new native plugin, permission,
@@ -249,7 +251,6 @@ workflows:
       <<: *env_versions
       groups:
         - convelabs_web
-        - ota_publish
     cache: *cache_cfg
     scripts:
       - name: Install deps
