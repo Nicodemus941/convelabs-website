@@ -119,7 +119,10 @@ const AppointmentCard: React.FC<AppointmentCardProps> = ({ appointment, phleboto
     // appointment had >1 lab order. Mary Rienzi 5/1/2026 had 3 files; only
     // the first opened until this fix.
     const raw = appointment.lab_order_file_path;
-    const paths = (raw.includes('\n') ? raw.split('\n') : raw.split(','))
+    // Newline-delimited list only. Never comma-split — filenames legitimately
+    // contain commas ("BURNSIDE, LAUREN.jpg") and splitting on comma shreds
+    // them into non-existent paths so nothing renders.
+    const paths = raw.split('\n')
       .map((p) => p.trim())
       .filter(Boolean);
     for (const path of paths) {
