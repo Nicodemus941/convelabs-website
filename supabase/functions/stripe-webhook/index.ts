@@ -85,6 +85,14 @@ Deno.serve(async (req) => {
         'org_subscription',
         'partnership',
         'provider_plan',
+        // 'membership' — stamped by create-checkout-session on EVERY membership
+        // signup. It was missing here, so every membership checkout threw
+        // "unknown metadata.type" and aborted the session handler. Maria
+        // Tejedor (Founding #4, 2026-07-28 20:01) is the case that surfaced it:
+        // she paid, the session handler died, and only handleSubscriptionCreated
+        // (customer.subscription.created) saved the membership + founding seat.
+        // The legacy signup path below is the intended handler for this type.
+        'membership',
       ]);
       if (metadata.type && !KNOWN_TYPES.has(metadata.type)) {
         throw new Error(
