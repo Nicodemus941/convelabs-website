@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyBmEL_MMRZzXZCC0FFtvsudRtQAO_naGQo</string>
+	<key>GCM_SENDER_ID</key>
+	<string>798300837388</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.convelabs.phleb</string>
+	<key>PROJECT_ID</key>
+	<string>convelabs-booking-app</string>
+	<key>STORAGE_BUCKET</key>
+	<string>convelabs-booking-app.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:798300837388:ios:3c647ae7a5d54cd1278029</string>
+	<key>DATABASE_URL</key>
+	<string>https://convelabs-booking-app.firebaseio.com</string>
+</dict>
+</plist>
