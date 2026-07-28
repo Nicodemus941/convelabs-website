@@ -17,6 +17,11 @@
 definitions:
   env_versions: &env_versions
     node: 22
+    # Capacitor 8's Android libraries target Java 21. Without this the CI
+    # machine's default JDK compiles with an older source level and every
+    # :capacitor-*:compileReleaseJavaWithJavac task dies with
+    # "error: invalid source release: 21".
+    java: 21
   cache_cfg: &cache_cfg
     cache_paths:
       - $HOME/.npm
