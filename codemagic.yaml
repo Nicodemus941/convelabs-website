@@ -109,10 +109,10 @@ workflows:
             -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD
     artifacts:
       - android/app/build/outputs/**/*.aab
-    publishing:
-      google_play:
-        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-        track: internal
+    # No `publishing: google_play:` — see the note on android-phleb. An unset
+    # $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS fails validation before the build
+    # starts. Upload the AAB artifact to Play manually until a Play service
+    # account exists.
 
   # ---------------- PHLEB (ConveLabs Pro) ----------------
   ios-phleb:
@@ -221,10 +221,13 @@ workflows:
             -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD
     artifacts:
       - android/app/build/outputs/**/*.aab
-    publishing:
-      google_play:
-        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-        track: internal
+    # NOTE: no `publishing: google_play:` here. Codemagic validates publishing
+    # credentials BEFORE preparing the build machine, so pointing at an unset
+    # $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS killed the build at step 0 with
+    # "Expecting value: line 1 column 1" (it tried to JSON-parse an empty
+    # string). The signed AAB is published as an artifact instead and uploaded
+    # to Play manually. To re-enable auto-publish, create a Play service
+    # account, store its JSON in that env var, then restore the block.
 
   # ---------------- PHLEB (ConveLabs Pro) · OTA web bundle ----------------
   # Ships web/UI fixes to already-installed ConveLabs Pro apps over-the-air
