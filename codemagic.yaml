@@ -102,6 +102,10 @@ workflows:
       - name: Build AAB
         script: |
           cd android
+          # gradlew is committed from a Windows checkout, so the exec bit can be
+          # missing -> `./gradlew` exits 126 ("command not executable"). chmod
+          # here as a belt-and-braces guard on top of the git 100755 mode.
+          chmod +x ./gradlew
           ./gradlew bundleRelease \
             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks \
             -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
@@ -214,6 +218,10 @@ workflows:
       - name: Build AAB
         script: |
           cd android
+          # gradlew is committed from a Windows checkout, so the exec bit can be
+          # missing -> `./gradlew` exits 126 ("command not executable"). chmod
+          # here as a belt-and-braces guard on top of the git 100755 mode.
+          chmod +x ./gradlew
           ./gradlew bundleRelease \
             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks \
             -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
