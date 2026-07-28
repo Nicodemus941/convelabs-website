@@ -5,6 +5,7 @@ import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crow
 import { toast } from 'sonner';
 import MemberOtpUnlockButton from './MemberOtpUnlockButton';
 import JoinWaitlistButton from './JoinWaitlistButton';
+import { findNextAvailable, type NextAvailable } from '@/lib/nextAvailableSlot';
 import { useFormContext } from 'react-hook-form';
 import { 
   FormField, 
@@ -243,6 +244,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   // Hormozi: every "no" is a revenue conversation if framed right.
   const [unlockSlot, setUnlockSlot] = useState<{ time: string; requiredTier?: MemberTier; reason?: string } | null>(null);
   const [heldSlots, setHeldSlots] = useState<Set<string>>(new Set());
+  // Real "next available" for the sold-out empty state. Offering a bare
+  // "try tomorrow" sent patients into a click-loop when tomorrow was also
+  // full — the #1 reported booking dead-end. null = still scanning or
+  // nothing open inside the scan window (fall back to the waitlist).
+  const [nextAvailable, setNextAvailable] = useState<NextAvailable | null>(null);
+  const [scanningNext, setScanningNext] = useState(false);
 
   // Fetch admin-blocked dates on mount. Only FULL-day blocks (no
   // start_time/end_time) gray out the date picker — time-windowed
@@ -620,6 +627,41 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     ? [...baseWindows, ...(phlebOnDuty ? dutyConstrainedAfterHours : afterHoursWindows)]
     : baseWindows;
   
+  // Is this date sold out for the currently-selected service?
+  const isSoldOut = activeWindows.length > 0
+    && activeWindows.every(w => bookedSlots.has(w.time) || heldSlots.has(w.time));
+
+  // When the day is sold out, find the REAL next opening rather than telling
+  // the patient to try tomorrow and hoping. Scans forward using the same
+  // blocking math as this grid, so what we advertise is actually bookable.
+  useEffect(() => {
+    if (!isSoldOut || !selectedDate || loadingSlots) {
+      setNextAvailable(null);
+      return;
+    }
+    let cancelled = false;
+    setScanningNext(true);
+    setNextAvailable(null);
+    (async () => {
+      try {
+        const found = await findNextAvailable(
+          selectedDate,
+          activeWindows.map(w => w.time),
+          { daysToScan: 14, newApptFootprintMin: 60, maxPerSlot: 1 },
+        );
+        if (!cancelled) setNextAvailable(found);
+      } catch (e) {
+        console.warn('[booking] next-available scan failed:', e);
+      } finally {
+        if (!cancelled) setScanningNext(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // activeWindows is derived each render; key off its time list instead of
+    // the array identity so we don't rescan on every keystroke elsewhere.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSoldOut, selectedDate?.getTime(), loadingSlots, activeWindows.map(w => w.time).join(',')]);
+
   // Check if both date and time are selected (STAT auto-selects "Next Available")
   const canContinue = selectedDate && (selectedTime || isStat);
   
@@ -880,36 +922,64 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         return null;
                       })()}
                     </div>
-                  ) : activeWindows.length > 0 && activeWindows.every(w => bookedSlots.has(w.time) || heldSlots.has(w.time)) ? (
+                  ) : isSoldOut ? (
                     /* Empty-state: every slot for this date is booked or held.
-                       Hormozi: never let the buyer leave empty-handed — always
-                       offer the next move (waitlist + try another date). */
+                       Never dead-end the patient. We used to offer a blind
+                       "try tomorrow", which looped them through empty grid
+                       after empty grid when tomorrow was full too. Now we scan
+                       forward for a REAL opening and jump straight to it. */
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center space-y-3">
-                      <p className="text-sm font-semibold text-amber-900">All slots are taken for {selectedDate ? format(selectedDate, 'EEEE, MMM d') : 'this day'}.</p>
-                      <p className="text-xs text-amber-800">Try the next day, or join the waitlist — we'll text you the moment a slot opens up.</p>
-                      <div className="flex flex-wrap justify-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="text-xs border-amber-400 text-amber-900 hover:bg-amber-100"
-                          onClick={() => {
-                            if (selectedDate) {
-                              const next = addDays(selectedDate, 1);
-                              setValue('date', next, { shouldValidate: true });
-                            }
-                          }}
-                        >
-                          Try {selectedDate ? format(addDays(selectedDate, 1), 'EEE MMM d') : 'next day'} →
-                        </Button>
-                        {selectedDate && (
-                          <JoinWaitlistButton
-                            dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
-                            desiredTime={selectedTime || ''}
-                            variant="subtle"
-                          />
-                        )}
-                      </div>
+                      <p className="text-sm font-semibold text-amber-900">
+                        Fully booked on {selectedDate ? format(selectedDate, 'EEEE, MMM d') : 'this day'}.
+                      </p>
+
+                      {scanningNext ? (
+                        <p className="text-xs text-amber-800">Finding the next opening…</p>
+                      ) : nextAvailable ? (
+                        <>
+                          <p className="text-xs text-amber-800">
+                            Our next opening is{' '}
+                            <strong>{format(nextAvailable.date, 'EEEE, MMM d')} at {nextAvailable.time}</strong>.
+                          </p>
+                          <div className="flex flex-wrap justify-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="text-xs bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+                              onClick={() => {
+                                setValue('date', nextAvailable.date, { shouldValidate: true });
+                                setValue('time', nextAvailable.time, { shouldValidate: true });
+                              }}
+                            >
+                              Book {format(nextAvailable.date, 'EEE MMM d')} at {nextAvailable.time} →
+                            </Button>
+                            {selectedDate && (
+                              <JoinWaitlistButton
+                                dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+                                desiredTime={selectedTime || ''}
+                                variant="subtle"
+                              />
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* Nothing open in the next two weeks — don't invent a
+                              date; put them on the waitlist for the day they
+                              actually wanted. */}
+                          <p className="text-xs text-amber-800">
+                            We're booked out for the next two weeks. Join the waitlist and we'll text you
+                            the moment a slot opens on your preferred day.
+                          </p>
+                          {selectedDate && (
+                            <JoinWaitlistButton
+                              dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+                              desiredTime={selectedTime || ''}
+                              variant="subtle"
+                            />
+                          )}
+                        </>
+                      )}
                     </div>
                   ) : activeWindows.length === 0 ? (
                     /* No slots offered at all — usually means the date is
