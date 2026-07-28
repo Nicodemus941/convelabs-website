@@ -89,8 +89,7 @@ workflows:
     environment:
       <<: *env_versions
       groups:
-        - convelabs_web
-        - android_keystore   # CM_KEYSTORE, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
+        - convelabs_web   # also holds CM_KEYSTORE, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
     cache: *cache_cfg
     scripts:
       - name: Install deps
@@ -202,8 +201,7 @@ workflows:
     environment:
       <<: *env_versions
       groups:
-        - convelabs_web
-        - android_keystore
+        - convelabs_web   # also holds CM_KEYSTORE* keystore vars
     cache: *cache_cfg
     scripts:
       - name: Install deps
