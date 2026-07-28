@@ -111,11 +111,16 @@ workflows:
           # missing -> `./gradlew` exits 126 ("command not executable"). chmod
           # here as a belt-and-braces guard on top of the git 100755 mode.
           chmod +x ./gradlew
-          ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks \
-            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD
+          # Derive the signing alias FROM THE KEYSTORE instead of trusting the
+          # CM_KEY_ALIAS env var. A mistyped or whitespace-padded paste there only
+          # surfaces at the very last task (:app:signReleaseBundle, after a full
+          # 1m+ compile) as "No key with alias '***' found in keystore" — an
+          # expensive way to discover a typo. keytool is authoritative here; the
+          # env var remains a fallback.
+          DETECTED_ALIAS=$(keytool -list             -keystore "$CM_BUILD_DIR/android/keystore.jks"             -storepass "$CM_KEYSTORE_PASSWORD" 2>/dev/null             | awk -F', ' '/PrivateKeyEntry/{print $1; exit}')
+          SIGN_ALIAS="${DETECTED_ALIAS:-$CM_KEY_ALIAS}"
+          echo "Signing with alias: $SIGN_ALIAS (detected=${DETECTED_ALIAS:-none})"
+          ./gradlew bundleRelease             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks             -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD"             -Pandroid.injected.signing.key.alias="$SIGN_ALIAS"             -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD"
     artifacts:
       - android/app/build/outputs/**/*.aab
     # No `publishing: google_play:` — see the note on android-phleb. An unset
@@ -227,11 +232,16 @@ workflows:
           # missing -> `./gradlew` exits 126 ("command not executable"). chmod
           # here as a belt-and-braces guard on top of the git 100755 mode.
           chmod +x ./gradlew
-          ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks \
-            -Pandroid.injected.signing.store.password=$CM_KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$CM_KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$CM_KEY_PASSWORD
+          # Derive the signing alias FROM THE KEYSTORE instead of trusting the
+          # CM_KEY_ALIAS env var. A mistyped or whitespace-padded paste there only
+          # surfaces at the very last task (:app:signReleaseBundle, after a full
+          # 1m+ compile) as "No key with alias '***' found in keystore" — an
+          # expensive way to discover a typo. keytool is authoritative here; the
+          # env var remains a fallback.
+          DETECTED_ALIAS=$(keytool -list             -keystore "$CM_BUILD_DIR/android/keystore.jks"             -storepass "$CM_KEYSTORE_PASSWORD" 2>/dev/null             | awk -F', ' '/PrivateKeyEntry/{print $1; exit}')
+          SIGN_ALIAS="${DETECTED_ALIAS:-$CM_KEY_ALIAS}"
+          echo "Signing with alias: $SIGN_ALIAS (detected=${DETECTED_ALIAS:-none})"
+          ./gradlew bundleRelease             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks             -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD"             -Pandroid.injected.signing.key.alias="$SIGN_ALIAS"             -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD"
     artifacts:
       - android/app/build/outputs/**/*.aab
     # NOTE: no `publishing: google_play:` here. Codemagic validates publishing
