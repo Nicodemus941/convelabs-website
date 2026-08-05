@@ -35,7 +35,23 @@ const PatientsSection: React.FC = () => {
         }
         // eslint-disable-next-line no-console
         console.log(`[phleb-directory] Patients RPC returned ${data?.length ?? 0} rows (uid=${uid}, role=${role})`);
-        setRows((data || []) as PatientListRow[]);
+        // The RPC returns { patient_name, email, phone, last_visit_at,
+        // total_visits, organization_id } — but PatientSearchList/PatientListRow
+        // read patient_email / patient_phone / visit_count / last_visit_date.
+        // Without this remap the rows rendered blank (no email/phone/visits) and
+        // search-by-email/phone matched nothing — the "directory does nothing"
+        // report. Map the RPC shape onto the row shape here.
+        const mapped: PatientListRow[] = ((data as any[]) || []).map((r) => ({
+          patient_name: r.patient_name,
+          patient_email: r.email ?? r.patient_email ?? null,
+          patient_phone: r.phone ?? r.patient_phone ?? null,
+          visit_count: r.total_visits ?? r.visit_count ?? null,
+          last_visit_date: r.last_visit_at ?? r.last_visit_date ?? null,
+          // carry the org id so the detail drawer can scope correctly without
+          // a second round-trip (null for direct/mobile patients).
+          _organization_id: r.organization_id ?? null,
+        })) as any;
+        setRows(mapped);
       } catch (e: any) {
         console.error('[phleb-directory] Patients load failed:', e);
         setErr(e?.message || String(e) || 'Failed to load patients');
@@ -44,15 +60,11 @@ const PatientsSection: React.FC = () => {
   }, []);
 
   const openDetail = async (p: PatientListRow) => {
-    // Look up an org this patient has been linked to via any of the phleb's
-    // appointments — the drawer needs one org context for its visit query.
-    const { data } = await supabase
-      .from('appointments')
-      .select('organization_id')
-      .ilike('patient_name', p.patient_name)
-      .not('organization_id', 'is', null)
-      .limit(1);
-    setFocusedOrgId(((data || [])[0] as any)?.organization_id || '');
+    // Use the org id the RPC already returned with the row. May be null for
+    // direct/mobile patients — that's fine: the drawer shows ALL of the
+    // patient's visits when no org is scoped (patient-centric view), which is
+    // exactly what a phleb wants. No second query needed.
+    setFocusedOrgId((p as any)._organization_id || '');
     setFocused(p.patient_name);
     setDrawerOpen(true);
   };

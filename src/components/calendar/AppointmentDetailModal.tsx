@@ -28,6 +28,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import RescheduleAppointmentModal from './RescheduleAppointmentModal';
+import SplitCompanionDialog from './SplitCompanionDialog';
+import AddCompanionDialog from './AddCompanionDialog';
 import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
 import UnassignOrgButton from '@/components/appointments/UnassignOrgButton';
 import CancelAppointmentModal from './CancelAppointmentModal';
@@ -70,6 +72,8 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
   const [staffName, setStaffName] = useState<string>('');
   const [showInsurance, setShowInsurance] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [addCompanionOpen, setAddCompanionOpen] = useState(false);
   // Add-companion link result shown INLINE in the modal. Toasts render
   // bottom-right — behind this right-side sheet — so admins saw nothing
   // happen and re-clicked (2026-07-09: 12 duplicate link-sends to a patient).
@@ -638,6 +642,35 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
               {companionLinkBusy ? 'Sending…' : companionLink ? 'Resend Companion Link' : 'Add Companion Link'}
             </Button>
           )}
+
+          {/* Add a companion directly + send an itemized invoice (draw fee +
+              optional specialty kit). For when staff book the companion for
+              the patient rather than sending a self-serve link. */}
+          {appt.companion_role !== 'companion' && appt.status !== 'cancelled' && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-8 gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+              onClick={() => setAddCompanionOpen(true)}
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Add Companion + Invoice
+            </Button>
+          )}
+
+          {/* Split a companion out of this booking onto their own date/time/
+              address — the primary patient stays scheduled and serviced. */}
+          {appt.companion_role === 'companion' && appt.status !== 'cancelled' && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs h-8 gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-50"
+              onClick={() => setSplitOpen(true)}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              Reschedule Separately
+            </Button>
+          )}
         </div>
 
         {/* Inline add-companion result — visible INSIDE the sheet (success
@@ -1191,6 +1224,20 @@ const AppointmentDetailModal: React.FC<AppointmentDetailModalProps> = ({
       open={rescheduleOpen}
       onClose={() => setRescheduleOpen(false)}
       onRescheduled={() => { onUpdate(); onClose(); }}
+    />
+
+    <SplitCompanionDialog
+      appt={appt}
+      open={splitOpen}
+      onOpenChange={setSplitOpen}
+      onDone={() => { onUpdate(); onClose(); }}
+    />
+
+    <AddCompanionDialog
+      appt={appt}
+      open={addCompanionOpen}
+      onOpenChange={setAddCompanionOpen}
+      onDone={() => { onUpdate(); onClose(); }}
     />
 
     <CancelAppointmentModal

@@ -24,6 +24,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
+import { serviceRequiresLabOrder, labOrderSkipReason } from '../_shared/lab-order-required.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -95,6 +96,7 @@ Deno.serve(async (req) => {
     let processed = 0;
     let reminded = 0;
     let escalated = 0;
+    let exempted = 0;
     const now = Date.now();
 
     for (const c of (candidates || []) as any[]) {
@@ -103,15 +105,35 @@ Deno.serve(async (req) => {
       const attempts = c.send_attempts || 0;
       const cadenceHours = REMINDER_CADENCE_HOURS[attempts - 1] || REMINDER_CADENCE_HOURS[REMINDER_CADENCE_HOURS.length - 1];
       const dueAt = lastSendAt + cadenceHours * 60 * 60 * 1000;
-      if (now < dueAt) continue;
 
-      // Load appointment for copy
+      // Load appointment. Deliberately BEFORE the due-time check so the
+      // service gate below can retire exempt rows on the very next cron run
+      // instead of leaving them parked until their next send is due.
       const { data: appt } = await admin
         .from('appointments')
-        .select('id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, lab_order_file_path, status')
+        .select('id, patient_name, patient_email, patient_phone, appointment_date, appointment_time, lab_order_file_path, status, service_type')
         .eq('id', c.appointment_id)
         .maybeSingle();
       if (!appt) continue;
+
+      // SERVICE GATE — therapeutic phlebotomy / in-office visits never need a
+      // patient-supplied requisition. If a request row exists for one (created
+      // before this rule, or by hand), retire it so it stops nagging and never
+      // reaches the owner-escalation SMS.
+      if (!serviceRequiresLabOrder((appt as any).service_type)) {
+        await admin.from('appointment_lab_order_requests')
+          .update({
+            status: 'cancelled',
+            last_send_status: labOrderSkipReason((appt as any).service_type),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', c.id);
+        console.log(`[remind-cron] cancelled request ${c.id} — ${(appt as any).service_type} needs no lab order`);
+        exempted++;
+        continue;
+      }
+
+      if (now < dueAt) continue;
 
       // If somehow a lab order arrived between cron runs, mark uploaded + skip
       if (appt.lab_order_file_path) {
@@ -246,7 +268,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ ok: true, processed, reminded, escalated }), {
+    return new Response(JSON.stringify({ ok: true, processed, reminded, escalated, exempted }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {

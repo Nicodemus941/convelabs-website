@@ -43,6 +43,12 @@ Deno.serve(async (req) => {
       serviceType, serviceName, servicePrice,
       appointmentDate, appointmentTime, address, isVip,
       memo,
+      // DELTA BILLING: bill ONLY an incremental amount (e.g. the after-hours
+      // surcharge from RescheduleAppointmentModal) instead of the whole visit.
+      // These were previously NOT destructured, so the caller's forceAmount was
+      // dropped and the function fell back to appt.total_amount — re-billing the
+      // FULL appointment. `description` overrides the primary line-item label.
+      forceAmount, description,
     } = body;
 
     if (!appointmentId) {
@@ -255,17 +261,25 @@ Deno.serve(async (req) => {
       },
     });
 
+    // Effective primary amount. `forceAmount` bills only a delta (after-hours
+    // surcharge etc.); otherwise fall back to the authoritative DB total_amount
+    // when the caller didn't pass servicePrice — otherwise the primary line item
+    // lands at $0 (only companions get billed) and the phleb transfer_data can
+    // exceed amount_due, which Stripe rejects at finalize. (Mathew Shealy
+    // add-companion, 2026-06-25.)
+    const primaryAmountDollars = (typeof forceAmount === 'number' && forceAmount > 0)
+      ? forceAmount
+      : Number(servicePrice ?? appt.total_amount ?? 0);
+    const primaryCents = Math.round(primaryAmountDollars * 100);
+
     // Add primary line item
     await stripe.invoiceItems.create({
       customer: customerId,
       invoice: invoice.id,
-      // Fall back to the authoritative DB total_amount when the caller didn't
-      // pass servicePrice — otherwise the primary line item lands at $0 (only
-      // companions get billed) and the phleb transfer_data can exceed amount_due,
-      // which Stripe rejects at finalize. (Mathew Shealy add-companion, 2026-06-25.)
-      amount: Math.round((servicePrice || appt.total_amount || 0) * 100),
+      amount: primaryCents,
       currency: 'usd',
-      description: `${serviceName || serviceType || 'Mobile Blood Draw'} — ${patientLabel} — ${appointmentDate || ''}${appointmentTime ? ` at ${appointmentTime}` : ''}`,
+      description: description
+        || `${serviceName || serviceType || 'Mobile Blood Draw'} — ${patientLabel} — ${appointmentDate || ''}${appointmentTime ? ` at ${appointmentTime}` : ''}`,
     });
 
     // ─── COMPANION LINE ITEMS — when this appointment has companions
@@ -358,7 +372,7 @@ Deno.serve(async (req) => {
           if (t > 0) totalTakeCents += t;
         }
 
-        const primaryCents = Math.round((servicePrice || appt.total_amount || 0) * 100);
+        // Uses the effective primary amount computed above (honors forceAmount).
         const totalInvoiceCents = primaryCents + companionTotalCents;
 
         // BUNDLE-FLOOR BACKSTOP (Owle family 2026-07-09): when the INVOICED
@@ -425,6 +439,13 @@ Deno.serve(async (req) => {
     const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
     const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 
+    // TRUE invoice total for the email/subject/CTA. Previously these rendered
+    // `servicePrice` alone, which (a) omitted auto-added companion line items
+    // — so a $150 + $75 companion invoice emailed "Amount Due $150" while
+    // Stripe charged $225 — and (b) showed "$0.00" whenever the caller omitted
+    // servicePrice. This mirrors exactly what Stripe will charge.
+    const emailTotalDollars = (primaryCents + companionTotalCents) / 100;
+
     if (MAILGUN_API_KEY) {
       const formattedDate = appointmentDate
         ? new Date(appointmentDate + 'T12:00:00').toLocaleDateString('en-US', {
@@ -454,7 +475,7 @@ Deno.serve(async (req) => {
             ${appointmentTime ? `<tr><td style="padding:4px 0;color:#6B5E54;">Time</td><td style="text-align:right;font-weight:600;">${appointmentTime}</td></tr>` : ''}
             ${address && !billedToOrg ? `<tr><td style="padding:4px 0;color:#6B5E54;">Location</td><td style="text-align:right;">${address}</td></tr>` : ''}
             <tr><td colspan="2" style="padding:8px 0 0;"><hr style="border:none;border-top:1px solid rgba(201,169,97,0.5);"></td></tr>
-            <tr><td style="padding:8px 0;color:#7F1D1D;font-weight:700;font-size:15px;">Amount Due</td><td style="text-align:right;font-weight:700;font-size:20px;color:#7F1D1D;">$${(servicePrice || 0).toFixed(2)}</td></tr>
+            <tr><td style="padding:8px 0;color:#7F1D1D;font-weight:700;font-size:15px;">Amount Due</td><td style="text-align:right;font-weight:700;font-size:20px;color:#7F1D1D;">$${emailTotalDollars.toFixed(2)}</td></tr>
           </table>
         </div>
 
@@ -476,7 +497,7 @@ Deno.serve(async (req) => {
         headline: headerTitle,
         greeting: `Hello ${greetingName},`,
         bodyHtml: `<p style="font-size:14px;color:#3F2A20;margin:0 0 12px;">${purposeLine}</p>${bodyHtml}`,
-        ctaLabel: `Pay Now — $${(servicePrice || 0).toFixed(2)}`,
+        ctaLabel: `Pay Now — $${emailTotalDollars.toFixed(2)}`,
         ctaHref: paymentUrl,
         trustCloser: !billedToOrg ? 'Pays for itself in 1 visit' : undefined,
         footerNote: 'Questions? Call (941) 527-9169 or reply to this email.',
@@ -486,8 +507,8 @@ Deno.serve(async (req) => {
       formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
       formData.append('to', invoiceToEmail);
       formData.append('subject', billedToOrg
-        ? `Invoice from ConveLabs — $${(servicePrice || 0).toFixed(2)} (${org!.name})`
-        : `Your ConveLabs Appointment — Invoice for $${(servicePrice || 0).toFixed(2)}`);
+        ? `Invoice from ConveLabs — $${emailTotalDollars.toFixed(2)} (${org!.name})`
+        : `Your ConveLabs Appointment — Invoice for $${emailTotalDollars.toFixed(2)}`);
       formData.append('html', emailHtml);
       formData.append('o:tracking-clicks', 'no');
 
@@ -502,7 +523,7 @@ Deno.serve(async (req) => {
             category: 'dunning',
             recipient: invoiceToEmail,
             channel: 'email',
-            payload_summary: `Invoice ${invoice.id} for appointment ${appointmentId} — $${(servicePrice || 0).toFixed(2)}`,
+            payload_summary: `Invoice ${invoice.id} for appointment ${appointmentId} — $${emailTotalDollars.toFixed(2)}`,
             next_allowed_at: invoiceGate.nextAllowedAt,
             origin_function: 'send-appointment-invoice',
           });

@@ -7,6 +7,37 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const supabaseClient = createClient(supabaseUrl, supabaseServiceKey);
 
+// ── CLOUDFLARE TURNSTILE (bot gate on checkout / card-testing) ───────
+// Fail-CLOSED on a missing/forged token (the abuse case). Fail-OPEN on a
+// siteverify network error OR our OWN secret misconfig, so a config slip
+// never blocks a real booking. Mirrors the E-Labus / chatbot pattern.
+async function verifyTurnstile(secret: string, token: string | undefined, ip?: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const form = new URLSearchParams();
+    form.append('secret', secret);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await resp.json();
+    if (data?.success === true) return true;
+    const codes: string[] = Array.isArray(data?.['error-codes']) ? data['error-codes'] : [];
+    console.warn('[turnstile] checkout failed:', JSON.stringify(codes.length ? codes : data));
+    if (codes.some((c) => ['invalid-input-secret', 'missing-input-secret', 'bad-request', 'internal-error'].includes(c))) {
+      console.error('[turnstile] CONFIG ERROR — failing open. Fix TURNSTILE_SECRET_KEY.');
+      return true;
+    }
+    return false;
+  } catch (_e) {
+    console.warn('[turnstile] siteverify unreachable, failing open');
+    return true;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // SERVER-SIDE MEMBERSHIP PRICING (source of truth)
 // If the frontend forgets to apply the member discount — OR a malicious
@@ -85,6 +116,31 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // ─── ABUSE VELOCITY CAP (card-testing defense) ──────────────────
+    // The anon key is public, so a bot can POST here in a loop to create
+    // Stripe Checkout Sessions and validate stolen cards (real fees + fraud
+    // flags). Cap session creation per-IP (catches single-source loops) and
+    // globally (catches distributed botnets). Fail-OPEN so a limiter hiccup
+    // never blocks a real booking. Turnstile + Stripe Radar are the full fix.
+    const _clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+      || req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+    try {
+      const [ipHit, globalHit] = await Promise.all([
+        supabaseClient.rpc('hit_rate_limit', { p_bucket: `checkout:ip:${_clientIp}`, p_window_seconds: 600, p_max: 8 }),   // 8 / 10min / IP
+        supabaseClient.rpc('hit_rate_limit', { p_bucket: `checkout:global`, p_window_seconds: 600, p_max: 100 }),          // 100 / 10min total
+      ]);
+      const ipOk = ipHit.error ? true : !!(ipHit.data as any)?.allowed;
+      const globalOk = globalHit.error ? true : !!(globalHit.data as any)?.allowed;
+      if (!ipOk || !globalOk) {
+        console.warn(`[checkout] rate-limited ip=${_clientIp} ipOk=${ipOk} globalOk=${globalOk}`);
+        return new Response(JSON.stringify({
+          error: "Too many booking attempts from your connection. Please wait a minute and try again, or call us at (941) 527-9169.",
+        }), { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    } catch (rlErr) {
+      console.warn('[checkout] rate-limit check failed (fail-open):', rlErr);
+    }
+
     let {
       serviceType,
       serviceName,
@@ -151,7 +207,51 @@ Deno.serve(async (req) => {
       // request flow. Normal patient bookings never send this, so the radius
       // guard below applies.
       allowOutOfArea = false,
+      // Cloudflare Turnstile token from the booking pay step (bot gate).
+      captchaToken = null,
     } = await req.json();
+
+    // ── TURNSTILE BOT GATE (anon callers only, flag-gated) ──────────
+    // create-appointment-checkout is the revenue path; enforcing before the
+    // token-sending frontend is live would block real bookings. So enforce
+    // ONLY when TURNSTILE_ENFORCE_CHECKOUT=1 (AND the secret is set). Gates
+    // anonymous bookers before a Stripe session is created; logged-in
+    // patients skip. Fail-closed on missing/forged token; the helper
+    // fails-open on siteverify network error / our own misconfig.
+    const TURNSTILE_SECRET = Deno.env.get('TURNSTILE_SECRET_KEY');
+    const _enforceCheckout = (Deno.env.get('TURNSTILE_ENFORCE_CHECKOUT') || '').toLowerCase();
+    if (TURNSTILE_SECRET && (_enforceCheckout === '1' || _enforceCheckout === 'true')) {
+      let isAnon = false;
+      try {
+        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+        const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+        const internalSecret = Deno.env.get('INTERNAL_FUNCTION_SECRET') || '';
+        const providedSecret = req.headers.get('x-internal-secret') || '';
+        if ((serviceKey && jwt === serviceKey) || (internalSecret && providedSecret === internalSecret)) {
+          // Trusted server-to-server caller (smoke tests, monitors, internal
+          // automation) — never Turnstile-gated. A bot only has the public
+          // anon key, never the service-role key or internal secret.
+          isAnon = false;
+        } else if (jwt) {
+          const { data: { user } } = await supabaseClient.auth.getUser(jwt);
+          isAnon = (user as any)?.is_anonymous === true || !user;
+        } else {
+          isAnon = true;
+        }
+      } catch { isAnon = true; }
+      if (isAnon) {
+        const ip = req.headers.get('CF-Connecting-IP')
+          || req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+          || undefined;
+        const ok = await verifyTurnstile(TURNSTILE_SECRET, captchaToken || undefined, ip);
+        if (!ok) {
+          return new Response(JSON.stringify({
+            error: 'security_check_failed',
+            message: 'Security check failed. Please refresh the page and try again, or call (941) 527-9169.',
+          }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+    }
 
     // ─── Senior auto-pricing safety net (65+) ───────────────────────
     // If the client sent a standard mobile visit but the patient's DOB shows

@@ -50,8 +50,20 @@ export async function findAvailablePhlebotomist(
       return null;
     }
     
-    const phlebotomists = phlebotomistData || [];
-    console.log(`Found ${phlebotomists.length} phlebotomists to check`);
+    const allPhlebotomists = phlebotomistData || [];
+
+    // Belt-and-suspenders with the DB trigger trg_prevent_excluded_phleb_realbooking:
+    // never auto-assign a phleb flagged exclude_from_auto_assignment (e.g. the App
+    // Store demo reviewer account), so a real patient booking is never routed to a
+    // demo / non-serviceable phlebotomist.
+    const { data: excludedRows } = await fetchRecords<{ user_id: string }>({
+      table: 'staff_profiles',
+      columns: 'user_id',
+      filters: { exclude_from_auto_assignment: true }
+    });
+    const excludedIds = new Set((excludedRows || []).map((r) => r.user_id));
+    const phlebotomists = allPhlebotomists.filter((p) => !excludedIds.has(p.id));
+    console.log(`Found ${phlebotomists.length} assignable phlebotomists to check (excluded ${excludedIds.size})`);
     
     if (phlebotomists.length === 0) {
       console.log("No phlebotomists available in the system");

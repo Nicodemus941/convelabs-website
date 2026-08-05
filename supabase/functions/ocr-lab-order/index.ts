@@ -151,12 +151,25 @@ const supabase = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 );
 
-// Known fasting panels — we mirror phlebHelpers.ts so detection stays consistent
+// Known fasting panels — keyword SAFETY NET behind the Claude prep
+// determination (see prompt item 8). Mirror phlebHelpers.ts so detection
+// stays consistent. 2026-07-07 audit changes:
+//   - REMOVED HbA1c — A1c does not require fasting; it was making
+//     A1c-only patients fast for nothing.
+//   - ADDED Insulin / Triglycerides / Homocysteine / Iron / TIBC /
+//     Glucose Tolerance — common fasting-preferred tests that real prod
+//     orders contained unmatched ("Fasting: Y" + INSULIN order missed).
 const FASTING_PANELS = [
   'Lipid Panel', 'Cholesterol', 'CMP', 'Comprehensive Metabolic Panel',
   'BMP', 'Basic Metabolic Panel', 'Glucose', 'Fasting Glucose',
-  'Fasting Insulin', 'Lactic Acid', 'HbA1c',
+  'Insulin', 'Lactic Acid', 'Triglyceride', 'Homocysteine',
+  'Iron', 'TIBC', 'Glucose Tolerance',
 ];
+
+// Glucose-tolerance (GTT) detection — the visit needs a glucola drink and a
+// 2-3 hour window, so schedule + phleb prep must know. Scanned against
+// panels + full text alongside the Claude prep determination.
+const GTT_RE = /glucose\s*tolerance|\bgtt\b|\bogtt\b|glucola|\b(1|2|3)[\s-]*(hr|hour)\s*glucose\b/i;
 
 // Tests that require a URINE specimen. When any of these appear, the patient
 // must collect a sample on the day of the visit and the phleb brings a sterile
@@ -235,6 +248,18 @@ interface OcrExtraction {
   // frontend helper src/lib/clientBillLabs.ts — keep the two in sync.
   billType?: 'client_bill' | 'insurance' | 'self_pay' | null;
   labCompany?: string | null;   // destination lab company (Quest / LabCorp / Evexia / Access Medical Labs / Ulta Lab Tests / Genova / ...)
+  // PREP REQUIREMENTS — Claude's holistic read of the form (checkboxes,
+  // "Fasting: Y", "NON-FASTING" negations, specimen-requirement blocks).
+  // 'yes' | 'no' | 'unclear'. This is the PRIMARY fasting signal; the
+  // FASTING_PANELS keyword list is the safety net. (2026-07-07 audit —
+  // 19/152 recent orders said "fasting" in the text but the panels-only
+  // keyword scan missed them, and the MMS auto-reply told those patients
+  // "no fasting needed".)
+  prep?: {
+    fasting?: 'yes' | 'no' | 'unclear' | null;
+    urine?: 'yes' | 'no' | 'unclear' | null;
+    gtt?: 'yes' | 'no' | 'unclear' | null;
+  } | null;
 }
 
 // ─── Client-bill / prepaid detection (server mirror of clientBillLabs.ts) ───
@@ -311,12 +336,16 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
             '   If the form genuinely has no patient block (rare), return patient: null.',
             '6. The BILLING designation. Look for how the order will be paid: a checkbox or label such as "Client Bill" / "Bill Client" / "Client Billed", "Bill Insurance" / "Third Party", or "Patient Bill" / "Self-Pay" / "Cash". Return billType as EXACTLY one of: "client_bill" (the ordering practice/lab is billed directly — patient insurance is NOT used), "insurance" (bill the patient\'s insurance), "self_pay" (patient pays cash), or null if not indicated.',
             '7. The DESTINATION LAB COMPANY — the laboratory that will RUN the tests (NOT the ordering practice). Common values: "Quest", "LabCorp", "Genova", "Evexia", "Access Medical Labs", "Ulta Lab Tests", "AdventHealth". Return labCompany as the lab name, or null if not shown. NOTE: Evexia, Access Medical Labs, and Ulta Lab Tests are prepaid functional-medicine labs — orders for them are always client-billed.',
+            '8. PREP REQUIREMENTS — read the WHOLE form (checkboxes, "Specimen Requirements" blocks, handwritten notes, test names) and determine:',
+            '   - fasting: does this order require the patient to fast before the draw? "yes" if the form explicitly indicates fasting (e.g. "FASTING", "Fasting: Y", a checked ☑ Fasting box, "12 hr fast", "NPO") OR the ordered tests conventionally require fasting (fasting glucose, fasting insulin, fasting lipids). "no" if the form EXPLICITLY says non-fasting (e.g. a checked ☑ NON-FASTING box, "Fasting: N", "non-fasting acceptable", "random/fasting does not matter"). "unclear" if the form gives no indication either way. IMPORTANT: an UNCHECKED "☐ NON-FASTING" checkbox is NOT a "no" — only a checked/circled/selected marking counts. HbA1c alone does NOT require fasting.',
+            '   - urine: does this order include any urine specimen (urinalysis, UA, urine culture, microalbumin, 24-hour urine, first morning void)? "yes" / "no" / "unclear".',
+            '   - gtt: does this order include a glucose tolerance test (GTT/OGTT, glucola, 1/2/3-hour glucose)? "yes" / "no" / "unclear".',
             '',
             'Reply ONLY with valid JSON in this exact shape, no prose:',
-            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}, "billType": "client_bill", "labCompany": "Access Medical Labs"}',
+            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}, "billType": "client_bill", "labCompany": "Access Medical Labs", "prep": {"fasting": "yes", "urine": "no", "gtt": "no"}}',
             '',
             'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null. If patient demographics are absent (rare), set "patient": null. If billing is not indicated, set "billType": null. If the destination lab is not shown, set "labCompany": null.',
-            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null, "patient": null, "billType": null, "labCompany": null}',
+            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null, "patient": null, "billType": null, "labCompany": null, "prep": null}',
           ].join('\n'),
         },
       ],
@@ -349,7 +378,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
     const content = json?.content?.[0]?.text || '';
     // Claude may wrap JSON in prose or code blocks — extract the JSON object
     const match = content.match(/\{[\s\S]*\}/);
-    if (!match) return { text: content, panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null };
+    if (!match) return { text: content, panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null, prep: null };
     try {
       const parsed = JSON.parse(match[0]);
       const text = String(parsed.text || '').substring(0, 8000);
@@ -408,9 +437,23 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
       const billType: OcrExtraction['billType'] =
         rawBill === 'client_bill' || rawBill === 'insurance' || rawBill === 'self_pay' ? rawBill : null;
       const labCompany = parsed.labCompany ? String(parsed.labCompany).trim().substring(0, 80) || null : null;
-      return { text, panels, insurance, practice, patient, billType, labCompany };
+      // Prep requirements — normalize each field to 'yes'|'no'|'unclear'|null.
+      let prep: OcrExtraction['prep'] = null;
+      if (parsed.prep && typeof parsed.prep === 'object') {
+        const norm = (v: any): 'yes' | 'no' | 'unclear' | null => {
+          const s = String(v || '').trim().toLowerCase();
+          return s === 'yes' || s === 'no' || s === 'unclear' ? s : null;
+        };
+        prep = {
+          fasting: norm(parsed.prep.fasting),
+          urine: norm(parsed.prep.urine),
+          gtt: norm(parsed.prep.gtt),
+        };
+        if (!prep.fasting && !prep.urine && !prep.gtt) prep = null;
+      }
+      return { text, panels, insurance, practice, patient, billType, labCompany, prep };
     } catch {
-      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null };
+      return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null, prep: null };
     }
   } catch (e: any) {
     console.error('[ocr] request exception', e);
@@ -563,18 +606,35 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Detect fasting panels from OCR panel list (redundant with phlebHelpers but
-    // useful as a pre-flight hint that admins can see even before rendering)
-    const fastingDetected = result.panels.some(p =>
+    // ─── PREP DETERMINATION (fasting / urine / GTT) ───────────────────
+    // PRIMARY signal: Claude's holistic read of the form (prompt item 8) —
+    // it handles "Fasting: Y", checked ☑ FASTING / ☑ NON-FASTING boxes,
+    // "non-fasting acceptable", and specimen-requirement blocks that the
+    // panel keyword list can't. SAFETY NET: the FASTING_PANELS keyword
+    // scan still forces fasting=true on classic fasting panels — UNLESS
+    // the form EXPLICITLY said non-fasting (prep.fasting === 'no'), in
+    // which case the doctor's explicit instruction wins.
+    // (2026-07-07 audit: panels-only scan missed 'Fasting: Y'/'FASTING
+    // required' orders and the MMS auto-reply told those patients "no
+    // fasting needed". HbA1c false-positives made others fast for nothing.)
+    const prep = result.prep || null;
+    const panelFasting = result.panels.some(p =>
       FASTING_PANELS.some(fp => p.toLowerCase().includes(fp.toLowerCase()))
     );
+    const fastingDetected = prep?.fasting === 'yes' || (panelFasting && prep?.fasting !== 'no');
 
     // Urine-specimen detection — scan both the structured panels AND the full
     // OCR text (some requisitions only show "UA" inline). Pad the haystack so
     // the " UA " / "U/A" tokens match at string boundaries without false hits
-    // inside words like "evaluation".
+    // inside words like "evaluation". Claude's prep.urine OR-folds in.
     const urineHay = ` ${[...result.panels, result.text || ''].join(' | ')} `.toLowerCase();
-    const urineDetected = URINE_PANELS.some(u => urineHay.includes(u.toLowerCase()));
+    const urineDetected = prep?.urine === 'yes'
+      || URINE_PANELS.some(u => urineHay.includes(u.toLowerCase()));
+
+    // Glucose-tolerance detection — previously returned in the response but
+    // NEVER computed (always false), so provider lab requests never knew a
+    // visit needed the 2-3 hour glucola window. Claude prep OR keyword.
+    const gttDetected = prep?.gtt === 'yes' || GTT_RE.test(urineHay);
 
     // ─── CLIENT-BILL / PREPAID DETECTION ──────────────────────────────
     // Evexia / Access Medical Labs / Ulta Lab Tests are prepaid functional-
@@ -608,6 +668,7 @@ Deno.serve(async (req) => {
         ocr_full_text: result.text,
         ocr_fasting_required: fastingDetected,
         ocr_urine_required: urineDetected,
+        ocr_gtt_required: gttDetected,
         ocr_completed_at: new Date().toISOString(),
         // Persist the OCR'd patient identity so the card + NIIMBOT labels can
         // show the name/DOB even when there's no chart row (e.g. org-billed
@@ -637,18 +698,20 @@ Deno.serve(async (req) => {
         try {
           const { data: allOrders } = await supabase
             .from('appointment_lab_orders')
-            .select('ocr_detected_panels, ocr_full_text, ocr_fasting_required, ocr_urine_required')
+            .select('ocr_detected_panels, ocr_full_text, ocr_fasting_required, ocr_urine_required, ocr_gtt_required')
             .eq('appointment_id', targetId)
             .eq('ocr_status', 'complete');
           const merged = new Set<string>();
           let mergedText = '';
           let mergedFasting = false;
           let mergedUrine = false;
+          let mergedGtt = false;
           for (const o of (allOrders || []) as any[]) {
             for (const p of (o.ocr_detected_panels || [])) merged.add(String(p));
             if (o.ocr_full_text) mergedText += (mergedText ? '\n\n---\n\n' : '') + o.ocr_full_text;
             if (o.ocr_fasting_required) mergedFasting = true;
             if (o.ocr_urine_required) mergedUrine = true;
+            if (o.ocr_gtt_required) mergedGtt = true;
           }
           // Include this row's results even if it isn't yet flushed into the
           // SELECT above (race window).
@@ -658,6 +721,7 @@ Deno.serve(async (req) => {
           }
           mergedFasting = mergedFasting || fastingDetected;
           mergedUrine = mergedUrine || urineDetected;
+          mergedGtt = mergedGtt || gttDetected;
 
           // Backfill the patient identity onto the appointment from the order:
           //   • name  — only if the appointment has no name (the "unknown
@@ -681,6 +745,7 @@ Deno.serve(async (req) => {
             // ever set TRUE here — never downgrade an admin-set flag.
             ...(mergedFasting ? { fasting_required: true } : {}),
             ...(mergedUrine ? { urine_required: true } : {}),
+            ...(mergedGtt ? { gtt_required: true } : {}),
             ...(filledNameFromOcr ? { patient_name: ocrName, ocr_name_unverified: true } : {}),
             ...((!(apptRow as any)?.patient_dob && ocrDob) ? { patient_dob: ocrDob } : {}),
           }).eq('id', targetId);
@@ -717,10 +782,19 @@ Deno.serve(async (req) => {
         }
       }
     } else if (targetId) {
+      // Legacy appointment-level path (MODE 2 — appointmentId with no
+      // appointment_lab_orders row, e.g. lab_order_file_path OCR + the MMS
+      // path). BUG FIX (2026-07-07): this branch never stamped the prep
+      // flags, so a fasting order OCR'd here got the correct MMS reply but
+      // the appointment stayed fasting_required=false and the night-before
+      // reminder never fired. One-way TRUE, same as the mirror path.
       await supabase.from('appointments').update({
         lab_order_ocr_text: result.text,
         lab_order_panels: result.panels,
         ocr_processed_at: new Date().toISOString(),
+        ...(fastingDetected ? { fasting_required: true } : {}),
+        ...(urineDetected ? { urine_required: true } : {}),
+        ...(gttDetected ? { gtt_required: true } : {}),
       }).eq('id', targetId);
     }
 
@@ -746,6 +820,7 @@ Deno.serve(async (req) => {
             ? `${hi}your lab order is on file ✓ Based on your order, please FAST 8–12 hours before your draw — water and any prescribed medications are fine.`
             : `${hi}your lab order is on file ✓ No fasting needed based on your order — eat and drink normally before your visit.`;
           if (urine) msg += ` You'll also give a urine sample, so please don't use the restroom right before we arrive.`;
+          if (gttDetected) msg += ` Your order includes a glucose tolerance test — plan for a 2-3 hour visit.`;
           msg += ` Questions? Just reply here. — ConveLabs`;
           const to = digits.length === 10 ? `+1${digits}` : `+${digits}`;
           const p = new URLSearchParams({ To: to, From: TF, Body: msg });
@@ -1169,8 +1244,13 @@ Deno.serve(async (req) => {
       panels: result.panels,
       fastingDetected,
       fastingRequired: fastingDetected,                    // alias for callers expecting the older field name
-      urineRequired: !!(result as any).urineRequired,
-      gttRequired: !!(result as any).gttRequired,
+      // BUG FIX (2026-07-07): these previously read `(result as any).urineRequired`
+      // / `.gttRequired` — fields that were NEVER assigned, so both were always
+      // false. create-lab-request consumed them → every provider lab request
+      // (and the appointment spawned from it) lost urine/GTT prep flags.
+      urineRequired: urineDetected,
+      gttRequired: gttDetected,
+      prep: result.prep || null,                           // Claude's raw yes/no/unclear determination
       patient: result.patient || null,                     // { dateOfBirth, sex/gender, etc. } — used by create-lab-request to stamp patient_dob
       provider: (result as any).provider || null,          // org-match info
       fullText: result.text || '',                          // create-lab-request stores in lab_order_full_text

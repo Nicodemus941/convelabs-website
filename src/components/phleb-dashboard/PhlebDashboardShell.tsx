@@ -17,7 +17,10 @@ import SettingsTab from './settings/SettingsTab';
 import DirectoryTab from './directory/DirectoryTab';
 import DeliveriesTab from './deliveries/DeliveriesTab';
 import PhlebEarningsLedger from './PhlebEarningsLedger';
-import { FolderOpen, Truck, DollarSign } from 'lucide-react';
+import { FolderOpen, Truck, DollarSign, BellRing, X } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { toast } from 'sonner';
+import { initPush } from '@/lib/native/push';
 
 const DESKTOP_TABS: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
   { id: 'schedule', label: 'Schedule', icon: Calendar },
@@ -41,6 +44,57 @@ const PhlebDashboardShell: React.FC = () => {
   useEffect(() => {
     sessionStorage.setItem('phleb-active-tab', activeTab);
   }, [activeTab]);
+
+  // Push-notification deep link: /phleb-app?appt=<id> (tap on a banner).
+  // Force the Schedule tab so ScheduleTab can pick the ?appt= param up,
+  // scroll to that card, and highlight it. Runs once per mount — the tap
+  // cold-launches the app or triggers a full navigation, so mount is the
+  // deep-link entry point.
+  useEffect(() => {
+    const apptParam = new URLSearchParams(window.location.search).get('appt');
+    if (apptParam) setActiveTab('schedule');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Native push enrollment ──────────────────────────────────────────
+  // Silent attempt on login: registers the token if permission was already
+  // granted, but NEVER triggers the OS dialog (iOS only allows one ask).
+  // If not granted yet, show a one-time priming banner; its button runs the
+  // real request. Foreground pushes (OS suppresses the banner while the app
+  // is open) surface as an in-app toast that jumps to the appointment.
+  const [showPushPrompt, setShowPushPrompt] = useState(false);
+  useEffect(() => {
+    if (!user?.id || !Capacitor.isNativePlatform()) return;
+    (async () => {
+      const { granted } = await initPush(user.id, onForegroundPush, { silent: true });
+      if (!granted && localStorage.getItem('phleb-push-prompt-dismissed') !== '1') {
+        setShowPushPrompt(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const onForegroundPush = (msg: { title: string; body: string; appointmentId: string | null }) => {
+    toast(msg.title, {
+      description: msg.body,
+      duration: 8000,
+      action: msg.appointmentId
+        ? { label: 'View', onClick: () => { window.location.assign(`/phleb-app?appt=${encodeURIComponent(msg.appointmentId!)}`); } }
+        : undefined,
+    });
+  };
+
+  const enablePush = async () => {
+    if (!user?.id) return;
+    setShowPushPrompt(false);
+    const { granted } = await initPush(user.id, onForegroundPush);
+    if (granted) {
+      toast.success("You're set — new bookings will ping this phone.");
+    } else {
+      toast.error('Notifications are off. You can enable them anytime in your phone Settings → ConveLabs Pro.');
+      localStorage.setItem('phleb-push-prompt-dismissed', '1');
+    }
+  };
 
   const {
     appointments,
@@ -142,6 +196,48 @@ const PhlebDashboardShell: React.FC = () => {
             <p className="text-red-100 text-sm">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
           </div>
         </div>
+
+        {/* Push-notification priming banner (native only, until enabled).
+            Explains the value BEFORE the one-shot iOS permission dialog. */}
+        {showPushPrompt && (
+          <div className="max-w-lg mx-auto px-3 sm:px-4 pt-3">
+            <div className="bg-white border border-[#EFE3E1] rounded-xl shadow-sm p-4 flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center flex-shrink-0">
+                <BellRing className="h-4.5 w-4.5 text-[#B91C1C]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Never miss a booking</p>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  Get pinged the second a new appointment lands, reschedules, or cancels — tap the alert and it opens straight to the job.
+                </p>
+                <div className="flex gap-2 mt-2.5">
+                  <button
+                    type="button"
+                    onClick={enablePush}
+                    className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs font-semibold rounded-lg px-4 py-2 transition"
+                  >
+                    Turn on notifications
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowPushPrompt(false); localStorage.setItem('phleb-push-prompt-dismissed', '1'); }}
+                    className="text-xs text-gray-500 px-2 py-2"
+                  >
+                    Not now
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Dismiss"
+                onClick={() => { setShowPushPrompt(false); localStorage.setItem('phleb-push-prompt-dismissed', '1'); }}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Earnings scoreboard — Hormozi: top-of-mind = top-of-screen.
             Phleb opens dashboard wanting to know "what am I making today

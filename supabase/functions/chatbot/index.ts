@@ -375,6 +375,62 @@ async function sendEscalationSMS(supabase: any, conversationId: string, reason: 
   await sendOwnerSms(`🔥 Ask-Nico escalation\nReason: ${reason}\nLast msg: ${lastUserMsg.substring(0, 120)}\n\nOpen & reply: ${PUBLIC_SITE_URL}/c/${token}`);
 }
 
+// ═══════ ABUSE RATE LIMITING ═════════════════════════════════════════
+// The anon key is in the page JS, so a bot can POST here directly and each
+// POST is one paid Sonnet call. hit_rate_limit() enforces per-IP + global
+// caps in the DB (see 20260720_abuse_rate_limits.sql). Fail-OPEN on any RPC
+// error so a limiter hiccup never takes the chatbot down — Turnstile is the
+// hard gate; this is defense-in-depth against volume.
+function getClientIp(req: Request): string {
+  const xff = req.headers.get('x-forwarded-for') || '';
+  const first = xff.split(',')[0].trim();
+  return first || req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+}
+
+async function checkRateLimit(supabase: any, bucket: string, windowSeconds: number, max: number): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc('hit_rate_limit', {
+      p_bucket: bucket, p_window_seconds: windowSeconds, p_max: max,
+    });
+    if (error) { console.warn('[rate-limit] rpc error (fail-open):', error.message); return true; }
+    return !!(data as any)?.allowed;
+  } catch (e) {
+    console.warn('[rate-limit] exception (fail-open):', e);
+    return true;
+  }
+}
+
+// ── CLOUDFLARE TURNSTILE (bot gate on the paid Sonnet call) ──────────
+// Fail-CLOSED on a missing/forged token (the abuse case). Fail-OPEN on a
+// siteverify network error OR our OWN secret misconfig, so a config slip
+// never breaks the funnel. Mirrors the E-Labus / ai-sales-chat pattern.
+async function verifyTurnstile(secret: string, token: string | undefined, ip?: string): Promise<boolean> {
+  if (!token) return false;
+  try {
+    const form = new URLSearchParams();
+    form.append('secret', secret);
+    form.append('response', token);
+    if (ip) form.append('remoteip', ip);
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await resp.json();
+    if (data?.success === true) return true;
+    const codes: string[] = Array.isArray(data?.['error-codes']) ? data['error-codes'] : [];
+    console.warn('[turnstile] failed:', JSON.stringify(codes.length ? codes : data));
+    if (codes.some(c => ['invalid-input-secret', 'missing-input-secret', 'bad-request', 'internal-error'].includes(c))) {
+      console.error('[turnstile] CONFIG ERROR — failing open. Fix TURNSTILE_SECRET_KEY.');
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn('[turnstile] siteverify unreachable, failing open');
+    return true;
+  }
+}
+
 // ═══════ HANDLER ═════════════════════════════════════════════════════
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -421,6 +477,72 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // ── ABUSE RATE LIMITS (per-IP + global) ──────────────────────
+    // Each POST is one paid Sonnet call. A bot that omits conversationId
+    // opens a fresh convo every time, sailing past the per-conversation
+    // caps below — so gate on IP and a global daily ceiling up front.
+    const clientIp = getClientIp(req);
+    const [ipOk, globalOk] = await Promise.all([
+      checkRateLimit(supabase, `chatbot:ip:${clientIp}`, 3600, 30),   // 30 msgs / hour / IP
+      checkRateLimit(supabase, `chatbot:global`, 86400, 1500),        // 1500 LLM calls / day total
+    ]);
+    if (!ipOk || !globalOk) {
+      console.warn(`[chatbot] rate-limited ip=${clientIp} ipOk=${ipOk} globalOk=${globalOk}`);
+      return new Response(JSON.stringify({
+        conversationId: conversationId || null,
+        reply: "I'm getting a lot of questions right now. Please call or text Nico directly at (941) 527-9169 and he'll help you personally.",
+        suggestedActions: [
+          { label: 'Call Nico', url: 'tel:+19415279169' },
+          { label: 'Book now', url: '/book-now' },
+        ],
+        escalated: false,
+        rateLimited: true,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // ── TURNSTILE BOT GATE (anon callers only) ───────────────────
+    // This is the LIVE chatbot — its widget must be sending captchaToken
+    // before we enforce, or every real visitor 403s. TURNSTILE_SECRET_KEY is
+    // project-wide (shared with ai-sales-chat), so enforcement here is gated
+    // behind a SEPARATE opt-in flag. Rollout: (1) deploy the frontend that
+    // sends captchaToken, (2) set TURNSTILE_ENFORCE_CHATBOT=1. Gates anon
+    // visitors before the paid Sonnet call; logged-in users skip.
+    const TURNSTILE_SECRET = Deno.env.get('TURNSTILE_SECRET_KEY');
+    const enforceFlag = (Deno.env.get('TURNSTILE_ENFORCE_CHATBOT') || '').toLowerCase();
+    const TURNSTILE_ENFORCE = enforceFlag === '1' || enforceFlag === 'true';
+    if (TURNSTILE_SECRET && TURNSTILE_ENFORCE) {
+      let isAnon = false;
+      try {
+        const jwt = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+        const internalSecret = Deno.env.get('INTERNAL_FUNCTION_SECRET') || '';
+        const providedSecret = req.headers.get('x-internal-secret') || '';
+        if ((SERVICE_KEY && jwt === SERVICE_KEY) || (internalSecret && providedSecret === internalSecret)) {
+          // Trusted server-to-server caller (smoke tests, monitors, internal
+          // automation) — never Turnstile-gated. A bot only has the public
+          // anon key, never the service-role key or internal secret.
+          isAnon = false;
+        } else if (jwt) {
+          const { data: { user } } = await supabase.auth.getUser(jwt);
+          isAnon = (user as any)?.is_anonymous === true || !user;
+        } else {
+          isAnon = true;
+        }
+      } catch { isAnon = true; }
+      if (isAnon) {
+        const ip = req.headers.get('CF-Connecting-IP') || clientIp || undefined;
+        const ok = await verifyTurnstile(TURNSTILE_SECRET, (body as any)?.captchaToken, ip);
+        if (!ok) {
+          return new Response(JSON.stringify({
+            conversationId: conversationId || null,
+            reply: "Quick security check didn't clear — please refresh the page and try again, or text Nico at (941) 527-9169.",
+            suggestedActions: [{ label: 'Text Nico', url: 'sms:+19415279169' }],
+            escalated: false,
+            securityCheckFailed: true,
+          }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+      }
+    }
 
     // ── CONVERSATION SETUP ───────────────────────────────────────
     let history: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -603,9 +725,20 @@ Deno.serve(async (req) => {
       })
       .eq('id', conversationId);
 
-    // ── FIRE ESCALATION SMS (non-blocking) ──────────────────────
+    // ── FIRE ESCALATION SMS (non-blocking, throttled) ───────────
+    // A bot can loop trigger words (refund/lawyer/…) across fresh convos to
+    // SMS-bomb Nico. Throttle owner escalation texts per-IP and globally so
+    // real escalations still reach him but a flood is capped.
     if (escalate && escalationReason) {
-      sendEscalationSMS(supabase, conversationId, escalationReason, userMessage).catch(() => {});
+      const [escIpOk, escGlobalOk] = await Promise.all([
+        checkRateLimit(supabase, `chatbot:esc:ip:${clientIp}`, 600, 3),   // ≤3 / 10 min / IP
+        checkRateLimit(supabase, `chatbot:esc:global`, 3600, 20),         // ≤20 / hour total
+      ]);
+      if (escIpOk && escGlobalOk) {
+        sendEscalationSMS(supabase, conversationId, escalationReason, userMessage).catch(() => {});
+      } else {
+        console.warn(`[chatbot] escalation SMS throttled ip=${clientIp}`);
+      }
     }
 
     return new Response(JSON.stringify({

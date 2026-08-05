@@ -517,9 +517,11 @@ const PatientProfile = () => {
                     </div>
                     <Button variant="outline" size="sm" className="text-xs gap-1" onClick={async () => {
                       // Newline-first split (current trigger), comma fallback for legacy rows.
-                      // Filenames with commas ("Rienzi, Mary Ellen.pdf") used to break this.
+                      // Filenames with commas ("Rienzi, Mary Ellen.pdf") break a
+                      // comma-split — the path list is newline-delimited, so split
+                      // on '\n' ONLY (the old comma fallback shredded such names).
                       const _raw = a.lab_order_file_path as string;
-                      const paths = (_raw.includes('\n') ? _raw.split('\n') : _raw.split(',')).map((p: string) => p.trim()).filter(Boolean);
+                      const paths = String(_raw).split('\n').map((p: string) => p.trim()).filter(Boolean);
                       for (const path of paths) {
                         // publicStorageUrl encodes each path segment with
                         // encodeURIComponent so commas/spaces resolve.

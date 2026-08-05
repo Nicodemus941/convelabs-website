@@ -15,7 +15,11 @@ const TenantOnboarding = lazy(() => import('../pages/TenantOnboarding'));
 const TenantDashboard = lazy(() => import('../pages/tenant/Dashboard'));
 const TenantBookAppointment = lazy(() => import('../pages/TenantBookAppointment'));
 const BookAppointment = lazy(() => import('../pages/BookAppointment'));
-const PhlebotomistApp = lazy(() => import('../pages/PhlebotomistApp'));
+// The native ConveLabs Pro app renders the SAME phleb dashboard the website +
+// PWA use, so field staff get an identical UI (tabs, earnings, correct "today"
+// via usePhlebotomistAppointments, and notch-safe headers) instead of the old
+// stripped-down PhlebotomistApp screen.
+const PhlebotomistDashboard = lazy(() => import('../components/dashboards/PhlebotomistDashboard'));
 
 export const routes = [
   <Route key="profile" path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />,
@@ -32,7 +36,7 @@ export const routes = [
   <Route key="admin-marketing-campaigns" path="/admin/marketing/campaigns" element={<RoleProtectedRoute allowedRoles={['office_manager', 'super_admin']}><MarketingCampaigns /></RoleProtectedRoute>} />,
   <Route key="admin-marketing-scheduled" path="/admin/marketing/scheduled" element={<RoleProtectedRoute allowedRoles={['office_manager', 'super_admin']}><ScheduledCampaigns /></RoleProtectedRoute>} />,
   <Route key="admin-marketing-analytics" path="/admin/marketing/analytics" element={<RoleProtectedRoute allowedRoles={['office_manager', 'super_admin']}><MarketingAnalytics /></RoleProtectedRoute>} />,
-  <Route key="phleb-app" path="/phleb-app" element={<RoleProtectedRoute allowedRoles={['phlebotomist','super_admin','office_manager']}><PhlebotomistApp /></RoleProtectedRoute>} />,
+  <Route key="phleb-app" path="/phleb-app" element={<RoleProtectedRoute allowedRoles={['phlebotomist','super_admin','office_manager']}><PhlebotomistDashboard /></RoleProtectedRoute>} />,
 ];
 
 export const ProtectedRoutes = () => null;

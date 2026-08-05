@@ -40,6 +40,42 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // ── Push-notification deep link ─────────────────────────────────────
+  // A tap on an OS notification opens /phleb-app?appt=<id>. Once the
+  // appointment list is loaded, jump to that appointment's DATE, expand its
+  // card, scroll it into view, and flash-highlight it. Param is consumed
+  // exactly once (cleared from the URL) so a later manual refresh doesn't
+  // re-hijack navigation.
+  const [deepLinkAppt, setDeepLinkAppt] = useState<string | null>(() =>
+    new URLSearchParams(window.location.search).get('appt')
+  );
+  const [highlightedAppt, setHighlightedAppt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!deepLinkAppt || appointments.length === 0) return;
+    const target = appointments.find(a => a.id === deepLinkAppt);
+    if (!target) return; // not in the loaded window (or not this phleb's) — leave schedule as-is
+    try {
+      const d = parseISO(target.appointment_date);
+      setSelectedDate(d);
+      setWeekStart(startOfWeek(d, { weekStartsOn: 1 }));
+    } catch { /* bad date — still expand below */ }
+    setExpandedCard(target.id);
+    setHighlightedAppt(target.id);
+    setDeepLinkAppt(null);
+    // Strip ?appt= so refreshes don't re-run the jump
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('appt');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    } catch { /* non-fatal */ }
+    // Scroll after the date-switch render settles
+    setTimeout(() => {
+      document.getElementById(`phleb-appt-${target.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+    // Drop the highlight ring after a few seconds
+    setTimeout(() => setHighlightedAppt(null), 5000);
+  }, [deepLinkAppt, appointments]);
+
   // Persist navigation state so it survives PWA background/reload
   useEffect(() => {
     sessionStorage.setItem('phleb-selected-date', format(selectedDate, 'yyyy-MM-dd'));
@@ -182,13 +218,20 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
       {/* Active Appointments */}
       {!isLoading && activeAppts.map((appt) => (
-        <PhlebAppointmentCard
+        <div
           key={appt.id}
-          appointment={appt}
-          onStatusUpdate={onStatusUpdate}
-          isExpanded={expandedCard === appt.id}
-          onToggle={() => setExpandedCard(expandedCard === appt.id ? null : appt.id)}
-        />
+          id={`phleb-appt-${appt.id}`}
+          className={highlightedAppt === appt.id
+            ? 'rounded-xl ring-2 ring-[#B91C1C] ring-offset-2 ring-offset-[#F6F0EE] transition-shadow duration-700'
+            : undefined}
+        >
+          <PhlebAppointmentCard
+            appointment={appt}
+            onStatusUpdate={onStatusUpdate}
+            isExpanded={expandedCard === appt.id}
+            onToggle={() => setExpandedCard(expandedCard === appt.id ? null : appt.id)}
+          />
+        </div>
       ))}
 
       {/* Completed */}
@@ -199,7 +242,12 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
             Completed ({completedAppts.length})
           </p>
           {completedAppts.map((appt) => (
-            <div key={appt.id} className="bg-white rounded-xl shadow-sm border border-[#EFE3E1] border-l-4 border-l-emerald-400 opacity-80 p-3 mb-2">
+            <div
+              key={appt.id}
+              id={`phleb-appt-${appt.id}`}
+              className={`bg-white rounded-xl shadow-sm border border-[#EFE3E1] border-l-4 border-l-emerald-400 opacity-80 p-3 mb-2${
+                highlightedAppt === appt.id ? ' ring-2 ring-[#B91C1C] ring-offset-2 ring-offset-[#F6F0EE]' : ''
+              }`}>
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center">
                   <CheckCircle2 className="h-4 w-4 text-emerald-500" />

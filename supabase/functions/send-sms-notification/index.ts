@@ -139,6 +139,59 @@ serve(async (req) => {
       )
     }
 
+    // ─── ANTI-ABUSE GATE ───────────────────────────────────────────
+    // The public anon key is embedded in the website JS, so a bot can call
+    // this function directly. Without a gate it could text ANY phone number
+    // (toll fraud / smishing under our brand). Rule: an anonymous caller
+    // (anon-key only) may ONLY text a number already in the patient registry.
+    // Logged-in users (staff/patient JWT) and trusted internal services may
+    // text anyone. A bot has the anon key but cannot forge a real user JWT.
+    if (phoneCheck.inRegistry === false) {
+      const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || ''
+      const internalSecret = Deno.env.get('INTERNAL_FUNCTION_SECRET') || ''
+      const authHeader = req.headers.get('Authorization') || ''
+      const bearer = authHeader.replace(/^Bearer\s+/i, '').trim()
+      const providedSecret = req.headers.get('x-internal-secret') || ''
+      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+
+      let trusted = false
+      // 1) Trusted internal service via shared secret
+      if (internalSecret && providedSecret === internalSecret) trusted = true
+      // 2) Server-to-server call carrying the service-role key
+      if (!trusted && bearer && serviceKey && bearer === serviceKey) trusted = true
+      // 3) A genuinely logged-in user (staff/patient) — the anon key alone fails this
+      if (!trusted && bearer && bearer !== anonKey) {
+        try {
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.38.4')
+          const authClient = createClient(Deno.env.get('SUPABASE_URL') || '', anonKey)
+          const { data: { user } } = await authClient.auth.getUser(bearer)
+          if (user) trusted = true
+        } catch { /* not a valid user token */ }
+      }
+
+      if (!trusted) {
+        console.warn('[abuse-guard] Blocked SMS to non-registry number from untrusted caller: ' + normalizedPhone)
+        try {
+          const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2.38.4')
+          const sb = createClient(Deno.env.get('SUPABASE_URL') || '', serviceKey)
+          await sb.from('webhook_logs').insert({
+            id: crypto.randomUUID(),
+            event_type: 'sms_abuse_blocked',
+            status: 'blocked',
+            payload_summary: {
+              recipient_phone: normalizedPhone,
+              reason: 'Non-registry recipient from untrusted (anon-key) caller',
+              origin_function: 'send-sms-notification',
+            },
+          }).then(() => {}, () => {})
+        } catch { /* never break on logging */ }
+        return new Response(
+          JSON.stringify({ success: false, blocked: true, reason: 'Recipient not permitted' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    }
+
     const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`
 
     const formData = new URLSearchParams()

@@ -3,6 +3,7 @@ import { stripe } from "../_shared/stripe.ts";
 import { verifyRecipientEmail, verifyRecipientPhone } from "../_shared/verify-recipient.ts";
 import { commitReschedule } from "../_shared/reschedule.ts";
 import { isSlotStillAvailable } from "../_shared/availability.ts";
+import { resolveMembershipPlan, upsertUserMembership, userIdFromEmail } from "../_shared/membership.ts";
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -64,11 +65,10 @@ Deno.serve(async (req) => {
       // Check if this is an upgrade
       const isUpgrade = metadata.is_upgrade === 'true';
 
-      // isFoundingMember is INTENT only — the webhook calls claim_founding_seat
-      // RPC post-insert to actually assign seat number 1-50 atomically.
-      // The real "is this person a founder?" truth is founding_member_number
-      // IS NOT NULL in user_memberships. See Founding 50 system (2026-04-19).
-      const isFoundingMember = metadata.founding_member === 'true';
+      // Founding-50 is NOT driven by a checkout flag. Any VIP membership claims
+      // the next seat server-side via claim_founding_seat (cap-safe + idempotent),
+      // in handleMembershipSignup / handleSubscriptionCreated / the bundled path.
+      // Truth = user_memberships.founding_member_number IS NOT NULL.
 
       // Whitelist of known metadata.type values. Anything not on this list
       // with metadata.type SET is a client-side bug or a malicious/stale
@@ -85,6 +85,14 @@ Deno.serve(async (req) => {
         'org_subscription',
         'partnership',
         'provider_plan',
+        // 'membership' — stamped by create-checkout-session on EVERY membership
+        // signup. It was missing here, so every membership checkout threw
+        // "unknown metadata.type" and aborted the session handler. Maria
+        // Tejedor (Founding #4, 2026-07-28 20:01) is the case that surfaced it:
+        // she paid, the session handler died, and only handleSubscriptionCreated
+        // (customer.subscription.created) saved the membership + founding seat.
+        // The legacy signup path below is the intended handler for this type.
+        'membership',
       ]);
       if (metadata.type && !KNOWN_TYPES.has(metadata.type)) {
         throw new Error(
@@ -161,12 +169,20 @@ Deno.serve(async (req) => {
       }
       // Handle membership upgrades
       else if (isUpgrade) {
-        await handleMembershipUpgrade(session, isFoundingMember, isSupernovaMember);
+        await handleMembershipUpgrade(session, isSupernovaMember);
       }
       // Handle regular membership signups (no metadata.type — legacy path)
       else {
-        await handleMembershipSignup(session, isFoundingMember, isSupernovaMember);
+        await handleMembershipSignup(session, isSupernovaMember);
       }
+    }
+    // Handle subscription created — deterministic, real-time membership create.
+    // The subscription carries metadata.type='membership' + plan_id (stamped by
+    // create-checkout-session via subscription_data.metadata), so this never
+    // depends on the checkout.session metadata path and never guesses by amount.
+    else if (event.type === 'customer.subscription.created') {
+      const subscription = event.data.object;
+      await handleSubscriptionCreated(subscription);
     }
     // Handle subscription updated (e.g. renewing)
     else if (event.type === 'customer.subscription.updated') {
@@ -460,8 +476,13 @@ async function handleAddCompanionPaid(session: any) {
       patient_phone: null,
       address: primary.address,
       zipcode: primary.zipcode || '',
-      service_type: serviceType,
-      service_name: (primary as any).service_name || serviceType,
+      // Per-companion service: a companion can need a specialty kit even when
+      // the primary is a standard draw (self-serve add-companion lets them
+      // pick it). Falls back to the primary's service when not specified.
+      service_type: c.serviceType || serviceType,
+      service_name: (c.serviceType && c.serviceType !== serviceType)
+        ? (c.serviceType === 'specialty-kit-genova' ? 'Specialty Kit Collection (Genova)' : 'Specialty Kit Collection')
+        : ((primary as any).service_name || serviceType),
       family_group_id: familyGroupId,
       companion_role: 'companion',
       organization_id: (primary as any).organization_id || null,
@@ -783,7 +804,7 @@ async function handleCreditPackPurchase(session: any) {
 }
 
 // Handle membership signup
-async function handleMembershipSignup(session: any, isFoundingMember = false, isSupernovaMember = false) {
+async function handleMembershipSignup(session: any, isSupernovaMember = false) {
   try {
     const customerId = session.customer;
     const subscriptionId = session.subscription;
@@ -829,12 +850,22 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     }
 
     // Calculate the next renewal date
+    // Normalize the frequency string. The frontend stamps metadata.billing_frequency
+    // as 'annual', but this block used to check === 'annually' — no branch matched,
+    // nextRenewal stayed "new Date()" and the member looked instantly expired
+    // (hit on the 2026-07-17 live sale). Unknown values default to +1 year; the
+    // subscription.updated handler later syncs the exact date from Stripe's
+    // current_period_end either way.
+    const freqNorm = String(billingFrequency || '').toLowerCase();
     let nextRenewal = new Date();
-    if (billingFrequency === 'monthly') {
+    if (freqNorm.startsWith('month')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 1);
-    } else if (billingFrequency === 'quarterly') {
+    } else if (freqNorm.startsWith('quarter')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 3);
-    } else if (billingFrequency === 'annually') {
+    } else {
+      if (!freqNorm.startsWith('annual') && freqNorm !== 'yearly') {
+        console.warn(`[membership] unrecognized billing_frequency '${billingFrequency}' — defaulting next_renewal to +1 year`);
+      }
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
@@ -865,8 +896,10 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
         credits_allocated_annual: planData.credits_per_year,
         next_renewal: nextRenewal.toISOString(),
         is_primary_member: true,
-        founding_member: isFoundingMember,
-        founding_member_signup_date: isFoundingMember ? new Date().toISOString() : null,
+        // founding status is owned by claim_founding_seat below (VIP only) —
+        // insert defaults, let the RPC flip them on a successful claim.
+        founding_member: false,
+        founding_member_signup_date: null,
         next_billing_override: nextBillingOverride ? nextBillingOverride.toISOString() : null,
         is_supernova_member: isSupernovaMember,
         bonus_credits: bonusCredits,
@@ -974,17 +1007,17 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
     }
 
     // ── FOUNDING 50 SEAT CLAIM ─────────────────────────────────────
-    // If (a) the checkout flagged this as founding intent AND (b) the
-    // plan is VIP, atomically claim the next founding seat number.
-    // The RPC serializes via row-lock on system_settings, enforces the
-    // 50-cap server-side, and sets founding_member_number +
+    // Any VIP membership claims the next founding seat. No checkout flag —
+    // "plan is VIP" is the sole signal (parity with handleSubscriptionCreated
+    // and the bundled path). The RPC serializes via row-lock on system_settings,
+    // enforces the 50-cap, and sets founding_member_number +
     // founding_locked_rate_cents on the row we just upserted.
     //
     // If the cap is already reached: RPC returns NULL, the membership
     // is still active, but the user doesn't get founding status. No
     // error thrown — graceful degradation.
     const isVipPlan = String(planData?.name || '').toLowerCase() === 'vip';
-    if (isFoundingMember && isVipPlan && (membershipData as any)?.id) {
+    if (isVipPlan && (membershipData as any)?.id) {
       try {
         const { data: seatNumber, error: claimErr } = await supabaseClient
           .rpc('claim_founding_seat' as any, { p_membership_id: (membershipData as any).id });
@@ -1041,10 +1074,6 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       }
     }
     
-    if (isFoundingMember) {
-      console.log(`User ${userId} registered as Founding Member with next billing on ${nextBillingOverride?.toISOString()}`);
-    }
-
     if (isSupernovaMember) {
       console.log(`User ${userId} registered as Supernova Member with ${bonusCredits} bonus credits`);
     }
@@ -1077,6 +1106,9 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
       await supabaseClient.functions.invoke('send-membership-welcome', {
         body: {
           userId,
+          // send-membership-welcome requires patient_email — this dispatch
+          // sent only `email` since birth, so every welcome 400'd silently.
+          patient_email: customerEmail,
           email: customerEmail,
           tier: welcomeTier,
           annualPriceCents,
@@ -1093,6 +1125,82 @@ async function handleMembershipSignup(session: any, isFoundingMember = false, is
   } catch (error) {
     console.error('Error processing membership signup:', error);
     throw error;
+  }
+}
+
+// Deterministic, real-time membership creation on subscription.created.
+// ONLY acts on memberships (metadata.type==='membership') — recurring-visit,
+// org, corporate and add-on subscriptions carry other types and are ignored
+// here. Resolves the plan via metadata.plan_id → price id → amount, resolves
+// the user via metadata.user_id → customer email, and upserts idempotently
+// through the shared helper. This is the belt-and-suspenders guarantee: even
+// if the checkout.session path is incomplete, a real membership subscription
+// always produces a user_memberships row the instant Stripe activates it.
+async function handleSubscriptionCreated(subscription: any) {
+  try {
+    const md = subscription.metadata || {};
+    if (md.type !== 'membership') return; // not a membership subscription
+
+    const item = subscription.items?.data?.[0];
+    const priceId = item?.price?.id || null;
+    const unit = item?.price?.unit_amount || 0;
+    const cust = subscription.customer;
+    const customerId = typeof cust === 'string' ? cust : (cust?.id || null);
+
+    let userId: string | null = (md.user_id && md.user_id !== 'guest') ? md.user_id : null;
+    let email: string | null = null;
+    if (customerId) {
+      try {
+        const c: any = await stripe.customers.retrieve(customerId);
+        if (c && !c.deleted) email = c.email || null;
+      } catch { /* customer fetch optional */ }
+    }
+    if (!userId) userId = await userIdFromEmail(supabaseClient, email);
+    if (!userId) { console.warn('[sub.created] membership but no resolvable user', subscription.id); return; }
+
+    const resolved = await resolveMembershipPlan(supabaseClient, { planId: md.plan_id, priceId, amountCents: unit });
+    if (!resolved) { console.warn('[sub.created] membership but no plan match', subscription.id); return; }
+
+    const periodEnd = subscription.current_period_end;
+    const nextRenewal = (typeof periodEnd === 'number' && periodEnd > 0) ? new Date(periodEnd * 1000).toISOString() : null;
+    const res = await upsertUserMembership(supabaseClient, {
+      userId, plan: resolved.plan, stripeCustomerId: customerId, stripeSubscriptionId: subscription.id,
+      billingFrequency: md.billing_frequency || (item?.price?.recurring?.interval === 'month' ? 'monthly' : 'annual'),
+      billingEmail: email, nextRenewal,
+    });
+    console.log(`[sub.created] membership ${res.created ? 'created' : 'ensured'} for ${userId} (${resolved.plan.name}, matched by ${resolved.matchedBy})`);
+
+    // ── FOUNDING-50 SEAT CLAIM (VIP) ───────────────────────────────
+    // This is the DETERMINISTIC provisioning path for /pricing purchases,
+    // and it previously never claimed a founding seat — so VIP buyers via
+    // /pricing got no seat number, badge, or $199 rate-lock even with seats
+    // open (proven live: the 2026-06-01 VIP fell through). handleMembershipSignup
+    // and the booking-bundled path both claim; this must too, at parity.
+    //
+    // claim_founding_seat is idempotent + cap-safe: it row-locks the settings
+    // row, no-ops (returns NULL) if the membership already has a number or the
+    // 50-cap is reached, and stamps founding_member_number +
+    // founding_locked_rate_cents on the row. Non-blocking — a claim failure
+    // never breaks membership creation. NO email/SMS here by design.
+    try {
+      const isVipPlan = String(resolved.plan?.name || '').toLowerCase() === 'vip';
+      const membershipId = (res as any)?.membershipId || (res as any)?.id || null;
+      if (isVipPlan && membershipId) {
+        const { data: seatNumber, error: claimErr } = await supabaseClient
+          .rpc('claim_founding_seat' as any, { p_membership_id: membershipId });
+        if (claimErr) {
+          console.warn('[sub.created][founding-50] claim RPC error (non-blocking):', claimErr.message);
+        } else if (seatNumber) {
+          console.log(`[sub.created][founding-50] assigned seat #${seatNumber} to membership ${membershipId} (user ${userId})`);
+        } else {
+          console.log(`[sub.created][founding-50] no seat assigned (cap reached or already numbered) for membership ${membershipId}`);
+        }
+      }
+    } catch (e: any) {
+      console.warn('[sub.created][founding-50] claim exception (non-blocking):', e?.message || e);
+    }
+  } catch (e: any) {
+    console.error('[sub.created] failed:', e?.message);
   }
 }
 
@@ -1162,11 +1270,22 @@ async function handleSubscriptionUpdate(subscription: any) {
       .update(updatePayload)
       .eq('stripe_subscription_id', subscriptionId)
       .select('id, user_id, stripe_customer_id, stripe_subscription_id, founding_member, founding_locked_rate_cents')
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Error updating membership:', error);
       throw error;
+    }
+
+    // Benign event-order race: on a fresh purchase Stripe can deliver
+    // customer.subscription.updated BEFORE checkout.session.completed has
+    // created the user_memberships row. The old .single() threw "Cannot
+    // coerce the result to a single JSON object" here (hit twice on the
+    // 2026-07-17 live sale). Zero rows just means "not created yet" — the
+    // checkout handler creates it, and the next subscription event syncs it.
+    if (!data) {
+      console.warn(`[handleSubscriptionUpdate] no membership row yet for ${subscriptionId} — skipping (creation handler owns this)`);
+      return;
     }
 
     console.log(`Updated subscription ${subscriptionId} status to ${status}`);
@@ -1880,6 +1999,30 @@ async function handleAppointmentPayment(session: any) {
       }
     }
 
+    // PHONE FALLBACK: the booking form's phone field is optional, so metadata
+    // can arrive blank — which lands a phone-less appointment and the
+    // confirmation SMS below then has no destination and silently never sends
+    // (root cause of "I never got a confirmation text"). If we have no phone
+    // from checkout, pull it from the patient's chart record so every booking
+    // stores a phone whenever we have one on file. Non-fatal.
+    let resolvedPhone: string | null = (metadata.patient_phone && String(metadata.patient_phone).trim()) || null;
+    if (!resolvedPhone && patientId) {
+      try {
+        const { data: tp } = await supabaseClient
+          .from('tenant_patients')
+          .select('phone')
+          .eq('id', patientId)
+          .maybeSingle();
+        const regPhone = (tp as any)?.phone;
+        if (regPhone && String(regPhone).trim()) {
+          resolvedPhone = String(regPhone).trim();
+          console.log('[webhook] patient_phone backfilled from registry for new booking');
+        }
+      } catch (phoneErr) {
+        console.warn('[webhook] registry phone fallback failed (non-fatal):', phoneErr);
+      }
+    }
+
     // SLOT VALIDATION: Check if this time slot is already booked
     if (appointmentDate && appointmentTime) {
       const { count } = await supabaseClient
@@ -1908,7 +2051,7 @@ async function handleAppointmentPayment(session: any) {
         patient_id: patientId,
         patient_name: patientName,
         patient_email: metadata.patient_email || null,
-        patient_phone: metadata.patient_phone || null,
+        patient_phone: resolvedPhone,
         // When account holder booked for a saved family member, link the
         // appointment to that family_members row. The billing/booker stays
         // on patient_id; family_member_id is the visit subject.
@@ -2951,6 +3094,12 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
     displayDate = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   } catch {}
 
+  // Tracks whether we reached the patient on any channel, so we can stamp a
+  // lightweight audit on the appointment (used to answer "did they get a
+  // confirmation?"). Intentionally does NOT touch confirmation_send_count, so
+  // the 48h confirm/reschedule reminder cron keeps working unchanged.
+  let confirmationChannelSent = false;
+
   // 1. Send confirmation EMAIL via Mailgun
   if (email && MAILGUN_API_KEY) {
     const emailCheck = await verifyRecipientEmail(appointment.id, email, patientName);
@@ -2998,6 +3147,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 
         if (mgRes.ok) {
           console.log(`Confirmation email sent to ${email}`);
+          confirmationChannelSent = true;
         } else {
           const errText = await mgRes.text();
           console.error(`Mailgun error: ${mgRes.status} ${errText}`);
@@ -3037,6 +3187,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 
         if (twilioRes.ok) {
           console.log(`Confirmation SMS sent to ${phone}`);
+          confirmationChannelSent = true;
         } else {
           const errText = await twilioRes.text();
           console.error(`Twilio error: ${twilioRes.status} ${errText}`);
@@ -3044,6 +3195,22 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
       } catch (smsErr) {
         console.error('SMS send error:', smsErr);
       }
+    }
+  } else if (!phone) {
+    console.warn(`[webhook] no phone on appointment ${appointment.id} — confirmation SMS skipped`);
+  }
+
+  // Audit stamp: record that a booking confirmation went out (SMS and/or
+  // email). Non-blocking; leaves confirmation_send_count untouched so the
+  // 48h reminder cron is unaffected.
+  if (confirmationChannelSent && appointment.id) {
+    try {
+      const nowIso = new Date().toISOString();
+      await supabaseClient.from('appointments')
+        .update({ patient_confirmation_sent_at: nowIso, last_confirmation_sent_at: nowIso })
+        .eq('id', appointment.id);
+    } catch (stampErr) {
+      console.warn('[webhook] confirmation audit stamp failed (non-fatal):', stampErr);
     }
   }
 
@@ -3119,7 +3286,7 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
 }
 
 // New function to handle upgrades
-async function handleMembershipUpgrade(session: any, isFoundingMember = false, isSupernovaMember = false) {
+async function handleMembershipUpgrade(session: any, isSupernovaMember = false) {
   try {
     const customerId = session.customer;
     const subscriptionId = session.subscription;
@@ -3177,12 +3344,22 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
     }
     
     // Calculate the next renewal date
+    // Normalize the frequency string. The frontend stamps metadata.billing_frequency
+    // as 'annual', but this block used to check === 'annually' — no branch matched,
+    // nextRenewal stayed "new Date()" and the member looked instantly expired
+    // (hit on the 2026-07-17 live sale). Unknown values default to +1 year; the
+    // subscription.updated handler later syncs the exact date from Stripe's
+    // current_period_end either way.
+    const freqNorm = String(billingFrequency || '').toLowerCase();
     let nextRenewal = new Date();
-    if (billingFrequency === 'monthly') {
+    if (freqNorm.startsWith('month')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 1);
-    } else if (billingFrequency === 'quarterly') {
+    } else if (freqNorm.startsWith('quarter')) {
       nextRenewal.setMonth(nextRenewal.getMonth() + 3);
-    } else if (billingFrequency === 'annually') {
+    } else {
+      if (!freqNorm.startsWith('annual') && freqNorm !== 'yearly') {
+        console.warn(`[membership] unrecognized billing_frequency '${billingFrequency}' — defaulting next_renewal to +1 year`);
+      }
       nextRenewal.setFullYear(nextRenewal.getFullYear() + 1);
     }
 
@@ -3258,8 +3435,11 @@ async function handleMembershipUpgrade(session: any, isFoundingMember = false, i
           credits_allocated_annual: planData.credits_per_year,
           next_renewal: nextRenewal.toISOString(),
           is_primary_member: true,
-          founding_member: isFoundingMember,
-          founding_member_signup_date: isFoundingMember ? new Date().toISOString() : null,
+          // Founding status for an upgrade-to-VIP is claimed by
+          // handleSubscriptionCreated when the new subscription's
+          // customer.subscription.created event fires. Insert defaults here.
+          founding_member: false,
+          founding_member_signup_date: null,
           is_supernova_member: isSupernovaMember,
           bonus_credits: bonusCredits,
           promotion_locked_price: promotionLockedPrice
@@ -3354,19 +3534,30 @@ async function handleLabRequestUnlock(session: any) {
       console.warn('[unlock] invoice item create failed:', e.message);
     }
 
-    // Create the membership row
-    const { data: plan } = await supabaseClient
-      .from('membership_plans' as any).select('id').eq('tier', tier).maybeSingle();
-    if (plan) {
-      await supabaseClient.from('user_memberships' as any).insert({
-        email: patientEmail,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: subscriptionId,
-        membership_plan_id: plan.id,
-        status: 'active',
-        started_at: new Date().toISOString(),
-        source: 'lab_request_unlock',
-      });
+    // Create the membership row via the canonical helper. The previous insert
+    // was doubly broken: it looked up membership_plans by a non-existent `tier`
+    // column (always null → nothing created) and used columns that don't exist
+    // (email / membership_plan_id / started_at / source). Resolve the plan by
+    // name↔tier and upsert with the real schema.
+    try {
+      const { data: planRows } = await supabaseClient.from('membership_plans')
+        .select('id, name, annual_price, monthly_price, quarterly_price, credits_per_year, stripe_annual_price_id, stripe_monthly_price_id, stripe_quarterly_price_id');
+      const tierKey = String(tier || '').toLowerCase();
+      const wanted = tierKey === 'member' ? 'regular' : tierKey;
+      const plan = (planRows || []).find((p: any) => String(p.name).toLowerCase().includes(wanted));
+      const uid = await userIdFromEmail(supabaseClient, patientEmail);
+      if (plan && uid) {
+        await upsertUserMembership(supabaseClient, {
+          userId: uid, plan,
+          stripeCustomerId: typeof customerId === 'string' ? customerId : null,
+          stripeSubscriptionId: typeof subscriptionId === 'string' ? subscriptionId : null,
+          billingEmail: patientEmail,
+        });
+      } else {
+        console.warn('[unlock] membership not created — unresolved', { hasPlan: !!plan, hasUser: !!uid, tier });
+      }
+    } catch (e: any) {
+      console.warn('[unlock] membership upsert failed:', e?.message);
     }
 
     // Create the appointment

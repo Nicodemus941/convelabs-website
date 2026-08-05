@@ -5,6 +5,7 @@ import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths } f
 import { CheckCircle2, DollarSign, TrendingUp, Calendar, ChevronLeft, ChevronRight, User } from 'lucide-react';
 import { PhlebAppointment } from '@/hooks/usePhlebotomistAppointments';
 import EarningsChart from './EarningsChart';
+import CompletedJobModal from './CompletedJobModal';
 
 interface CompletedTabProps {
   appointments: PhlebAppointment[];
@@ -12,6 +13,7 @@ interface CompletedTabProps {
 
 const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
   const [viewMonth, setViewMonth] = useState(new Date());
+  const [selected, setSelected] = useState<PhlebAppointment | null>(null);
 
   const completed = useMemo(() => {
     return appointments
@@ -115,7 +117,14 @@ const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
       ) : (
         <div className="space-y-2">
           {completed.map((appt) => (
-            <Card key={appt.id} className="shadow-sm">
+            <Card
+              key={appt.id}
+              className="shadow-sm cursor-pointer hover:border-emerald-300 hover:shadow transition active:scale-[0.99]"
+              onClick={() => setSelected(appt)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(appt); } }}
+            >
               <CardContent className="p-3">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center flex-shrink-0">
@@ -146,6 +155,8 @@ const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
           ))}
         </div>
       )}
+
+      <CompletedJobModal open={!!selected} onClose={() => setSelected(null)} appt={selected} />
     </div>
   );
 };

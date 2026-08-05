@@ -1,0 +1,285 @@
+# Codemagic CI — cloud builds for the two ConveLabs apps (no Mac required).
+#
+# One web codebase -> two apps, selected by the npm cap:<target> script which
+# stamps the native applicationId / bundle id + display name before building:
+#   patient -> com.convelabs.patient  ("ConveLabs")
+#   phleb   -> com.convelabs.phleb    ("ConveLabs Pro")
+#
+# BEFORE the first run, set these up in the Codemagic UI:
+#   * Env group "convelabs_web"     -> VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY,
+#                                       VITE_STRIPE_PUBLISHABLE_KEY, VITE_POSTHOG_KEY, ...
+#                                       (whatever the web build reads from import.meta.env)
+#   * iOS: App Store Connect API key (Integrations) + provision both bundle ids.
+#   * Android: keystore in env group "android_keystore" + Google Play service account.
+#
+# Trigger a workflow manually (or wire branch triggers) per app/platform.
+
+definitions:
+  env_versions: &env_versions
+    node: 22
+    # Capacitor 8's Android libraries target Java 21. Without this the CI
+    # machine's default JDK compiles with an older source level and every
+    # :capacitor-*:compileReleaseJavaWithJavac task dies with
+    # "error: invalid source release: 21".
+    java: 21
+  cache_cfg: &cache_cfg
+    cache_paths:
+      - $HOME/.npm
+
+workflows:
+  # ---------------- PATIENT (ConveLabs) ----------------
+  ios-patient:
+    name: ConveLabs Patient · iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: ELabusAppStoreKey
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+      vars:
+        BUNDLE_ID: "com.convelabs.patient"
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (patient)
+        script: npm run cap:patient
+      - name: Set iOS build number
+        script: |
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
+      - name: Set up code signing (permanent shared cert — never revoke)
+        script: |
+          # Reuses the ONE permanent team-wide distribution key (IOS_DIST_CERT_KEY,
+          # base64 PEM) already shared by E-Labus / GHS / ConveLabs Pro — see the
+          # ios-phleb workflow for the ITMS-90035 post-mortem. fetch-signing-files
+          # REUSES the existing cert; --create makes the App Store provisioning
+          # profile for this bundle id on first run (com.convelabs.patient had none
+          # → the earlier "No matching profiles found" failure). This workflow
+          # NEVER revokes certs and NEVER regenerates the key — the shared cert
+          # already exists team-wide, so no legacy-cert cleanup is needed here.
+          set -e
+          if [ -z "$IOS_DIST_CERT_KEY" ]; then
+            echo "FATAL: IOS_DIST_CERT_KEY env var is not set (Codemagic app → Environment variables, mark Secure)."
+            exit 1
+          fi
+          keychain initialize
+          echo "IOS_DIST_CERT_KEY length: ${#IOS_DIST_CERT_KEY}"
+          printf '%s' "$IOS_DIST_CERT_KEY" | shasum -a 256 | cut -c1-16
+          printf '%s' "$IOS_DIST_CERT_KEY" | tr -d ' \t\r\n' | base64 --decode > /tmp/convelabs_cert_key.pem
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/convelabs_cert_key.pem \
+            --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-patient:
+    name: ConveLabs Patient · Android
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web   # also holds CM_KEYSTORE, CM_KEYSTORE_PASSWORD, CM_KEY_ALIAS, CM_KEY_PASSWORD
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (patient)
+        script: npm run cap:patient
+      - name: Decode keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/keystore.jks
+      - name: Build AAB
+        script: |
+          cd android
+          # gradlew is committed from a Windows checkout, so the exec bit can be
+          # missing -> `./gradlew` exits 126 ("command not executable"). chmod
+          # here as a belt-and-braces guard on top of the git 100755 mode.
+          chmod +x ./gradlew
+          # Derive the signing alias FROM THE KEYSTORE instead of trusting the
+          # CM_KEY_ALIAS env var. A mistyped or whitespace-padded paste there only
+          # surfaces at the very last task (:app:signReleaseBundle, after a full
+          # 1m+ compile) as "No key with alias '***' found in keystore" — an
+          # expensive way to discover a typo. keytool is authoritative here; the
+          # env var remains a fallback.
+          DETECTED_ALIAS=$(keytool -list             -keystore "$CM_BUILD_DIR/android/keystore.jks"             -storepass "$CM_KEYSTORE_PASSWORD" 2>/dev/null             | awk -F', ' '/PrivateKeyEntry/{print $1; exit}')
+          SIGN_ALIAS="${DETECTED_ALIAS:-$CM_KEY_ALIAS}"
+          echo "Signing with alias: $SIGN_ALIAS (detected=${DETECTED_ALIAS:-none})"
+          ./gradlew bundleRelease             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks             -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD"             -Pandroid.injected.signing.key.alias="$SIGN_ALIAS"             -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD"
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+    # No `publishing: google_play:` — see the note on android-phleb. An unset
+    # $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS fails validation before the build
+    # starts. Upload the AAB artifact to Play manually until a Play service
+    # account exists.
+
+  # ---------------- PHLEB (ConveLabs Pro) ----------------
+  ios-phleb:
+    name: ConveLabs Pro · iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: ELabusAppStoreKey
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+      vars:
+        BUNDLE_ID: "com.convelabs.phleb"
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (phleb)
+        script: npm run cap:phleb
+      - name: Set iOS build number
+        script: |
+          cd ios/App
+          agvtool new-version -all "$BUILD_NUMBER"
+      - name: Set up code signing (permanent shared cert — never revoke)
+        script: |
+          # ITMS-90035 POST-MORTEM (2026-07-02): throwaway per-build certs on the
+          # shared Do-Ya team (S34X3C4RRS) meant any build's cert churn could
+          # retroactively invalidate another app's already-uploaded binary
+          # (E-Labus build #62 bounced from App Review with "Invalid Signature").
+          # TEAM-WIDE FIX: every app (E-Labus, GHS, ConveLabs Pro) now shares ONE
+          # permanent private key via the SECURE env var IOS_DIST_CERT_KEY
+          # (base64 PEM; master copy C:\Users\nicod\Keystores\elabus-ios-dist-key.pem).
+          # Distribution certs are team-wide, so the one cert signs all bundle
+          # IDs; fetch-signing-files REUSES it and only creates if missing.
+          # NEVER revoke certs unconditionally, NEVER regenerate the key.
+          set -e
+          if [ -z "$IOS_DIST_CERT_KEY" ]; then
+            echo "FATAL: IOS_DIST_CERT_KEY env var is not set (Codemagic app → Environment variables, mark Secure)."
+            exit 1
+          fi
+          keychain initialize
+          # Diagnostics (length + digest only, never key material) + tr strips
+          # whitespace a UI paste can introduce. Expected: length 2312,
+          # sha256 starts db865ca99cdeae46 (same shared key as e-labus/GHS).
+          echo "IOS_DIST_CERT_KEY length: ${#IOS_DIST_CERT_KEY}"
+          printf '%s' "$IOS_DIST_CERT_KEY" | shasum -a 256 | cut -c1-16
+          printf '%s' "$IOS_DIST_CERT_KEY" | tr -d ' \t\r\n' | base64 --decode > /tmp/convelabs_cert_key.pem
+          if ! app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/convelabs_cert_key.pem \
+            --create; then
+            # One-time self-heal: cert cap full of legacy throwaway certs — clear
+            # and retry once. Never runs again once the permanent cert exists.
+            echo "fetch-signing-files failed — clearing legacy throwaway certs and retrying once"
+            for T in IOS_DISTRIBUTION DISTRIBUTION; do
+              app-store-connect certificates list --type "$T" --json > /tmp/dist_certs.json 2>/dev/null || true
+              for CID in $(jq -r '.[].id // empty' /tmp/dist_certs.json 2>/dev/null); do
+                echo "Revoking legacy distribution certificate ($T) $CID"
+                app-store-connect certificates delete "$CID" --ignore-not-found 2>/dev/null || true
+              done
+            done
+            app-store-connect fetch-signing-files "$BUNDLE_ID" \
+              --type IOS_APP_STORE \
+              --certificate-key=@file:/tmp/convelabs_cert_key.pem \
+              --create
+          fi
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --project "ios/App/App.xcodeproj" \
+            --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-phleb:
+    name: ConveLabs Pro · Android
+    instance_type: linux_x2
+    max_build_duration: 60
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web   # also holds CM_KEYSTORE* keystore vars
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build web + sync (phleb)
+        script: npm run cap:phleb
+      - name: Decode keystore
+        script: |
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/keystore.jks
+      - name: Build AAB
+        script: |
+          cd android
+          # gradlew is committed from a Windows checkout, so the exec bit can be
+          # missing -> `./gradlew` exits 126 ("command not executable"). chmod
+          # here as a belt-and-braces guard on top of the git 100755 mode.
+          chmod +x ./gradlew
+          # Derive the signing alias FROM THE KEYSTORE instead of trusting the
+          # CM_KEY_ALIAS env var. A mistyped or whitespace-padded paste there only
+          # surfaces at the very last task (:app:signReleaseBundle, after a full
+          # 1m+ compile) as "No key with alias '***' found in keystore" — an
+          # expensive way to discover a typo. keytool is authoritative here; the
+          # env var remains a fallback.
+          DETECTED_ALIAS=$(keytool -list             -keystore "$CM_BUILD_DIR/android/keystore.jks"             -storepass "$CM_KEYSTORE_PASSWORD" 2>/dev/null             | awk -F', ' '/PrivateKeyEntry/{print $1; exit}')
+          SIGN_ALIAS="${DETECTED_ALIAS:-$CM_KEY_ALIAS}"
+          echo "Signing with alias: $SIGN_ALIAS (detected=${DETECTED_ALIAS:-none})"
+          ./gradlew bundleRelease             -Pandroid.injected.signing.store.file=$CM_BUILD_DIR/android/keystore.jks             -Pandroid.injected.signing.store.password="$CM_KEYSTORE_PASSWORD"             -Pandroid.injected.signing.key.alias="$SIGN_ALIAS"             -Pandroid.injected.signing.key.password="$CM_KEY_PASSWORD"
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+    # NOTE: no `publishing: google_play:` here. Codemagic validates publishing
+    # credentials BEFORE preparing the build machine, so pointing at an unset
+    # $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS killed the build at step 0 with
+    # "Expecting value: line 1 column 1" (it tried to JSON-parse an empty
+    # string). The signed AAB is published as an artifact instead and uploaded
+    # to Play manually. To re-enable auto-publish, create a Play service
+    # account, store its JSON in that env var, then restore the block.
+
+  # ---------------- PHLEB (ConveLabs Pro) · OTA web bundle ----------------
+  # Ships web/UI fixes to already-installed ConveLabs Pro apps over-the-air
+  # (no store submission). Build the phleb web bundle, then publish it to the
+  # self-hosted Capgo registry. GRACEFUL: publish-ota.mjs exits 0 if
+  # SUPABASE_SERVICE_ROLE_KEY is empty, so the lane never breaks a build before
+  # the secret is wired into the `ota_publish` env group.
+  #
+  # Add these two vars to the EXISTING `convelabs_web` env group (mark Secure)
+  # so no new group is needed (a reference to a non-existent group hard-fails
+  # the build at parse time, before the graceful script gate can run):
+  #   SUPABASE_URL=https://yluyonhrxxtyuiyrdixl.supabase.co
+  #   SUPABASE_SERVICE_ROLE_KEY=<service role key>
+  # Never OTA a change Apple/Google must review (new native plugin, permission,
+  # IAP, or core-purpose change) — cut a native build instead and bump
+  # OTA_MIN_NATIVE_BUILD to that build number.
+  phleb-web-ota:
+    name: ConveLabs Pro · Web OTA
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build phleb web bundle (prod)
+        script: npm run build:phleb
+      - name: Publish OTA bundle
+        script: npm run ota:publish:phleb

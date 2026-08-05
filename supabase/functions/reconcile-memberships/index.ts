@@ -80,8 +80,9 @@ Deno.serve(async (req) => {
   let checked = 0;
 
   try {
-    // Cache membership_plans for price→plan mapping.
-    const { data: plans } = await admin.from('membership_plans').select('id, name, annual_price, monthly_price, credits_per_year');
+    // Cache membership_plans for plan resolution (by id / Stripe price id / amount).
+    const { data: plans } = await admin.from('membership_plans')
+      .select('id, name, annual_price, monthly_price, quarterly_price, credits_per_year, stripe_annual_price_id, stripe_monthly_price_id, stripe_quarterly_price_id');
     const planList = (plans || []) as any[];
 
     // Walk active Stripe subscriptions (paginate).
@@ -104,9 +105,18 @@ Deno.serve(async (req) => {
         if (email && /placeholder\.com$|example\.com$|@test\.|test@/.test(email)) continue;
         const item = sub.items?.data?.[0];
         const unit = item?.price?.unit_amount || 0;
+        const priceId = item?.price?.id || null;
         const interval = item?.price?.recurring?.interval || 'year';
-        // Match a plan by price (annual or monthly).
-        const plan = planList.find(p => p.annual_price === unit) || planList.find(p => p.monthly_price === unit) || null;
+        const metaPlanId = (sub.metadata && (sub.metadata as any).plan_id) || null;
+        // Resolve the plan DETERMINISTICALLY: subscription metadata.plan_id
+        // (the authoritative signal stamped at checkout) → Stripe price id →
+        // amount (last resort). Amount alone collides with visit/companion
+        // prices, so it's only the final fallback.
+        const plan = (metaPlanId && planList.find(p => p.id === metaPlanId))
+          || planList.find(p => [p.stripe_annual_price_id, p.stripe_monthly_price_id, p.stripe_quarterly_price_id].includes(priceId))
+          || planList.find(p => p.annual_price === unit)
+          || planList.find(p => p.monthly_price === unit)
+          || null;
 
         if (!email || !plan) {
           flagged.push({ sub: sub.id, email, unit, reason: !email ? 'no_customer_email' : 'no_plan_match' });
@@ -230,6 +240,23 @@ Deno.serve(async (req) => {
               .select('id').eq('stripe_payment_intent_id', pi).maybeSingle();
             if (appt) continue;
           }
+          // Also exclude charges whose INVOICE is tied to an appointment.
+          // Companion add-on / visit invoices store stripe_invoice_id (not the
+          // PI) on the row, so the PI check above misses them. This killed the
+          // Ava Shealy $225 companion+specialty-kit invoice colliding with the
+          // Essential Care $225 membership price. (2026-06-30)
+          const invId = typeof ch.invoice === 'string' ? ch.invoice : (ch.invoice as any)?.id || null;
+          if (invId) {
+            const { data: apptByInv } = await admin.from('appointments')
+              .select('id').eq('stripe_invoice_id', invId).maybeSingle();
+            if (apptByInv) continue;
+          }
+          // And exclude charges explicitly tagged as a non-membership flow
+          // (companion add-ons, visit/appointment invoices, tips). Amount alone
+          // is never proof of a membership purchase.
+          const md = { ...(ch.metadata || {}) } as Record<string, string>;
+          const flow = `${md.type || ''} ${md.source || ''} ${md.flow || ''}`.toLowerCase();
+          if (/companion|appointment|visit|addon|add_on|tip|invoice_payment/.test(flow)) continue;
 
           // Does this customer already have an active membership? (then fine)
           const { data: tp } = await admin.from('tenant_patients')

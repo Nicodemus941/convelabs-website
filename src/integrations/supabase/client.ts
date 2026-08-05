@@ -1,11 +1,21 @@
 
 import { createClient } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import type { Database } from './types';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// Only detect session in URL on auth-related pages (login, reset-password, signup)
+// In the native (Capacitor) app the URL is capacitor://localhost/... — there is
+// never an OAuth code/hash to exchange, and supabase-js's Web-Locks-based auth
+// lock can DEADLOCK inside iOS WKWebView (the app boots, then the login screen
+// hangs blank). So on native: don't detect a session in the URL, and swap the
+// Web Locks lock for a pass-through so auth init never stalls. Web is unchanged.
+const isNativeApp = (() => {
+  try { return Capacitor.isNativePlatform(); } catch { return false; }
+})();
+
+// Only detect session in URL on auth-related web pages (login, reset, signup).
 const isAuthPage = typeof window !== 'undefined' &&
   (window.location.pathname.includes('/reset-password') ||
    window.location.pathname.includes('/login') ||
@@ -16,8 +26,10 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storage: localStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: isAuthPage,
+    detectSessionInUrl: isAuthPage && !isNativeApp,
     flowType: 'pkce',
+    // Pass-through lock on native to avoid the WKWebView navigator.locks deadlock.
+    ...(isNativeApp ? { lock: async (_name: string, _acquireTimeout: number, fn: () => Promise<any>) => await fn() } : {}),
   },
   global: {
     headers: {

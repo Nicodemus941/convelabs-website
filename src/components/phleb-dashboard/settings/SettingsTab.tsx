@@ -80,6 +80,13 @@ const SettingsTab: React.FC = () => {
 
   const handleLogout = async () => {
     try {
+      // Remove this device's push token FIRST (needs the still-valid session)
+      // so a signed-out phleb — or the next user on a shared device — stops
+      // receiving this account's appointment notifications. No-op on web.
+      try {
+        const { teardownPush } = await import('@/lib/native/push');
+        await teardownPush();
+      } catch { /* never block sign-out on push cleanup */ }
       await logout();
       navigate('/login');
     } catch (err) {

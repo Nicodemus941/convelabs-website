@@ -136,7 +136,22 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const methods = useForm<BookingFormValues>({
     resolver: zodResolver(bookingFormSchema),
     defaultValues: {
-      date: new Date(),
+      // Default to the first day that can actually be booked, not blindly
+      // "today". Past the 3 PM same-day cutoff every visitor used to land on
+      // a grid that just said "Same-Day Booking Cutoff Reached" with no times
+      // — a dead first impression for anyone browsing in the evening, which
+      // is when a lot of people book. Roll to tomorrow instead.
+      // (Mirrors SAME_DAY_CUTOFF_HOUR in DateTimeSelectionStep.)
+      date: (() => {
+        const now = new Date();
+        const SAME_DAY_CUTOFF_HOUR = 15; // 3 PM
+        if (now.getHours() >= SAME_DAY_CUTOFF_HOUR) {
+          const tomorrow = new Date(now);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          return tomorrow;
+        }
+        return now;
+      })(),
       time: '',
       patientDetails: {
         firstName: user?.firstName || '',

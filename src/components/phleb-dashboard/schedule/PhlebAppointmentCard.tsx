@@ -139,7 +139,11 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
       for (const row of siblings) {
         const raw = String(row.lab_order_file_path || '');
         if (!raw) continue;
-        const parts = raw.includes('\n') ? raw.split('\n') : raw.split(',');
+        // Path list is ALWAYS newline-delimited. NEVER split on comma —
+        // filenames legitimately contain commas (e.g. "BURNSIDE, LAUREN.jpg"),
+        // and comma-splitting shredded them into non-existent paths → the lab
+        // order wouldn't render (Lauren Burnside, 2026-07-27).
+        const parts = raw.split('\n');
         for (const p of parts) {
           const t = p.trim();
           if (t) paths.push(t);
@@ -901,9 +905,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 // crash; the LabOrderStatusList below will surface the new
                 // upload via its own realtime query.
                 const _raw = appointment.lab_order_file_path || '';
-                const _own = _raw
-                  ? (_raw.includes('\n') ? _raw.split('\n') : _raw.split(','))
-                  : [];
+                // Newline-delimited only — never comma-split (breaks
+                // comma-containing filenames). See note above.
+                const _own = _raw ? _raw.split('\n') : [];
                 // Merge family-group sibling paths so couple/family bookings
                 // show every patient's lab order on the primary's card. Dedup
                 // by trimmed path string.

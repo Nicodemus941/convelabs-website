@@ -106,7 +106,13 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     const newPaths: string[] = [];
     const failedFiles: File[] = [];
     for (const file of acceptedFiles) {
-      const fileName = `laborder_${Date.now()}_${file.name}`;
+      // Sanitize the original filename — commas/spaces in a storage key are
+      // fragile (need URL-encoding on every read) and, because
+      // lab_order_file_path is a newline-delimited list, a comma in the name
+      // previously got shredded by comma-splitting consumers. Keep only safe
+      // chars; preserve the extension. (Lauren Burnside, 2026-07-27.)
+      const safeOriginal = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+      const fileName = `laborder_${Date.now()}_${safeOriginal}`;
       const { error } = await supabase.storage.from('lab-orders').upload(fileName, file);
       if (!error) {
         newPaths.push(fileName);

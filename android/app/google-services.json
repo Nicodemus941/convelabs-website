@@ -1,0 +1,59 @@
+{
+  "project_info": {
+    "project_number": "798300837388",
+    "firebase_url": "https://convelabs-booking-app.firebaseio.com",
+    "project_id": "convelabs-booking-app",
+    "storage_bucket": "convelabs-booking-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:798300837388:android:cff2db5f39b21d1d278029",
+        "android_client_info": {
+          "package_name": "com.convelabs.phleb"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJVYfv9CPpurqNsPOwuYnSdODQkp13gtE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "798300837388-85m20av7dfntq3l8jj99123nl166kbm8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:798300837388:android:1ec71c15af780e3a278029",
+        "android_client_info": {
+          "package_name": "com.convelabs.splash"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJVYfv9CPpurqNsPOwuYnSdODQkp13gtE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "798300837388-85m20av7dfntq3l8jj99123nl166kbm8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

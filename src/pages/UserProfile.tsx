@@ -9,15 +9,21 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Loader2, Save, Lock, User, Phone, Mail } from "lucide-react";
+import { Loader2, Save, Lock, User, Phone, Mail, Trash2, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 const UserProfile = () => {
-  const { user, refreshSession } = useAuth();
+  const { user, refreshSession, logout } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
   
   // Form states
   const [firstName, setFirstName] = useState(user?.firstName || "");
@@ -102,6 +108,24 @@ const UserProfile = () => {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("delete-account");
+      if (error) throw error;
+      if (data && data.ok === false) throw new Error(data.error || "Deletion failed");
+
+      toast.success("Your account has been deleted.");
+      // Sign out + bounce to the home screen; the session is now invalid.
+      await logout();
+      navigate("/", { replace: true });
+    } catch (err: any) {
+      console.error("Account deletion failed:", err);
+      toast.error(err.message || "Could not delete your account. Please contact support.");
+      setIsDeleting(false);
+    }
+  };
+
   if (!user) {
     return null;
   }
@@ -115,6 +139,7 @@ const UserProfile = () => {
           <TabsList className="mb-6">
             <TabsTrigger value="profile">Profile Information</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
+            <TabsTrigger value="account">Account</TabsTrigger>
           </TabsList>
           
           <TabsContent value="profile">
@@ -287,6 +312,66 @@ const UserProfile = () => {
                     </div>
                   </div>
                 </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="account">
+            <Card className="border-destructive/40">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-destructive">
+                  <AlertTriangle className="h-5 w-5" />
+                  Delete Account
+                </CardTitle>
+                <CardDescription>
+                  Permanently delete your ConveLabs account and sign-in. This cannot be undone.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Deleting your account removes your login and personal profile details. Lab and
+                  medical records that we are legally required to retain are kept in de-identified
+                  form. If you have an active membership, contact{" "}
+                  <a href="mailto:info@convelabs.com" className="underline">info@convelabs.com</a>{" "}
+                  about any remaining balance or refund.
+                </p>
+
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" disabled={isDeleting}>
+                      {isDeleting ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Deleting…</>
+                      ) : (
+                        <><Trash2 className="mr-2 h-4 w-4" />Delete my account</>
+                      )}
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently deletes your account and you will be signed out. Type{" "}
+                        <span className="font-semibold">DELETE</span> to confirm.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <Input
+                      value={confirmText}
+                      onChange={(e) => setConfirmText(e.target.value)}
+                      placeholder="DELETE"
+                      autoComplete="off"
+                    />
+                    <AlertDialogFooter>
+                      <AlertDialogCancel onClick={() => setConfirmText("")}>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={confirmText !== "DELETE" || isDeleting}
+                        onClick={handleDeleteAccount}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete account
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </CardContent>
             </Card>
           </TabsContent>

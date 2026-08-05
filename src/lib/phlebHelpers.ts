@@ -114,7 +114,14 @@ export function detectFastingRequirement(appointment: {
       { match: (s: string) => /\bcmp\b|comprehensive\s*metabolic/.test(s), label: 'CMP' },
       { match: (s: string) => /\bbmp\b|basic\s*metabolic/.test(s), label: 'BMP' },
       { match: (s: string) => /\bglucose\b/.test(s), label: 'Glucose' },
-      { match: (s: string) => /fasting\s*insulin/.test(s), label: 'Fasting Insulin' },
+      // 2026-07-07 sync with ocr-lab-order FASTING_PANELS: bare insulin,
+      // triglycerides, homocysteine, iron/TIBC are fasting-preferred and
+      // showed up unmatched on real orders. (HbA1c deliberately absent —
+      // A1c does not require fasting.)
+      { match: (s: string) => /\binsulin\b/.test(s), label: 'Insulin' },
+      { match: (s: string) => /triglyceride/.test(s), label: 'Triglycerides' },
+      { match: (s: string) => /homocysteine/.test(s), label: 'Homocysteine' },
+      { match: (s: string) => /\biron\b|\btibc\b/.test(s), label: 'Iron/TIBC' },
     ];
     for (const p of panels) {
       if (lower.some(p.match)) {
