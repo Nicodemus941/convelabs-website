@@ -17,7 +17,7 @@ import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppo
 import OnTheWayDialog from './OnTheWayDialog';
 import PatientEditModal from './PatientEditModal';
 import SpecimenDeliveryModal from './SpecimenDeliveryModal';
-import CancelAppointmentModal from '@/components/calendar/CancelAppointmentModal';
+import NoShowAppointmentModal from '@/components/calendar/NoShowAppointmentModal';
 import LabOrderViewerModal from './LabOrderViewerModal';
 import RunningLateModal from './RunningLateModal';
 import PhlebSmsDialog from './PhlebSmsDialog';
@@ -57,7 +57,7 @@ interface Props {
 
 const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, isExpanded, onToggle }) => {
   const [showOnTheWay, setShowOnTheWay] = useState(false);
-  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showNoShowModal, setShowNoShowModal] = useState(false);
   const [showPatientEdit, setShowPatientEdit] = useState(() => {
     return sessionStorage.getItem('phleb-editing-patient') === appointment.id;
   });
@@ -1210,12 +1210,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 }}>
                   <CalendarClock className="h-4 w-4" /> Request Reschedule
                 </Button>
-                {['scheduled', 'confirmed'].includes(appointment.status) && (
+                {['scheduled', 'confirmed', 'en_route', 'arrived'].includes(appointment.status) && (
                   <Button variant="outline" size="sm" className="w-full gap-2 h-10 border-red-200 text-red-600 hover:bg-red-50" onClick={(e) => {
                     e.stopPropagation();
-                    setShowCancelModal(true);
+                    setShowNoShowModal(true);
                   }}>
-                    <AlertTriangle className="h-4 w-4" /> Cancel (Patient No-Show)
+                    <AlertTriangle className="h-4 w-4" /> Mark Patient No-Show
                   </Button>
                 )}
               </div>
@@ -1275,11 +1275,11 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         }}
       />
 
-      <CancelAppointmentModal
+      <NoShowAppointmentModal
         appointment={appointment}
-        open={showCancelModal}
-        onClose={() => setShowCancelModal(false)}
-        onCancelled={() => onStatusUpdate(appointment.id, 'cancelled')}
+        open={showNoShowModal}
+        onClose={() => setShowNoShowModal(false)}
+        onMarked={() => onStatusUpdate(appointment.id, 'cancelled')}
         alsoNotifyAdmin={true}
         performedBy="phleb"
       />

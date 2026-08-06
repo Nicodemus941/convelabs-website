@@ -7,12 +7,15 @@ import { UserX, Loader2, Bell, BellOff, DollarSign } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import type { PhlebAppointment } from '@/hooks/usePhlebotomistAppointments';
 
 interface NoShowAppointmentModalProps {
-  appointment: any;
+  appointment: PhlebAppointment | null;
   open: boolean;
   onClose: () => void;
   onMarked: () => void;
+  alsoNotifyAdmin?: boolean;
+  performedBy?: 'admin' | 'phleb';
 }
 
 /**
@@ -28,7 +31,7 @@ interface NoShowAppointmentModalProps {
  *   slot lockout) was already consumed. Waiving is a judgment call, not a default.
  */
 const NoShowAppointmentModal: React.FC<NoShowAppointmentModalProps> = ({
-  appointment, open, onClose, onMarked,
+  appointment, open, onClose, onMarked, alsoNotifyAdmin = false, performedBy = 'admin',
 }) => {
   const appt = appointment;
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,28 +71,41 @@ const NoShowAppointmentModal: React.FC<NoShowAppointmentModalProps> = ({
   const handleConfirm = async () => {
     setIsSubmitting(true);
     try {
-      // Cast to any because generated types don't include no_show/no_show_at/no_show_fee yet (columns exist in DB)
-      const { error } = await supabase.from('appointments').update({
+      const noShowPatch: Record<string, unknown> = {
         status: 'cancelled',
         no_show: true,
         no_show_at: new Date().toISOString(),
         no_show_fee: fee,
         cancellation_reason: `No-show${applyFee ? ` (fee: $${fee.toFixed(2)})` : ' (fee waived)'}${note ? `. ${note}` : ''}`,
         cancelled_at: new Date().toISOString(),
-      } as any).eq('id', appt.id);
+      };
+      const { error } = await supabase.from('appointments').update(noShowPatch).eq('id', appt.id);
       if (error) throw error;
 
       // Activity log
       try {
-        await supabase.from('activity_log' as any).insert({
+        await supabase.from('activity_log').insert({
           patient_id: appt.patient_id || null,
           activity_type: 'no_show',
           description: `Marked no-show${applyFee ? ` with $${fee.toFixed(2)} fee` : ' (fee waived)'}${note ? `. Note: ${note}` : ''}${!notifyPatient ? ' [no patient notification]' : ''}`,
-          performed_by: 'admin',
+          performed_by: performedBy,
           appointment_id: appt.id,
         });
       } catch (logErr) {
         console.warn('Activity log error (non-fatal):', logErr);
+      }
+
+      if (alsoNotifyAdmin) {
+        try {
+          await supabase.functions.invoke('send-sms-notification', {
+            body: {
+              to: '9415279169',
+              message: `${performedBy === 'phleb' ? 'Phleb' : 'Admin'} marked no-show: ${patientName}${timeStr ? ` (${timeStr})` : ''}${applyFee ? ` · fee $${fee.toFixed(2)}` : ' · fee waived'}${note ? `. Note: ${note}` : ''}${notifyPatient ? '' : ' [patient NOT notified]'}`,
+            },
+          });
+        } catch (e) {
+          console.warn('Admin notify failed (non-fatal):', e);
+        }
       }
 
       // Patient notification
@@ -120,9 +136,9 @@ const NoShowAppointmentModal: React.FC<NoShowAppointmentModalProps> = ({
       );
       onMarked();
       onClose();
-    } catch (err: any) {
+    } catch (err) {
       console.error('No-show error:', err);
-      toast.error(err.message || 'Failed to mark no-show');
+      toast.error(err instanceof Error ? err.message : 'Failed to mark no-show');
     } finally {
       setIsSubmitting(false);
     }
