@@ -58,6 +58,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import AppointmentBookingButton from "@/components/appointment/AppointmentBookingButton";
+import AppointmentDetailModal from "@/components/calendar/AppointmentDetailModal";
 import {
   Table,
   TableBody,
@@ -90,10 +91,6 @@ const EnhancedAppointmentsTab = () => {
     cancelAppointment 
   } = useAppointments();
 
-  useEffect(() => {
-    fetchAppointments();
-  }, []);
-  
   const fetchAppointments = async () => {
     try {
       await getAppointments();
@@ -102,6 +99,13 @@ const EnhancedAppointmentsTab = () => {
       toast.error("Failed to load appointments. Please try again.");
     }
   };
+
+  useEffect(() => {
+    fetchAppointments();
+    // getAppointments comes from a non-memoized hook helper; calling once on
+    // mount is intentional here to avoid a refetch loop on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStatusChange = async (id: string, status: string) => {
     try {
@@ -150,19 +154,22 @@ const EnhancedAppointmentsTab = () => {
       const today = new Date();
       
       switch (dateRange) {
-        case "today":
+        case "today": {
           matchesDateRange = format(appointmentDate, "yyyy-MM-dd") === format(today, "yyyy-MM-dd");
           break;
-        case "week":
+        }
+        case "week": {
           const weekStart = startOfWeek(today);
           const weekEnd = endOfWeek(today);
           matchesDateRange = appointmentDate >= weekStart && appointmentDate <= weekEnd;
           break;
-        case "month":
+        }
+        case "month": {
           const monthStart = startOfMonth(today);
           const monthEnd = endOfMonth(today);
           matchesDateRange = appointmentDate >= monthStart && appointmentDate <= monthEnd;
           break;
+        }
       }
     }
 
@@ -190,7 +197,8 @@ const EnhancedAppointmentsTab = () => {
   // Bulk selection helpers
   const toggleSelect = (id: string) => setSelectedIds(prev => {
     const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     return next;
   });
   const toggleSelectAll = () => {
@@ -646,55 +654,13 @@ const EnhancedAppointmentsTab = () => {
                             
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-2">
-                                <Dialog>
-                                  <DialogTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => setSelectedAppointment(appointment)}
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
-                                  </DialogTrigger>
-                                  <DialogContent className="max-w-2xl">
-                                    <DialogHeader>
-                                      <DialogTitle>Appointment Details</DialogTitle>
-                                    </DialogHeader>
-                                    {selectedAppointment && (
-                                      <div className="space-y-4">
-                                        <div className="grid grid-cols-2 gap-4">
-                                          <div>
-                                            <h4 className="font-medium mb-2">Patient Information</h4>
-                                            <div className="space-y-1 text-sm">
-                                              <p><strong>Name:</strong> {selectedAppointment.patient_name}</p>
-                                              <p><strong>Phone:</strong> {selectedAppointment.patient_phone}</p>
-                                              <p><strong>Email:</strong> {selectedAppointment.patient_email}</p>
-                                            </div>
-                                          </div>
-                                          <div>
-                                            <h4 className="font-medium mb-2">Appointment Details</h4>
-                                            <div className="space-y-1 text-sm">
-                                              <p><strong>Date:</strong> {format(new Date(selectedAppointment.appointment_date), "PPP")}</p>
-                                              <p><strong>Time:</strong> {selectedAppointment.appointment_time}</p>
-                                              <p><strong>Service:</strong> {selectedAppointment.service_type}</p>
-                                              <p><strong>Status:</strong> {selectedAppointment.status}</p>
-                                            </div>
-                                          </div>
-                                        </div>
-                                        <div>
-                                          <h4 className="font-medium mb-2">Address</h4>
-                                          <p className="text-sm">{selectedAppointment.address}</p>
-                                        </div>
-                                        {selectedAppointment.notes && (
-                                          <div>
-                                            <h4 className="font-medium mb-2">Notes</h4>
-                                            <p className="text-sm">{selectedAppointment.notes}</p>
-                                          </div>
-                                        )}
-                                      </div>
-                                    )}
-                                  </DialogContent>
-                                </Dialog>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setSelectedAppointment(appointment)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
 
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
@@ -703,6 +669,9 @@ const EnhancedAppointmentsTab = () => {
                                     </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => setSelectedAppointment(appointment)}>
+                                      Open full manager
+                                    </DropdownMenuItem>
                                     {appointment.status === "scheduled" && (
                                       <>
                                         <DropdownMenuItem onClick={() => handleStatusChange(appointment.id, "confirmed")}>
@@ -710,9 +679,6 @@ const EnhancedAppointmentsTab = () => {
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => handleStatusChange(appointment.id, "completed")}>
                                           Mark Completed
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleStatusChange(appointment.id, "no-show")}>
-                                          Mark No-Show
                                         </DropdownMenuItem>
                                       </>
                                     )}
@@ -778,6 +744,13 @@ const EnhancedAppointmentsTab = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      <AppointmentDetailModal
+        appointment={selectedAppointment}
+        open={!!selectedAppointment}
+        onClose={() => setSelectedAppointment(null)}
+        onUpdate={fetchAppointments}
+      />
     </div>
   );
 };

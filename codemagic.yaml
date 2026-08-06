@@ -253,6 +253,29 @@ workflows:
     # account, store its JSON in that env var, then restore the block.
 
   # ---------------- PHLEB (ConveLabs Pro) · OTA web bundle ----------------
+  # ---------------- PATIENT (ConveLabs) · OTA web bundle -------------------
+  # Same OTA path as the phleb app, but for the public patient/native shell.
+  # Use this for web/UI fixes that stay within the already-reviewed native
+  # capabilities. Anything that changes native plugins, permissions, or core
+  # app purpose still needs a real App Store / Play submission first.
+  patient-web-ota:
+    name: ConveLabs Patient · Web OTA
+    instance_type: linux_x2
+    max_build_duration: 30
+    environment:
+      <<: *env_versions
+      groups:
+        - convelabs_web
+    cache: *cache_cfg
+    scripts:
+      - name: Install deps
+        script: npm ci
+      - name: Build patient web bundle (prod)
+        script: npm run build:patient
+      - name: Publish OTA bundle
+        script: npm run ota:publish:patient
+
+  # ---------------- PHLEB (ConveLabs Pro) · OTA web bundle ----------------
   # Ships web/UI fixes to already-installed ConveLabs Pro apps over-the-air
   # (no store submission). Build the phleb web bundle, then publish it to the
   # self-hosted Capgo registry. GRACEFUL: publish-ota.mjs exits 0 if

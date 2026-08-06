@@ -256,7 +256,7 @@ const InvoicesTab: React.FC = () => {
   const handleResendInvoice = async (invoice: Invoice) => {
     if (!invoice.patient_email) { toast.error('No email on file'); return; }
     try {
-      await supabase.functions.invoke('send-appointment-invoice', {
+      const { data, error } = await supabase.functions.invoke('send-appointment-invoice', {
         body: {
           appointmentId: invoice.id,
           patientName: invoice.patient_name,
@@ -270,9 +270,26 @@ const InvoicesTab: React.FC = () => {
           isVip: invoice.is_vip,
         },
       });
+      if (error) {
+        const ctx = (error as any).context;
+        let msg = error.message || 'Failed to resend invoice';
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json();
+            msg = body?.message || body?.error || msg;
+          } catch {
+            /* keep fallback */
+          }
+        }
+        throw new Error(msg);
+      }
+      if ((data as any)?.error) {
+        throw new Error((data as any).error);
+      }
       toast.success('Invoice resent to ' + invoice.patient_email);
+      fetchInvoices();
     } catch (err) {
-      toast.error('Failed to resend invoice');
+      toast.error((err as Error)?.message || 'Failed to resend invoice');
     }
   };
 

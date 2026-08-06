@@ -41,20 +41,36 @@ export async function fetchAppointmentsSimplified(
   userEmail?: string
 ) {
   try {
+    const fetchAllPages = async (buildQuery: () => any) => {
+      const rows: any[] = [];
+      let from = 0;
+      const requestSize = 1000;
+      for (let guard = 0; guard < 50; guard++) {
+        const { data, error } = await buildQuery()
+          .order('appointment_date', { ascending: false })
+          .range(from, from + requestSize - 1);
+        if (error) throw error;
+        const page = data || [];
+        rows.push(...page);
+        if (page.length === 0) break;
+        from += page.length;
+      }
+      return rows;
+    };
+
     // For patients: match by patient_id OR patient_email (IDs can mismatch)
     if (userId) {
-      let data: any[] = [];
-
-      // Try by patient_id first
-      const { data: byId } = await supabase.from('appointments').select('*')
-        .eq('patient_id', userId).order('appointment_date', { ascending: false }).limit(50);
-      if (byId) data = [...byId];
+      const byId = await fetchAllPages(() =>
+        supabase.from('appointments').select('*').eq('patient_id', userId)
+      );
+      let data: any[] = [...byId];
 
       // Also get by email (catches mismatched patient_ids)
       if (userEmail) {
-        const { data: byEmail } = await supabase.from('appointments').select('*')
-          .ilike('patient_email', userEmail).order('appointment_date', { ascending: false }).limit(50);
-        if (byEmail) {
+        const byEmail = await fetchAllPages(() =>
+          supabase.from('appointments').select('*').ilike('patient_email', userEmail)
+        );
+        if (byEmail.length > 0) {
           const existingIds = new Set(data.map(a => a.id));
           data = [...data, ...byEmail.filter(a => !existingIds.has(a.id))];
         }
@@ -64,13 +80,7 @@ export async function fetchAppointmentsSimplified(
     }
 
     // Admin: get all
-    const { data, error } = await supabase.from('appointments').select('*')
-      .order('appointment_date', { ascending: false }).limit(50);
-
-    if (error) {
-      console.error("Error in fetchAppointmentsSimplified:", error);
-      throw error;
-    }
+    const data = await fetchAllPages(() => supabase.from('appointments').select('*'));
 
     return { data, error: null };
   } catch (error) {
