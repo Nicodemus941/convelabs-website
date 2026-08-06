@@ -32,17 +32,27 @@ const LeadCapture = () => {
           userAgent: navigator.userAgent,
         },
       });
-      if (error) console.warn('Lead capture error:', error);
-      if (data?.welcomeEmailSent === false && data?.emailError) {
-        console.warn('Welcome email failed:', data.emailError);
+
+      if (error || !data?.success) {
+        console.warn('Lead capture error:', error || data);
+        toast.error("We couldn't save your request. Please try again.");
+        return;
       }
+
+      if (data?.welcomeEmailSent === false) {
+        console.warn('Welcome email failed:', data.emailError);
+        toast.error("We saved your email, but the discount message did not send yet. Please try again in a moment.");
+        return;
+      }
+
       setIsSubmitted(true);
     } catch (err) {
-      // Still show success — we logged the error; don't punish the user for our bugs
       console.error('Lead capture exception:', err);
-      setIsSubmitted(true);
+      toast.error("We couldn't save your request. Please try again.");
+      return;
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   if (isSubmitted) {
@@ -83,8 +93,8 @@ const LeadCapture = () => {
             📋 "Understanding Your Blood Work Results" — what your doctor isn't telling you
           </p>
 
-          <form onSubmit={handleSubmit} className="flex gap-3 max-w-md mx-auto">
-            <div className="relative flex-1">
+          <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto">
+            <div className="relative w-full flex-1">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 type="email"
@@ -98,7 +108,7 @@ const LeadCapture = () => {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="h-12 px-6 bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
+              className="h-12 w-full sm:w-auto px-6 bg-conve-red hover:bg-conve-red-dark text-white rounded-xl"
             >
               {isSubmitting ? "..." : "Get 10% Off"}
               <ArrowRight className="ml-1.5 h-4 w-4" />

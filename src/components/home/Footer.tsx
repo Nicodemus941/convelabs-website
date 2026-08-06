@@ -210,7 +210,7 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
                 toast.success("The checklist request was received.");
               }
             }}
-            className="flex gap-2 max-w-md mx-auto"
+            className="flex flex-col sm:flex-row gap-2 max-w-md mx-auto"
           >
             <input
               type="email"
@@ -221,7 +221,7 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
             <button
               type="submit"
               disabled={leadCaptureSubmitting}
-              className="bg-[#B91C1C] hover:bg-[#991B1B] disabled:opacity-70 text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors whitespace-nowrap"
+              className="w-full sm:w-auto bg-[#B91C1C] hover:bg-[#991B1B] disabled:opacity-70 text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors whitespace-nowrap"
             >
               {leadCaptureSubmitting ? 'Sending...' : 'Send the checklist →'}
             </button>
