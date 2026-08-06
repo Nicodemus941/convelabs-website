@@ -13,7 +13,7 @@ import NotesSection from './NotesSection';
 
 type Sub = 'patients' | 'invoices' | 'organizations' | 'notes';
 
-const ITEMS: { id: Sub; label: string; short: string; Icon: any }[] = [
+const ITEMS: { id: Sub; label: string; short: string; Icon: React.ElementType }[] = [
   { id: 'patients', label: 'Patients', short: 'Patients', Icon: Users },
   { id: 'invoices', label: 'Invoices', short: 'Invoices', Icon: Receipt },
   { id: 'organizations', label: 'Organizations', short: 'Orgs', Icon: Building2 },
@@ -33,8 +33,8 @@ const DirectoryTab: React.FC = () => {
   return (
     <div className="max-w-lg mx-auto px-3 sm:px-4 pb-20 sm:pb-8 pt-3 space-y-4">
       <div>
-        <h1 className="text-xl font-bold text-gray-900">Directory</h1>
-        <p className="text-xs text-gray-500 mt-0.5">Your patients, invoices, orgs, and care notes — all in one place.</p>
+        <h1 className="text-xl font-bold text-gray-900">Resources</h1>
+        <p className="text-xs text-gray-500 mt-0.5">Everything you may need off the live visit: patients, invoices, organizations, and care notes.</p>
       </div>
 
       {/* Segmented control */}

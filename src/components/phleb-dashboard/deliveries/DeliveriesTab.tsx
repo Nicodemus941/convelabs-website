@@ -133,10 +133,10 @@ const DeliveriesTab: React.FC = () => {
       <div className="space-y-3">
         <div className="flex items-center gap-2 mb-1">
           <Truck className="h-5 w-5 text-[#B91C1C]" />
-          <h2 className="text-lg font-bold">Specimen Deliveries</h2>
+          <h2 className="text-lg font-bold">Lab Drop-offs</h2>
         </div>
         <p className="text-xs text-muted-foreground -mt-1">
-          Past completed deliveries — most recent first. Tap any row for full details.
+          Past completed lab handoffs and specimen deliveries. Tap any row for the full chain-of-custody detail.
         </p>
 
         <div className="relative">

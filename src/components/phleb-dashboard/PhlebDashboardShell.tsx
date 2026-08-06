@@ -32,13 +32,13 @@ const FIELD_VISIT_ACTIVE_STATUSES = new Set([
 ]);
 
 const DESKTOP_TABS: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
-  { id: 'schedule', label: 'Schedule', icon: Calendar },
-  { id: 'messages', label: 'Messages', icon: MessageSquare },
-  { id: 'directory', label: 'Directory', icon: FolderOpen },
-  { id: 'deliveries', label: 'Deliveries', icon: Truck },
-  { id: 'earnings', label: 'Earnings', icon: DollarSign },
-  { id: 'completed', label: 'Completed', icon: CheckCircle2 },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'schedule', label: 'Today', icon: Calendar },
+  { id: 'messages', label: 'Inbox', icon: MessageSquare },
+  { id: 'directory', label: 'Resources', icon: FolderOpen },
+  { id: 'deliveries', label: 'Labs', icon: Truck },
+  { id: 'earnings', label: 'Pay', icon: DollarSign },
+  { id: 'completed', label: 'History', icon: CheckCircle2 },
+  { id: 'settings', label: 'Profile', icon: Settings },
 ];
 
 interface PhlebSmsRow {

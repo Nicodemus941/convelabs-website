@@ -115,6 +115,11 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
   const todayEarnings = todayCompleted.reduce((s, a) => s + (a.total_amount || 0), 0);
   const todayTips = todayCompleted.reduce((s, a) => s + (a.tip_amount || 0), 0);
   const nextAppt = [...todayRemaining].sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''))[0];
+  const scrollToAppointment = (appointmentId?: string | null) => {
+    if (!appointmentId) return;
+    document.getElementById(`phleb-appt-${appointmentId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setExpandedCard(appointmentId);
+  };
 
   return (
     <div className="space-y-4">
@@ -138,7 +143,10 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
       {isToday(selectedDate) && todayAppts.length > 0 && (
         <div className="bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-xl p-4 shadow-md">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-medium text-gray-400">Today's Overview</p>
+            <div>
+              <p className="text-sm font-semibold text-white">Today&apos;s run</p>
+              <p className="text-xs text-gray-400 mt-0.5">Stay on the next unresolved job, then close wrap-ups.</p>
+            </div>
             <span className="text-xs text-gray-500">{format(new Date(), 'EEEE, MMM d')}</span>
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -169,6 +177,37 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
               <span className="text-gray-300">Next: <span className="text-white font-medium">{nextAppt.patient_name}</span> at {nextAppt.appointment_time}</span>
             </div>
           )}
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {nextAppt && (
+              <Button
+                size="sm"
+                className="h-9 bg-white text-gray-900 hover:bg-gray-100"
+                onClick={() => scrollToAppointment(nextAppt.id)}
+              >
+                Open next job
+              </Button>
+            )}
+            {todayWrapUps.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 border-gray-600 bg-transparent text-white hover:bg-white/10 hover:text-white"
+                onClick={() => scrollToAppointment(todayWrapUps[0]?.id)}
+              >
+                Jump to wrap-up
+              </Button>
+            )}
+            {todayCompleted.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 border-gray-600 bg-transparent text-white hover:bg-white/10 hover:text-white"
+                onClick={() => scrollToAppointment(todayCompleted[0]?.id)}
+              >
+                Review completed
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -228,28 +267,38 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
       )}
 
       {/* Active Appointments */}
-      {!isLoading && activeAppts.map((appt) => (
-        <div
-          key={appt.id}
-          id={`phleb-appt-${appt.id}`}
-          className={highlightedAppt === appt.id
-            ? 'rounded-xl ring-2 ring-[#B91C1C] ring-offset-2 ring-offset-[#F6F0EE] transition-shadow duration-700'
-            : undefined}
-        >
-          <PhlebAppointmentCard
-            appointment={appt}
-            onStatusUpdate={onStatusUpdate}
-            isExpanded={expandedCard === appt.id}
-            onToggle={() => setExpandedCard(expandedCard === appt.id ? null : appt.id)}
-          />
+      {!isLoading && activeAppts.length > 0 && (
+        <div className="pt-1">
+          <p className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1.5">
+            <Clock className="h-4 w-4 text-[#B91C1C]" />
+            Needs action ({activeAppts.length})
+          </p>
+          <div className="space-y-3">
+            {activeAppts.map((appt) => (
+              <div
+                key={appt.id}
+                id={`phleb-appt-${appt.id}`}
+                className={highlightedAppt === appt.id
+                  ? 'rounded-xl ring-2 ring-[#B91C1C] ring-offset-2 ring-offset-[#F6F0EE] transition-shadow duration-700'
+                  : undefined}
+              >
+                <PhlebAppointmentCard
+                  appointment={appt}
+                  onStatusUpdate={onStatusUpdate}
+                  isExpanded={expandedCard === appt.id}
+                  onToggle={() => setExpandedCard(expandedCard === appt.id ? null : appt.id)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
-      ))}
+      )}
 
       {!isLoading && wrapUpAppts.length > 0 && (
         <div className="pt-2">
           <p className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
             <Package className="h-4 w-4 text-indigo-500" />
-            Delivery Complete - Tap Job Completed ({wrapUpAppts.length})
+            Wrap-up queue ({wrapUpAppts.length})
           </p>
           {wrapUpAppts.map((appt) => (
             <div
@@ -275,7 +324,7 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
         <div className="pt-2">
           <p className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-            Completed ({completedAppts.length})
+            Closed out ({completedAppts.length})
           </p>
           {completedAppts.map((appt) => (
             <div

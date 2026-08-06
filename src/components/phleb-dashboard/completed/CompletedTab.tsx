@@ -44,6 +44,11 @@ const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
 
   return (
     <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900">Visit History</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">Review finished visits, tips, and earnings without leaving the phleb dashboard.</p>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="shadow-sm border-0 bg-gradient-to-br from-emerald-50 to-white">

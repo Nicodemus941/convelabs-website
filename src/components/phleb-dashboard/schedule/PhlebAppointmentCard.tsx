@@ -412,6 +412,62 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
     );
   };
 
+  const primaryAction = (() => {
+    switch (appointment.status) {
+      case 'scheduled':
+      case 'confirmed':
+        return {
+          label: 'Start route',
+          helper: 'Confirm ETA and head to the patient.',
+          icon: Truck,
+          onClick: () => setShowOnTheWay(true),
+        };
+      case 'en_route':
+        return {
+          label: 'Mark arrived',
+          helper: 'You are at the visit location.',
+          icon: MapPin,
+          onClick: () => onStatusUpdate(appointment.id, 'arrived'),
+        };
+      case 'arrived':
+        return {
+          label: 'Start draw',
+          helper: 'Begin the live visit workflow.',
+          icon: Play,
+          onClick: () => onStatusUpdate(appointment.id, 'in_progress'),
+        };
+      case 'in_progress':
+        if (noSpecimenToDeliver) {
+          return {
+            label: 'Complete job',
+            helper: 'No specimen drop-off is required.',
+            icon: CheckCircle2,
+            onClick: () => onStatusUpdate(appointment.id, 'completed'),
+          };
+        }
+        return {
+          label: 'Mark specimen delivered',
+          helper: 'Capture the lab drop-off to unlock completion.',
+          icon: Package,
+          onClick: () => setShowSpecimenDelivery(true),
+        };
+      case 'specimen_delivered':
+        return {
+          label: 'Complete job',
+          helper: 'Close the visit once delivery is done.',
+          icon: CheckCircle2,
+          onClick: () => onStatusUpdate(appointment.id, 'completed'),
+        };
+      default:
+        return {
+          label: 'Review details',
+          helper: 'Use the full card for follow-up details.',
+          icon: CheckCircle2,
+          onClick: onToggle,
+        };
+    }
+  })();
+
   return (
     <>
       <Card
@@ -549,12 +605,37 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               {isExpanded ? <ChevronUp className="h-5 w-5 text-muted-foreground ml-2" /> : <ChevronRight className="h-5 w-5 text-muted-foreground ml-2" />}
             </div>
 
-            {/* Navigate / Message / Running Late */}
-            <div className="flex gap-2 mt-3">
-              <Button size="sm" className="flex-1 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 h-9" onClick={(e) => { e.stopPropagation(); handleNavigate(); }}>
-                <Navigation className="h-3.5 w-3.5" /> Navigate
-              </Button>
-              <Button size="sm" variant="outline" className="flex-1 gap-1.5 h-9 border-gray-200" onClick={(e) => { e.stopPropagation(); handleMessage(); }}>
+            <div className="mt-3 rounded-xl border border-[#EFE3E1] bg-[#FBF8F7] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#8B7C7E]">Next step</p>
+                  <p className="text-sm font-semibold text-[#1A1416]">{primaryAction.label}</p>
+                  <p className="text-xs text-[#8B7C7E] mt-0.5">{primaryAction.helper}</p>
+                </div>
+                <Badge variant="outline" className="border-[#E8D8D3] bg-white text-[#7A5E61]">
+                  Live job
+                </Badge>
+              </div>
+              <div className="grid grid-cols-[1fr_auto] gap-2 mt-3">
+                <Button
+                  size="sm"
+                  className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 h-10 justify-center"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    primaryAction.onClick();
+                  }}
+                >
+                  <primaryAction.icon className="h-3.5 w-3.5" />
+                  {primaryAction.label}
+                </Button>
+                <Button size="sm" variant="outline" className="gap-1.5 h-10 border-gray-200 px-3" onClick={(e) => { e.stopPropagation(); handleNavigate(); }}>
+                  <Navigation className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Navigate</span>
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              <Button size="sm" variant="outline" className="gap-1.5 h-9 border-gray-200" onClick={(e) => { e.stopPropagation(); handleMessage(); }}>
                 <MessageSquare className="h-3.5 w-3.5" /> Message
               </Button>
               <Button
@@ -565,11 +646,20 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                 onClick={(e) => { e.stopPropagation(); setShowRunningLate(true); }}
               >
                 <Clock3 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Late</span>
+                <span>Late</span>
               </Button>
-            </div>
-            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-              <SendRescheduleLinkButton appointmentId={appointment.id} size="sm" variant="outline" className="w-full h-9" />
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 h-9 border-gray-200"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggle();
+                }}
+              >
+                {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                Details
+              </Button>
             </div>
           </div>
 
@@ -1198,6 +1288,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               {/* Manage */}
               <div className="px-4 py-3 space-y-2">
                 <p className="text-sm font-semibold text-gray-800 mb-2">Manage Appointment</p>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <SendRescheduleLinkButton appointmentId={appointment.id} size="sm" variant="outline" className="w-full h-10" />
+                </div>
                 <Button variant="outline" size="sm" className="w-full gap-2 h-10" onClick={async (e) => {
                   e.stopPropagation();
                   // Quick reschedule — notify admin
