@@ -14,6 +14,7 @@ import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 // 100% mobile mirror of schedule-lab-request — keep these in sync
 const MOBILE_PRICE_CENTS = 15000;
+const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
 // NOTE: these used to import from ../_shared/. Inlined below because the MCP
 // edge-function deploy path doesn't bundle relative module imports cleanly.
 // Single source of truth for the library versions still lives at
@@ -151,6 +152,23 @@ function fmtDate(iso: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
+function normalizeDigits(value: string | null | undefined): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function normalizeName(value: string | null | undefined): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function splitPatientName(fullName: string): { firstName: string; lastName: string } {
+  const clean = String(fullName || '').trim().replace(/\s+/g, ' ');
+  const parts = clean.split(' ').filter(Boolean);
+  return {
+    firstName: parts[0] || clean || 'Patient',
+    lastName: parts.slice(1).join(' '),
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
@@ -174,6 +192,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const {
       organization_id, patient_name, patient_email, patient_phone,
+      patient_address,
       lab_order_file_path, draw_by_date, next_doctor_appt_date,
       next_doctor_appt_notes, admin_notes, billed_to,
       // Provider-asserted fasting flag (set by the modal's "12-hour fast
@@ -212,6 +231,21 @@ Deno.serve(async (req) => {
       post_payment_action === 'provider_schedule' ? 'provider_schedule' : 'send_link';
     const useEmbedded = embedded === true;
     const householdList: any[] = Array.isArray(household_members) ? household_members.filter((m: any) => m && m.patient_name) : [];
+    const normalizedEmail = patient_email?.trim().toLowerCase() || null;
+    const normalizedPhone = patient_phone?.trim() || null;
+    const patientPhoneDigits = normalizeDigits(patient_phone);
+    const nameParts = splitPatientName(patient_name);
+    const addressPayload = patient_address && typeof patient_address === 'object' && String((patient_address as any).line1 || '').trim()
+      ? {
+          label: ['home', 'office', 'other'].includes(String((patient_address as any).label || '').toLowerCase())
+            ? String((patient_address as any).label || '').toLowerCase()
+            : 'home',
+          line1: String((patient_address as any).line1 || '').trim(),
+          city: String((patient_address as any).city || '').trim() || null,
+          zipcode: String((patient_address as any).zipcode || '').trim() || null,
+          access_notes: String((patient_address as any).access_notes || '').trim() || null,
+        }
+      : null;
     // Normalize: accept both 'YYYY-MM-DD' and ISO strings; reject anything
     // else so a malformed value can't slip into the date column.
     const dobClean: string | null = (() => {
@@ -336,6 +370,126 @@ Deno.serve(async (req) => {
 
     const finalDob: string | null = dobClean || ocrDob || chartDob;
 
+    // ── PROVIDER ROSTER / ADDRESS SYNC ──────────────────────────────────
+    // The provider modal promises that inline patient details become part of
+    // the chart so future requests/bookings auto-suggest the right info.
+    // Keep that promise here without making request delivery depend on it.
+    let tenantPatientId: string | null = null;
+    try {
+      let matchedPatient: any = null;
+      if (normalizedEmail) {
+        const { data } = await admin.from('tenant_patients')
+          .select('id, first_name, last_name, email, phone, date_of_birth, address, city, zipcode')
+          .eq('organization_id', organization_id)
+          .ilike('email', normalizedEmail)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+        matchedPatient = data || null;
+      }
+      if (!matchedPatient && patientPhoneDigits.length >= 10) {
+        const { data } = await admin.from('tenant_patients')
+          .select('id, first_name, last_name, email, phone, date_of_birth, address, city, zipcode')
+          .eq('organization_id', organization_id)
+          .eq('is_active', true);
+        matchedPatient = (data || []).find((row: any) =>
+          normalizeDigits(row.phone) === patientPhoneDigits,
+        ) || null;
+      }
+      if (!matchedPatient) {
+        const { data } = await admin.from('tenant_patients')
+          .select('id, first_name, last_name, email, phone, date_of_birth, address, city, zipcode')
+          .eq('organization_id', organization_id)
+          .eq('is_active', true)
+          .limit(200);
+        matchedPatient = (data || []).find((row: any) =>
+          normalizeName(`${row.first_name || ''} ${row.last_name || ''}`) === normalizeName(patient_name),
+        ) || null;
+      }
+
+      if (matchedPatient?.id) {
+        tenantPatientId = matchedPatient.id;
+        const updatePayload: Record<string, unknown> = {};
+        if (nameParts.firstName && !String(matchedPatient.first_name || '').trim()) updatePayload.first_name = nameParts.firstName;
+        if (nameParts.lastName && !String(matchedPatient.last_name || '').trim()) updatePayload.last_name = nameParts.lastName;
+        if (normalizedEmail && !String(matchedPatient.email || '').trim()) updatePayload.email = normalizedEmail;
+        if (normalizedPhone && !String(matchedPatient.phone || '').trim()) updatePayload.phone = normalizedPhone;
+        if (finalDob && !matchedPatient.date_of_birth) updatePayload.date_of_birth = finalDob;
+        if (addressPayload && !String(matchedPatient.address || '').trim()) {
+          updatePayload.address = addressPayload.line1;
+          updatePayload.city = addressPayload.city;
+          updatePayload.zipcode = addressPayload.zipcode;
+        }
+        if (Object.keys(updatePayload).length > 0) {
+          await admin.from('tenant_patients').update(updatePayload).eq('id', tenantPatientId);
+        }
+      } else {
+        const insertPayload: Record<string, unknown> = {
+          tenant_id: DEFAULT_TENANT_ID,
+          organization_id,
+          first_name: nameParts.firstName,
+          last_name: nameParts.lastName || '',
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          date_of_birth: finalDob,
+          is_active: true,
+        };
+        if (addressPayload) {
+          insertPayload.address = addressPayload.line1;
+          insertPayload.city = addressPayload.city;
+          insertPayload.zipcode = addressPayload.zipcode;
+        }
+        const { data: createdPatient, error: createPatientErr } = await admin
+          .from('tenant_patients')
+          .insert(insertPayload)
+          .select('id')
+          .single();
+        if (!createPatientErr && createdPatient?.id) {
+          tenantPatientId = createdPatient.id;
+        } else if (createPatientErr) {
+          console.warn('[create-lab-request] tenant_patient create failed (non-blocking):', createPatientErr.message);
+        }
+      }
+
+      if (tenantPatientId && addressPayload) {
+        const { data: existingAddresses } = await admin
+          .from('patient_addresses')
+          .select('id, label, line1, city, zipcode, access_notes, is_default')
+          .eq('patient_id', tenantPatientId)
+          .eq('is_active', true);
+
+        const matchingAddress = (existingAddresses || []).find((row: any) =>
+          String(row.label || '').toLowerCase() === addressPayload.label &&
+          normalizeName(row.line1) === normalizeName(addressPayload.line1) &&
+          normalizeName(row.city) === normalizeName(addressPayload.city) &&
+          normalizeDigits(row.zipcode) === normalizeDigits(addressPayload.zipcode),
+        );
+
+        if (matchingAddress) {
+          const needsAddressUpdate =
+            String(matchingAddress.access_notes || '').trim() !== String(addressPayload.access_notes || '').trim();
+          if (needsAddressUpdate) {
+            await admin.from('patient_addresses').update({
+              access_notes: addressPayload.access_notes,
+            }).eq('id', matchingAddress.id);
+          }
+        } else {
+          await admin.from('patient_addresses').insert({
+            patient_id: tenantPatientId,
+            label: addressPayload.label,
+            line1: addressPayload.line1,
+            city: addressPayload.city,
+            zipcode: addressPayload.zipcode,
+            access_notes: addressPayload.access_notes,
+            is_default: !existingAddresses || existingAddresses.length === 0,
+            is_active: true,
+          });
+        }
+      }
+    } catch (syncErr: any) {
+      console.warn('[create-lab-request] patient roster/address sync failed (non-blocking):', syncErr?.message || syncErr);
+    }
+
     // Generate one-time token
     const accessToken = crypto.randomUUID() + '-' + crypto.randomUUID().split('-')[0];
 
@@ -387,6 +541,7 @@ Deno.serve(async (req) => {
             .select('id').ilike('email', patient_email).maybeSingle();
           tpId = (tp as any)?.id || null;
         }
+        if (!tpId && tenantPatientId) tpId = tenantPatientId;
 
         const serviceType = (org.auto_fulfill_service_type as string) || 'mobile';
 

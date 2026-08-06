@@ -37,6 +37,14 @@ function plusDays(iso: string, n: number): string {
   const d = new Date(iso); d.setDate(d.getDate() + n); return d.toISOString();
 }
 
+function normalizeDigits(value: string | null | undefined): string {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function normalizeName(value: string | null | undefined): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -184,10 +192,37 @@ Deno.serve(async (req) => {
     // ── LAB REQUESTS (provider-initiated patient bookings) ───────────────
     const { data: labRequests } = await admin
       .from('patient_lab_requests')
-      .select('id, patient_name, patient_email, patient_phone, draw_by_date, next_doctor_appt_date, status, appointment_id, patient_notified_at, patient_scheduled_at, created_at, access_token, lab_order_panels, fasting_required, provider_payment_status, billed_to, cancelled_at')
+      .select('id, patient_name, patient_email, patient_phone, patient_dob, draw_by_date, next_doctor_appt_date, next_doctor_appt_notes, admin_notes, status, appointment_id, patient_notified_at, patient_scheduled_at, created_at, access_token, lab_order_file_path, lab_order_panels, fasting_required, provider_payment_status, billed_to, cancelled_at')
       .eq('organization_id', orgId)
       .order('created_at', { ascending: false })
       .limit(100);
+
+    const { data: rosterRows } = await admin
+      .from('tenant_patients')
+      .select('id, first_name, last_name, email, phone, date_of_birth, address, city, zipcode')
+      .eq('organization_id', orgId)
+      .eq('is_active', true)
+      .limit(500);
+
+    const enrichedLabRequests = ((labRequests as any[]) || []).map((request) => {
+      const reqEmail = String(request.patient_email || '').trim().toLowerCase();
+      const reqPhoneDigits = normalizeDigits(request.patient_phone);
+      const reqName = normalizeName(request.patient_name);
+      const rosterMatch = ((rosterRows as any[]) || []).find((row) =>
+        (reqEmail && String(row.email || '').trim().toLowerCase() === reqEmail) ||
+        (reqPhoneDigits && normalizeDigits(row.phone) === reqPhoneDigits) ||
+        (reqName && normalizeName(`${row.first_name || ''} ${row.last_name || ''}`) === reqName)
+      );
+      return {
+        ...request,
+        has_lab_order: !!request.lab_order_file_path,
+        has_dob: !!(request.patient_dob || rosterMatch?.date_of_birth),
+        has_chart_address: !!(rosterMatch?.address || rosterMatch?.city || rosterMatch?.zipcode),
+        has_email: !!reqEmail,
+        has_phone: !!String(request.patient_phone || '').trim(),
+        chart_patient_id: rosterMatch?.id || null,
+      };
+    });
 
     // ── RECENT ACTIVITY (last 30 days of completed/delivered visits) ────
     // Provider needs a permanent timeline of work we did for them so
@@ -271,7 +306,7 @@ Deno.serve(async (req) => {
       patients,
       invoices,
       team,
-      labRequests: labRequests || [],
+      labRequests: enrichedLabRequests,
       recentActivity,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error: any) {

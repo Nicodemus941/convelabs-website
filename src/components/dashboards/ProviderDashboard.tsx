@@ -1034,6 +1034,13 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
 
   const rows = groups[tab];
 
+  const contactRouteLabel = (request: any) => {
+    if (request.has_email && request.has_phone) return 'Email + SMS';
+    if (request.has_email) return 'Email only';
+    if (request.has_phone) return 'SMS only';
+    return 'Missing contact';
+  };
+
   return (
     <Card className="shadow-sm border-[#EFE3E1]">
       <CardHeader className="pb-3 flex flex-row items-center justify-between">
@@ -1086,6 +1093,37 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                       Draw by {format(new Date(r.draw_by_date + 'T12:00:00'), 'EEE MMM d')}
                       {r.next_doctor_appt_date && <> · Consult {format(new Date(r.next_doctor_appt_date + 'T12:00:00'), 'MMM d')}</>}
                     </p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                        r.has_lab_order
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}>
+                        {r.has_lab_order ? 'Order attached' : 'Order needed'}
+                      </span>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                        r.has_dob
+                          ? 'bg-slate-50 text-slate-700 border-slate-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}>
+                        {r.has_dob ? 'DOB on file' : 'DOB missing'}
+                      </span>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium border ${
+                        r.has_chart_address
+                          ? 'bg-slate-50 text-slate-700 border-slate-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                      }`}>
+                        {r.has_chart_address ? 'Address on file' : 'Address missing'}
+                      </span>
+                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium border bg-white text-gray-700 border-gray-200">
+                        {contactRouteLabel(r)}
+                      </span>
+                      {r.fasting_required && (
+                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium border bg-amber-50 text-amber-800 border-amber-200">
+                          Fasting
+                        </span>
+                      )}
+                    </div>
                     {r.status === 'pending_schedule' && (
                       <p className={`text-[11px] font-semibold mt-1 ${urgencyColor}`}>
                         {daysLeft <= 0 ? 'Deadline passed' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
