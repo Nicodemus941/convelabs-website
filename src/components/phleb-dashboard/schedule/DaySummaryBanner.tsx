@@ -9,18 +9,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { format, isToday, isTomorrow } from 'date-fns';
 import { Calendar, DollarSign } from 'lucide-react';
-import { extractSurchargeCents } from '@/lib/phlebSurchargeMap';
+import type { PhlebAppointment } from '@/hooks/usePhlebotomistAppointments';
 
 interface Props {
   selectedDate: Date;
-  appointments: Array<{
-    id: string;
-    appointment_date: string;
-    service_type: string | null;
-    status: string;
-    tip_amount: number | null;
-    family_group_id?: string | null;
-  }>;
+  appointments: PhlebAppointment[];
 }
 
 const DaySummaryBanner: React.FC<Props> = ({ selectedDate, appointments }) => {
@@ -32,7 +25,8 @@ const DaySummaryBanner: React.FC<Props> = ({ selectedDate, appointments }) => {
     if (!user?.id) return;
     (async () => {
       const { data } = await supabase.from('staff_profiles').select('id').eq('user_id', user.id).maybeSingle();
-      setStaffId((data as any)?.id || null);
+      const profile = data as { id?: string } | null;
+      setStaffId(profile?.id || null);
     })();
   }, [user?.id]);
 
@@ -45,17 +39,13 @@ const DaySummaryBanner: React.FC<Props> = ({ selectedDate, appointments }) => {
       const dayAppts = appointments.filter(
         (a) => a.appointment_date === dayStr && a.status !== 'cancelled',
       );
-      // Group counts so we know if a row is part of a couple bundle
-      const groupCounts = new Map<string, number>();
-      for (const a of dayAppts) if (a.family_group_id) groupCounts.set(a.family_group_id, (groupCounts.get(a.family_group_id) || 0) + 1);
-
       // v2 rule: read each appointment's $87-floor-aware take directly.
       // No surcharge map needed — the RPC reads total_amount which already
       // bakes in same-day / extended-area / after-hours pricing.
       let sum = 0;
       for (const a of dayAppts) {
         try {
-          const { data } = await supabase.rpc('phleb_take_for_appointment_cents' as any, {
+          const { data } = await supabase.rpc('phleb_take_for_appointment_cents', {
             p_appointment_id: a.id,
           });
           sum += parseInt(String(data || 0), 10);

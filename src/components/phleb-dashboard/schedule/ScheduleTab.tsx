@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { startOfWeek, format, isToday, parseISO } from 'date-fns';
-import { Calendar, Loader2, RefreshCw, DollarSign, Clock, MapPin, WifiOff } from 'lucide-react';
+import { Calendar, Loader2, RefreshCw, DollarSign, Clock, MapPin, WifiOff, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import WeekStrip from './WeekStrip';
@@ -91,7 +91,9 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
     return appointments.filter(a => a.appointment_date === selectedDateStr && a.status !== 'cancelled');
   }, [appointments, selectedDateStr]);
 
-  const activeAppts = dayAppointments.filter(a => a.status !== 'completed')
+  const activeAppts = dayAppointments.filter(a => !['completed', 'specimen_delivered'].includes(a.status))
+    .sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
+  const wrapUpAppts = dayAppointments.filter(a => a.status === 'specimen_delivered')
     .sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
   const completedAppts = dayAppointments.filter(a => a.status === 'completed')
     .sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''));
@@ -108,10 +110,11 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
   const todayStr = format(new Date(), 'yyyy-MM-dd');
   const todayAppts = appointments.filter(a => a.appointment_date === todayStr && a.status !== 'cancelled');
   const todayCompleted = todayAppts.filter(a => a.status === 'completed');
-  const todayRemaining = todayAppts.filter(a => !['completed', 'cancelled'].includes(a.status));
+  const todayRemaining = todayAppts.filter(a => !['completed', 'cancelled', 'specimen_delivered'].includes(a.status));
+  const todayWrapUps = todayAppts.filter(a => a.status === 'specimen_delivered');
   const todayEarnings = todayCompleted.reduce((s, a) => s + (a.total_amount || 0), 0);
   const todayTips = todayCompleted.reduce((s, a) => s + (a.tip_amount || 0), 0);
-  const nextAppt = todayRemaining.sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''))[0];
+  const nextAppt = [...todayRemaining].sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''))[0];
 
   return (
     <div className="space-y-4">
@@ -149,9 +152,17 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
             </div>
             <div className="text-center">
               <p className="text-2xl font-bold text-amber-400">{todayRemaining.length}</p>
-              <p className="text-[10px] text-gray-400">Remaining</p>
+              <p className="text-[10px] text-gray-400">Field Visits Left</p>
             </div>
           </div>
+          {todayWrapUps.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-gray-700 flex items-center gap-2 text-sm">
+              <Package className="h-3.5 w-3.5 text-indigo-300" />
+              <span className="text-gray-300">
+                {todayWrapUps.length} wrap-up{todayWrapUps.length !== 1 ? 's' : ''} pending completion.
+              </span>
+            </div>
+          )}
           {nextAppt && (
             <div className="mt-3 pt-3 border-t border-gray-700 flex items-center gap-2 text-sm">
               <Clock className="h-3.5 w-3.5 text-gray-400" />
@@ -213,7 +224,7 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
       {/* Day summary — visits + projected earnings for the selected day */}
       {!isLoading && dayAppointments.length > 0 && (
-        <DaySummaryBanner selectedDate={selectedDate} appointments={appointments as any} />
+        <DaySummaryBanner selectedDate={selectedDate} appointments={appointments} />
       )}
 
       {/* Active Appointments */}
@@ -233,6 +244,31 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
           />
         </div>
       ))}
+
+      {!isLoading && wrapUpAppts.length > 0 && (
+        <div className="pt-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+            <Package className="h-4 w-4 text-indigo-500" />
+            Delivery Complete - Tap Job Completed ({wrapUpAppts.length})
+          </p>
+          {wrapUpAppts.map((appt) => (
+            <div
+              key={appt.id}
+              id={`phleb-appt-${appt.id}`}
+              className={highlightedAppt === appt.id
+                ? 'rounded-xl ring-2 ring-[#B91C1C] ring-offset-2 ring-offset-[#F6F0EE] transition-shadow duration-700'
+                : undefined}
+            >
+              <PhlebAppointmentCard
+                appointment={appt}
+                onStatusUpdate={onStatusUpdate}
+                isExpanded={expandedCard === appt.id}
+                onToggle={() => setExpandedCard(expandedCard === appt.id ? null : appt.id)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Completed */}
       {!isLoading && completedAppts.length > 0 && (
