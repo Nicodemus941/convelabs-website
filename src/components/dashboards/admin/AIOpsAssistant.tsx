@@ -17,6 +17,12 @@ interface Message {
   loading?: boolean;
 }
 
+const isMarkdownDividerCell = (cell: string) =>
+  Array.from(cell).every((char) => char === '-' || char === ':' || char.trim() === '');
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Unknown error';
+
 const SUGGESTED_PROMPTS = [
   { icon: Heart, label: "System health check", prompt: "Run a system health check" },
   { icon: Calendar, label: "Today's schedule", prompt: "Show me today's full schedule" },
@@ -94,11 +100,12 @@ const AIOpsAssistant: React.FC = () => {
             : m
         )
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('AI Ops Assistant error:', err);
-      const errMessage = err.message?.includes('ANTHROPIC_API_KEY')
+      const rawErrorMessage = getErrorMessage(err);
+      const errMessage = rawErrorMessage.includes('ANTHROPIC_API_KEY')
         ? 'The AI assistant requires an Anthropic API key. Please add ANTHROPIC_API_KEY to your Supabase Edge Function secrets.'
-        : `Sorry, I encountered an error: ${err.message || 'Unknown error'}. Please try again.`;
+        : `Sorry, I encountered an error: ${rawErrorMessage}. Please try again.`;
 
       setMessages(prev =>
         prev.map(m =>
@@ -107,7 +114,7 @@ const AIOpsAssistant: React.FC = () => {
             : m
         )
       );
-      setError(err.message);
+      setError(rawErrorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -175,7 +182,7 @@ const AIOpsAssistant: React.FC = () => {
         if (line.includes('|') && line.trim().startsWith('|')) {
           const cells = line.split('|').filter(c => c.trim());
           // Skip separator rows
-          if (cells.every(c => /^[-:\s]+$/.test(c))) return null;
+          if (cells.every(isMarkdownDividerCell)) return null;
           const isHeader = j > 0 && lines[j + 1]?.includes('---');
           return (
             <div key={`${i}-${j}`} className={`grid gap-2 text-xs py-1 px-2 ${isHeader ? 'font-semibold bg-gray-50 rounded' : 'border-b border-gray-100'}`}

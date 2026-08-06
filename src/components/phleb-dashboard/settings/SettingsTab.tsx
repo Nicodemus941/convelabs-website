@@ -10,6 +10,10 @@ import {
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import StripeConnectCard from './StripeConnectCard';
+import { teardownPush } from '@/lib/native/push';
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Unknown error';
 
 const SettingsTab: React.FC = () => {
   const { user, logout } = useAuth();
@@ -56,7 +60,7 @@ const SettingsTab: React.FC = () => {
       // Update staff_profiles
       const { error: staffError } = await supabase
         .from('staff_profiles')
-        .update({ phone } as any)
+        .update({ phone })
         .eq('user_id', user.id);
 
       if (staffError) {
@@ -64,15 +68,15 @@ const SettingsTab: React.FC = () => {
         // Try upsert approach
         const { error: upsertError } = await supabase
           .from('staff_profiles')
-          .upsert({ user_id: user.id, phone, pay_rate: 0 } as any, { onConflict: 'user_id' });
+          .upsert({ user_id: user.id, phone, pay_rate: 0 }, { onConflict: 'user_id' });
 
         if (upsertError) throw upsertError;
       }
 
       toast.success('Phone number saved successfully');
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Save error:', err);
-      toast.error('Failed to save phone number: ' + (err.message || 'Unknown error'));
+      toast.error('Failed to save phone number: ' + getErrorMessage(err));
     } finally {
       setIsSaving(false);
     }
@@ -84,7 +88,6 @@ const SettingsTab: React.FC = () => {
       // so a signed-out phleb — or the next user on a shared device — stops
       // receiving this account's appointment notifications. No-op on web.
       try {
-        const { teardownPush } = await import('@/lib/native/push');
         await teardownPush();
       } catch { /* never block sign-out on push cleanup */ }
       await logout();

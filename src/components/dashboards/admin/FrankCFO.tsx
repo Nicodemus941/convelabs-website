@@ -16,6 +16,12 @@ interface Message {
   loading?: boolean;
 }
 
+const isMarkdownDividerCell = (cell: string) =>
+  Array.from(cell).every((char) => char === '-' || char === ':' || char.trim() === '');
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Unknown error';
+
 const SUGGESTED_PROMPTS = [
   { icon: CalendarDays, label: "Daily report", prompt: "Give me today's revenue report" },
   { icon: CalendarRange, label: "Weekly report", prompt: "Give me this week's report vs last week" },
@@ -91,11 +97,12 @@ const FrankCFO: React.FC = () => {
             : m
         )
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Frank CFO error:', err);
-      const errMessage = err.message?.includes('ANTHROPIC_API_KEY')
+      const rawErrorMessage = getErrorMessage(err);
+      const errMessage = rawErrorMessage.includes('ANTHROPIC_API_KEY')
         ? 'Frank requires an Anthropic API key. Please add ANTHROPIC_API_KEY to your Supabase Edge Function secrets.'
-        : `Sorry, I hit an error pulling the numbers: ${err.message || 'Unknown error'}. Please try again.`;
+        : `Sorry, I hit an error pulling the numbers: ${rawErrorMessage}. Please try again.`;
 
       setMessages(prev =>
         prev.map(m =>
@@ -104,7 +111,7 @@ const FrankCFO: React.FC = () => {
             : m
         )
       );
-      setError(err.message);
+      setError(rawErrorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -165,7 +172,7 @@ const FrankCFO: React.FC = () => {
 
         if (line.includes('|') && line.trim().startsWith('|')) {
           const cells = line.split('|').filter(c => c.trim());
-          if (cells.every(c => /^[-:\s]+$/.test(c))) return null;
+          if (cells.every(isMarkdownDividerCell)) return null;
           const isHeader = j > 0 && lines[j + 1]?.includes('---');
           return (
             <div key={`${i}-${j}`} className={`grid gap-2 text-xs py-1 px-2 ${isHeader ? 'font-semibold bg-emerald-50 rounded' : 'border-b border-gray-100'}`}
