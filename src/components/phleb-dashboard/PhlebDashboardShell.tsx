@@ -23,6 +23,14 @@ import { Capacitor } from '@capacitor/core';
 import { toast } from 'sonner';
 import { initPush } from '@/lib/native/push';
 
+const FIELD_VISIT_ACTIVE_STATUSES = new Set([
+  'scheduled',
+  'confirmed',
+  'en_route',
+  'arrived',
+  'in_progress',
+]);
+
 const DESKTOP_TABS: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
   { id: 'schedule', label: 'Schedule', icon: Calendar },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
@@ -262,20 +270,23 @@ const PhlebDashboardShell: React.FC = () => {
         {activeTab === 'schedule' && (() => {
           const now = new Date();
           const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-          const monthAppts = appointments.filter(a => (a.appointment_date || '').startsWith(monthPrefix));
-          const monthRemaining = monthAppts.filter(a => a.status !== 'completed' && a.status !== 'cancelled').length;
+          const monthAppts = appointments.filter(a => (a.appointment_date || '').startsWith(monthPrefix) && a.status !== 'cancelled');
+          const monthRemaining = monthAppts.filter(a => FIELD_VISIT_ACTIVE_STATUSES.has(a.status)).length;
           const monthCompleted = monthAppts.filter(a => a.status === 'completed').length;
+          const monthWrapUps = monthAppts.filter(a => a.status === 'specimen_delivered').length;
           const monthLabel = now.toLocaleString('en-US', { month: 'short' });
           return (
             <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mb-4">
               <div className="flex items-baseline justify-between mb-1.5 px-1">
                 <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">{monthLabel} {now.getFullYear()}</p>
-                <p className="text-[10px] text-gray-400">Current month only</p>
+                <p className="text-[10px] text-gray-400">
+                  {monthWrapUps > 0 ? `${monthWrapUps} wrap-up${monthWrapUps === 1 ? '' : 's'} pending` : 'Current month only'}
+                </p>
               </div>
               <div className="grid grid-cols-3 gap-2.5">
                 <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 text-center">
                   <p className="text-2xl font-bold text-[#B91C1C] tabular-nums">{monthRemaining}</p>
-                  <p className="text-[11px] text-[#8B7C7E] font-medium">Remaining</p>
+                  <p className="text-[11px] text-[#8B7C7E] font-medium">Field Visits Left</p>
                 </div>
                 <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 text-center">
                   <p className="text-2xl font-bold text-emerald-600 tabular-nums">{monthCompleted}</p>

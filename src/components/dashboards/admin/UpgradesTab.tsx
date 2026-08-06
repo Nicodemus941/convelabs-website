@@ -38,12 +38,21 @@ interface UpgradeEvent {
   revenue_cents: number;
   potential_cents: number;
   discount_cents: number;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
   converted_at: string | null;
 }
 
-const TYPE_META: Record<string, { label: string; icon: any; color: string; bg: string }> = {
+interface UpgradeStats {
+  intent: number;
+  converted: number;
+  lost: number;
+  revenue: number;
+  discount: number;
+  potential: number;
+}
+
+const TYPE_META: Record<string, { label: string; icon: React.ElementType; color: string; bg: string }> = {
   companion_click:     { label: 'Family Member Add-ons', icon: Users,   color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200' },
   membership_applied:  { label: 'Membership Discounts',  icon: Crown,   color: 'text-purple-700', bg: 'bg-purple-50 border-purple-200' },
   promo_applied:       { label: 'Promo / Referral Codes', icon: Tag,    color: 'text-blue-700',   bg: 'bg-blue-50 border-blue-200' },
@@ -67,35 +76,53 @@ const UpgradesTab: React.FC = () => {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const cutoff = new Date(Date.now() - (RANGES.find(r => r.key === range)?.days ?? 30) * 24 * 3600 * 1000).toISOString();
-      const { data } = await supabase
-        .from('upgrade_events' as any)
+      const baseQuery = supabase
+        .from('upgrade_events' as never)
         .select('*')
-        .gte('created_at', cutoff)
         .order('created_at', { ascending: false })
         .limit(500);
+      const rangeDef = RANGES.find(r => r.key === range);
+      const { data } = range === 'all'
+        ? await baseQuery
+        : await baseQuery.gte('created_at', new Date(Date.now() - (rangeDef?.days ?? 30) * 24 * 3600 * 1000).toISOString());
       setEvents((data as unknown as UpgradeEvent[]) || []);
       setLoading(false);
     })();
   }, [range]);
 
   const kpis = useMemo(() => {
-    const byType: Record<string, { intent: number; converted: number; revenue: number; discount: number; potential: number }> = {};
-    let totalRevenue = 0, totalPotential = 0, totalDiscount = 0, intent = 0, converted = 0;
+    const byType: Record<string, UpgradeStats> = {};
+    let totalRevenue = 0;
+    let totalPotential = 0;
+    let totalDiscount = 0;
+    let intent = 0;
+    let converted = 0;
+    let lost = 0;
     for (const e of events) {
       const t = e.event_type;
-      if (!byType[t]) byType[t] = { intent: 0, converted: 0, revenue: 0, discount: 0, potential: 0 };
-      if (e.status === 'converted') { byType[t].converted++; converted++; }
-      else { byType[t].intent++; intent++; }
-      byType[t].revenue += e.revenue_cents || 0;
+      if (!byType[t]) byType[t] = { intent: 0, converted: 0, lost: 0, revenue: 0, discount: 0, potential: 0 };
+
+      if (e.status === 'converted') {
+        byType[t].converted++;
+        converted++;
+        byType[t].revenue += e.revenue_cents || 0;
+        totalRevenue += e.revenue_cents || 0;
+      } else if (e.status === 'lost') {
+        byType[t].lost++;
+        lost++;
+      } else {
+        byType[t].intent++;
+        intent++;
+        byType[t].potential += e.potential_cents || 0;
+        totalPotential += e.potential_cents || 0;
+      }
+
       byType[t].discount += e.discount_cents || 0;
-      byType[t].potential += e.potential_cents || 0;
-      totalRevenue += e.revenue_cents || 0;
-      totalPotential += e.potential_cents || 0;
       totalDiscount += e.discount_cents || 0;
     }
-    const conversionRate = (intent + converted) > 0 ? (converted / (intent + converted)) * 100 : 0;
-    return { byType, totalRevenue, totalPotential, totalDiscount, intent, converted, conversionRate };
+    const totalOutcomes = intent + converted + lost;
+    const conversionRate = totalOutcomes > 0 ? (converted / totalOutcomes) * 100 : 0;
+    return { byType, totalRevenue, totalPotential, totalDiscount, intent, converted, lost, conversionRate };
   }, [events]);
 
   const recent = events.slice(0, 25);
@@ -163,7 +190,9 @@ const UpgradesTab: React.FC = () => {
                   <ArrowRight className="h-3.5 w-3.5" /> Conversion
                 </div>
                 <p className="text-2xl font-bold text-gray-900">{kpis.conversionRate.toFixed(1)}%</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Intent → converted</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {kpis.lost > 0 ? `${kpis.lost} lost event(s) kept out of live pipeline` : 'Converted out of all tracked outcomes'}
+                </p>
               </CardContent>
             </Card>
           </div>
@@ -171,8 +200,8 @@ const UpgradesTab: React.FC = () => {
           {/* Per-type breakdown */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {Object.entries(TYPE_META).map(([key, meta]) => {
-              const k = kpis.byType[key] || { intent: 0, converted: 0, revenue: 0, discount: 0, potential: 0 };
-              const total = k.intent + k.converted;
+              const k = kpis.byType[key] || { intent: 0, converted: 0, lost: 0, revenue: 0, discount: 0, potential: 0 };
+              const total = k.intent + k.converted + k.lost;
               const Icon = meta.icon;
               const convRate = total > 0 ? (k.converted / total) * 100 : 0;
               return (
@@ -199,11 +228,11 @@ const UpgradesTab: React.FC = () => {
                         <p className="text-[10px] text-gray-500 uppercase tracking-wide">Conv.</p>
                       </div>
                     </div>
-                    {k.discount > 0 && (
-                      <p className="text-[11px] text-gray-500 mt-2 text-center">
-                        {dollars(k.discount)} in discounts given
-                      </p>
-                    )}
+                    <p className="text-[11px] text-gray-500 mt-2 text-center">
+                      {k.intent} open
+                      {k.lost > 0 ? ` · ${k.lost} lost` : ''}
+                      {k.discount > 0 ? ` · ${dollars(k.discount)} discounted` : ''}
+                    </p>
                   </CardContent>
                 </Card>
               );

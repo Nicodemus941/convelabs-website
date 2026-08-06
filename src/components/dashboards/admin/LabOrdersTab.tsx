@@ -141,6 +141,7 @@ interface OrgMeta {
 
 const LabOrdersTab: React.FC = () => {
   const { user } = useAuth();
+  const adminBasePath = `/dashboard/${user?.role === 'office_manager' ? 'office_manager' : 'super_admin'}`;
   const [rows, setRows] = useState<LabOrderRow[]>([]);
   const [orgMap, setOrgMap] = useState<Map<string, OrgMeta>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -595,7 +596,7 @@ const LabOrderRow: React.FC<{
     );
   } else if (row.status === 'scheduled' && row.appointment_id) {
     primaryAction = (
-      <Button size="sm" variant="outline" className="hidden sm:inline-flex h-9 text-xs gap-1.5" onClick={(e) => { e.stopPropagation(); window.open(`/dashboard/super_admin/calendar?appointment=${row.appointment_id}`, '_blank'); }}>
+      <Button size="sm" variant="outline" className="hidden sm:inline-flex h-9 text-xs gap-1.5" onClick={(e) => { e.stopPropagation(); window.open(`${adminBasePath}/calendar?appointment=${row.appointment_id}`, '_blank'); }}>
         <Calendar className="h-3.5 w-3.5" /> View Appointment
       </Button>
     );
@@ -743,7 +744,7 @@ const LabOrderDetailDrawer: React.FC<{
               </Button>
               {row.appointment_id && (
                 <Button variant="outline" size="sm" className="h-9 text-xs gap-1.5 flex-shrink-0" asChild>
-                  <a href={`/dashboard/super_admin/calendar?appointment=${row.appointment_id}`} target="_blank" rel="noopener">
+                  <a href={`${adminBasePath}/calendar?appointment=${row.appointment_id}`} target="_blank" rel="noopener">
                     <Calendar className="h-3.5 w-3.5" /> View appointment
                   </a>
                 </Button>
