@@ -76,6 +76,11 @@ export interface BookingFormValues {
     email?: string;
     phone?: string;
     dateOfBirth?: string;
+    dob?: string;
+    relationship?: string;
+    fastingRequired?: boolean;
+    kitsCount?: number;
+    _source?: string;
   }>;
   labOrder?: {
     skipped?: boolean;
@@ -148,6 +153,11 @@ export const bookingFormSchema = z.object({
     email: z.string().optional(),
     phone: z.string().optional(),
     dateOfBirth: z.string().optional(),
+    dob: z.string().optional(),
+    relationship: z.string().optional(),
+    fastingRequired: z.boolean().optional(),
+    kitsCount: z.number().optional(),
+    _source: z.string().optional(),
   })).optional(),
   labOrder: z.object({
     skipped: z.boolean().optional(),

@@ -21,7 +21,7 @@ import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Loader2, Send, CheckCircle2, Copy, ExternalLink, Zap, Upload, FileText, Building2, X, ShieldCheck } from 'lucide-react';
+import { Loader2, Send, CheckCircle2, Copy, ExternalLink, Zap, Upload, FileText, Building2, X, ShieldCheck, Users, UserPlus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -37,6 +37,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   patient: PatientPrefill | null;
+  onSent?: () => void;
   // Optional pre-fills. When opened from the Lab Orders tab, we already
   // know the org + the lab order PDF + the likely service type. Pre-fill
   // those so the user doesn't have to re-select. (Kandace Bennett case
@@ -68,15 +69,34 @@ const SERVICES: ServiceOption[] = [
 ];
 
 interface OrgOption { id: string; name: string }
+interface HouseholdMember {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  date_of_birth?: string | null;
+  household_relation?: string | null;
+}
+interface CompanionDraft {
+  firstName: string;
+  lastName: string;
+  relationship: string;
+  dateOfBirth: string;
+}
 
 const SendBookingLinkModal: React.FC<Props> = ({
-  open, onClose, patient,
+  open, onClose, patient, onSent,
   presetOrganizationId, presetOrganizationName, presetLabOrderPath, presetServiceType,
 }) => {
   const [busy, setBusy] = useState(false);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [manualOrgName, setManualOrgName] = useState<string>('');
+  const [householdLoading, setHouseholdLoading] = useState(false);
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
+  const [selectedHouseholdIds, setSelectedHouseholdIds] = useState<string[]>([]);
+  const [manualCompanions, setManualCompanions] = useState<CompanionDraft[]>([]);
   const [labOrderFile, setLabOrderFile] = useState<File | null>(null);
   const [labOrderUploading, setLabOrderUploading] = useState(false);
   const [uploadedPath, setUploadedPath] = useState<string | null>(null);
@@ -87,6 +107,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
     serviceLabel: string;
     orgName: string | null;
     labOrderAttached: boolean;
+    householdCount: number;
   } | null>(null);
 
   // Load provider orgs once the modal opens — short list so a flat dropdown
@@ -102,17 +123,55 @@ const SendBookingLinkModal: React.FC<Props> = ({
           .select('id, name')
           .order('name', { ascending: true });
         if (cancelled) return;
-        setOrgs((data || []) as any);
+        setOrgs(data || []);
       } catch {/* non-fatal */}
     })();
     return () => { cancelled = true; };
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !patient?.id) {
+      setHouseholdMembers([]);
+      setSelectedHouseholdIds([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setHouseholdLoading(true);
+      try {
+        const { data: primary } = await supabase
+          .from('tenant_patients')
+          .select('id, household_id')
+          .eq('id', patient.id)
+          .maybeSingle();
+        if (cancelled || !primary?.household_id) {
+          if (!cancelled) setHouseholdMembers([]);
+          return;
+        }
+        const { data: members } = await supabase
+          .from('tenant_patients')
+          .select('id, first_name, last_name, email, phone, date_of_birth, household_relation')
+          .eq('household_id', primary.household_id)
+          .is('deleted_at', null)
+          .neq('id', primary.id)
+          .order('first_name', { ascending: true });
+        if (!cancelled) setHouseholdMembers((members || []) as HouseholdMember[]);
+      } catch {
+        if (!cancelled) setHouseholdMembers([]);
+      } finally {
+        if (!cancelled) setHouseholdLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, patient?.id]);
 
   // Pre-fill org + lab-order path when launched from a context that already
   // has them (e.g. Lab Orders tab clicking "Send Booking Link" on a row).
   // Re-runs whenever the modal opens for a different patient/order.
   useEffect(() => {
     if (!open) return;
+    setSelectedHouseholdIds([]);
+    setManualCompanions([]);
     if (presetOrganizationId) setSelectedOrgId(presetOrganizationId);
     else if (presetOrganizationName) setManualOrgName(presetOrganizationName);
     if (presetLabOrderPath) setUploadedPath(presetLabOrderPath);
@@ -123,9 +182,43 @@ const SendBookingLinkModal: React.FC<Props> = ({
     setSentResult(null);
     setSelectedOrgId('');
     setManualOrgName('');
+    setSelectedHouseholdIds([]);
+    setManualCompanions([]);
     setLabOrderFile(null);
     setUploadedPath(null);
     onClose();
+  };
+
+  const toggleHouseholdMember = (memberId: string) => {
+    setSelectedHouseholdIds((current) =>
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId]
+    );
+  };
+
+  const updateManualCompanion = (index: number, key: keyof CompanionDraft, value: string) => {
+    setManualCompanions((current) =>
+      current.map((entry, entryIndex) => (
+        entryIndex === index ? { ...entry, [key]: value } : entry
+      ))
+    );
+  };
+
+  const removeManualCompanion = (index: number) => {
+    setManualCompanions((current) => current.filter((_, entryIndex) => entryIndex !== index));
+  };
+
+  const addManualCompanion = () => {
+    setManualCompanions((current) => [
+      ...current,
+      {
+        firstName: '',
+        lastName: patient?.lastName || '',
+        relationship: 'Companion',
+        dateOfBirth: '',
+      },
+    ]);
   };
 
   const uploadLabOrderIfNeeded = async (): Promise<string | null> => {
@@ -141,8 +234,9 @@ const SendBookingLinkModal: React.FC<Props> = ({
       if (upErr) throw upErr;
       setUploadedPath(safeName);
       return safeName;
-    } catch (e: any) {
-      toast.error(`Lab order upload failed: ${e?.message || e}`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(`Lab order upload failed: ${message}`);
       return null;
     } finally {
       setLabOrderUploading(false);
@@ -153,9 +247,41 @@ const SendBookingLinkModal: React.FC<Props> = ({
     if (!patient) return;
     setBusy(true);
     try {
+      const selectedLinkedMembers = householdMembers.filter((member) => selectedHouseholdIds.includes(member.id));
+      const trimmedManualCompanions = manualCompanions
+        .map((entry) => ({
+          firstName: entry.firstName.trim(),
+          lastName: entry.lastName.trim(),
+          relationship: entry.relationship.trim(),
+          dateOfBirth: entry.dateOfBirth,
+        }))
+        .filter((entry) => entry.firstName || entry.lastName || entry.dateOfBirth || entry.relationship);
+      const incompleteManual = trimmedManualCompanions.find((entry) => !entry.firstName || !entry.lastName);
+      if (incompleteManual) {
+        toast.error('Each added companion needs at least a first and last name before you send the link.');
+        return;
+      }
       const labOrderPath = await uploadLabOrderIfNeeded();
       const orgRow = orgs.find(o => o.id === selectedOrgId) || null;
       const organizationName = orgRow?.name || manualOrgName.trim() || null;
+      const additionalPatients = [
+        ...selectedLinkedMembers.map((member) => ({
+          firstName: member.first_name || '',
+          lastName: member.last_name || '',
+          email: member.email || '',
+          phone: member.phone || '',
+          dateOfBirth: member.date_of_birth || '',
+          relationship: member.household_relation || 'Family member',
+          source: 'prefill_household',
+        })),
+        ...trimmedManualCompanions.map((entry) => ({
+          firstName: entry.firstName,
+          lastName: entry.lastName,
+          dateOfBirth: entry.dateOfBirth || '',
+          relationship: entry.relationship || 'Companion',
+          source: 'prefill_household',
+        })),
+      ];
 
       const { data, error } = await supabase.functions.invoke('create-booking-prefill-link', {
         body: {
@@ -170,6 +296,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
           organizationName: organizationName || undefined,
           providerOfficeLabel: organizationName || undefined,
           labOrderPath: labOrderPath || undefined,
+          additionalPatients,
         },
       });
       if (error) throw error;
@@ -188,6 +315,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
         serviceLabel: svc.label,
         orgName: organizationName,
         labOrderAttached: !!labOrderPath,
+        householdCount: additionalPatients.length,
       });
       const channels: string[] = [];
       if (data.sms_sent) channels.push('SMS');
@@ -197,8 +325,9 @@ const SendBookingLinkModal: React.FC<Props> = ({
       } else {
         toast.warning('No channel succeeded — copy the URL below to send manually.');
       }
-    } catch (e: any) {
-      toast.error(e?.message || 'Send failed');
+      onSent?.();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Send failed');
     } finally {
       setBusy(false);
     }
@@ -214,6 +343,14 @@ const SendBookingLinkModal: React.FC<Props> = ({
     specialty: SERVICES.filter(s => s.category === 'specialty'),
     partner: SERVICES.filter(s => s.category === 'partner'),
   };
+  const selectedLinkedMembers = householdMembers.filter((member) => selectedHouseholdIds.includes(member.id));
+  const householdCount = selectedLinkedMembers.length + manualCompanions.length;
+  const householdSummary = [
+    ...selectedLinkedMembers.map((member) => `${member.first_name || ''} ${member.last_name || ''}`.trim()),
+    ...manualCompanions
+      .map((entry) => `${entry.firstName || ''} ${entry.lastName || ''}`.trim())
+      .filter(Boolean),
+  ];
 
   const hipaaMode = !!(orgs.find(o => o.id === selectedOrgId) || manualOrgName.trim());
 
@@ -248,6 +385,11 @@ const SendBookingLinkModal: React.FC<Props> = ({
                   <FileText className="h-3 w-3" /> Lab order will auto-attach to the appointment after booking
                 </p>
               )}
+              {sentResult.householdCount > 0 && (
+                <p className="text-[11px] text-emerald-700 mt-1 flex items-center justify-center gap-1">
+                  <Users className="h-3 w-3" /> {sentResult.householdCount} additional patient{sentResult.householdCount === 1 ? '' : 's'} ride on the same booking link
+                </p>
+              )}
             </div>
 
             <div>
@@ -259,7 +401,10 @@ const SendBookingLinkModal: React.FC<Props> = ({
                 <button type="button" onClick={() => copy(sentResult.url)} className="px-3 border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600" title="Copy URL"><Copy className="h-4 w-4" /></button>
                 <a href={sentResult.url} target="_blank" rel="noopener" className="px-3 flex items-center border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-600" title="Preview link"><ExternalLink className="h-4 w-4" /></a>
               </div>
-              <p className="text-[10px] text-gray-500 mt-1.5">Link expires in 7 days. Patient lands on /book-now with the service + identity pre-loaded.</p>
+              <p className="text-[10px] text-gray-500 mt-1.5">
+                Link expires in 7 days. Patient lands on /book-now with their identity pre-loaded
+                {sentResult.householdCount > 0 ? ` and ${sentResult.householdCount} same-visit companion${sentResult.householdCount === 1 ? '' : 's'} already attached` : ''}.
+              </p>
             </div>
 
             <Button variant="outline" className="w-full" onClick={handleClose}>Done</Button>
@@ -293,6 +438,20 @@ const SendBookingLinkModal: React.FC<Props> = ({
               </p>
             )}
 
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-1.5">
+              <p className="text-xs font-semibold text-blue-900">What the patient sees</p>
+              <p className="text-[11px] text-blue-800 leading-relaxed">
+                Their booking link opens with their information already filled in.
+                {householdCount > 0 ? ` The same visit will also include ${householdCount} additional patient${householdCount === 1 ? '' : 's'}.` : ''}
+                They just upload the lab order if needed, choose a date and time, and pay.
+              </p>
+              {householdSummary.length > 0 && (
+                <p className="text-[10px] text-blue-700">
+                  Included household: {householdSummary.join(', ')}
+                </p>
+              )}
+            </div>
+
             {/* Step 1 — Provider's office */}
             <div className="border border-gray-200 rounded-lg p-3 space-y-2">
               <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1.5">
@@ -319,6 +478,129 @@ const SendBookingLinkModal: React.FC<Props> = ({
                   <ShieldCheck className="h-3 w-3" /> SMS will name the office but never the patient — HIPAA minimum-necessary.
                 </p>
               )}
+            </div>
+
+            <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-1.5">
+                  <Users className="h-3 w-3" /> Same-visit family / companion <span className="text-gray-400 normal-case">(optional)</span>
+                </p>
+                {householdCount > 0 && (
+                  <span className="text-[10px] rounded-full bg-blue-100 text-blue-800 px-2 py-0.5 font-semibold">
+                    {householdCount} included
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-600">
+                Add anyone getting drawn at the same address and time. Their details ride on the same booking link so the patient does not have to re-enter the whole household manually.
+              </p>
+
+              {householdLoading ? (
+                <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Loading linked household members…
+                </div>
+              ) : householdMembers.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium text-gray-700">Linked household members</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {householdMembers.map((member) => {
+                      const selected = selectedHouseholdIds.includes(member.id);
+                      const displayName = `${member.first_name || ''} ${member.last_name || ''}`.trim();
+                      return (
+                        <button
+                          key={member.id}
+                          type="button"
+                          onClick={() => toggleHouseholdMember(member.id)}
+                          className={`text-left rounded-lg border px-3 py-2 transition ${
+                            selected
+                              ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-200'
+                              : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-gray-900 truncate">{displayName || 'Unnamed family member'}</p>
+                              <p className="text-[11px] text-gray-600 truncate">
+                                {member.household_relation || 'Family member'}
+                                {member.date_of_birth ? ` · DOB ${member.date_of_birth}` : ''}
+                              </p>
+                            </div>
+                            {selected && <CheckCircle2 className="h-4 w-4 text-blue-600 flex-shrink-0" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-500">
+                  No linked household members yet. You can still add a manual companion below.
+                </p>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-medium text-gray-700">Manual companions</p>
+                  <button
+                    type="button"
+                    onClick={addManualCompanion}
+                    className="text-[11px] text-[#B91C1C] font-semibold inline-flex items-center gap-1"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" /> Add companion
+                  </button>
+                </div>
+                {manualCompanions.length === 0 ? (
+                  <p className="text-[11px] text-gray-500">
+                    Use this when the extra person is not linked on the chart yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {manualCompanions.map((entry, index) => (
+                      <div key={index} className="rounded-lg border border-gray-200 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-medium text-gray-700">Companion {index + 1}</p>
+                          <button
+                            type="button"
+                            onClick={() => removeManualCompanion(index)}
+                            className="text-gray-400 hover:text-red-600"
+                            title="Remove companion"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            placeholder="First name"
+                            value={entry.firstName}
+                            onChange={(e) => updateManualCompanion(index, 'firstName', e.target.value)}
+                            className="h-9 text-sm"
+                          />
+                          <Input
+                            placeholder="Last name"
+                            value={entry.lastName}
+                            onChange={(e) => updateManualCompanion(index, 'lastName', e.target.value)}
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input
+                            placeholder="Relationship"
+                            value={entry.relationship}
+                            onChange={(e) => updateManualCompanion(index, 'relationship', e.target.value)}
+                            className="h-9 text-sm"
+                          />
+                          <Input
+                            type="date"
+                            value={entry.dateOfBirth}
+                            onChange={(e) => updateManualCompanion(index, 'dateOfBirth', e.target.value)}
+                            className="h-9 text-sm"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Step 2 — Lab order upload (hidden when already attached via preset) */}

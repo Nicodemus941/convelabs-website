@@ -264,6 +264,20 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             return;
           }
           const p = j.prefill;
+          const additionalPatients = Array.isArray(p.additional_patients)
+            ? p.additional_patients
+                .map((member: any) => ({
+                  firstName: member?.firstName || '',
+                  lastName: member?.lastName || '',
+                  email: member?.email || '',
+                  phone: member?.phone || '',
+                  dateOfBirth: member?.dateOfBirth || member?.dob || '',
+                  dob: member?.dateOfBirth || member?.dob || '',
+                  relationship: member?.relationship || '',
+                  _source: member?.source || member?._source || 'prefill_household',
+                }))
+                .filter((member: any) => member.firstName && member.lastName)
+            : [];
           methods.reset({
             ...methods.getValues(),
             serviceDetails: {
@@ -297,6 +311,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
               memberId: p.insurance_member_id || '',
               groupNumber: p.insurance_group_number || '',
             } as any,
+            additionalPatients,
             // Stamp token + org so handleCheckout passes them through
             prefillTokenId: p.token_id,
             organizationId: p.organization_id || undefined,
@@ -317,7 +332,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             : hasAddress
               ? ' · address + service pre-loaded · pick a time'
               : ' · service pre-loaded';
-          toast.success(`Welcome${greeting}${skippedNote}`);
+          const householdNote = additionalPatients.length > 0
+            ? ` · ${additionalPatients.length} family member${additionalPatients.length === 1 ? '' : 's'} already included`
+            : '';
+          toast.success(`Welcome${greeting}${skippedNote}${householdNote}`);
         } catch (e: any) {
           console.warn('[prefill] resolve failed:', e);
         }

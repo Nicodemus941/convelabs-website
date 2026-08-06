@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
       billedTo = 'patient',
       labOrderPath: labOrderPathIn,
       providerOfficeLabel: providerOfficeLabelIn,
+      additionalPatients: additionalPatientsIn,
     } = body || {};
 
     if (!serviceType) {
@@ -143,6 +144,20 @@ Deno.serve(async (req) => {
     const hint = SERVICE_PRICE_HINT[serviceType] || { name: serviceNameIn || serviceType, price: 0 };
     const serviceName = serviceNameIn || hint.name;
     const servicePriceCents = Math.round(hint.price * 100);
+    const additionalPatients = Array.isArray(additionalPatientsIn)
+      ? additionalPatientsIn
+          .slice(0, 8)
+          .map((p: any) => ({
+            firstName: String(p?.firstName || '').trim(),
+            lastName: String(p?.lastName || '').trim(),
+            email: p?.email ? String(p.email).trim().toLowerCase() : null,
+            phone: p?.phone ? String(p.phone).trim() : null,
+            dateOfBirth: p?.dateOfBirth ? String(p.dateOfBirth) : (p?.dob ? String(p.dob) : null),
+            relationship: p?.relationship ? String(p.relationship).trim() : null,
+            source: p?.source ? String(p.source).trim() : (p?._source ? String(p._source).trim() : 'prefill_household'),
+          }))
+          .filter((p: any) => p.firstName && p.lastName)
+      : [];
 
     // Resolve provider/org display name — used in the HIPAA-minimum-necessary
     // SMS copy. We never expose patient name in SMS when an org context exists
@@ -175,6 +190,7 @@ Deno.serve(async (req) => {
         organization_name: organizationName,
         provider_office_label: providerOfficeLabel,
         lab_order_path: labOrderPath,
+        household_members_json: additionalPatients,
         billed_to: billedTo,
         hipaa_minimum_necessary: !!providerOfficeLabel,
         created_by: requester.id,

@@ -14,6 +14,7 @@ import {
 import { format, formatDistanceToNow } from 'date-fns';
 import PatientAddressPicker from '@/components/shared/PatientAddressPicker';
 import PatientStatusChip from '@/components/shared/PatientStatusChip';
+import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
 
 /**
  * PatientDetailDrawer — shared slide-in panel with full patient history.
@@ -470,7 +471,7 @@ const ReminderCadenceCard: React.FC<ReminderCardProps> = ({ profile, organizatio
   const [editing, setEditing] = useState(false);
   const [days, setDays] = useState(String(profile.lab_reminder_cadence_days || 7));
   const [saving, setSaving] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [sendLinkModalOpen, setSendLinkModalOpen] = useState(false);
 
   const deadline = profile.lab_reminder_deadline_at ? new Date(profile.lab_reminder_deadline_at) : null;
   const isOverdue = deadline && deadline.getTime() < Date.now();
@@ -502,44 +503,11 @@ const ReminderCadenceCard: React.FC<ReminderCardProps> = ({ profile, organizatio
     }
   };
 
-  const sendBookingLink = async () => {
-    if (!profile.email && !profile.phone) {
-      toast.error('Patient has no phone or email — add one first');
-      return;
-    }
-    setSending(true);
-    try {
-      // Use the existing patient-lab-request infrastructure: create a row and
-      // the patient gets a text/email with the booking link. Simpler than
-      // spinning up a one-off notification path.
-      const { data, error } = await supabase.from('patient_lab_requests').insert({
-        organization_id: organizationId,
-        patient_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
-        patient_email: profile.email,
-        patient_phone: profile.phone,
-        draw_by_date: new Date(Date.now() + 14 * 86400 * 1000).toISOString().substring(0, 10),
-        status: 'pending_schedule',
-        access_token: crypto.randomUUID(),
-      } as any).select('id, access_token').single();
-      if (error) throw error;
-
-      // Stamp last_sent_at so we don't double-remind
-      await supabase.from('tenant_patients').update({
-        lab_reminder_last_sent_at: new Date().toISOString(),
-      } as any).eq('id', profile.id);
-
-      // Fire the SMS/email
-      await supabase.functions.invoke('remind-lab-request-patients', {
-        body: { lab_request_id: (data as any).id },
-      }).catch((e) => console.warn('remind invoke error (non-fatal):', e));
-
-      toast.success('Booking link sent');
-      onChanged();
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to send booking link');
-    } finally {
-      setSending(false);
-    }
+  const handleLinkSent = async () => {
+    await supabase.from('tenant_patients').update({
+      lab_reminder_last_sent_at: new Date().toISOString(),
+    } as any).eq('id', profile.id);
+    onChanged();
   };
 
   const tone = isOverdue
@@ -601,14 +569,33 @@ const ReminderCadenceCard: React.FC<ReminderCardProps> = ({ profile, organizatio
       <div className="flex gap-2 flex-wrap">
         <Button
           size="sm"
-          onClick={sendBookingLink}
-          disabled={sending}
+          onClick={() => {
+            if (!profile.email && !profile.phone) {
+              toast.error('Patient has no phone or email — add one first');
+              return;
+            }
+            setSendLinkModalOpen(true);
+          }}
           className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5 flex-1 sm:flex-none"
         >
-          {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+          <Send className="h-3 w-3" />
           Send booking link now
         </Button>
       </div>
+
+      <SendBookingLinkModal
+        open={sendLinkModalOpen}
+        onClose={() => setSendLinkModalOpen(false)}
+        onSent={handleLinkSent}
+        presetOrganizationId={organizationId || null}
+        patient={{
+          id: profile.id,
+          firstName: profile.first_name || '',
+          lastName: profile.last_name || '',
+          email: profile.email,
+          phone: profile.phone,
+        }}
+      />
     </div>
   );
 };

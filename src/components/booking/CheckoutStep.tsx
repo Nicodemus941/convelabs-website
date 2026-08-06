@@ -145,6 +145,9 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   // — caught Mary Rienzi at $250 vs $175. Consolidation removes the dual path.
   const additionalPatientsAll = (watch('additionalPatients') || []) as any[];
   const familyMembers = additionalPatientsAll.filter((p: any) => p?._source === 'family_member') as FamilyMember[];
+  const prefilledHouseholdMembers = additionalPatientsAll.filter((p: any) =>
+    p?._source !== 'family_member'
+  );
   const [showFamilyForm, setShowFamilyForm] = useState(false);
   const [familyForm, setFamilyForm] = useState({ name: '', dob: '', relationship: 'Spouse', fastingRequired: false });
   const BUNDLE_COUNT = 4;
@@ -487,6 +490,16 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             <span className="text-muted-foreground">Patient</span>
             <span>{getValues('patientDetails.firstName')} {getValues('patientDetails.lastName')}</span>
           </div>
+          {prefilledHouseholdMembers.length > 0 && (
+            <div className="flex justify-between items-start gap-3">
+              <span className="text-muted-foreground">Household</span>
+              <span className="text-right max-w-[55%] sm:max-w-[60%] text-xs sm:text-sm">
+                {prefilledHouseholdMembers.map((member: any) =>
+                  `${member.firstName || ''} ${member.lastName || ''}`.trim()
+                ).join(', ')}
+              </span>
+            </div>
+          )}
           {getValues('locationDetails.address') && (
             <div className="flex justify-between">
               <span className="text-muted-foreground">Address</span>
@@ -502,6 +515,13 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             </div>
           )}
         </div>
+
+        {prefilledHouseholdMembers.length > 0 && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+            This link already includes {prefilledHouseholdMembers.length} additional patient{prefilledHouseholdMembers.length === 1 ? '' : 's'} for the same visit.
+            If this list looks wrong, tap Back before paying to adjust the household details.
+          </div>
+        )}
 
         <Separator />
 
