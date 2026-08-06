@@ -121,6 +121,16 @@ verify_jwt = false
 [functions.remind-lab-request-patients]
 verify_jwt = false
 
+# Public analytics mirror — the browser sends its own session/visitor ids and
+# the function stores traffic + funnel events in Supabase for internal reporting.
+[functions.track-analytics]
+verify_jwt = false
+
+# Nightly owner traffic report. Pg_cron sends no JWT, so the function validates
+# a dedicated shared secret instead.
+[functions.send-nightly-traffic-report]
+verify_jwt = false
+
 [functions.notify-provider-deadline-risk]
 verify_jwt = false
 
@@ -260,4 +270,3 @@ verify_jwt = true
 # token-only patient page can call it without a login.
 [functions.add-companion]
 verify_jwt = false
-

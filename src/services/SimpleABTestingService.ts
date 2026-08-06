@@ -72,14 +72,14 @@ class SimpleABTestingService {
         experimentName: 'home-fee-clarity',
         variant: 'control',
         content: {
-          offerText: 'Home visits from $150. Office visits from $55.'
+          offerText: 'Home visits from $150. Office visits from $55. Senior visits from $110. Farther locations can add distance-based cost.'
         }
       },
       {
         experimentName: 'home-fee-clarity',
         variant: 'billing_split',
         content: {
-          offerText: 'You pay ConveLabs for the draw. Your lab bills the tests through its normal insurance workflow.'
+          offerText: 'You pay ConveLabs for the draw. Your lab bills the tests through its normal insurance workflow. Different locations can cost more based on distance.'
         }
       }
     ]);

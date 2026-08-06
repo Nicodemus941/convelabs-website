@@ -79,14 +79,17 @@ const PricingTransparency = ({
             <div className="border-t border-border pt-4">
               <h3 className="text-lg font-semibold text-foreground">Senior Blood Draw (65+)</h3>
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl sm:text-4xl font-bold text-conve-red">$100</span>
+                <span className="text-3xl sm:text-4xl font-bold text-conve-red">$110</span>
                 <span className="text-muted-foreground text-base">/ visit</span>
               </div>
             </div>
           </div>
-          <p className="text-muted-foreground text-sm mb-6">
+          <p className="text-muted-foreground text-sm mb-2">
             Additional patient at same location:{" "}
             <span className="font-semibold text-foreground">$75</span>
+          </p>
+          <p className="text-muted-foreground text-sm mb-6">
+            Different locations can cost more based on distance, and we show that before checkout when it applies.
           </p>
 
           <div className="space-y-3 mb-8 text-left">
@@ -96,7 +99,7 @@ const PricingTransparency = ({
               "Specimen delivery confirmation sent to you",
               "Quest, LabCorp, AdventHealth, or your lab of choice",
               "Family members can be booked at the same visit",
-              "No hidden fees or surprise checkout add-ons",
+              "Distance-based pricing is shown before you pay when a farther location adds cost",
             ].map((item, i) => (
               <div key={i} className="flex items-start gap-2.5">
                 <CheckCircle className="h-5 w-5 text-conve-red flex-shrink-0 mt-0.5" />

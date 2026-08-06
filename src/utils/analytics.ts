@@ -1,5 +1,4 @@
 import React from 'react';
-import { supabase } from '@/integrations/supabase/client';
 import { trackEvent as posthogTrack } from '@/lib/posthog';
 
 interface AnalyticsEvent {
@@ -7,7 +6,7 @@ interface AnalyticsEvent {
   visitorId: string;
   userId?: string;
   eventType: string;
-  eventData: any;
+  eventData: Record<string, unknown>;
   ipAddress?: string;
   userAgent?: string;
   referrer?: string;
@@ -28,6 +27,18 @@ class AnalyticsTracker {
     
     this.setupEventListeners();
     this.trackPageView();
+  }
+
+  private getSupabaseUrl(): string {
+    return import.meta.env.VITE_SUPABASE_URL || 'https://yluyonhrxxtyuiyrdixl.supabase.co';
+  }
+
+  private getSupabaseAnonKey(): string {
+    return (
+      import.meta.env.VITE_SUPABASE_ANON_KEY ||
+      import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsdXlvbmhyeHh0eXVpeXJkaXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc1MDExODgsImV4cCI6MjA2MzA3NzE4OH0.ZKP-k5fizUtKZsekV9RFL1wYcVfIHEeQWArs-4l5Q-Y'
+    );
   }
 
   private getOrCreateSessionId(): string {
@@ -94,7 +105,7 @@ class AnalyticsTracker {
     });
   }
 
-  trackFunnelStage(stage: string, stageOrder: number, data?: any) {
+  trackFunnelStage(stage: string, stageOrder: number, data?: Record<string, unknown>) {
     this.trackEvent('funnel_stage', {
       stage,
       stage_order: stageOrder,
@@ -133,7 +144,7 @@ class AnalyticsTracker {
     });
   }
 
-  private async trackEvent(eventType: string, eventData: any) {
+  private trackEvent(eventType: string, eventData: Record<string, unknown>) {
     try {
       // Fire to PostHog — covers ~everything:
       //  - page views / page leaves (autocapture + manual)
@@ -146,6 +157,33 @@ class AnalyticsTracker {
         session_id: this.sessionId,
         visitor_id: this.visitorId,
         user_id: this.userId,
+      });
+
+      const endpoint = `${this.getSupabaseUrl()}/functions/v1/track-analytics`;
+      const payload: AnalyticsEvent = {
+        sessionId: this.sessionId,
+        visitorId: this.visitorId,
+        userId: this.userId,
+        eventType,
+        eventData,
+        referrer: typeof document !== 'undefined' ? document.referrer || undefined : undefined,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+      };
+
+      // Mirror the load-bearing funnel + traffic events into Supabase so
+      // nightly ops reporting does not depend on PostHog alone.
+      void fetch(endpoint, {
+        method: 'POST',
+        keepalive: eventType === 'page_view' || eventType === 'funnel_stage',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': this.getSupabaseAnonKey(),
+          'Authorization': `Bearer ${this.getSupabaseAnonKey()}`,
+          'X-Client-Info': 'convelabs-web-analytics',
+        },
+        body: JSON.stringify(payload),
+      }).catch((error) => {
+        console.warn('Supabase analytics mirror error:', error);
       });
     } catch (error) {
       console.warn('Analytics tracking error:', error);
@@ -214,7 +252,7 @@ export const analytics = new AnalyticsTracker();
 export const useAnalytics = () => {
   return {
     trackPageView: () => analytics.trackPageView(),
-    trackFunnelStage: (stage: string, order: number, data?: any) => 
+    trackFunnelStage: (stage: string, order: number, data?: Record<string, unknown>) =>
       analytics.trackFunnelStage(stage, order, data),
     trackBookingIntent: (source: string, serviceType?: string) => 
       analytics.trackBookingIntent(source, serviceType),

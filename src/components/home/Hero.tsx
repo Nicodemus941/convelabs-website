@@ -72,13 +72,13 @@ const Hero = ({
   const feeContent = feeVariant === 'billing_split'
     ? {
         pricingTitle: 'You pay the draw fee',
-        pricingBody: 'Home visits from $150. Office visits from $55. Additional patient at the same stop from $75.',
+        pricingBody: 'Home visits from $150. Office visits from $55. Senior visits from $110. Different locations can cost more based on distance.',
         insuranceTitle: 'Your lab bills the tests',
         insuranceBody: 'Quest, LabCorp, or AdventHealth handles the test billing through its usual insurance process.',
       }
     : {
         pricingTitle: 'Clear pricing',
-        pricingBody: 'Mobile visits from $150. Office visits from $55. No surprise add-ons at checkout.',
+        pricingBody: 'Mobile visits from $150. Office visits from $55. Senior visits from $110. Farther locations can add distance-based cost.',
         insuranceTitle: 'Insurance clarity',
         insuranceBody: 'You pay ConveLabs for the draw. Insurance usually covers the lab work itself.',
       };
