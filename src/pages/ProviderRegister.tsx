@@ -11,9 +11,9 @@
  */
 
 import React, { useState } from 'react';
-import { Helmet } from 'react-helmet';
-import Header from '@/components/layout/Header';
-import Footer from '@/components/layout/Footer';
+import { Helmet } from 'react-helmet-async';
+import Header from '@/components/home/Header';
+import Footer from '@/components/home/Footer';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,7 +46,7 @@ const ProviderRegister: React.FC = () => {
       // Insert into provider_partnership_inquiries — existing table with
       // an open anon-INSERT policy (ppi_insert_anon_auth). Admin sees it
       // in the existing partnership-inquiries triage. status='new'.
-      const { error } = await supabase.from('provider_partnership_inquiries' as any).insert({
+      const { error } = await supabase.from('provider_partnership_inquiries').insert({
         practice_name: form.org_name.trim(),
         contact_name: form.contact_name.trim() || null,
         contact_email: form.contact_email.trim(),
@@ -56,12 +56,12 @@ const ProviderRegister: React.FC = () => {
         referral_source: 'self_registration',
         landing_url: typeof window !== 'undefined' ? window.location.href : null,
         status: 'new',
-      } as any);
+      });
       if (error) throw error;
       setSubmitted(true);
       toast.success('Thanks — we\'ll reach out within 24 hours');
-    } catch (e: any) {
-      toast.error(`Couldn't submit: ${e?.message || 'unknown'}`);
+    } catch (e: unknown) {
+      toast.error(`Couldn't submit: ${e instanceof Error ? e.message : 'unknown'}`);
     } finally {
       setSubmitting(false);
     }

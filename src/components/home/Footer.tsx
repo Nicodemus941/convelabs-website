@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Container } from "@/components/ui/container";
 import { useAuth } from "@/contexts/AuthContext";
@@ -7,6 +7,7 @@ import { Gem, FlaskConical, CalendarDays, User, Stethoscope, Shield, Phone, Shie
 import BrandFooterLockup from "@/components/brand/BrandFooterLockup";
 import { ENROLLMENT_URL, TESTS_URL, BOOKING_URL, AUTH_URL, withSource } from '@/lib/constants/urls';
 import { useBookingModalSafe } from '@/contexts/BookingModalContext';
+import { toast } from 'sonner';
 
 interface FooterProps {
   /**
@@ -25,6 +26,7 @@ interface FooterProps {
 const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
   const { user } = useAuth();
   const bookingModal = useBookingModalSafe();
+  const [leadCaptureSubmitting, setLeadCaptureSubmitting] = useState(false);
 
   // ── Slim portal footer — legal + a single lifeline link ─────────
   if (variant === 'slim') {
@@ -39,7 +41,7 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
               <a href="tel:+19415279169" className="hover:text-conve-red">(941) 527-9169</a>
               <a href="mailto:info@convelabs.com" className="hover:text-conve-red">info@convelabs.com</a>
               <Link to="/privacy-policy" className="hover:text-conve-red">Privacy</Link>
-              <Link to="/terms" className="hover:text-conve-red">Terms</Link>
+              <Link to="/terms-of-service" className="hover:text-conve-red">Terms</Link>
             </div>
           </div>
         </Container>
@@ -161,7 +163,7 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
               <li><Link to="/partnerships" className="text-gray-400 hover:text-white transition-colors inline-block py-1">For Providers</Link></li>
               <li><Link to="/contact" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Contact</Link></li>
               <li><Link to="/privacy-policy" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Privacy Policy</Link></li>
-              <li><Link to="/terms" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Terms &amp; Conditions</Link></li>
+              <li><Link to="/terms-of-service" className="text-gray-400 hover:text-white transition-colors inline-block py-1">Terms &amp; Conditions</Link></li>
             </ul>
           </div>
 
@@ -188,14 +190,24 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
             A one-page checklist of the panels that catch problems years early — the same ones our concierge patients run. Straight to your inbox, no sales pitch.
           </p>
           <form
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
               const input = e.currentTarget.querySelector('input');
               if (input?.value) {
-                supabase
-                  .from('leads' as any)
-                  .insert({ email: input.value, source: 'footer_5_labs_checklist', status: 'new' })
-                  .then(() => { input.value = ''; });
+                setLeadCaptureSubmitting(true);
+                const { error } = await supabase
+                  .from('leads')
+                  .insert({ email: input.value, source: 'footer_5_labs_checklist', status: 'new' });
+
+                setLeadCaptureSubmitting(false);
+
+                if (error) {
+                  toast.error("We couldn't save your request. Please try again.");
+                  return;
+                }
+
+                input.value = '';
+                toast.success("The checklist request was received.");
               }
             }}
             className="flex gap-2 max-w-md mx-auto"
@@ -206,8 +218,12 @@ const Footer: React.FC<FooterProps> = ({ variant = 'full' }) => {
               className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-[#B91C1C]"
               required
             />
-            <button type="submit" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors whitespace-nowrap">
-              Send the checklist →
+            <button
+              type="submit"
+              disabled={leadCaptureSubmitting}
+              className="bg-[#B91C1C] hover:bg-[#991B1B] disabled:opacity-70 text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors whitespace-nowrap"
+            >
+              {leadCaptureSubmitting ? 'Sending...' : 'Send the checklist →'}
             </button>
           </form>
         </div>

@@ -14,9 +14,9 @@
  */
 
 import React from 'react';
-import { Helmet } from 'react-helmet';
-import Header from '@/components/layout/Header';
-import Footer from '@/components/layout/Footer';
+import { Helmet } from 'react-helmet-async';
+import Header from '@/components/home/Header';
+import Footer from '@/components/home/Footer';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Clock, MapPin, FlaskConical, DollarSign, Users, Phone, Mail, FileText, Building2, CheckCircle2 } from 'lucide-react';

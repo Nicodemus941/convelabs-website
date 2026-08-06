@@ -8,6 +8,7 @@ import Home from '../pages/Home';
 const Pricing = lazy(() => import('../pages/Pricing'));
 const Brand = lazy(() => import('../pages/Brand'));
 const About = lazy(() => import('../pages/About'));
+const AppointmentsPage = lazy(() => import('../pages/Appointments'));
 const Contact = lazy(() => import('../pages/Contact'));
 const Login = lazy(() => import('../pages/Login'));
 const PhlebLogin = lazy(() => import('../pages/PhlebLogin'));
@@ -27,6 +28,8 @@ const PartnershipOnboarding = lazy(() => import('../pages/PartnershipOnboarding'
 const PartnershipSuccess = lazy(() => import('../pages/PartnershipSuccess'));
 const PartnerWithUs = lazy(() => import('../pages/PartnerWithUs'));
 const PartnerWithUsThanks = lazy(() => import('../pages/PartnerWithUsThanks'));
+const ForProviders = lazy(() => import('../pages/ForProviders'));
+const ProviderRegister = lazy(() => import('../pages/ProviderRegister'));
 const ProviderDrawPlan = lazy(() => import('../pages/ProviderDrawPlan'));
 const BookNow = lazy(() => import('../pages/BookNow'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
@@ -70,6 +73,7 @@ const LocationRedirect: React.FC<{ slug: string }> = ({ slug }) => (
 // Export routes as an array of Route elements
 export const routes = [
   <Route key="home" path="/" element={<Home />} />,
+  <Route key="appointments" path="/appointments" element={<AppointmentsPage />} />,
   <Route key="book-now" path="/book-now" element={<BookNow />} />,
   <Route key="pricing" path="/pricing" element={<Pricing />} />,
   <Route key="brand" path="/brand" element={<Brand />} />,
@@ -81,6 +85,8 @@ export const routes = [
   <Route key="partnership-onboarding" path="/partnership-onboarding" element={<PartnershipOnboarding />} />,
   <Route key="partnership-success" path="/partnership-success" element={<PartnershipSuccess />} />,
   <Route key="partner-with-us" path="/partner-with-us" element={<PartnerWithUs />} />,
+  <Route key="for-providers" path="/for-providers" element={<ForProviders />} />,
+  <Route key="provider-register" path="/providers/register" element={<ProviderRegister />} />,
   <Route key="provider-draw-plan" path="/providers/draw-plan" element={<ProviderDrawPlan />} />,
   <Route key="partner-with-us-thanks" path="/partner-with-us/thanks" element={<PartnerWithUsThanks />} />,
   
@@ -124,7 +130,9 @@ export const routes = [
   <Route key="reset-password" path="/reset-password" element={<ResetPassword />} />,
   <Route key="guarantee" path="/guarantee" element={<Guarantee />} />,
   <Route key="privacy-policy" path="/privacy-policy" element={<PrivacyPolicy />} />,
+  <Route key="privacy-alias" path="/privacy" element={<Navigate to="/privacy-policy" replace />} />,
   <Route key="terms-of-service" path="/terms-of-service" element={<TermsOfService />} />,
+  <Route key="terms-alias" path="/terms" element={<Navigate to="/terms-of-service" replace />} />,
   <Route key="phlebotomist-signup" path="/phlebotomist-signup" element={<PhlebotomistSignup />} />,
   <Route key="blog" path="/blog" element={<Blog />} />,
   <Route key="blog-post" path="/blog/:postId" element={<BlogPost />} />,

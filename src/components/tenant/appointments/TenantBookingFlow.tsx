@@ -253,7 +253,11 @@ const TenantBookingFlow: React.FC<TenantBookingFlowProps> = ({ onAppointmentCrea
               <button
                 type="button"
                 className="px-4 py-2 bg-primary text-primary-foreground rounded-md"
-                onClick={() => window.location.href = "/tenant-dashboard"}
+                onClick={() => {
+                  if (currentTenant?.id) {
+                    window.location.href = `/tenant/dashboard/${currentTenant.id}`;
+                  }
+                }}
               >
                 Return to Dashboard
               </button>

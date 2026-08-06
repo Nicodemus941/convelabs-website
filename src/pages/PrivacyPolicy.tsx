@@ -13,10 +13,10 @@ const PrivacyPolicy: React.FC = () => {
         <title>Privacy Policy | ConveLabs | Protecting Your Personal Information</title>
         <meta 
           name="description" 
-          content="Learn how ConveLabs protects your personal and health information. Our privacy policy outlines how we collect, use, share, and secure your data in compliance with HIPAA and other regulations." 
+          content="Learn how ConveLabs collects, uses, shares, and protects your personal information when you use our website, booking flows, and related services."
         />
-        <meta name="keywords" content="privacy policy, HIPAA compliance, data security, patient privacy, healthcare data protection, ConveLabs privacy" />
-        <link rel="canonical" href="https://convelabs.com/privacy" />
+        <meta name="keywords" content="privacy policy, data security, patient privacy, healthcare data handling, ConveLabs privacy" />
+        <link rel="canonical" href="https://convelabs.com/privacy-policy" />
       </Helmet>
       
       <Header />

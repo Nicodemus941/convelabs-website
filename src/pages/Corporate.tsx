@@ -58,7 +58,7 @@ const Corporate: React.FC = () => {
     {
       icon: Shield,
       title: "Enterprise-Grade Security",
-      description: "HIPAA compliant platform with bank-level encryption and SOC 2 Type II certification"
+      description: "Encrypted workflows, role-based access, and centralized admin controls for enterprise teams"
     },
     {
       icon: BarChart,
@@ -89,10 +89,10 @@ const Corporate: React.FC = () => {
   ];
 
   const complianceSignals = [
-    { icon: Shield, label: "HIPAA Compliant" },
+    { icon: Shield, label: "Private Data Handling" },
     { icon: Award, label: "CLIA Certified" },
     { icon: Building2, label: "Enterprise Security" },
-    { icon: CheckCircle, label: "SOC 2 Type II" }
+    { icon: CheckCircle, label: "Audit-Ready Access Controls" }
   ];
 
   const corporateFeatures = [
@@ -156,8 +156,8 @@ const Corporate: React.FC = () => {
     <>
       <Helmet>
         <title>Cut Healthcare Costs by 25% | Enterprise Workforce Health Solutions | ConveLabs</title>
-        <meta name="description" content="Fortune 500-trusted mobile health platform reduces sick days 30% and healthcare costs 25%. HIPAA-compliant enterprise wellness with 10-minute screenings and executive reporting." />
-        <meta name="keywords" content="enterprise healthcare solutions, corporate wellness ROI, workforce health platform, Fortune 500 health services, executive health programs, HIPAA compliant wellness, employee health screenings, corporate health cost reduction, workplace wellness analytics, enterprise phlebotomy services" />
+        <meta name="description" content="Enterprise workforce health operations with mobile screenings, centralized scheduling, executive reporting, and multi-location program visibility." />
+        <meta name="keywords" content="enterprise healthcare solutions, workforce health platform, executive health programs, employee health screenings, workplace wellness analytics, enterprise phlebotomy services" />
         <link rel="canonical" href="https://convelabs.com/corporate" />
         <script type="application/ld+json">
           {JSON.stringify({
@@ -880,7 +880,7 @@ const Corporate: React.FC = () => {
             <Card className="luxury-card p-6 bg-white/10 backdrop-blur-sm border-white/20">
               <CardContent className="p-0">
                 <Shield className="h-8 w-8 text-conve-gold mx-auto mb-2" />
-                <div className="text-sm font-medium text-white">HIPAA Compliant</div>
+                <div className="text-sm font-medium text-white">Private Data Handling</div>
                 <div className="text-xs text-white/80">Enterprise Security</div>
               </CardContent>
             </Card>

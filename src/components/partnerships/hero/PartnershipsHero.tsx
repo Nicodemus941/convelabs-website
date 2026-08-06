@@ -13,7 +13,14 @@ const PartnershipsHero: React.FC = () => {
 
   return (
     <section className="relative bg-gradient-to-b from-gray-50 to-white pt-24 pb-16 md:pt-32 md:pb-24">
-      <div className="absolute inset-0 z-0 bg-[url('/images/grid-pattern.svg')] bg-repeat opacity-5"></div>
+      <div
+        className="absolute inset-0 z-0 opacity-40"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, rgba(15, 23, 42, 0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(15, 23, 42, 0.06) 1px, transparent 1px)',
+          backgroundSize: '32px 32px',
+        }}
+      />
       
       <div className="container mx-auto px-4 relative z-10">
         <div className="max-w-3xl mx-auto text-center">

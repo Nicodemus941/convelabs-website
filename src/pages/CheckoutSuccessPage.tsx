@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle2, Sparkles, Calendar, Mail, Crown, Heart, AlertTriangle, ChevronRight } from 'lucide-react';
+import { Loader2, CheckCircle2, Sparkles, Calendar, Mail, Crown, Heart, AlertTriangle, ChevronRight, type LucideIcon } from 'lucide-react';
 import ReferringProviderCapture from '@/components/patient/ReferringProviderCapture';
+import { supabase } from '@/integrations/supabase/client';
 
 /**
  * Universal checkout-success page: /welcome?session_id=cs_...
@@ -13,7 +14,7 @@ import ReferringProviderCapture from '@/components/patient/ReferringProviderCapt
  * again → double-charge (see: Suzanne/Aditya, 2026-04-20).
  *
  * This page:
- *   1. Verifies the session server-side (via confirm-checkout-session edge fn)
+ *   1. Verifies the session server-side
  *   2. Renders a kind-specific receipt (membership / appointment / lab request)
  *   3. Shows exactly what unlocked + the immediate next step
  *   4. Tells the user they'll also get an email receipt (idempotent backup)
@@ -28,10 +29,10 @@ interface ConfirmResponse {
   customer_email: string | null;
   customer_name: string | null;
   amount_display: string;
-  details: any;
+  details: Record<string, unknown>;
 }
 
-const TIER_META: Record<string, { label: string; color: string; benefits: string[]; icon: any }> = {
+const TIER_META: Record<string, { label: string; color: string; benefits: string[]; icon: LucideIcon }> = {
   member: {
     label: 'Member',
     color: '#0F766E',
@@ -78,21 +79,34 @@ const CheckoutSuccessPage: React.FC = () => {
     if (!sessionId) { setErr('No session_id provided'); setLoading(false); return; }
     (async () => {
       try {
-        const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/confirm-checkout-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId }),
+        const { data: verifyData, error } = await supabase.functions.invoke('verify-checkout-session', {
+          body: { sessionId, isGuestCheckout: false },
         });
-        const j = await resp.json();
-        if (!resp.ok) throw new Error(j.error || 'Could not verify payment');
-        setData(j);
+        if (error) throw new Error(error.message || 'Could not verify payment');
+        if (!verifyData) throw new Error('Could not verify payment');
+
+        const normalized: ConfirmResponse = {
+          ok: Boolean(verifyData.success),
+          paid: Boolean(verifyData.success),
+          kind: verifyData.kind || 'other',
+          customer_email: verifyData.customer_email || null,
+          customer_name: verifyData.customer_name || null,
+          amount_display: typeof verifyData.amount_display === 'string'
+            ? verifyData.amount_display
+            : typeof verifyData.amount_total === 'number'
+              ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(verifyData.amount_total / 100)
+              : 'Your payment',
+          details: verifyData.details || {},
+        };
+
+        setData(normalized);
         // For appointment / lab-request bookings, prompt for referring-provider
         // capture ~2 seconds after success renders — patient is warm + just paid.
-        if ((j.kind === 'appointment' || j.kind === 'lab_request') && j.paid && j.details?.patient_name) {
+        if ((normalized.kind === 'appointment' || normalized.kind === 'lab_request') && normalized.paid && normalized.details?.patient_name) {
           setTimeout(() => setProviderModalOpen(true), 2000);
         }
-      } catch (e: any) {
-        setErr(e?.message || 'Could not verify payment');
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : 'Could not verify payment');
       } finally {
         setLoading(false);
       }

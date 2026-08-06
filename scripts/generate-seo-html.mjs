@@ -86,7 +86,7 @@ const STATIC_ROUTES = [
     description: 'Refer patient draws to ConveLabs. We handle mobile collection, lab routing, and specimen delivery for clinics and concierge practices in Central Florida.' },
   { path: '/b2b',
     title: 'Mobile Phlebotomy for Practices — ConveLabs B2B',
-    description: 'ConveLabs for healthcare practices: order patient blood draws, track specimens, get delivery receipts. Org-billed, HIPAA-compliant mobile phlebotomy.' },
+    description: 'ConveLabs for healthcare practices: order patient blood draws, track specimens, get delivery receipts, and manage org-billed mobile phlebotomy operations.' },
   { path: '/corporate',
     title: 'Corporate Wellness Blood Draws — ConveLabs',
     description: 'On-site corporate wellness blood draws across Central Florida. Licensed phlebotomists come to your office for employee biometric screening and lab work.' },

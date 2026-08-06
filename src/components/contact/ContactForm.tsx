@@ -17,8 +17,8 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { MessageSquare } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
-import { useWebhookIntegration } from "@/hooks/useWebhookIntegration";
 import { useVisitorOptimization } from "@/hooks/useVisitorOptimization";
+import { supabase } from "@/integrations/supabase/client";
 
 // Form validation schema
 const contactFormSchema = z.object({
@@ -33,7 +33,6 @@ type ContactFormValues = z.infer<typeof contactFormSchema>;
 
 const ContactForm: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { qualifyLead } = useWebhookIntegration();
   const { trackFormStart, trackFormComplete } = useVisitorOptimization();
 
   // Initialize form
@@ -57,37 +56,58 @@ const ContactForm: React.FC = () => {
     try {
       // Track form completion in local system
       trackFormComplete('contact-form');
-      
-      // Qualify lead through webhook integration
-      console.log('Attempting lead qualification for:', data.email);
-      const qualification = await qualifyLead({
-        email: data.email,
-        phone: data.phone,
-        name: data.name,
-        source: 'contact_form',
-        metadata: {
-          page_visited: window.location.pathname,
-          time_on_site: 0,
-          interactions_count: 1,
-          subject: data.subject,
-          message_length: data.message.length,
+
+      const contactSummary = [
+        `Name: ${data.name}`,
+        `Email: ${data.email}`,
+        data.phone ? `Phone: ${data.phone}` : null,
+        `Subject: ${data.subject}`,
+        `Page: ${window.location.href}`,
+        "",
+        data.message,
+      ].filter(Boolean).join("\n");
+
+      const leadCapture = await supabase.functions.invoke('process-lead-capture', {
+        body: {
+          email: data.email.trim().toLowerCase(),
+          source: 'contact_form',
+          referrer: window.location.href,
+          userAgent: navigator.userAgent,
         },
       });
 
-      if (qualification) {
-        console.log('Lead qualification successful:', qualification);
-        // Show personalized response based on qualification
-        if (qualification.qualification.score >= 80) {
-          toast.success("Thank you! Based on your inquiry, we'll prioritize your request and contact you within 2 hours.");
-        } else if (qualification.qualification.score >= 60) {
-          toast.success("Your message has been sent! We'll schedule a consultation call with you within 24 hours.");
-        } else {
-          toast.success("Your message has been sent! We'll be in touch shortly with helpful information.");
-        }
-      } else {
-        console.log('Lead qualification failed or returned null');
-        toast.success("Your message has been sent! We'll be in touch shortly.");
+      const adminEmail = await supabase.functions.invoke('send-email', {
+        body: {
+          to: 'info@convelabs.com',
+          subject: `[ConveLabs Contact] ${data.subject}`,
+          text: contactSummary,
+          html: `
+            <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111827;">
+              <h2 style="margin-bottom:16px;">New website contact inquiry</h2>
+              <p><strong>Name:</strong> ${data.name}</p>
+              <p><strong>Email:</strong> ${data.email}</p>
+              ${data.phone ? `<p><strong>Phone:</strong> ${data.phone}</p>` : ''}
+              <p><strong>Subject:</strong> ${data.subject}</p>
+              <p><strong>Page:</strong> ${window.location.href}</p>
+              <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb;" />
+              <p style="white-space:pre-wrap;">${data.message}</p>
+            </div>
+          `,
+        },
+      });
+
+      const leadSaved = !leadCapture.error && leadCapture.data?.success !== false;
+      const messageDelivered = !adminEmail.error && adminEmail.data?.success !== false;
+
+      if (!leadSaved && !messageDelivered) {
+        throw new Error("Unable to save or deliver contact inquiry");
       }
+
+      toast.success(
+        messageDelivered
+          ? "Your message has been sent. We'll be in touch shortly."
+          : "Your inquiry was saved successfully. We'll follow up shortly."
+      );
       
       // Reset form
       form.reset();
