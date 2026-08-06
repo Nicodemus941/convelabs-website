@@ -6,11 +6,8 @@ import Header from "@/components/home/Header";
 import Hero from "@/components/home/Hero";
 import WelcomePromoHeroBanner from "@/components/promo/WelcomePromoHeroBanner";
 import MeetYourPhlebotomist from "@/components/home/MeetYourPhlebotomist";
-import ComparisonTable from "@/components/home/ComparisonTable";
-import ValueStack from "@/components/home/ValueStack";
 import GuaranteeBanner from "@/components/home/GuaranteeBanner";
 import TrustBanner from "@/components/home/TrustBanner";
-import PartnersMarquee from "@/components/home/PartnersMarquee";
 import ChatbotWidget from "@/components/chatbot/ChatbotWidget";
 import HowItWorks from "@/components/home/HowItWorks";
 import TestimonialsSection from "@/components/home/TestimonialsSection";
@@ -19,6 +16,7 @@ import FAQSection from "@/components/home/FAQSection";
 import CallToAction from "@/components/home/CallToAction";
 import LeadCapture from "@/components/home/LeadCapture";
 import Footer from "@/components/home/Footer";
+import PricingTransparency from "@/components/home/PricingTransparency";
 import { PageTransition } from "@/components/ui/page-transition";
 import { VisitorOptimizationProvider } from "@/components/optimization/VisitorOptimizationProvider";
 import { FAQSchema } from "@/components/seo/FAQSchema";
@@ -33,8 +31,9 @@ const Home = () => {
   // PWA auto-redirect: if user is logged in and in standalone mode, go to dashboard
   useEffect(() => {
     if (isLoading) return;
+    const navigatorWithStandalone = window.navigator as Navigator & { standalone?: boolean };
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches
-      || (window.navigator as any).standalone === true;
+      || navigatorWithStandalone.standalone === true;
 
     if (user && isStandalone) {
       navigate(`/dashboard/${user.role || 'patient'}`, { replace: true });
@@ -219,14 +218,12 @@ const Home = () => {
         <main>
           <PageTransition>
             <Hero />
-            <MeetYourPhlebotomist />
-            <TestimonialsSection />
-            <GuaranteeBanner />
             <TrustBanner />
-            <PartnersMarquee />
-            <ComparisonTable />
-            <ValueStack />
+            <PricingTransparency />
             <HowItWorks />
+            <TestimonialsSection />
+            <MeetYourPhlebotomist />
+            <GuaranteeBanner />
             <MembershipCTA />
             <FAQSection />
             <LeadCapture />

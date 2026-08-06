@@ -1,5 +1,5 @@
 import React from "react";
-import { Calendar, Shield, UserCheck, Clock, Star, CheckCircle } from "lucide-react";
+import { Shield, UserCheck, Star, CheckCircle, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { motion, type Variants } from "framer-motion";
@@ -20,22 +20,22 @@ const HowItWorks = () => {
   
   const steps = [{
     step: 1,
-    title: "Schedule Your Mobile Blood Draw",
-    description: "Book online scheduling for blood tests through our platform for convenient blood testing at your preferred location and time.",
-    icon: <Calendar className="h-8 w-8 text-white" />,
-    details: ["Flexible scheduling", "Same-day availability", "Orlando & Tampa service"]
+    title: "Upload your lab order and pick a time",
+    description: "Start with the order from your doctor, choose home or office, and select the slot that works for you.",
+    icon: <Upload className="h-8 w-8 text-white" />,
+    details: ["Book in minutes", "Same-day when available", "Family add-ons supported"]
   }, {
     step: 2,
-    title: "Meet Your Mobile Phlebotomist",
-    description: "Our certified specialists arrive punctually for your scheduled blood draw at home with professional-grade equipment and expert precision.",
+    title: "A licensed phlebotomist comes to you",
+    description: "We arrive with the supplies, confirm the order, draw the specimen, and keep the visit calm and efficient.",
     icon: <UserCheck className="h-8 w-8 text-white" />,
-    details: ["99% first-stick success", "Professional in-home blood draw", "5-7 minute service"]
+    details: ["Home, office, or hotel", "Early fasting slots", "Professional specimen handling"]
   }, {
     step: 3,
-    title: "Receive Fast Blood Test Results",
-    description: "Access your lab results through our secure portal or have them delivered directly to your physician with convenient blood collection tracking.",
+    title: "We deliver the specimen to your lab",
+    description: "Your sample goes to Quest, LabCorp, AdventHealth, or your chosen lab, and you get delivery confirmation after drop-off.",
     icon: <Shield className="h-8 w-8 text-white" />,
-    details: ["Secure digital access", "Fast results delivery", "No lost samples guarantee"]
+    details: ["Same-day lab delivery", "Confirmation text or email", "Results stay with your normal lab workflow"]
   }];
   
   const containerVariants: Variants = {
@@ -79,16 +79,14 @@ const HowItWorks = () => {
           <motion.div variants={itemVariants} className="text-center mb-12 sm:mb-16 md:mb-20">
             <div className="inline-flex items-center gap-2.5 px-6 py-3 bg-white/80 backdrop-blur-sm rounded-full border border-brand-gold/30 text-xs font-medium uppercase tracking-[0.18em] mb-8 shadow-luxury">
               <Star className="h-4 w-4 text-brand-gold-deep" />
-              How to Get Blood Work at Home
+              How booking works
             </div>
             
             <h2 className="text-3xl sm:text-4xl md:text-5xl font-playfair font-bold mb-8 luxury-heading">
-              Simple At-Home Blood Testing Process
+              Three steps from order to draw
             </h2>
             <p className="text-xl executive-focus max-w-3xl mx-auto">
-              Experience the benefits of mobile phlebotomy with our streamlined process 
-              for convenient blood collection at home—designed for professionals who value 
-              efficiency and quality healthcare.
+              No request form purgatory. No waiting-room shuffle. Just book, confirm, and let us come to you.
             </p>
           </motion.div>
 
@@ -141,14 +139,13 @@ const HowItWorks = () => {
           <motion.div variants={itemVariants} className="text-center">
             <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-5 sm:p-6 md:p-8 shadow-luxury border border-gray-100/60">
               <h3 className="text-2xl font-playfair font-semibold text-gray-900 mb-4">
-                Ready for Convenient Blood Testing at Home?
+                Ready to check availability?
               </h3>
               <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
-                Join 500+ patients across Central Florida who have experienced the benefits of mobile phlebotomy
-                with ConveLabs premium at-home lab services and blood collection solutions.
+                If you already have the lab order, the fastest path is to start the booking and pick a time.
               </p>
               <Button onClick={handleBookNowClick} className="luxury-button text-base md:text-lg py-4 px-6 md:py-6 md:px-12 font-semibold tracking-wide">
-                Schedule Your At-Home Blood Draw
+                Book My Home Visit
                 <ArrowRight className="ml-3 h-5 w-5" />
               </Button>
             </div>

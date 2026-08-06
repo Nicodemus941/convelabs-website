@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, Stethoscope } from "lucide-react";
+import { ArrowRight, CalendarDays, DollarSign, FlaskConical } from "lucide-react";
 import { motion, type Variants } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 import { useBookingModalSafe } from "@/contexts/BookingModalContext";
@@ -47,13 +47,8 @@ const Hero = () => {
     window.location.href = "/book-now?source=hero_cta";
   };
 
-  // YC critique 2026-05-25: secondary CTA should be a forward step toward
-  // purchase, not lateral scrolling. Swapped from "Watch Reviews" to
-  // "How It Works" — scrolls to the value-stack section that explains the
-  // product. Reviews are still accessible further down, but the conversion
-  // path is now: book OR understand the product. Both push toward a yes.
-  const scrollToHowItWorks = () => {
-    const el = document.getElementById('how-it-works');
+  const scrollToPricing = () => {
+    const el = document.getElementById('pricing');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
 
@@ -113,7 +108,7 @@ const Hero = () => {
             >
               <span className="h-px w-8 sm:w-12 bg-brand-gold/50" />
               <span className="text-[0.7rem] sm:text-xs font-medium uppercase tracking-[0.28em] text-brand-gold-soft">
-                Mobile Phlebotomy · Central Florida
+                Mobile Blood Draws · Central Florida
               </span>
               <span className="h-px w-8 sm:w-12 bg-brand-gold/50" />
             </motion.div>
@@ -124,26 +119,51 @@ const Hero = () => {
               variants={itemVariants}
               className="font-playfair text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-medium leading-[1.08] tracking-tight text-white mb-7"
             >
-              Blood draws at your{" "}
-              <span className="italic text-brand-gold">kitchen table.</span>
+              Book your home blood draw
               <br />
-              Not a waiting room.
+              <span className="italic text-brand-gold">without going to the lab.</span>
             </motion.h1>
 
-            {/* Subtitle — the critical insurance-clarity line that answers
-                "why pay when LabCorp is free?" Immediate category separation. */}
             <motion.p
               variants={itemVariants}
               className="text-lg sm:text-xl md:text-2xl font-light text-white/90 max-w-2xl mx-auto mb-7 leading-relaxed"
             >
-              Your doctor ordered labs — we come to you.
+              Pick a time, upload your lab order, and a licensed phlebotomist comes to your home or office.
               <span className="block mt-2 text-base sm:text-lg text-white/75">
-                Your insurance still covers the tests. We're the phlebotomist who skips the drive.
+                We deliver your specimen to Quest, LabCorp, or AdventHealth the same day when your visit qualifies.
               </span>
             </motion.p>
 
-            {/* Dual CTA — refined: crimson primary with letter-spaced caps,
-                gold-hairline ghost secondary. Sharper radius reads couture. */}
+            <motion.div
+              variants={itemVariants}
+              className="grid gap-3 sm:grid-cols-3 max-w-4xl mx-auto mb-9 text-left"
+            >
+              <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-4">
+                <div className="flex items-center gap-2 mb-2 text-brand-gold-soft">
+                  <DollarSign className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Clear pricing</span>
+                </div>
+                <p className="text-sm font-medium text-white">Mobile visits from $150</p>
+                <p className="text-sm text-white/70">Office visits from $55. No surprise add-ons at checkout.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-4">
+                <div className="flex items-center gap-2 mb-2 text-brand-gold-soft">
+                  <FlaskConical className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Insurance clarity</span>
+                </div>
+                <p className="text-sm font-medium text-white">Your lab bills the tests</p>
+                <p className="text-sm text-white/70">You pay ConveLabs for the draw. Insurance usually covers the lab work itself.</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-4">
+                <div className="flex items-center gap-2 mb-2 text-brand-gold-soft">
+                  <CalendarDays className="h-4 w-4" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Fast booking</span>
+                </div>
+                <p className="text-sm font-medium text-white">Same-day when available</p>
+                <p className="text-sm text-white/70">Early fasting appointments, family add-ons, and home or office scheduling.</p>
+              </div>
+            </motion.div>
+
             <motion.div
               variants={itemVariants}
               className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10 mt-2"
@@ -157,25 +177,22 @@ const Hero = () => {
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
               <Button
-                onClick={scrollToHowItWorks}
+                onClick={scrollToPricing}
                 size="lg"
                 variant="outline"
                 className="h-14 px-8 font-semibold text-sm uppercase tracking-[0.15em] rounded-lg border border-brand-gold/40 bg-transparent text-white hover:bg-brand-gold/10 hover:border-brand-gold/70 transition-all w-full sm:w-auto"
               >
-                <Stethoscope className="mr-2 h-5 w-5" />
-                How It Works
+                <DollarSign className="mr-2 h-5 w-5" />
+                See Pricing
               </Button>
             </motion.div>
 
-            {/* Credibility stripe — Hormozi 3-anchor rule. NFL athlete +
-                @morellifit moved to the Meet Your Phlebotomist section below
-                where they have full context (Mount's teams, Morelli's brands).
-                Hero stripe keeps the 3 most universally trust-building
-                signals for a cold stranger landing from Google. */}
             <motion.div
               variants={itemVariants}
               className="flex flex-wrap justify-center items-center gap-x-5 gap-y-2 text-sm text-white/75"
             >
+              <span className="font-semibold text-white">Quest · LabCorp · AdventHealth</span>
+              <span className="text-brand-gold/40">·</span>
               <span className="flex items-center gap-1.5">
                 <span className="text-brand-gold">★</span>
                 <span className="font-semibold text-white tabular-nums">5.0</span>
@@ -184,7 +201,7 @@ const Hero = () => {
               <span className="text-brand-gold/40">·</span>
               <span className="font-semibold text-white tabular-nums">{visitCount.toLocaleString()}+ home visits</span>
               <span className="text-brand-gold/40">·</span>
-              <span className="text-white/75">HIPAA Compliant</span>
+              <span className="text-white/75">On-time or your visit is free</span>
             </motion.div>
 
             {/* Live urgency badge */}

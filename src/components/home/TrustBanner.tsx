@@ -1,12 +1,12 @@
 import React from "react";
-import { Shield, Award, Clock, CheckCircle, Users } from "lucide-react";
+import { Shield, Clock, CheckCircle, Users, FlaskConical } from "lucide-react";
 
 const trustItems = [
-  { icon: <Shield className="h-5 w-5" />, label: "HIPAA Compliant" },
-  { icon: <Award className="h-5 w-5" />, label: "CLIA Certified Labs" },
-  { icon: <CheckCircle className="h-5 w-5" />, label: "Licensed Phlebotomists" },
-  { icon: <Clock className="h-5 w-5" />, label: "Same-Day Available" },
-  { icon: <Users className="h-5 w-5" />, label: "500+ Patients Served" },
+  { icon: <CheckCircle className="h-5 w-5" />, label: "Licensed phlebotomists" },
+  { icon: <FlaskConical className="h-5 w-5" />, label: "Quest / LabCorp / AdventHealth delivery" },
+  { icon: <Shield className="h-5 w-5" />, label: "HIPAA-compliant handling" },
+  { icon: <Clock className="h-5 w-5" />, label: "Same-day when available" },
+  { icon: <Users className="h-5 w-5" />, label: "164 five-star reviews" },
 ];
 
 const TrustBanner = () => {

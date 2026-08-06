@@ -18,10 +18,10 @@ const PricingTransparency = () => {
           className="text-center mb-12"
         >
           <h2 className="text-3xl sm:text-4xl font-bold text-foreground mb-4">
-            Simple, Transparent Pricing
+            Know the fee before you book
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            No surprise fees. Know exactly what you'll pay before you book.
+            Your lab handles the lab bill. ConveLabs charges the draw fee.
           </p>
         </motion.div>
 
@@ -32,6 +32,15 @@ const PricingTransparency = () => {
           transition={{ duration: 0.6, delay: 0.15 }}
           className="bg-muted/30 border border-border rounded-2xl p-8 sm:p-10 max-w-lg mx-auto"
         >
+          <div className="rounded-xl bg-white border border-border p-4 mb-6 text-left">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-conve-red mb-2">
+              How billing works
+            </p>
+            <p className="text-sm text-foreground leading-relaxed">
+              ConveLabs charges for the blood draw visit. Quest, LabCorp, AdventHealth, or your chosen lab bills the test itself through its normal insurance process.
+            </p>
+          </div>
+
           <div className="space-y-4 mb-6">
             <div>
               <h3 className="text-lg font-semibold text-foreground">Doctor Office Blood Draw</h3>
@@ -63,10 +72,11 @@ const PricingTransparency = () => {
           <div className="space-y-3 mb-8 text-left">
             {[
               "Licensed phlebotomist at your door",
-              "All standard lab tests available",
+              "You can upload the lab order during booking",
               "Specimen delivery confirmation sent to you",
-              "HIPAA-compliant specimen handling",
-              "No hidden fees or extra charges",
+              "Quest, LabCorp, AdventHealth, or your lab of choice",
+              "Family members can be booked at the same visit",
+              "No hidden fees or surprise checkout add-ons",
             ].map((item, i) => (
               <div key={i} className="flex items-start gap-2.5">
                 <CheckCircle className="h-5 w-5 text-conve-red flex-shrink-0 mt-0.5" />
@@ -85,9 +95,9 @@ const PricingTransparency = () => {
           </Button>
 
           <p className="text-xs text-muted-foreground mt-4 text-center">
-            Save up to 64% with a membership plan.{" "}
+            Membership is optional.{" "}
             <a href="/membership" className="text-conve-red underline">
-              Learn more
+              See savings plans
             </a>
           </p>
         </motion.div>
