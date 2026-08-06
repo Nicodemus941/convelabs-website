@@ -3,8 +3,18 @@ import { createClient } from '@supabase/supabase-js';
 import { Capacitor } from '@capacitor/core';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+const DEFAULT_SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
+const DEFAULT_SUPABASE_PUBLISHABLE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlsdXlvbmhyeHh0eXVpeXJkaXhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc1MDExODgsImV4cCI6MjA2MzA3NzE4OH0.ZKP-k5fizUtKZsekV9RFL1wYcVfIHEeQWArs-4l5Q-Y';
+
+// The public site is tightly coupled to the production Supabase project in
+// multiple route-level fallbacks already. Mirror that here so a missing local
+// Vite env does not hard-crash the entire app into a blank screen.
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const SUPABASE_PUBLISHABLE_KEY =
+  import.meta.env.VITE_SUPABASE_ANON_KEY ||
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  DEFAULT_SUPABASE_PUBLISHABLE_KEY;
 
 // In the native (Capacitor) app the URL is capacitor://localhost/... — there is
 // never an OAuth code/hash to exchange, and supabase-js's Web-Locks-based auth
@@ -29,7 +39,7 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     detectSessionInUrl: isAuthPage && !isNativeApp,
     flowType: 'pkce',
     // Pass-through lock on native to avoid the WKWebView navigator.locks deadlock.
-    ...(isNativeApp ? { lock: async (_name: string, _acquireTimeout: number, fn: () => Promise<any>) => await fn() } : {}),
+    ...(isNativeApp ? { lock: async (_name: string, _acquireTimeout: number, fn: () => Promise<unknown>) => await fn() } : {}),
   },
   global: {
     headers: {
