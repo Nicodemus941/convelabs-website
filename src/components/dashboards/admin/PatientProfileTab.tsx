@@ -7,12 +7,20 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   User, Phone, Mail, Calendar, Clock, MapPin, Shield, FileText,
   Search, ArrowLeft, Package, ClipboardList, DollarSign, Stethoscope,
   ChevronRight, Edit3, CalendarPlus, Receipt, MessageSquare, MoreHorizontal, UserPlus, Loader2,
+  Copy, Send,
   Crown,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -25,6 +33,8 @@ import ScheduleAppointmentModal from '@/components/calendar/ScheduleAppointmentM
 import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
 import PatientCommsTimeline from '@/components/admin/PatientCommsTimeline';
 import FamilyHouseholdCard from '@/components/admin/FamilyHouseholdCard';
+import AppointmentDetailModal from '@/components/calendar/AppointmentDetailModal';
+import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
 import { Zap } from 'lucide-react';
 
 /**
@@ -80,6 +90,7 @@ const PatientProfileTab: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [showMembershipModal, setShowMembershipModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
   const [savingPatient, setSavingPatient] = useState(false);
   // Inline error surface for the Edit Patient modal. Toasts can be hidden
@@ -298,6 +309,74 @@ const PatientProfileTab: React.FC = () => {
     specimen_delivered: 'bg-indigo-50 text-indigo-700',
   };
 
+  const openMessageThread = (phone?: string | null, email?: string | null) => {
+    if (phone) {
+      window.open(`sms:${phone}`, '_blank');
+      return;
+    }
+    if (email) {
+      window.open(`mailto:${email}`, '_blank');
+      return;
+    }
+    toast.error('No phone or email on file');
+  };
+
+  const sendInvoiceReminder = async (appointment: any) => {
+    const fallbackName = `${selectedPatient?.first_name || ''} ${selectedPatient?.last_name || ''}`.trim() || 'this patient';
+    if (!window.confirm(`Send a friendly invoice reminder to ${appointment.patient_name || fallbackName}? Email + SMS will go out.`)) return;
+    try {
+      const { data, error } = await supabase.functions.invoke('send-manual-invoice-reminder', {
+        body: { appointment_id: appointment.id, email: true, sms: true },
+      });
+      if (error) throw error;
+      const results = (data as any)?.results || {};
+      const okBits: string[] = [];
+      if (results.email?.ok) okBits.push('email');
+      if (results.sms?.ok) okBits.push('SMS');
+      if (okBits.length === 0) {
+        toast.error(`Reminder failed — ${results.email?.error || results.sms?.error || 'unknown'}`);
+        return;
+      }
+      toast.success(`Reminder sent via ${okBits.join(' + ')}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to send reminder');
+    }
+  };
+
+  const sendAppointmentPayLink = async (appointmentId: string) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-appointment-pay-token', {
+        body: { appointment_id: appointmentId },
+      });
+      if (error) throw error;
+      const url = (data as any)?.url;
+      if (!url) throw new Error('No link returned');
+      try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
+      if ((data as any)?.emailed) {
+        toast.success('Pay link emailed to patient (and copied to clipboard)');
+      } else {
+        toast.success('Pay link copied — paste it to the patient', { description: url, duration: 15000 });
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to create pay link');
+    }
+  };
+
+  const copyVisitAddress = async (appointment: any) => {
+    if (!appointment?.address) {
+      toast.error('No visit address on file');
+      return;
+    }
+    const lines = [appointment.address];
+    if (appointment.gate_code) lines.push(`Gate code: ${appointment.gate_code}`);
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      toast.success('Visit address copied');
+    } catch {
+      toast.error('Could not copy the visit address');
+    }
+  };
+
   // Patient profile view
   if (selectedPatient) {
     const p = selectedPatient;
@@ -420,8 +499,8 @@ const PatientProfileTab: React.FC = () => {
             }}>
               <Receipt className="h-3.5 w-3.5" /> Generate Invoice
             </Button>
-            {p.phone && (
-              <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => window.open(`sms:${p.phone}`)}>
+            {(p.phone || p.email) && (
+              <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => openMessageThread(p.phone, p.email)}>
                 <MessageSquare className="h-3.5 w-3.5" /> Message
               </Button>
             )}
@@ -509,6 +588,13 @@ const PatientProfileTab: React.FC = () => {
             email: p.email,
             phone: p.phone,
           }}
+        />
+
+        <AppointmentDetailModal
+          appointment={selectedAppointment}
+          open={!!selectedAppointment}
+          onClose={() => setSelectedAppointment(null)}
+          onUpdate={() => loadPatientData(p)}
         />
 
         {/* Recurring-series gap detector — only renders if gaps exist. */}
@@ -620,8 +706,9 @@ const PatientProfileTab: React.FC = () => {
                 <p className="text-sm font-semibold mb-2 text-blue-700">Upcoming ({upcomingAppts.length})</p>
                 {upcomingAppts.map(a => (
                   <Card key={a.id} className="shadow-sm mb-2">
-                    <CardContent className="p-3 flex items-center justify-between">
-                      <div>
+                    <CardContent className="p-3 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className={`text-[10px] ${STATUS_COLORS[a.status] || ''}`}>{a.status}</Badge>
                           <span className="text-sm font-medium">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}</span>
@@ -631,7 +718,71 @@ const PatientProfileTab: React.FC = () => {
                         {a.address && <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" /> {a.address}</p>}
                         {a.gate_code && <p className="text-xs text-amber-600">Gate: {a.gate_code}</p>}
                       </div>
-                      <span className="text-sm font-medium">${a.total_amount || 0}</span>
+                      <span className="text-sm font-medium flex-shrink-0">${a.total_amount || 0}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={() => setSelectedAppointment(a)}
+                        >
+                          Manage
+                        </Button>
+                        <SendRescheduleLinkButton
+                          appointmentId={a.id}
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          label="Send reschedule link"
+                        />
+                        {(a.patient_phone || p.phone || a.patient_email || p.email) && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs gap-1.5"
+                            onClick={() => openMessageThread(a.patient_phone || p.phone, a.patient_email || p.email)}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            Message
+                          </Button>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="outline" className="h-8 px-2">
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-56">
+                            <DropdownMenuItem onClick={() => setSelectedAppointment(a)}>
+                              Manage appointment
+                            </DropdownMenuItem>
+                            {!['paid', 'completed', 'succeeded'].includes(String(a.payment_status)) &&
+                              a.status !== 'cancelled' &&
+                              (a.total_amount || 0) > 0 && (
+                              <>
+                                <DropdownMenuItem onClick={() => sendAppointmentPayLink(a.id)}>
+                                  <Send className="mr-2 h-3.5 w-3.5" />
+                                  Send pay link
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => sendInvoiceReminder(a)}>
+                                  <Receipt className="mr-2 h-3.5 w-3.5" />
+                                  Send invoice reminder
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                            {a.address && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => copyVisitAddress(a)}>
+                                  <Copy className="mr-2 h-3.5 w-3.5" />
+                                  Copy visit address
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </CardContent>
                   </Card>
                 ))}
@@ -654,6 +805,9 @@ const PatientProfileTab: React.FC = () => {
                         <p className="text-xs text-muted-foreground mt-1 capitalize">{(a.service_type || '').replace(/_|-/g, ' ')}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSelectedAppointment(a)}>
+                          Manage
+                        </Button>
                         <span className="text-sm font-medium">${a.total_amount || 0}</span>
                         {a.payment_status === 'completed' && (a.total_amount || 0) > 0 && (
                           <StaffRefundButton
@@ -677,11 +831,14 @@ const PatientProfileTab: React.FC = () => {
                 <p className="text-sm font-semibold mb-2 text-red-600">Cancelled ({cancelledAppts.length})</p>
                 {cancelledAppts.map(a => (
                   <Card key={a.id} className="shadow-sm mb-2 opacity-50">
-                    <CardContent className="p-3 flex items-center justify-between">
+                    <CardContent className="p-3 flex items-center justify-between gap-2">
                       <div>
                         <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700">cancelled</Badge>
                         <span className="text-sm ml-2">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d') : ''}</span>
                       </div>
+                      <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSelectedAppointment(a)}>
+                        Manage
+                      </Button>
                     </CardContent>
                   </Card>
                 ))}
