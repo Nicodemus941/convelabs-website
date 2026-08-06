@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,10 +23,22 @@ import { FAQSchema } from "@/components/seo/FAQSchema";
 import { HowToSchema } from "@/components/seo/HowToSchema";
 import { OrganizationSchema } from "@/components/seo/OrganizationSchema";
 import { ReviewSchema } from "@/components/seo/ReviewSchema";
+import { useSimpleABTesting } from "@/hooks/useSimpleABTesting";
+import { analytics } from "@/utils/analytics";
+
+type HeroExperimentVariant = 'control' | 'local_certainty';
+type FeeExperimentVariant = 'control' | 'billing_split';
+
+const HERO_EXPERIMENT_KEY = 'convelabs_exp_home_hero_clarity';
+const FEE_EXPERIMENT_KEY = 'convelabs_exp_home_fee_clarity';
 
 const Home = () => {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
+  const { getVariantForExperiment, trackClick } = useSimpleABTesting();
+  const [heroVariant, setHeroVariant] = useState<HeroExperimentVariant>('control');
+  const [feeVariant, setFeeVariant] = useState<FeeExperimentVariant>('control');
+  const experimentInitRef = useRef(false);
 
   // PWA auto-redirect: if user is logged in and in standalone mode, go to dashboard
   useEffect(() => {
@@ -39,6 +51,33 @@ const Home = () => {
       navigate(`/dashboard/${user.role || 'patient'}`, { replace: true });
     }
   }, [user, isLoading, navigate]);
+
+  useEffect(() => {
+    if (experimentInitRef.current) return;
+    experimentInitRef.current = true;
+
+    const assignedHero = (sessionStorage.getItem(HERO_EXPERIMENT_KEY) ||
+      getVariantForExperiment('home-hero-clarity')) as HeroExperimentVariant;
+    const assignedFee = (sessionStorage.getItem(FEE_EXPERIMENT_KEY) ||
+      getVariantForExperiment('home-fee-clarity')) as FeeExperimentVariant;
+
+    sessionStorage.setItem(HERO_EXPERIMENT_KEY, assignedHero);
+    sessionStorage.setItem(FEE_EXPERIMENT_KEY, assignedFee);
+    setHeroVariant(assignedHero);
+    setFeeVariant(assignedFee);
+
+    analytics.trackABTestExposure('home-hero-clarity', assignedHero);
+    analytics.trackABTestExposure('home-fee-clarity', assignedFee);
+  }, [getVariantForExperiment]);
+
+  const trackHeroExperimentClick = () => {
+    void trackClick('home-hero-clarity');
+    void trackClick('home-fee-clarity');
+  };
+
+  const trackFeeExperimentClick = () => {
+    void trackClick('home-fee-clarity');
+  };
 
   return (
     <VisitorOptimizationProvider>
@@ -217,9 +256,17 @@ const Home = () => {
         <WelcomePromoHeroBanner />
         <main>
           <PageTransition>
-            <Hero />
+            <Hero
+              heroVariant={heroVariant}
+              feeVariant={feeVariant}
+              onPrimaryClick={trackHeroExperimentClick}
+              onSecondaryClick={trackFeeExperimentClick}
+            />
             <TrustBanner />
-            <PricingTransparency />
+            <PricingTransparency
+              feeVariant={feeVariant}
+              onExperimentClick={trackFeeExperimentClick}
+            />
             <HowItWorks />
             <TestimonialsSection />
             <MeetYourPhlebotomist />

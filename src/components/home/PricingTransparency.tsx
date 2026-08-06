@@ -4,8 +4,27 @@ import { CheckCircle, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
 import { useBookingModalSafe } from "@/contexts/BookingModalContext";
 
-const PricingTransparency = () => {
+type FeeVariant = 'control' | 'billing_split';
+
+interface PricingTransparencyProps {
+  feeVariant?: FeeVariant;
+  onExperimentClick?: () => void;
+}
+
+const PricingTransparency = ({
+  feeVariant = 'control',
+  onExperimentClick,
+}: PricingTransparencyProps) => {
   const bookingModal = useBookingModalSafe();
+  const billingCopy = feeVariant === 'billing_split'
+    ? {
+        headline: 'You pay ConveLabs for the draw. Your lab bills the test.',
+        body: 'Quest, LabCorp, AdventHealth, or your chosen lab handles the test billing through its normal insurance workflow.',
+      }
+    : {
+        headline: 'ConveLabs charges the draw fee. Your lab handles the lab bill.',
+        body: 'Your insurance still goes through the receiving lab the normal way.',
+      };
 
   return (
     <section id="pricing" className="py-16 sm:py-20 bg-white">
@@ -37,7 +56,8 @@ const PricingTransparency = () => {
               How billing works
             </p>
             <p className="text-sm text-foreground leading-relaxed">
-              ConveLabs charges for the blood draw visit. Quest, LabCorp, AdventHealth, or your chosen lab bills the test itself through its normal insurance process.
+              <span className="font-medium text-foreground">{billingCopy.headline}</span>{' '}
+              {billingCopy.body}
             </p>
           </div>
 
@@ -86,7 +106,10 @@ const PricingTransparency = () => {
           </div>
 
           <Button
-            onClick={() => bookingModal?.openModal("pricing_cta")}
+            onClick={() => {
+              onExperimentClick?.();
+              bookingModal?.openModal("pricing_cta");
+            }}
             size="lg"
             className="w-full h-14 bg-conve-red hover:bg-conve-red-dark text-white font-semibold text-base rounded-xl shadow-luxury-red hover:shadow-luxury-red-hover transition-all"
           >

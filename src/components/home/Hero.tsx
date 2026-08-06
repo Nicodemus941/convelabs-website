@@ -26,9 +26,62 @@ const HERO_VIDEO_MP4 = "/videos/hero-loop.mp4";
 const HERO_VIDEO_WEBM = "/videos/hero-loop.webm";
 const HERO_POSTER = "/images/hero-poster.jpg";
 
-const Hero = () => {
+type HeroVariant = 'control' | 'local_certainty';
+type FeeVariant = 'control' | 'billing_split';
+
+interface HeroProps {
+  heroVariant?: HeroVariant;
+  feeVariant?: FeeVariant;
+  onPrimaryClick?: () => void;
+  onSecondaryClick?: () => void;
+}
+
+const Hero = ({
+  heroVariant = 'control',
+  feeVariant = 'control',
+  onPrimaryClick,
+  onSecondaryClick,
+}: HeroProps) => {
   const [visitCount, setVisitCount] = useState(500);
   const bookingModal = useBookingModalSafe();
+
+  const heroContent = heroVariant === 'local_certainty'
+    ? {
+        headline: (
+          <>
+            Skip the waiting room.
+            <br />
+            <span className="italic text-brand-gold">We come to you.</span>
+          </>
+        ),
+        body: 'Home and office blood draws across Central Florida with clear pricing and fast online booking.',
+        bodySecondary: 'Choose your time, upload the order, and let ConveLabs handle the draw and lab drop-off.',
+      }
+    : {
+        headline: (
+          <>
+            Book your home blood draw
+            <br />
+            <span className="italic text-brand-gold">without going to the lab.</span>
+          </>
+        ),
+        body: 'Pick a time, upload your lab order, and a licensed phlebotomist comes to your home or office.',
+        bodySecondary: 'We deliver your specimen to Quest, LabCorp, or AdventHealth the same day when your visit qualifies.',
+      };
+
+  const feeContent = feeVariant === 'billing_split'
+    ? {
+        pricingTitle: 'You pay the draw fee',
+        pricingBody: 'Home visits from $150. Office visits from $55. Additional patient at the same stop from $75.',
+        insuranceTitle: 'Your lab bills the tests',
+        insuranceBody: 'Quest, LabCorp, or AdventHealth handles the test billing through its usual insurance process.',
+      }
+    : {
+        pricingTitle: 'Clear pricing',
+        pricingBody: 'Mobile visits from $150. Office visits from $55. No surprise add-ons at checkout.',
+        insuranceTitle: 'Insurance clarity',
+        insuranceBody: 'You pay ConveLabs for the draw. Insurance usually covers the lab work itself.',
+      };
 
   useEffect(() => {
     supabase.from('appointments').select('id', { count: 'exact', head: true })
@@ -39,6 +92,7 @@ const Hero = () => {
   }, []);
 
   const handleBookNow = () => {
+    onPrimaryClick?.();
     if (bookingModal?.openModal) {
       bookingModal.openModal('hero_cta');
       return;
@@ -48,6 +102,7 @@ const Hero = () => {
   };
 
   const scrollToPricing = () => {
+    onSecondaryClick?.();
     const el = document.getElementById('pricing');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
@@ -119,18 +174,16 @@ const Hero = () => {
               variants={itemVariants}
               className="font-playfair text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-medium leading-[1.08] tracking-tight text-white mb-7"
             >
-              Book your home blood draw
-              <br />
-              <span className="italic text-brand-gold">without going to the lab.</span>
+              {heroContent.headline}
             </motion.h1>
 
             <motion.p
               variants={itemVariants}
               className="text-lg sm:text-xl md:text-2xl font-light text-white/90 max-w-2xl mx-auto mb-7 leading-relaxed"
             >
-              Pick a time, upload your lab order, and a licensed phlebotomist comes to your home or office.
+              {heroContent.body}
               <span className="block mt-2 text-base sm:text-lg text-white/75">
-                We deliver your specimen to Quest, LabCorp, or AdventHealth the same day when your visit qualifies.
+                {heroContent.bodySecondary}
               </span>
             </motion.p>
 
@@ -141,18 +194,18 @@ const Hero = () => {
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-4">
                 <div className="flex items-center gap-2 mb-2 text-brand-gold-soft">
                   <DollarSign className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Clear pricing</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">{feeContent.pricingTitle}</span>
                 </div>
                 <p className="text-sm font-medium text-white">Mobile visits from $150</p>
-                <p className="text-sm text-white/70">Office visits from $55. No surprise add-ons at checkout.</p>
+                <p className="text-sm text-white/70">{feeContent.pricingBody}</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-4">
                 <div className="flex items-center gap-2 mb-2 text-brand-gold-soft">
                   <FlaskConical className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">Insurance clarity</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em]">{feeContent.insuranceTitle}</span>
                 </div>
                 <p className="text-sm font-medium text-white">Your lab bills the tests</p>
-                <p className="text-sm text-white/70">You pay ConveLabs for the draw. Insurance usually covers the lab work itself.</p>
+                <p className="text-sm text-white/70">{feeContent.insuranceBody}</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm p-4">
                 <div className="flex items-center gap-2 mb-2 text-brand-gold-soft">

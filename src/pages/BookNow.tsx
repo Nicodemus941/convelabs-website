@@ -31,6 +31,8 @@ const BookNow: React.FC = () => {
   const status = searchParams.get('status');
   const source = searchParams.get('source') || 'direct';
   const prefill = searchParams.get('prefill');
+  const heroExperimentVariant = sessionStorage.getItem('convelabs_exp_home_hero_clarity');
+  const feeExperimentVariant = sessionStorage.getItem('convelabs_exp_home_fee_clarity');
 
   // Persist referral code from URL into sessionStorage (survives multi-step flow)
   const refCode = searchParams.get('ref');
@@ -54,8 +56,10 @@ const BookNow: React.FC = () => {
       status: status || 'new',
       hasPrefill: Boolean(prefill),
       refCode: refCode || null,
+      heroExperimentVariant: heroExperimentVariant || null,
+      feeExperimentVariant: feeExperimentVariant || null,
     });
-  }, [source, status, prefill, refCode]);
+  }, [source, status, prefill, refCode, heroExperimentVariant, feeExperimentVariant]);
 
   // Poll for checkout verification on success return
   const verifyPayment = useCallback(async () => {
@@ -77,7 +81,23 @@ const BookNow: React.FC = () => {
             sessionId,
             bookingId: result.bookingId,
             source,
+            heroExperimentVariant: heroExperimentVariant || null,
+            feeExperimentVariant: feeExperimentVariant || null,
           });
+          if (heroExperimentVariant) {
+            analytics.trackABTestConversion(
+              'home-hero-clarity',
+              heroExperimentVariant,
+              result.appointment?.total_amount,
+            );
+          }
+          if (feeExperimentVariant) {
+            analytics.trackABTestConversion(
+              'home-fee-clarity',
+              feeExperimentVariant,
+              result.appointment?.total_amount,
+            );
+          }
           return;
         }
 
@@ -94,7 +114,7 @@ const BookNow: React.FC = () => {
           setVerifyError('Verification is taking longer than expected. Your booking may still be processing — check your email for confirmation.');
           setMode('error');
         }
-      } catch (err: any) {
+      } catch {
         if (attempts < maxAttempts) {
           setTimeout(poll, pollInterval);
         } else {
@@ -105,7 +125,7 @@ const BookNow: React.FC = () => {
     };
 
     poll();
-  }, [sessionId, source]);
+  }, [sessionId, source, heroExperimentVariant, feeExperimentVariant]);
 
   useEffect(() => {
     if (mode === 'verifying') {

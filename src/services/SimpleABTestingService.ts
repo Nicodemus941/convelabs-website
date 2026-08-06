@@ -15,6 +15,29 @@ export interface SimpleABTest {
   };
 }
 
+type VisitorProfile = {
+  leadGrade?: 'hot' | 'warm' | 'cold' | string;
+  deviceType?: 'mobile' | 'desktop' | string;
+  hasBookingIntent?: boolean;
+  selectedService?: string | null;
+};
+
+type ExperimentPerformanceEntry = {
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  totalValue: number;
+};
+
+type ExperimentPerformance = Record<string, ExperimentPerformanceEntry>;
+
+type ConversionEventRow = {
+  variant: string | null;
+  event_type: string | null;
+  event_value: number | null;
+  created_at: string;
+};
+
 class SimpleABTestingService {
   private experiments: Map<string, SimpleABTest[]> = new Map();
 
@@ -24,6 +47,43 @@ class SimpleABTestingService {
   }
 
   private initializeExperiments() {
+    // ConveLabs homepage clarity experiments
+    this.experiments.set('home-hero-clarity', [
+      {
+        experimentName: 'home-hero-clarity',
+        variant: 'control',
+        content: {
+          headline: 'Book your home blood draw without going to the lab.',
+          subheadline: 'Pick a time, upload your lab order, and a licensed phlebotomist comes to your home or office.'
+        }
+      },
+      {
+        experimentName: 'home-hero-clarity',
+        variant: 'local_certainty',
+        content: {
+          headline: 'Skip the waiting room. We come to you.',
+          subheadline: 'Home and office blood draws across Central Florida with clear pricing and fast booking.'
+        }
+      }
+    ]);
+
+    this.experiments.set('home-fee-clarity', [
+      {
+        experimentName: 'home-fee-clarity',
+        variant: 'control',
+        content: {
+          offerText: 'Home visits from $150. Office visits from $55.'
+        }
+      },
+      {
+        experimentName: 'home-fee-clarity',
+        variant: 'billing_split',
+        content: {
+          offerText: 'You pay ConveLabs for the draw. Your lab bills the tests through its normal insurance workflow.'
+        }
+      }
+    ]);
+
     // Hero CTA Test
     this.experiments.set('hero-cta', [
       {
@@ -87,7 +147,7 @@ class SimpleABTestingService {
     ]);
   }
 
-  assignVariant(sessionId: string, experimentName: string, visitorProfile?: any): string {
+  assignVariant(sessionId: string, experimentName: string, visitorProfile?: VisitorProfile): string {
     const experiments = this.experiments.get(experimentName);
     if (!experiments || experiments.length === 0) {
       return 'control';
@@ -181,7 +241,7 @@ class SimpleABTestingService {
     return Array.from(this.experiments.keys());
   }
 
-  async getPerformanceData(experimentName: string): Promise<any> {
+  async getPerformanceData(experimentName: string): Promise<ExperimentPerformance> {
     try {
       const { data, error } = await supabase
         .from('conversion_events')
@@ -191,7 +251,7 @@ class SimpleABTestingService {
       if (error) throw error;
 
       // Aggregate performance data
-      const performance = data?.reduce((acc: any, event: any) => {
+      const performance = (data as ConversionEventRow[] | null)?.reduce<ExperimentPerformance>((acc, event) => {
         const variant = event.variant || 'control';
         if (!acc[variant]) {
           acc[variant] = {
