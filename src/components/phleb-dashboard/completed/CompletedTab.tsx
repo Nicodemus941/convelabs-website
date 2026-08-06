@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths } from 'date-fns';
+import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths, addMonths, isSameMonth } from 'date-fns';
 import { CheckCircle2, DollarSign, TrendingUp, Calendar, ChevronLeft, ChevronRight, User } from 'lucide-react';
 import { PhlebAppointment } from '@/hooks/usePhlebotomistAppointments';
 import EarningsChart from './EarningsChart';
@@ -20,6 +20,12 @@ const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
       .filter(a => a.status === 'completed')
       .sort((a, b) => b.appointment_date.localeCompare(a.appointment_date));
   }, [appointments]);
+
+  const visibleCompleted = useMemo(() => {
+    const monthStartKey = format(startOfMonth(viewMonth), 'yyyy-MM-dd');
+    const monthEndKey = format(endOfMonth(viewMonth), 'yyyy-MM-dd');
+    return completed.filter(a => a.appointment_date >= monthStartKey && a.appointment_date <= monthEndKey);
+  }, [completed, viewMonth]);
 
   // Stats
   const now = new Date();
@@ -100,23 +106,28 @@ const CompletedTab: React.FC<CompletedTabProps> = ({ appointments }) => {
         <span className="text-sm font-semibold text-gray-700">
           {format(viewMonth, 'MMMM yyyy')}
         </span>
-        <Button variant="ghost" size="sm" onClick={() => setViewMonth(new Date())}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setViewMonth(addMonths(viewMonth, 1))}
+          disabled={isSameMonth(viewMonth, new Date())}
+        >
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Completed List */}
-      {completed.length === 0 ? (
+      {visibleCompleted.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-dashed p-8 text-center">
           <div className="w-14 h-14 rounded-full bg-gray-50 flex items-center justify-center mx-auto mb-3">
             <CheckCircle2 className="h-7 w-7 text-gray-400" />
           </div>
-          <h3 className="font-semibold text-gray-800 mb-1">No completed jobs yet</h3>
-          <p className="text-sm text-muted-foreground">Completed appointments will appear here.</p>
+          <h3 className="font-semibold text-gray-800 mb-1">No completed jobs in {format(viewMonth, 'MMMM yyyy')}</h3>
+          <p className="text-sm text-muted-foreground">Use the month arrows to review earlier completed visits.</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {completed.map((appt) => (
+          {visibleCompleted.map((appt) => (
             <Card
               key={appt.id}
               className="shadow-sm cursor-pointer hover:border-emerald-300 hover:shadow transition active:scale-[0.99]"
