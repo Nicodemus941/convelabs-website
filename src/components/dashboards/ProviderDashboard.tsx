@@ -23,9 +23,11 @@ import PracticeProfilePanel from '@/components/provider/PracticeProfilePanel';
 import SubscribeYourPracticeCard from '@/components/provider/SubscribeYourPracticeCard';
 import ManageSubscriptionCard from '@/components/provider/ManageSubscriptionCard';
 import BAASigningModal from '@/components/provider/BAASigningModal';
+import AttachLabOrderToRequestModal from '@/components/provider/AttachLabOrderToRequestModal';
 import OrgStaffList from '@/components/admin/OrgStaffList';
 import ServicesPricingModal from '@/components/provider/ServicesPricingModal';
 import OrgAttachLabOrderModal from '@/components/provider/OrgAttachLabOrderModal';
+import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 import { Activity, Paperclip } from 'lucide-react';
 import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
 
@@ -74,6 +76,9 @@ const ProviderDashboard: React.FC = () => {
   // appointment without going through the full CreateLabRequestModal
   // flow (which assumes the patient hasn't booked yet).
   const [attachTarget, setAttachTarget] = useState<any | null>(null);
+  const [focusedPatientName, setFocusedPatientName] = useState<string | null>(null);
+  const [focusedPatientId, setFocusedPatientId] = useState<string | null>(null);
+  const [patientDrawerOpen, setPatientDrawerOpen] = useState(false);
   // Raw Supabase metadata for the welcome header — useAuth().user strips
   // user_metadata in the mapping layer, so we have to fetch it directly.
   // Without this, Lara saw "larak" (email prefix fallback) instead of her
@@ -337,6 +342,11 @@ const ProviderDashboard: React.FC = () => {
   };
 
   const prettyPatient = (a: any) => a.patient_name_masked ? (a.org_reference_id || 'Confidential') : (a.patient_name || 'Patient');
+  const openPatientDrawer = (patientName: string, patientId?: string | null) => {
+    setFocusedPatientName(patientName);
+    setFocusedPatientId(patientId || null);
+    setPatientDrawerOpen(true);
+  };
 
   // BAA gate — blocks the entire portal until the provider has signed the BAA.
   // Must come AFTER loading + error early returns so we don't flash the modal
@@ -506,6 +516,7 @@ const ProviderDashboard: React.FC = () => {
           labRequests={data.labRequests || []}
           onCreate={() => setShowLabRequest(true)}
           onRefresh={loadData}
+          onOpenPatient={openPatientDrawer}
         />
 
         {/* THIS MONTH */}
@@ -862,6 +873,26 @@ const ProviderDashboard: React.FC = () => {
         onUploaded={loadData}
       />
 
+      {focusedPatientName && (
+        <PatientDetailDrawer
+          open={patientDrawerOpen}
+          onOpenChange={(nextOpen) => {
+            setPatientDrawerOpen(nextOpen);
+            if (!nextOpen) {
+              setTimeout(() => {
+                setFocusedPatientName(null);
+                setFocusedPatientId(null);
+                loadData();
+              }, 250);
+            }
+          }}
+          patientName={focusedPatientName}
+          tenantPatientId={focusedPatientId}
+          organizationId={org.id}
+          canEdit={true}
+        />
+      )}
+
       {/* SET A PASSWORD — blocking gate for invited staff who landed via
           Supabase magic-link invite (they have a session but no password
           yet). Once set, password_set: true is stamped and the modal
@@ -957,9 +988,15 @@ const ProviderDashboard: React.FC = () => {
 // ─── Subcomponents ────────────────────────────────────────────────────────
 
 // ─── LAB REQUESTS SECTION ────────────────────────────────────────────
-const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; onRefresh: () => void }> = ({ labRequests, onCreate, onRefresh }) => {
+const LabRequestsSection: React.FC<{
+  labRequests: any[];
+  onCreate: () => void;
+  onRefresh: () => void;
+  onOpenPatient: (patientName: string, patientId?: string | null) => void;
+}> = ({ labRequests, onCreate, onRefresh, onOpenPatient }) => {
   const [tab, setTab] = useState<'pending' | 'scheduled' | 'completed'>('pending');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [attachTarget, setAttachTarget] = useState<any | null>(null);
 
   const groups = {
     pending: labRequests.filter(r => r.status === 'pending_schedule'),
@@ -1033,12 +1070,37 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
   };
 
   const rows = groups[tab];
+  const needsChartCleanupCount = labRequests.filter((r: any) => !r.has_dob || !r.has_chart_address || (!r.has_email && !r.has_phone)).length;
+  const needsOrderCount = labRequests.filter((r: any) => r.status === 'pending_schedule' && !r.has_lab_order).length;
+  const followUpSoonCount = labRequests.filter((r: any) => {
+    if (!r.next_doctor_appt_date || ['completed', 'cancelled', 'expired'].includes(String(r.status || ''))) return false;
+    const diffMs = new Date(`${r.next_doctor_appt_date}T12:00:00`).getTime() - Date.now();
+    const days = Math.ceil(diffMs / 86400000);
+    return days >= 0 && days <= 7;
+  }).length;
 
   const contactRouteLabel = (request: any) => {
     if (request.has_email && request.has_phone) return 'Email + SMS';
     if (request.has_email) return 'Email only';
     if (request.has_phone) return 'SMS only';
     return 'Missing contact';
+  };
+
+  const requestNextStepLabel = (request: any) => {
+    if (!request.has_lab_order) return 'Next: attach the lab order so booking prep is complete.';
+    if (!request.has_dob || !request.has_chart_address || (!request.has_email && !request.has_phone)) {
+      return 'Next: finish the patient chart so scheduling does not stall.';
+    }
+    if (request.status === 'pending_schedule') {
+      return request.patient_notified_at
+        ? 'Next: waiting on the patient to pick a time.'
+        : 'Next: send or resend the patient booking link.';
+    }
+    if (request.status === 'scheduled') return 'Next: watch the visit and specimen delivery timeline.';
+    if (request.status === 'completed') return 'Closed: this request finished successfully.';
+    if (request.status === 'cancelled') return 'Closed: restore and resend if the office still needs the draw.';
+    if (request.status === 'expired') return 'Closed: send a fresh request with a new draw-by date.';
+    return 'Next step available in the tracker.';
   };
 
   return (
@@ -1052,6 +1114,18 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
           <Plus className="h-3.5 w-3.5" /> New request
         </Button>
       </CardHeader>
+
+      <div className="px-6 pb-3 flex flex-wrap gap-2 text-[11px]">
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-medium ${needsChartCleanupCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+          {needsChartCleanupCount > 0 ? `${needsChartCleanupCount} need chart cleanup` : 'Charts ready'}
+        </span>
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-medium ${needsOrderCount > 0 ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+          {needsOrderCount > 0 ? `${needsOrderCount} need lab order` : 'Orders attached'}
+        </span>
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 font-medium ${followUpSoonCount > 0 ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+          {followUpSoonCount > 0 ? `${followUpSoonCount} follow-up soon` : 'No near follow-ups'}
+        </span>
+      </div>
 
       {/* Tabs */}
       <div className="px-6 border-b flex gap-1 text-sm">
@@ -1136,6 +1210,9 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                         ✓ Booked {formatDistanceToNow(new Date(r.patient_scheduled_at), { addSuffix: true })}
                       </p>
                     )}
+                    <p className="text-[11px] text-gray-600 mt-1">
+                      {requestNextStepLabel(r)}
+                    </p>
                     {/* Charge-at-booking payment state (2026-07-13) */}
                     {r.provider_payment_status === 'card_on_file' && (
                       <p className="text-[11px] text-sky-700 font-semibold mt-0.5">
@@ -1157,6 +1234,21 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                     </Button>
                     {r.status === 'pending_schedule' && (
                       <>
+                        {!r.has_lab_order && (
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-[#B91C1C] hover:text-[#991B1B] hover:bg-red-50"
+                            title="Attach the missing lab order to this request"
+                            onClick={() => setAttachTarget(r)}>
+                            <Paperclip className="h-3.5 w-3.5 mr-1" />
+                            Attach order
+                          </Button>
+                        )}
+                        {(!r.has_dob || !r.has_chart_address || (!r.has_email && !r.has_phone) || r.chart_patient_id) && (
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-sky-700 hover:text-sky-900 hover:bg-sky-50"
+                            title="Open the patient chart to fix missing DOB, contact, or address details"
+                            onClick={() => onOpenPatient(r.patient_name, r.chart_patient_id || null)}>
+                            {(!r.has_dob || !r.has_chart_address || (!r.has_email && !r.has_phone)) ? 'Fix chart' : 'Open patient'}
+                          </Button>
+                        )}
                         <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
                           title="Send the patient a fresh link with a new needed-by date — payment carries over"
                           onClick={() => openResend(r)}>
@@ -1172,17 +1264,31 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
                       </>
                     )}
                     {r.status === 'scheduled' && (
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs"
-                        title="Cancel this request + appointment" onClick={() => handleCancelRequest(r.id, r.patient_name)}>
-                        Cancel
-                      </Button>
+                      <>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-sky-700 hover:text-sky-900 hover:bg-sky-50"
+                          title="Open the patient chart and visit history"
+                          onClick={() => onOpenPatient(r.patient_name, r.chart_patient_id || null)}>
+                          Open patient
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50 text-xs"
+                          title="Cancel this request + appointment" onClick={() => handleCancelRequest(r.id, r.patient_name)}>
+                          Cancel
+                        </Button>
+                      </>
                     )}
                     {(r.status === 'cancelled' || r.status === 'expired') && (
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
-                        title="Restore this request and send the patient a fresh link — no new payment needed"
-                        onClick={() => openResend(r)}>
-                        ⟳ Restore & resend
-                      </Button>
+                      <>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-sky-700 hover:text-sky-900 hover:bg-sky-50"
+                          title="Open the patient chart and prior request context"
+                          onClick={() => onOpenPatient(r.patient_name, r.chart_patient_id || null)}>
+                          Open patient
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50"
+                          title="Restore this request and send the patient a fresh link — no new payment needed"
+                          onClick={() => openResend(r)}>
+                          ⟳ Restore & resend
+                        </Button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1245,6 +1351,21 @@ const LabRequestsSection: React.FC<{ labRequests: any[]; onCreate: () => void; o
           )}
         </DialogContent>
       </Dialog>
+
+      <AttachLabOrderToRequestModal
+        open={!!attachTarget}
+        onClose={() => setAttachTarget(null)}
+        request={attachTarget ? {
+          id: attachTarget.id,
+          patient_name: attachTarget.patient_name,
+          draw_by_date: attachTarget.draw_by_date,
+          has_lab_order: !!attachTarget.has_lab_order,
+        } : null}
+        onUploaded={() => {
+          setAttachTarget(null);
+          onRefresh();
+        }}
+      />
     </Card>
   );
 };
