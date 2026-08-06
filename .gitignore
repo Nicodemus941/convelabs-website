@@ -32,3 +32,4 @@ dist-ssr
 _import/
 sendresult.json
 icons/
+.vercel
