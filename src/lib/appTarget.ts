@@ -12,13 +12,27 @@ export const APP_TARGET: AppTarget =
 export const isPhlebApp = APP_TARGET === 'phleb';
 export const isPatientApp = APP_TARGET === 'patient';
 
+function inferTargetFromPathname(pathname?: string): AppTarget | null {
+  if (!pathname) return null;
+  return pathname.startsWith('/phleb') ? 'phleb' : null;
+}
+
+function resolveTarget(target?: AppTarget): AppTarget {
+  if (target) return target;
+  if (typeof window !== 'undefined') {
+    const inferred = inferTargetFromPathname(window.location.pathname);
+    if (inferred) return inferred;
+  }
+  return APP_TARGET;
+}
+
 /**
  * Where a freshly-launched native app should land. The route is auth-gated by
  * the existing ProtectedRoute/RoleProtectedRoute, so unauthenticated users are
  * still bounced to /login first; once signed in they arrive here.
  */
-export function landingRouteForTarget(target: AppTarget = APP_TARGET): string {
-  return target === 'phleb' ? '/phleb-app' : '/dashboard';
+export function landingRouteForTarget(target?: AppTarget): string {
+  return resolveTarget(target) === 'phleb' ? '/phleb-app' : '/dashboard';
 }
 
 /**
@@ -27,8 +41,8 @@ export function landingRouteForTarget(target: AppTarget = APP_TARGET): string {
  * the user straight on the field dashboard. On the website / patient build this
  * stays the normal marketing login, so public + patient behavior is unchanged.
  */
-export function loginRouteForTarget(target: AppTarget = APP_TARGET): string {
-  return target === 'phleb'
+export function loginRouteForTarget(target?: AppTarget): string {
+  return resolveTarget(target) === 'phleb'
     ? '/phleb-login?redirect=/phleb-app'
     : '/login?redirect=/dashboard';
 }
