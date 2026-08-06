@@ -13,13 +13,13 @@
  *   1. Phleb clicks "Connect your Stripe account"
  *   2. Server creates an Express account (or fetches existing) + Account Link
  *   3. Phleb redirected to Stripe-hosted form (5 min: SSN, DOB, bank)
- *   4. Stripe redirects back to /dashboard/phlebotomist?connect=success
+ *   4. Stripe redirects back to /phleb-app?connect=success
  *   5. Status check fires capabilities (charges_enabled, payouts_enabled)
  *   6. From here on, every patient charge auto-splits via transfer_data
  */
 
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,6 +43,23 @@ interface StaffRow {
   stripe_connect_payouts_enabled: boolean;
 }
 
+type UserMetadata = Record<string, unknown>;
+
+const asMetadata = (value: unknown): UserMetadata =>
+  value && typeof value === 'object' ? value as UserMetadata : {};
+
+const getStringValue = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim().length > 0 ? value : null;
+
+const getUnknownRecord = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' ? value as Record<string, unknown> : null;
+
+const getErrorField = (error: unknown, field: string): unknown =>
+  getUnknownRecord(error)?.[field];
+
+const getErrorMessage = (error: unknown, fallback = 'unknown'): string =>
+  getStringValue(getErrorField(error, 'message')) || fallback;
+
 async function getStaffForAuthUser(token: string): Promise<{ staff: StaffRow | null; email: string | null; firstName: string | null; lastName: string | null; phone: string | null }> {
   const adminClient = createClient(SUPABASE_URL, SERVICE_KEY);
   // Resolve auth user from JWT
@@ -55,17 +72,17 @@ async function getStaffForAuthUser(token: string): Promise<{ staff: StaffRow | n
     .eq('user_id', user.id)
     .maybeSingle();
 
-  const meta = (user.user_metadata || {}) as any;
+  const meta = asMetadata(user.user_metadata);
   return {
     staff: (staff as StaffRow) || null,
     email: user.email || null,
-    firstName: meta.first_name || meta.firstName || null,
-    lastName: meta.last_name || meta.lastName || null,
-    phone: meta.phone || null,
+    firstName: getStringValue(meta.first_name) || getStringValue(meta.firstName),
+    lastName: getStringValue(meta.last_name) || getStringValue(meta.lastName),
+    phone: getStringValue(meta.phone),
   };
 }
 
-async function syncCapabilities(adminClient: any, staffId: string, accountId: string): Promise<{ charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean }> {
+async function syncCapabilities(adminClient: SupabaseClient, staffId: string, accountId: string): Promise<{ charges_enabled: boolean; payouts_enabled: boolean; details_submitted: boolean }> {
   const account = await stripe.accounts.retrieve(accountId);
   const charges = !!account.charges_enabled;
   const payouts = !!account.payouts_enabled;
@@ -132,7 +149,7 @@ Deno.serve(async (req) => {
         // 1. Identify which Stripe account this key controls
         const account = await stripe.accounts.retrieve();
         accountId = account.id;
-        businessName = (account as any).business_profile?.name || account.email || null;
+        businessName = account.business_profile?.name || account.email || null;
 
         // 2. Probe whether Connect is enabled by attempting to LIST
         //    connected accounts (read-only, doesn't create anything).
@@ -141,12 +158,12 @@ Deno.serve(async (req) => {
         try {
           await stripe.accounts.list({ limit: 1 });
           connectEnabled = true;
-        } catch (e: any) {
+        } catch (e: unknown) {
           connectEnabled = false;
-          connectError = String(e?.message || 'unknown');
+          connectError = getErrorMessage(e);
         }
-      } catch (e: any) {
-        connectError = `Could not retrieve Stripe account: ${e?.message || 'unknown'}`;
+      } catch (e: unknown) {
+        connectError = `Could not retrieve Stripe account: ${getErrorMessage(e)}`;
       }
 
       return new Response(JSON.stringify({
@@ -178,8 +195,8 @@ Deno.serve(async (req) => {
     }
 
     const origin = req.headers.get('origin') || 'https://www.convelabs.com';
-    const returnUrl = `${origin}/dashboard/phlebotomist?connect=success`;
-    const refreshUrl = `${origin}/dashboard/phlebotomist?connect=refresh`;
+    const returnUrl = `${origin}/phleb-app?connect=success`;
+    const refreshUrl = `${origin}/phleb-app?connect=refresh`;
 
     // ─── action: status — pull from Stripe + sync DB ────────────────
     if (action === 'status') {
@@ -271,7 +288,7 @@ Deno.serve(async (req) => {
       expires_at: link.expires_at,
       ...caps,
     }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[connect-onboard] unhandled:', e);
 
     // Detect the "platform not registered for Connect" error specifically.
@@ -280,7 +297,7 @@ Deno.serve(async (req) => {
     // code for it — match on the substring. When this fires, the OWNER
     // of the Stripe account needs to enable Connect at
     // https://dashboard.stripe.com/connect — no code change can fix it.
-    const msg = String(e?.message || '');
+    const msg = getErrorMessage(e, '');
     const isPlatformNotEnabled = /signed up for Connect/i.test(msg)
       || /not.*Connect.*platform/i.test(msg);
 
@@ -293,18 +310,18 @@ Deno.serve(async (req) => {
         component: 'connect-onboard',
         action: 'top_level_catch',
         error_message: msg || 'unknown',
-        error_stack: String(e?.stack || ''),
+        error_stack: String(getErrorField(e, 'stack') || ''),
         payload: {
-          stripe_code: e?.code || null,
-          stripe_type: e?.type || null,
-          stripe_status_code: e?.statusCode || null,
-          stripe_request_id: e?.requestId || null,
-          stripe_doc_url: e?.doc_url || null,
+          stripe_code: getStringValue(getErrorField(e, 'code')),
+          stripe_type: getStringValue(getErrorField(e, 'type')),
+          stripe_status_code: getErrorField(e, 'statusCode'),
+          stripe_request_id: getStringValue(getErrorField(e, 'requestId')),
+          stripe_doc_url: getStringValue(getErrorField(e, 'doc_url')),
           admin_action_required: isPlatformNotEnabled
             ? 'Enable Stripe Connect at https://dashboard.stripe.com/connect — pick Platform or marketplace, Express onboarding type. One-time setup, instant approval for US accounts.'
             : null,
         },
-      } as any);
+      });
     } catch { /* non-fatal */ }
 
     if (isPlatformNotEnabled) {
@@ -320,9 +337,9 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       error: 'connect_failed',
-      message: e?.message || 'Stripe Connect onboarding failed',
-      stripe_code: e?.code || null,
-      stripe_type: e?.type || null,
+      message: msg || 'Stripe Connect onboarding failed',
+      stripe_code: getStringValue(getErrorField(e, 'code')),
+      stripe_type: getStringValue(getErrorField(e, 'type')),
     }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });

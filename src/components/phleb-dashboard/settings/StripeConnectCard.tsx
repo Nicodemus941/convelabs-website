@@ -25,6 +25,22 @@ import { toast } from '@/components/ui/sonner';
 
 type Status = 'unknown' | 'not_connected' | 'pending' | 'connected';
 
+interface ConnectOnboardResponse {
+  account_id?: string | null;
+  charges_enabled?: boolean;
+  connected?: boolean;
+  details_submitted?: boolean;
+  error?: string;
+  message?: string;
+  onboarding_url?: string;
+  payouts_enabled?: boolean;
+  url?: string;
+}
+
+type ConnectOnboardError = Error & {
+  payload?: ConnectOnboardResponse | null;
+};
+
 // Same pattern as appointmentCheckout.ts — bypass supabase.functions.invoke()
 // because it triggers an auth-token refresh that hangs on iOS PWA / mobile
 // Safari, leaving the button spinning forever. Direct fetch + AbortController
@@ -34,7 +50,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://yluyonhrxxtyu
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
   || import.meta.env.VITE_SUPABASE_ANON_KEY || '') as string;
 
-async function callConnectOnboard(action: 'onboard' | 'status' | 'dashboard'): Promise<any> {
+async function callConnectOnboard(action: 'onboard' | 'status' | 'dashboard'): Promise<ConnectOnboardResponse> {
   // Pull token directly from localStorage — avoids the SDK auth-lock hang
   let token = SUPABASE_ANON_KEY;
   try {
@@ -60,15 +76,15 @@ async function callConnectOnboard(action: 'onboard' | 'status' | 'dashboard'): P
       credentials: 'omit',
       cache: 'no-store',
     });
-    let body: any = null;
+    let body: ConnectOnboardResponse | null = null;
     try { body = await res.json(); } catch { /* keep null */ }
     if (!res.ok) {
       const msg = body?.message || body?.error || `HTTP ${res.status}`;
-      const err: any = new Error(msg);
+      const err = new Error(msg) as ConnectOnboardError;
       err.payload = body;
       throw err;
     }
-    return body;
+    return body || {};
   } finally {
     clearTimeout(timer);
   }
@@ -91,7 +107,7 @@ const StripeConnectCard: React.FC = () => {
       } else {
         setStatus('pending');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('[connect-status] failed:', err);
       setStatus('not_connected');
     } finally {
@@ -117,19 +133,20 @@ const StripeConnectCard: React.FC = () => {
     try {
       const data = await callConnectOnboard('onboard');
       if (data?.onboarding_url) {
-        // Hosted-form redirect — Stripe will return to /dashboard/phlebotomist?connect=success
+        // Hosted-form redirect — Stripe will return to /phleb-app?connect=success
         window.location.href = data.onboarding_url;
         return;
       }
       toast.error('Could not start Stripe onboarding — please try again.');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const typedErr = err as ConnectOnboardError;
       console.error('[connect] error:', err);
 
       // Specific case: ConveLabs admin hasn't enabled the Stripe Connect
       // platform yet (a one-time Stripe-dashboard step, not a code bug).
       // Show a friendly "we're working on it" message instead of a scary
       // generic error so the phleb knows it's a setup issue on our end.
-      if (err?.payload?.error === 'platform_not_enabled' || /platform_not_enabled|signed up for Connect|isn't enabled on the ConveLabs/i.test(String(err?.message || ''))) {
+      if (typedErr.payload?.error === 'platform_not_enabled' || /platform_not_enabled|signed up for Connect|isn't enabled on the ConveLabs/i.test(String(typedErr.message || ''))) {
         toast.info('Stripe Connect setup is pending on our end.', {
           description: 'Our admin has been notified — you\'ll be able to connect your bank account as soon as setup is complete (usually same-day). Nothing for you to do right now.',
           duration: 12000,
@@ -138,9 +155,9 @@ const StripeConnectCard: React.FC = () => {
         return;
       }
 
-      const msg = err?.name === 'AbortError'
+      const msg = typedErr.name === 'AbortError'
         ? 'Stripe connect timed out — check your connection and try again.'
-        : `Stripe connect failed: ${err?.message || 'Unknown error'}`;
+        : `Stripe connect failed: ${typedErr.message || 'Unknown error'}`;
       toast.error(msg, { duration: 8000 });
     } finally {
       setIsLoading(false);
@@ -156,9 +173,10 @@ const StripeConnectCard: React.FC = () => {
         return;
       }
       toast.error('Could not open Stripe dashboard.');
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const typedErr = err as Error;
       console.error('[connect-dashboard] error:', err);
-      toast.error(`Couldn't open dashboard: ${err?.message || 'Unknown error'}`, { duration: 6000 });
+      toast.error(`Couldn't open dashboard: ${typedErr.message || 'Unknown error'}`, { duration: 6000 });
     } finally {
       setIsLoading(false);
     }

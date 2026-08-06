@@ -11,6 +11,7 @@ import {
 import { toast } from '@/components/ui/sonner';
 import StripeConnectCard from './StripeConnectCard';
 import { teardownPush } from '@/lib/native/push';
+import { loginRouteForTarget } from '@/lib/appTarget';
 
 const getErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : 'Unknown error';
@@ -22,6 +23,7 @@ const SettingsTab: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [smsNotifications, setSmsNotifications] = useState(true);
+  const phlebLoginRoute = loginRouteForTarget('phleb');
 
   // Load staff profile phone + notification prefs
   useEffect(() => {
@@ -91,11 +93,11 @@ const SettingsTab: React.FC = () => {
         await teardownPush();
       } catch { /* never block sign-out on push cleanup */ }
       await logout();
-      navigate('/login');
+      navigate(phlebLoginRoute, { replace: true });
     } catch (err) {
       console.error('Logout error:', err);
       // Force redirect even if logout fails
-      window.location.href = '/login';
+      window.location.href = phlebLoginRoute;
     }
   };
 
@@ -203,7 +205,7 @@ const SettingsTab: React.FC = () => {
             About
           </h3>
           <p className="text-xs text-muted-foreground">ConveLabs Phlebotomist App v1.0</p>
-          <p className="text-xs text-muted-foreground">HIPAA Compliant - All data encrypted</p>
+          <p className="text-xs text-muted-foreground">Field data syncs through the ConveLabs platform with encrypted transport.</p>
         </CardContent>
       </Card>
 

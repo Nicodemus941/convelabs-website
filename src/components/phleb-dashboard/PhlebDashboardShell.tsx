@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
+import type { RealtimePostgresInsertPayload } from '@supabase/supabase-js';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
@@ -32,6 +33,10 @@ const DESKTOP_TABS: { id: PhlebTab; label: string; icon: React.ElementType }[] =
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
+interface PhlebSmsRow {
+  direction?: string | null;
+}
+
 const PhlebDashboardShell: React.FC = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<PhlebTab>(() => {
@@ -53,7 +58,13 @@ const PhlebDashboardShell: React.FC = () => {
   useEffect(() => {
     const apptParam = new URLSearchParams(window.location.search).get('appt');
     if (apptParam) setActiveTab('schedule');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stripe Connect onboarding should land the phleb back in Settings so the
+  // capability refresh is visible instead of dropping them on an unrelated tab.
+  useEffect(() => {
+    const connectParam = new URLSearchParams(window.location.search).get('connect');
+    if (connectParam) setActiveTab('settings');
   }, []);
 
   // ── Native push enrollment ──────────────────────────────────────────
@@ -71,7 +82,6 @@ const PhlebDashboardShell: React.FC = () => {
         setShowPushPrompt(true);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const onForegroundPush = (msg: { title: string; body: string; appointmentId: string | null }) => {
@@ -110,8 +120,8 @@ const PhlebDashboardShell: React.FC = () => {
   useEffect(() => {
     const channel = supabase
       .channel('phleb-sms-indicator')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sms_messages' }, (payload) => {
-        const msg = payload.new as any;
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sms_messages' }, (payload: RealtimePostgresInsertPayload<PhlebSmsRow>) => {
+        const msg = payload.new;
         if (msg.direction === 'inbound' && activeTab !== 'messages') {
           setUnreadMessages(prev => prev + 1);
         }
