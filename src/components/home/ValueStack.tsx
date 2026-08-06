@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { GHS_BOOKING_PAGE } from '@/lib/constants/urls';
 import { supabase } from '@/integrations/supabase/client';
+import { useBookingModalSafe } from '@/contexts/BookingModalContext';
 
 /**
  * VALUE STACK — Hormozi $100M Offers Construction
@@ -46,6 +46,7 @@ const fmt = (n: number) => `$${n.toFixed(0)}`;
 
 const ValueStack: React.FC = () => {
   const [slotsLeft, setSlotsLeft] = useState<number | null>(null);
+  const bookingModal = useBookingModalSafe();
 
   useEffect(() => {
     // Pull today's remaining availability as live urgency signal
@@ -71,7 +72,12 @@ const ValueStack: React.FC = () => {
   }, []);
 
   const handleBook = () => {
-    window.location.href = GHS_BOOKING_PAGE;
+    if (bookingModal?.openModal) {
+      bookingModal.openModal('value_stack_cta');
+      return;
+    }
+
+    window.location.href = "/book-now?source=value_stack_cta";
   };
 
   return (

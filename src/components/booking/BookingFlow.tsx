@@ -26,6 +26,7 @@ import BookingChatAssistant from './BookingChatAssistant';
 import PriceEstimateBadge from './PriceEstimateBadge';
 import BookingTrustBadges from './BookingTrustBadges';
 import SlotConflictModal from './SlotConflictModal';
+import { analytics } from '@/utils/analytics';
 
 interface BookingFlowProps {
   tenantId?: string;
@@ -117,6 +118,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // Sub-step within combined steps
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showLabOrder, setShowLabOrder] = useState(false);
+  const viewedFunnelStagesRef = useRef<Set<string>>(new Set());
+  const redirectingToCheckoutRef = useRef(false);
 
   // Slot-conflict modal state. Fires when create-appointment-checkout returns
   // 409 slot_unavailable. Hormozi: never let a buyer leave empty-handed —
@@ -469,6 +472,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     try {
       setIsProcessing(true);
       setCheckoutError(null); // clear any prior banner before retrying
+      analytics.trackFunnelStage('checkout_submitted', 97, {
+        source: bookingSource,
+        displayStep: displayStep + 1,
+        visitType: methods.getValues('serviceDetails.visitType') || null,
+        selectedService: methods.getValues('serviceDetails.selectedService') || null,
+      });
       data = methods.getValues();
       // Resolve labels referenced inside pricingBreakdown / surcharges.
       // These were referenced but never declared in scope (memberLabel,
@@ -895,6 +904,11 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // got the URL. If they NEVER arrive at Stripe (DNS, blocker, etc.)
         // the booking_audit_log row is the only signal we have.
         try { sessionStorage.setItem('cl.lastCheckoutRedirectAt', String(Date.now())); } catch { /* noop */ }
+        redirectingToCheckoutRef.current = true;
+        analytics.trackFunnelStage('redirected_to_checkout', 98, {
+          source: bookingSource,
+          sessionUrlPresent: true,
+        });
         window.location.href = result.url;
       } else {
         // Page-went-blank guard: if Stripe URL is missing AND for any
@@ -966,6 +980,58 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     methods.getValues('serviceDetails.visitType') || '',
   );
   const progressPercent = Math.min((displayStep / (totalSteps - 1)) * 100, 100);
+  const bookingSource = (() => {
+    try {
+      return new URL(window.location.href).searchParams.get('source') || 'direct';
+    } catch {
+      return 'direct';
+    }
+  })();
+
+  useEffect(() => {
+    const stageKey = STEP_LABELS[displayStep]
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_|_$/g, '');
+
+    if (viewedFunnelStagesRef.current.has(stageKey)) return;
+    viewedFunnelStagesRef.current.add(stageKey);
+
+    analytics.trackFunnelStage(`booking_${stageKey}_viewed`, displayStep + 1, {
+      source: bookingSource,
+      visitType: methods.getValues('serviceDetails.visitType') || null,
+      selectedService: methods.getValues('serviceDetails.selectedService') || null,
+      hasPrefill: prefillFastPath,
+    });
+  }, [displayStep, bookingSource, methods, prefillFastPath]);
+
+  useEffect(() => {
+    const handlePageExit = () => {
+      if (bookingComplete || redirectingToCheckoutRef.current) return;
+
+      const stageKey = STEP_LABELS[displayStep]
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '');
+
+      analytics.trackBookingAbandoned(`${stageKey}:${bookingSource}`);
+      analytics.trackFunnelStage('booking_page_abandoned', 98, {
+        source: bookingSource,
+        stage: stageKey,
+        displayStep: displayStep + 1,
+        visitType: methods.getValues('serviceDetails.visitType') || null,
+        selectedService: methods.getValues('serviceDetails.selectedService') || null,
+      });
+    };
+
+    window.addEventListener('pagehide', handlePageExit);
+    window.addEventListener('beforeunload', handlePageExit);
+
+    return () => {
+      window.removeEventListener('pagehide', handlePageExit);
+      window.removeEventListener('beforeunload', handlePageExit);
+    };
+  }, [bookingComplete, bookingSource, displayStep, methods]);
 
   // Reschedule context banner — surfaced when patient clicked Reschedule
   // on the dashboard. Confirms what they're rescheduling so they don't

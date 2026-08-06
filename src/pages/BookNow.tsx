@@ -29,6 +29,8 @@ const BookNow: React.FC = () => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get('session_id');
   const status = searchParams.get('status');
+  const source = searchParams.get('source') || 'direct';
+  const prefill = searchParams.get('prefill');
 
   // Persist referral code from URL into sessionStorage (survives multi-step flow)
   const refCode = searchParams.get('ref');
@@ -43,6 +45,17 @@ const BookNow: React.FC = () => {
   const { user } = useAuth();
   const [booking, setBooking] = useState<ConfirmedBooking | null>(null);
   const [verifyError, setVerifyError] = useState('');
+
+  useEffect(() => {
+    sessionStorage.setItem('booking_intent_time', Date.now().toString());
+    sessionStorage.setItem('booking_intent_source', source);
+    analytics.trackFunnelStage('book_now_loaded', 0, {
+      source,
+      status: status || 'new',
+      hasPrefill: Boolean(prefill),
+      refCode: refCode || null,
+    });
+  }, [source, status, prefill, refCode]);
 
   // Poll for checkout verification on success return
   const verifyPayment = useCallback(async () => {
@@ -60,7 +73,11 @@ const BookNow: React.FC = () => {
         if (result.status === 'completed' && result.appointment) {
           setBooking(result.appointment);
           setMode('confirmed');
-          analytics.trackFunnelStage('payment_success', 10, { sessionId, bookingId: result.bookingId });
+          analytics.trackFunnelStage('payment_success', 10, {
+            sessionId,
+            bookingId: result.bookingId,
+            source,
+          });
           return;
         }
 
@@ -88,16 +105,16 @@ const BookNow: React.FC = () => {
     };
 
     poll();
-  }, [sessionId]);
+  }, [sessionId, source]);
 
   useEffect(() => {
     if (mode === 'verifying') {
       verifyPayment();
     }
     if (mode === 'cancelled') {
-      analytics.trackFunnelStage('payment_cancel', 11);
+      analytics.trackFunnelStage('payment_cancel', 11, { source });
     }
-  }, [mode, verifyPayment]);
+  }, [mode, source, verifyPayment]);
 
   return (
     <>

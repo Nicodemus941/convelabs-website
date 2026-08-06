@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Stethoscope } from "lucide-react";
 import { motion, type Variants } from "framer-motion";
-import { GHS_BOOKING_PAGE } from "@/lib/constants/urls";
 import { supabase } from "@/integrations/supabase/client";
+import { useBookingModalSafe } from "@/contexts/BookingModalContext";
 
 /**
  * HERO — Post-Hormozi / NFL-endorsement Rebuild
@@ -28,6 +28,7 @@ const HERO_POSTER = "/images/hero-poster.jpg";
 
 const Hero = () => {
   const [visitCount, setVisitCount] = useState(500);
+  const bookingModal = useBookingModalSafe();
 
   useEffect(() => {
     supabase.from('appointments').select('id', { count: 'exact', head: true })
@@ -38,7 +39,12 @@ const Hero = () => {
   }, []);
 
   const handleBookNow = () => {
-    window.location.href = GHS_BOOKING_PAGE;
+    if (bookingModal?.openModal) {
+      bookingModal.openModal('hero_cta');
+      return;
+    }
+
+    window.location.href = "/book-now?source=hero_cta";
   };
 
   // YC critique 2026-05-25: secondary CTA should be a forward step toward

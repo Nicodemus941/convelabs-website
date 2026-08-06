@@ -186,6 +186,8 @@ export const ConversionOptimizationProvider: React.FC<ConversionOptimizationProv
   };
   
   const trackBookingIntent = (source: string) => {
+    sessionStorage.setItem('booking_intent_time', Date.now().toString());
+    sessionStorage.setItem('booking_intent_source', source);
     analytics.trackBookingIntent(source, selectedService || undefined);
     
     // Track conversion events
@@ -211,8 +213,12 @@ export const ConversionOptimizationProvider: React.FC<ConversionOptimizationProv
   };
   
   const trackBookingAbandonment = () => {
-    // This is now handled automatically by the analytics system
-    console.log('Booking abandonment tracked');
+    analytics.trackFunnelStage('booking_abandoned', 99, {
+      source: sessionStorage.getItem('booking_intent_source') || 'unknown',
+      selected_service: selectedService,
+      preferred_location: preferredLocation,
+      path: location.pathname,
+    });
   };
   
   const setServiceSelection = (service: string) => {
