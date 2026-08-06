@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, MessageSquare, CheckCircle2, Settings, FolderOpen, Truck, DollarSign } from 'lucide-react';
+import { Calendar, MessageSquare, Settings, FolderOpen, DollarSign } from 'lucide-react';
 
 export type PhlebTab = 'schedule' | 'messages' | 'directory' | 'completed' | 'deliveries' | 'earnings' | 'settings';
 
@@ -13,9 +13,7 @@ const tabs: { id: PhlebTab; label: string; icon: React.ElementType }[] = [
   { id: 'schedule', label: 'Today', icon: Calendar },
   { id: 'messages', label: 'Inbox', icon: MessageSquare },
   { id: 'directory', label: 'Resources', icon: FolderOpen },
-  { id: 'deliveries', label: 'Labs', icon: Truck },
   { id: 'earnings', label: 'Pay', icon: DollarSign },
-  { id: 'completed', label: 'History', icon: CheckCircle2 },
   { id: 'settings', label: 'Profile', icon: Settings },
 ];
 

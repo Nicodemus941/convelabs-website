@@ -45,11 +45,24 @@ interface PhlebSmsRow {
   direction?: string | null;
 }
 
+type ScheduleMobileView = 'run' | 'history' | 'labs';
+
 const PhlebDashboardShell: React.FC = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<PhlebTab>(() => {
     const saved = sessionStorage.getItem('phleb-active-tab');
+    if (saved === 'completed' || saved === 'deliveries') {
+      return window.matchMedia('(min-width: 768px)').matches ? (saved as PhlebTab) : 'schedule';
+    }
     return (saved as PhlebTab) || 'schedule';
+  });
+  const [scheduleView, setScheduleView] = useState<ScheduleMobileView>(() => {
+    const savedView = sessionStorage.getItem('phleb-schedule-view');
+    if (savedView === 'run' || savedView === 'history' || savedView === 'labs') return savedView;
+    const saved = sessionStorage.getItem('phleb-active-tab');
+    if (saved === 'completed') return 'history';
+    if (saved === 'deliveries') return 'labs';
+    return 'run';
   });
   const [unreadMessages, setUnreadMessages] = useState(0);
 
@@ -57,6 +70,10 @@ const PhlebDashboardShell: React.FC = () => {
   useEffect(() => {
     sessionStorage.setItem('phleb-active-tab', activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    sessionStorage.setItem('phleb-schedule-view', scheduleView);
+  }, [scheduleView]);
 
   // Push-notification deep link: /phleb-app?appt=<id> (tap on a banner).
   // Force the Schedule tab so ScheduleTab can pick the ?appt= param up,
@@ -309,17 +326,55 @@ const PhlebDashboardShell: React.FC = () => {
         */}
         <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 mt-4">
           <div hidden={activeTab !== 'schedule'}>
-            <ScheduleTab
-              appointments={appointments}
-              isLoading={isLoading}
-              monthDates={monthDates}
-              onRefresh={() => fetchMonthAppointments()}
-              onStatusUpdate={updateStatus}
-              isOnline={isOnline}
-              lastCacheAt={lastCacheAt}
-            />
+            <div className="md:hidden mb-4">
+              <div className="rounded-2xl border border-[#EFE3E1] bg-white p-2 shadow-sm">
+                <div className="flex items-center justify-between gap-3 px-2 pb-2">
+                  <div>
+                    <p className="text-sm font-semibold text-[#1A1416]">Today lane</p>
+                    <p className="text-xs text-[#8B7C7E]">Run the day, then review history or lab handoffs without leaving this lane.</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'run' as const, label: 'Run' },
+                    { id: 'history' as const, label: 'History' },
+                    { id: 'labs' as const, label: 'Labs' },
+                  ].map((view) => (
+                    <button
+                      key={view.id}
+                      type="button"
+                      onClick={() => setScheduleView(view.id)}
+                      className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                        scheduleView === view.id
+                          ? 'bg-[#B91C1C] text-white shadow-sm'
+                          : 'bg-[#F6F0EE] text-[#7A5E61]'
+                      }`}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div hidden={scheduleView !== 'run'}>
+              <ScheduleTab
+                appointments={appointments}
+                isLoading={isLoading}
+                monthDates={monthDates}
+                onRefresh={() => fetchMonthAppointments()}
+                onStatusUpdate={updateStatus}
+                isOnline={isOnline}
+                lastCacheAt={lastCacheAt}
+              />
+            </div>
+            <div hidden={scheduleView !== 'history'} className="md:hidden">
+              <CompletedTab appointments={appointments} />
+            </div>
+            <div hidden={scheduleView !== 'labs'} className="md:hidden">
+              <DeliveriesTab />
+            </div>
           </div>
-          <div hidden={activeTab !== 'completed'}>
+          <div hidden={activeTab !== 'completed'} className="hidden md:block">
             <CompletedTab appointments={appointments} />
           </div>
           <div hidden={activeTab !== 'messages'}>
@@ -328,7 +383,7 @@ const PhlebDashboardShell: React.FC = () => {
           <div hidden={activeTab !== 'directory'}>
             <DirectoryTab />
           </div>
-          <div hidden={activeTab !== 'deliveries'}>
+          <div hidden={activeTab !== 'deliveries'} className="hidden md:block">
             <DeliveriesTab />
           </div>
           <div hidden={activeTab !== 'earnings'} className="max-w-lg md:max-w-3xl mx-auto pb-24">
@@ -345,6 +400,7 @@ const PhlebDashboardShell: React.FC = () => {
             activeTab={activeTab}
             onTabChange={(tab) => {
               setActiveTab(tab);
+              if (tab === 'schedule') setScheduleView('run');
               if (tab === 'messages') setUnreadMessages(0);
             }}
             unreadMessages={unreadMessages}
