@@ -140,6 +140,7 @@ export function usePhlebotomistAppointments() {
   // Seed first render from the persistent snapshot so even a cold PWA open
   // shows the last schedule with NO loading spinner.
   const [appointments, setAppointments] = useState<PhlebAppointment[]>(() => pickScheduleSeed(userId)?.rows ?? []);
+  const appointmentsRef = useRef<PhlebAppointment[]>(pickScheduleSeed(userId)?.rows ?? []);
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [lastCacheAt, setLastCacheAt] = useState<number | null>(null);
   // Only show the loading spinner on a true first-ever load (no snapshot yet).
@@ -148,6 +149,10 @@ export function usePhlebotomistAppointments() {
   // Forward-only status guard: records the status the phleb just set so a
   // lagging-replica refetch can't roll it backward. { id -> {status, at} }.
   const pendingStatusRef = useRef<Record<string, { status: AppointmentStatus; at: number }>>({});
+
+  useEffect(() => {
+    appointmentsRef.current = appointments;
+  }, [appointments]);
   // Fetch all appointments for the current month for this phlebotomist.
   // `silent=true` skips the isLoading toggle so background refetches
   // (realtime push, visibility-change resume) don't flash the loading
@@ -206,7 +211,7 @@ export function usePhlebotomistAppointments() {
       // Phlebotomists only see their own appointments
       // Admins/owners see all
       if (isPhlebRole) {
-        query = query.eq('phlebotomist_id', user.id);
+        query = query.eq('phlebotomist_id', userId);
       }
 
       const { data: appts, error } = await query;
@@ -272,7 +277,7 @@ export function usePhlebotomistAppointments() {
           let patientInsurance: string | null = null;
           let patientInsuranceId: string | null = null;
           let patientInsuranceGroup: string | null = null;
-          let labOrderPath: string | null = appt.lab_order_file_path || null;
+          const labOrderPath: string | null = appt.lab_order_file_path || null;
 
           // PRIORITY 2: Lookup tenant_patients for insurance/DOB and missing fields
           let tpData: any = null;
@@ -503,7 +508,7 @@ export function usePhlebotomistAppointments() {
 
       // Trigger post-visit sequence when appointment is completed
       if (newStatus === 'completed') {
-        const appt = appointments.find(a => a.id === appointmentId);
+          const appt = appointmentsRef.current.find(a => a.id === appointmentId);
         if (appt) {
           supabase.functions.invoke('trigger-post-visit-sequence', {
             body: {

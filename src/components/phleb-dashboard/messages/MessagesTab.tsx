@@ -46,6 +46,7 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [allPatients, setAllPatients] = useState<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const normalizePhoneKey = (phone: string | null | undefined) => (phone || '').replace(/\D/g, '').slice(-10);
 
   // Coerce ANY cell value into a string so we never accidentally render
   // an object as a React child (the {lat, lng, ...} crash 2026-05-10).
@@ -367,6 +368,26 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         created_at: new Date().toISOString(),
       };
       setMessages(prev => [...prev, newMsg]);
+      setConversations(prev => {
+        const phoneKey = normalizePhoneKey(activeConversation.patient_phone);
+        const next = prev.map((conv) =>
+          normalizePhoneKey(conv.patient_phone) === phoneKey
+            ? {
+                ...conv,
+                unread: false,
+                last_message: `→ ${newMsg.body.slice(0, 80)}`,
+                last_message_at: newMsg.created_at,
+              }
+            : conv
+        );
+        return next.sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime());
+      });
+      setActiveConversation(prev => prev ? {
+        ...prev,
+        unread: false,
+        last_message: `→ ${newMsg.body.slice(0, 80)}`,
+        last_message_at: newMsg.created_at,
+      } : prev);
       setNewMessage('');
       toast.success('Message sent');
     } catch (err) {
@@ -460,6 +481,21 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
         body: { phoneNumber: phone, notificationType: 'custom', customMessage: newMessage.trim() },
       });
       if (error) throw error;
+      const createdAt = new Date().toISOString();
+      const normalizedPhone = normalizePhoneKey(phone);
+      const nextConversation: Conversation = {
+        id: normalizedPhone || crypto.randomUUID(),
+        patient_id: '',
+        patient_phone: phone,
+        patient_name: composeName || phone,
+        last_message: `→ ${newMessage.trim().slice(0, 80)}`,
+        last_message_at: createdAt,
+        unread: false,
+      };
+      setConversations(prev => {
+        const withoutMatch = prev.filter((conv) => normalizePhoneKey(conv.patient_phone) !== normalizedPhone);
+        return [nextConversation, ...withoutMatch];
+      });
       toast.success(`Message sent to ${composeName || composePhone}`);
       setNewMessage('');
       setShowCompose(false);
@@ -586,7 +622,14 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ appointments }) => {
           <Card
             key={rowKey}
             className="shadow-sm border-[#EFE3E1] cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => setActiveConversation(conv)}
+            onClick={() => {
+              setConversations(prev => prev.map((row) =>
+                normalizePhoneKey(row.patient_phone) === normalizePhoneKey(conv.patient_phone)
+                  ? { ...row, unread: false }
+                  : row
+              ));
+              setActiveConversation({ ...conv, unread: false });
+            }}
           >
             <CardContent className="p-3 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center flex-shrink-0 font-bold text-xs shadow-sm">

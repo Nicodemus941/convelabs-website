@@ -472,7 +472,7 @@ const PhlebEarningsLedger: React.FC = () => {
         .channel(`phleb-earnings-ledger-${staffIdLocal}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'staff_payouts', filter: `staff_id=eq.${staffIdLocal}` },
           () => setRefreshKey(k => k + 1))
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${staffIdLocal}` },
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointments', filter: `phlebotomist_id=eq.${user.id}` },
           () => setRefreshKey(k => k + 1))
         .subscribe();
     })();

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import PatientSearchList, { PatientListRow } from '@/components/shared/PatientSearchList';
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 import { AlertCircle } from 'lucide-react';
+import { loginRouteForTarget } from '@/lib/appTarget';
 
 /**
  * PatientsSection — read-only patient roster for the phleb.
@@ -17,6 +18,7 @@ const PatientsSection: React.FC = () => {
   const [focused, setFocused] = useState<string | null>(null);
   const [focusedOrgId, setFocusedOrgId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const phlebLoginRoute = loginRouteForTarget('phleb');
 
   useEffect(() => {
     (async () => {
@@ -89,7 +91,7 @@ const PatientsSection: React.FC = () => {
               </button>
               <button
                 type="button"
-                onClick={async () => { await supabase.auth.signOut(); window.location.href = '/provider-login'; }}
+                onClick={async () => { await supabase.auth.signOut(); window.location.href = phlebLoginRoute; }}
                 className="text-[11px] underline font-semibold text-red-700"
               >
                 Sign out + back in
