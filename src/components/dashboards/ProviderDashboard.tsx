@@ -499,7 +499,7 @@ const ProviderDashboard: React.FC = () => {
         <PracticeProfilePanel orgId={org.id} />
 
         {/* LINKED PATIENTS + BULK RE-REQUEST */}
-        <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} />
+        <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} labRequests={data.labRequests || []} />
 
         {/* LAB REQUESTS */}
         <LabRequestsSection

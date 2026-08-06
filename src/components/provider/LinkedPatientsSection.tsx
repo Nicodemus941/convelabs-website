@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -56,6 +56,10 @@ function lastActivity(p: LinkedPatient): number {
   return new Date(p.last_visit_date || p.added_at || 0).getTime();
 }
 
+function normalizePatientKey(value: string | null | undefined): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 type SortKey = 'recent' | 'name' | 'needs_info' | 'visits';
 
 /** Which schedulable fields are missing on a patient row. */
@@ -77,9 +81,10 @@ interface EnrollmentRow {
 interface Props {
   orgId: string;
   onRequestCreated?: () => void;
+  labRequests?: any[];
 }
 
-const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => {
+const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated, labRequests = [] }) => {
   const [patients, setPatients] = useState<LinkedPatient[]>([]);
   const [enrollments, setEnrollments] = useState<Map<string, EnrollmentRow>>(new Map());
   const [orgTier, setOrgTier] = useState<string | null>(null);
@@ -194,6 +199,31 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
   };
 
   useEffect(() => { load(); }, [orgId]);
+
+  const latestRequestByPatient = useMemo(() => {
+    const priority = (status: string | null | undefined) => {
+      switch (status) {
+        case 'pending_schedule': return 0;
+        case 'scheduled': return 1;
+        case 'completed': return 2;
+        case 'cancelled': return 3;
+        case 'expired': return 4;
+        default: return 5;
+      }
+    };
+    const sorted = [...labRequests].sort((a: any, b: any) => {
+      const statusDelta = priority(a?.status) - priority(b?.status);
+      if (statusDelta !== 0) return statusDelta;
+      return new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime();
+    });
+    const map = new Map<string, any>();
+    for (const request of sorted) {
+      const key = normalizePatientKey(request?.patient_name);
+      if (!key || map.has(key)) continue;
+      map.set(key, request);
+    }
+    return map;
+  }, [labRequests]);
 
   const toggle = (name: string) => {
     setSelected(prev => {
@@ -541,6 +571,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                 <>
                   {capped.map(p => {
               const isSelected = selected.has(p.patient_name);
+              const latestRequest = latestRequestByPatient.get(normalizePatientKey(p.patient_name));
               return (
                 <label
                   key={p.patient_name}
@@ -607,6 +638,52 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
                         <>No visits yet{p.added_at && ` · Added ${format(new Date(p.added_at), 'MMM d, yyyy')}`}</>
                       )}
                     </p>
+                    {latestRequest && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] capitalize ${
+                            latestRequest.status === 'pending_schedule'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : latestRequest.status === 'scheduled'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-slate-50 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          Request {String(latestRequest.status || 'unknown').replace(/_/g, ' ')}
+                        </Badge>
+                        {latestRequest.draw_by_date && (
+                          <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-700">
+                            Draw by {format(new Date(`${latestRequest.draw_by_date}T12:00:00`), 'MMM d')}
+                          </span>
+                        )}
+                        {latestRequest.next_doctor_appt_date && (
+                          <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
+                            Follow-up {format(new Date(`${latestRequest.next_doctor_appt_date}T12:00:00`), 'MMM d')}
+                          </span>
+                        )}
+                        {!latestRequest.has_lab_order && (
+                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                            Missing order
+                          </span>
+                        )}
+                        {!latestRequest.has_dob && (
+                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                            Missing DOB
+                          </span>
+                        )}
+                        {!latestRequest.has_chart_address && (
+                          <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                            Missing address
+                          </span>
+                        )}
+                        {latestRequest.patient_notified_at && (
+                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                            Notified
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {(p.patient_email || p.patient_phone) && (
                       <p className="text-[10px] text-gray-400 truncate mt-0.5">
                         {p.patient_email} {p.patient_email && p.patient_phone && '·'} {p.patient_phone}
