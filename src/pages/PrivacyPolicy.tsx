@@ -54,7 +54,7 @@ const PrivacyPolicy: React.FC = () => {
               <li>Treatment records and notes from healthcare providers</li>
               <li>Prescription information (if applicable)</li>
             </ul>
-            <p>Note: Health information is collected and handled in compliance with the Health Insurance Portability and Accountability Act (HIPAA) and other relevant healthcare privacy laws.</p>
+            <p>Note: Health-related information may be subject to additional privacy and record-handling requirements depending on the service provided and the laboratories or providers involved.</p>
             
             <h3>c. Payment Information</h3>
             <p>When you subscribe to our Services, we may collect payment information such as:</p>
@@ -123,7 +123,7 @@ const PrivacyPolicy: React.FC = () => {
             <h3>e. To Comply with Legal and Regulatory Requirements</h3>
             <p>We are required to collect, use, and store certain information to comply with applicable laws and regulations, including but not limited to:</p>
             <ul>
-              <li>Health Insurance Portability and Accountability Act (HIPAA): We use and disclose health information as necessary to provide healthcare services and in compliance with HIPAA to protect your medical records and privacy.</li>
+              <li>Applicable privacy and healthcare recordkeeping laws: We may use and disclose health-related information as needed to provide services, coordinate with providers or laboratories, process billing, and meet legal obligations.</li>
               <li>State and Federal Healthcare Laws: We are obligated to comply with laws that regulate healthcare services, including the submission of insurance claims, reporting lab test results to government entities, and maintaining appropriate health records.</li>
               <li>Insurance Verification and Claims: We use your insurance information to verify your eligibility for benefits and submit claims to insurance providers for covered lab services.</li>
             </ul>
@@ -210,8 +210,8 @@ const PrivacyPolicy: React.FC = () => {
             <h3>d. Right to Opt-Out of Marketing Communications</h3>
             <p>You may opt out of receiving marketing communications at any time by clicking the unsubscribe link in any email or contacting us directly.</p>
             
-            <h3>e. HIPAA Rights</h3>
-            <p>If you are a patient receiving services from ConveLabs, you have specific rights under the Health Insurance Portability and Accountability Act (HIPAA) to protect the privacy and security of your health information. For more information on your HIPAA rights, please review our HIPAA Notice of Privacy Practices.</p>
+            <h3>e. Additional Health Privacy Rights</h3>
+            <p>Depending on the services you use and the information involved, you may have additional privacy rights under applicable law. Contact us if you need the specific privacy notice or rights information that applies to your situation.</p>
             
             <h2>6. State-Specific Privacy Notice</h2>
             <p>This State-Specific Privacy Notice supplements the ConveLabs Privacy Policy and applies to users located in specific states with data protection laws that are more stringent than federal laws. This notice applies to users from states like California, Nevada, and other states with more robust privacy regulations. Suppose you are accessing ConveLabs from one of these states. In that case, this notice will provide additional details about your rights, how we handle your personal information, and how you can exercise your privacy rights.</p>

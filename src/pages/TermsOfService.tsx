@@ -160,26 +160,26 @@ const TermsOfService = () => {
               </p>
             </section>
 
-            {/* Section 7 - HIPAA */}
+            {/* Section 7 - Health Information and Privacy */}
             <section>
-              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 7: HIPAA Compliance and Protected Health Information</h2>
+              <h2 className="text-xl font-bold text-gray-900 border-b pb-2">Section 7: Health Information and Protected Data</h2>
               <p className="mt-3">
-                7.1. <strong>HIPAA Acknowledgment.</strong> ConveLabs is committed to protecting the privacy and security of your Protected Health Information ("PHI") in compliance with the Health Insurance Portability and Accountability Act of 1996 ("HIPAA"), the Health Information Technology for Economic and Clinical Health Act ("HITECH Act"), and all applicable federal and state privacy laws and regulations.
+                7.1. <strong>Health Information Notice.</strong> If ConveLabs collects health-related information in connection with a service, that information will be handled according to our privacy notices, our service workflows, and applicable law.
               </p>
               <p>
-                7.2. <strong>Use and Disclosure of PHI.</strong> ConveLabs collects, uses, and discloses PHI only as necessary to: (a) provide specimen collection and transport services; (b) coordinate with ordering healthcare providers and receiving laboratories; (c) process payments and billing; (d) comply with legal and regulatory requirements; and (e) as otherwise permitted or required by law.
+                7.2. <strong>Use and Disclosure of Health Information.</strong> ConveLabs may collect, use, and disclose health-related information only as needed to: (a) provide specimen collection and transport services; (b) coordinate with ordering healthcare providers and receiving laboratories; (c) process payments and billing; (d) comply with legal and regulatory requirements; and (e) as otherwise permitted or required by law.
               </p>
               <p>
-                7.3. <strong>Patient Rights Under HIPAA.</strong> As a Patient, you have the right to: (a) receive a copy of ConveLabs' Notice of Privacy Practices; (b) request restrictions on certain uses and disclosures of your PHI; (c) request access to your PHI maintained by ConveLabs; (d) request amendments to your PHI; (e) receive an accounting of disclosures of your PHI; (f) request confidential communications; and (g) file a complaint if you believe your privacy rights have been violated.
+                7.3. <strong>Patient Privacy Requests.</strong> Depending on the information involved and the laws that apply, you may be able to request access to certain records, ask for corrections, request restrictions on some uses or disclosures, request confidential communications, or file a privacy complaint.
               </p>
               <p>
-                7.4. <strong>Security Measures.</strong> ConveLabs implements administrative, physical, and technical safeguards to protect the confidentiality, integrity, and availability of your PHI, including but not limited to: encrypted data transmission and storage, role-based access controls, staff training on privacy and security protocols, secure specimen labeling and chain of custody procedures, and regular security assessments and audits.
+                7.4. <strong>Security Measures.</strong> ConveLabs uses administrative, physical, and technical safeguards intended to protect the confidentiality, integrity, and availability of sensitive information, including encrypted data transmission, role-based access controls, staff procedures, secure specimen labeling, and chain-of-custody practices.
               </p>
               <p>
-                7.5. <strong>Breach Notification.</strong> In the event of a breach of unsecured PHI, ConveLabs will provide notification to affected individuals, the U.S. Department of Health and Human Services, and other parties as required by applicable law, within the timeframes specified under HIPAA and HITECH.
+                7.5. <strong>Breach Notification.</strong> If a reportable privacy or security incident occurs, ConveLabs will provide notices required by applicable law to affected individuals or other required parties within the legally required timeframes.
               </p>
               <p>
-                7.6. <strong>Consent to Use PHI.</strong> By accepting these Terms and booking an appointment, you consent to the collection, use, and disclosure of your PHI as described herein and in ConveLabs' Notice of Privacy Practices.
+                7.6. <strong>Consent to Use Health Information.</strong> By accepting these Terms and booking an appointment, you consent to the collection, use, and disclosure of health-related information as described in these Terms and in the privacy notices made available to you.
               </p>
             </section>
 
@@ -275,7 +275,7 @@ const TermsOfService = () => {
                 13.1. ConveLabs collects, packages, and transports specimens from the point of collection to a clinical laboratory designated on the requisition (the "Performing Lab"). <strong>At the moment a specimen is accepted by the Performing Lab</strong>, custody and control of the specimen and all associated test results transfer to that Performing Lab.
               </p>
               <p>
-                13.2. The Performing Lab — not ConveLabs — is the data controller and result-of-record issuer under CLIA, HIPAA, and applicable state law. ConveLabs does NOT generate, certify, alter, withhold, or amend any test result. Disputes regarding test accuracy, the Performing Lab's billing, or insurance reimbursement must be addressed directly with the Performing Lab.
+                13.2. The Performing Lab — not ConveLabs — is the result-of-record issuer under applicable laboratory and privacy laws. ConveLabs does NOT generate, certify, alter, withhold, or amend any test result. Disputes regarding test accuracy, the Performing Lab's billing, or insurance reimbursement must be addressed directly with the Performing Lab.
               </p>
               <p>
                 13.3. Specimen-integrity events occurring during ConveLabs custody are remediated under the Recollection Guarantee in Section 12.
@@ -306,7 +306,7 @@ const TermsOfService = () => {
                 <p className="mt-2">Phone: (941) 527-9169</p>
                 <p>Fax: (941) 251-8467</p>
                 <p>Email: info@convelabs.com</p>
-                <p className="mt-2">HIPAA Privacy Officer: info@convelabs.com</p>
+                <p className="mt-2">Privacy requests: info@convelabs.com</p>
               </div>
             </section>
 

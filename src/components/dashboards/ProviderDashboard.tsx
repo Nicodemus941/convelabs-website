@@ -912,7 +912,7 @@ const ProviderDashboard: React.FC = () => {
                   className="mt-1 h-4 w-4 rounded border-gray-300 text-[#B91C1C] focus:ring-[#B91C1C]"
                 />
                 <span className="text-[12px] text-gray-700 leading-snug">
-                  I agree to the <a href="/terms" target="_blank" className="text-[#B91C1C] underline">Terms of Service</a> and <a href="/privacy" target="_blank" className="text-[#B91C1C] underline">Privacy Policy</a>, and confirm that I'm authorized to access patient records on behalf of my organization (HIPAA).
+                  I agree to the <a href="/terms" target="_blank" className="text-[#B91C1C] underline">Terms of Service</a> and <a href="/privacy" target="_blank" className="text-[#B91C1C] underline">Privacy Policy</a>, and confirm that I'm authorized to access patient records on behalf of my organization.
                 </span>
               </label>
             )}

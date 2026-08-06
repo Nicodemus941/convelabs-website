@@ -2,12 +2,6 @@ import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useGeoLocation } from './useGeoLocation';
 
-interface WebhookPayload {
-  action: 'qualify_lead' | 'track_visitor_analytics' | 'analyze_visitor_behavior' | 'generate_discount_coupon';
-  site: string;
-  data: any;
-}
-
 interface LeadQualificationResponse {
   success: boolean;
   leadId: string;
@@ -27,6 +21,14 @@ interface CouponGenerationResponse {
   expiresAt: string;
   bookingLink: string;
   emailSent: boolean;
+}
+
+interface VisitorInteraction {
+  type: string;
+  element_id?: string;
+  element_text?: string;
+  data?: Record<string, unknown>;
+  value_score?: number;
 }
 
 interface VisitorData {
@@ -49,12 +51,11 @@ interface VisitorData {
     page_visited: string;
     time_on_site: number;
     interactions_count: number;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
 export const useWebhookIntegration = () => {
-  const WEBHOOK_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/convelabs-webhook';
   const { geoData } = useGeoLocation();
 
   const getSessionId = useCallback(() => {
@@ -69,17 +70,6 @@ export const useWebhookIntegration = () => {
       localStorage.setItem('convelabs_visitor_id', visitorId);
     }
     return visitorId;
-  }, []);
-
-  const getUTMParams = useCallback(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    return {
-      source: urlParams.get('utm_source') || undefined,
-      medium: urlParams.get('utm_medium') || undefined,
-      campaign: urlParams.get('utm_campaign') || undefined,
-      term: urlParams.get('utm_term') || undefined,
-      content: urlParams.get('utm_content') || undefined,
-    };
   }, []);
 
   const getDeviceInfo = useCallback(() => {
@@ -101,129 +91,146 @@ export const useWebhookIntegration = () => {
     return 0;
   }, []);
 
-  const sendWebhookRequest = useCallback(async (payload: WebhookPayload) => {
-    try {
-      console.log('Sending webhook request:', payload);
-      const response = await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        console.error(`Webhook request failed with status: ${response.status}`);
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error(`Webhook request failed: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log('Webhook response:', result);
-      return result;
-    } catch (error) {
-      console.error('Webhook integration error:', error);
-      throw error;
-    }
-  }, []);
-
   const qualifyLead = useCallback(async (leadData: VisitorData): Promise<LeadQualificationResponse | null> => {
     try {
-      const utmParams = getUTMParams();
-      const deviceInfo = getDeviceInfo();
-      
-      const payload: WebhookPayload = {
-        action: 'qualify_lead',
-        site: 'convelabs.com',
-        data: {
-          ...leadData,
-          ...utmParams,
-          ...deviceInfo,
-          visitor_id: getVisitorId(),
-          session_id: getSessionId(),
-          metadata: {
-            page_visited: window.location.pathname,
-            time_on_site: getTimeOnSite(),
-            ...leadData.metadata,
-          },
-        },
-      };
+      const interactions = leadData.metadata?.interactions_count ?? 0;
+      const timeOnSite = leadData.metadata?.time_on_site ?? getTimeOnSite();
+      const score = Math.max(
+        35,
+        Math.min(
+          95,
+          40 +
+            (leadData.phone ? 15 : 0) +
+            Math.min(interactions * 5, 20) +
+            Math.min(Math.floor(timeOnSite / 30), 20)
+        )
+      );
 
-      const response = await sendWebhookRequest(payload);
-      
-      // Also store in local system for backup
-      await supabase.functions.invoke('analyze-visitor-behavior', {
+      const priority: LeadQualificationResponse['qualification']['priority'] =
+        score >= 80 ? 'hot' : score >= 60 ? 'warm' : 'cold';
+      const recommendedRoute: LeadQualificationResponse['recommendedRoute'] =
+        score >= 80 ? 'direct_booking' : score >= 60 ? 'consultation' : 'nurture';
+
+      const leadCapture = await supabase.functions.invoke('process-lead-capture', {
         body: {
-          action: 'track_lead_qualification',
-          data: {
-            webhook_response: response,
-            payload: payload.data,
-          }
-        }
+          email: leadData.email?.trim().toLowerCase(),
+          source: leadData.source || 'visitor_qualification',
+          referrer: typeof window !== 'undefined' ? window.location.href : undefined,
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        },
       });
 
-      return response;
+      await supabase.functions.invoke('analyze-visitor-behavior', {
+        body: {
+          action: 'track_interaction',
+          data: {
+            sessionId: getSessionId(),
+            type: 'form_complete',
+            element: 'lead_qualification',
+            value: priority,
+            path: window.location.pathname,
+          },
+        },
+      });
+
+      return {
+        success: !leadCapture.error,
+        leadId: getVisitorId(),
+        qualification: {
+          score,
+          priority,
+          reasoning: `Qualified from captured contact info, ${interactions} tracked interactions, and ${timeOnSite}s on site.`,
+        },
+        recommendedRoute,
+        nextSteps:
+          recommendedRoute === 'direct_booking'
+            ? ['Show booking-first CTAs', 'Prioritize rapid follow-up']
+            : recommendedRoute === 'consultation'
+              ? ['Offer consult scheduling', 'Send service overview']
+              : ['Enroll in nurture follow-up', 'Keep educational CTAs visible'],
+      };
     } catch (error) {
       console.error('Lead qualification failed:', error);
       return null;
     }
-  }, [getUTMParams, getDeviceInfo, getVisitorId, getSessionId, getTimeOnSite, sendWebhookRequest]);
+  }, [getVisitorId, getSessionId, getTimeOnSite]);
 
-  const trackVisitorAnalytics = useCallback(async (interactions: any[] = []) => {
+  const trackVisitorAnalytics = useCallback(async (interactions: VisitorInteraction[] = []) => {
     try {
-      const utmParams = getUTMParams();
       const deviceInfo = getDeviceInfo();
-      
-      const payload: WebhookPayload = {
-        action: 'track_visitor_analytics',
-        site: 'convelabs.com',
-        data: {
-          session_id: getSessionId(),
-          visitor_id: getVisitorId(),
-          site: 'convelabs.com',
-          page_url: window.location.href,
-          referrer: document.referrer,
-          ...utmParams,
-          ...deviceInfo,
-          country: geoData.country,
-          city: geoData.city,
-          interactions,
-          journey_data: {
-            stage: 'consideration',
-            touchpoint: 'website_visit',
-            interaction_type: 'page_view',
-            time_spent: getTimeOnSite(),
-            position: 'middle_funnel',
-          },
-        },
-      };
 
-      return await sendWebhookRequest(payload);
+      const events = interactions.length > 0 ? interactions : [{
+        type: 'page_view',
+        element_id: 'page',
+        element_text: document.title,
+      }];
+
+      const results = await Promise.all(
+        events.map((interaction) =>
+          supabase.functions.invoke('analyze-visitor-behavior', {
+            body: {
+              action: 'track_interaction',
+              data: {
+                sessionId: getSessionId(),
+                type: interaction.type,
+                element: interaction.element_id || interaction.element_text || 'page',
+                value: JSON.stringify({
+                  page_url: window.location.href,
+                  referrer: document.referrer,
+                  ...deviceInfo,
+                  country: geoData.country,
+                  city: geoData.city,
+                  details: interaction.data || null,
+                  value_score: interaction.value_score ?? null,
+                }),
+                path: window.location.pathname,
+              },
+            },
+          })
+        )
+      );
+
+      return { success: results.every(({ error }) => !error) };
     } catch (error) {
       console.error('Visitor analytics tracking failed:', error);
       return null;
     }
-  }, [getUTMParams, getDeviceInfo, getSessionId, getVisitorId, getTimeOnSite, sendWebhookRequest]);
+  }, [getDeviceInfo, getSessionId, geoData.country, geoData.city]);
 
   const analyzeBehavior = useCallback(async (trigger: string) => {
     try {
-      const payload: WebhookPayload = {
-        action: 'analyze_visitor_behavior',
-        site: 'convelabs.com',
-        data: {
-          visitor_id: getVisitorId(),
-          session_id: getSessionId(),
-          trigger,
+      const { data, error } = await supabase.functions.invoke('analyze-visitor-behavior', {
+        body: {
+          action: 'analyze_visitor',
+          data: {
+            sessionId: getSessionId(),
+            pageViews: [{
+              path: window.location.pathname,
+              timeOnPage: getTimeOnSite(),
+              interactions: [trigger],
+              timestamp: new Date().toISOString(),
+            }],
+            interactions: [{
+              type: 'cta_click',
+              element: trigger,
+              timestamp: new Date().toISOString(),
+            }],
+            demographics: {
+              location: [geoData.city, geoData.country].filter(Boolean).join(', ') || undefined,
+              deviceType: getDeviceInfo().device_type,
+              isReturning: Boolean(localStorage.getItem('convelabs_visitor_id')),
+            },
+          },
         },
-      };
+      });
 
-      return await sendWebhookRequest(payload);
+      if (error) throw error;
+      return data;
     } catch (error) {
       console.error('Behavior analysis failed:', error);
       return null;
     }
-  }, [getVisitorId, getSessionId, sendWebhookRequest]);
+  }, [geoData.city, geoData.country, getDeviceInfo, getSessionId, getTimeOnSite]);
 
   const generateDiscountCoupon = useCallback(async (offerData: {
     email: string;
@@ -235,46 +242,52 @@ export const useWebhookIntegration = () => {
   }): Promise<CouponGenerationResponse | null> => {
     try {
       console.log('Generating discount coupon for:', offerData);
-      const utmParams = getUTMParams();
-      const deviceInfo = getDeviceInfo();
-      
-      const payload: WebhookPayload = {
-        action: 'generate_discount_coupon',
-        site: 'convelabs.com',
-        data: {
-          ...offerData,
-          ...utmParams,
-          ...deviceInfo,
-          visitor_id: getVisitorId(),
-          session_id: getSessionId(),
-          timestamp: new Date().toISOString(),
-          source: 'exit_intent_popup',
-          metadata: {
-            page_visited: window.location.pathname,
-            time_on_site: getTimeOnSite(),
-          },
-        },
-      };
-
-      const response = await sendWebhookRequest(payload);
-      
-      // Also store in local system for backup
-      await supabase.functions.invoke('analyze-visitor-behavior', {
+      await supabase.functions.invoke('process-lead-capture', {
         body: {
-          action: 'track_coupon_generation',
-          data: {
-            webhook_response: response,
-            payload: payload.data,
-          }
-        }
+          email: offerData.email.trim().toLowerCase(),
+          source: 'exit_intent_popup',
+          referrer: typeof window !== 'undefined' ? window.location.href : undefined,
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        },
       });
 
-      return response;
+      const followUpSummary = [
+        `Exit intent offer request`,
+        `Email: ${offerData.email}`,
+        offerData.phone ? `Phone: ${offerData.phone}` : null,
+        `Profile: ${offerData.visitorProfile}`,
+        `Offer: ${offerData.offerType}`,
+        `Requested discount: ${offerData.discountPercent}%`,
+        `Page: ${window.location.href}`,
+      ].filter(Boolean).join('\n');
+
+      const { error } = await supabase.functions.invoke('send-email', {
+        body: {
+          to: 'info@convelabs.com',
+          subject: `[ConveLabs Offer Request] ${offerData.visitorProfile}`,
+          text: followUpSummary,
+          html: `<pre style="font-family:Arial,sans-serif;white-space:pre-wrap;">${followUpSummary}</pre>`,
+        },
+      });
+
+      if (error) {
+        console.error('Offer follow-up request failed:', error);
+        return null;
+      }
+
+      return {
+        success: true,
+        couponCode: 'FOLLOW_UP',
+        discountAmount: offerData.discountPercent,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        bookingLink: '/contact',
+        emailSent: true,
+      };
     } catch (error) {
       console.error('Coupon generation failed:', error);
       return null;
     }
-  }, [getUTMParams, getDeviceInfo, getVisitorId, getSessionId, getTimeOnSite, sendWebhookRequest]);
+  }, []);
 
   return {
     qualifyLead,
