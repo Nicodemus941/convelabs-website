@@ -92,6 +92,7 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
     const d = new Date(); d.setDate(d.getDate() + 14);
     return d.toISOString().substring(0, 10);
   });
+  const [nextApptDate, setNextApptDate] = useState('');
   const [notes, setNotes] = useState('');
   const [fastingRequired, setFastingRequired] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -233,62 +234,91 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
         if (upErr) throw upErr;
       }
 
-      const rows = Array.from(selected).map(name => {
-        const p = patients.find(x => x.patient_name === name)!;
-        return {
-          organization_id: orgId,
-          patient_name: name,
-          patient_email: p.patient_email || null,
-          patient_phone: p.patient_phone || null,
-          // Reuse the new lab order if uploaded, otherwise keep null — admin
-          // will follow up with patient for upload.
-          lab_order_file_path: filePath || p.last_lab_order_file_path || null,
-          draw_by_date: drawBy,
-          fasting_required: fastingRequired,
-          admin_notes: notes || null,
-          status: 'pending_schedule',
-          access_token: crypto.randomUUID(),
-          access_token_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          patient_reminder_count: 0,
-          dob_verify_attempts: 0,
-        };
-      });
+      const selectedPatients = Array.from(selected)
+        .map(name => patients.find(x => x.patient_name === name))
+        .filter(Boolean) as LinkedPatient[];
 
-      const { error: insErr, count } = await supabase.from('patient_lab_requests').insert(rows, { count: 'exact' });
-      if (insErr) throw insErr;
+      const missingContact = selectedPatients.filter(p => !p.patient_email && !p.patient_phone);
+      if (missingContact.length > 0) {
+        throw new Error(
+          `Missing email/phone for ${missingContact.map(p => p.patient_name).slice(0, 3).join(', ')}${missingContact.length > 3 ? ` +${missingContact.length - 3} more` : ''}. Open those patient charts first and add contact info.`
+        );
+      }
+
+      const { data: session } = await supabase.auth.getSession();
+      const token = session?.session?.access_token;
+      if (!token) throw new Error('No active session');
+
+      let createdCount = 0;
+      let deliveredAny = 0;
+      let partialAny = 0;
+      const failures: string[] = [];
+
+      for (const p of selectedPatients) {
+        const resp = await fetch('https://yluyonhrxxtyuiyrdixl.supabase.co/functions/v1/create-lab-request', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            organization_id: orgId,
+            patient_name: p.patient_name,
+            patient_email: p.patient_email || null,
+            patient_phone: p.patient_phone || null,
+            patient_dob: p.date_of_birth || null,
+            lab_order_file_path: filePath || p.last_lab_order_file_path || null,
+            draw_by_date: drawBy,
+            next_doctor_appt_date: nextApptDate || null,
+            admin_notes: notes || null,
+            fasting_required: fastingRequired,
+          }),
+        });
+        const j = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          failures.push(`${p.patient_name}: ${j?.error || `HTTP ${resp.status}`}`);
+          continue;
+        }
+        createdCount++;
+        const delivery = j?.delivery || {};
+        const emailSent = !!delivery.email_sent;
+        const smsSent = !!delivery.sms_sent;
+        if (emailSent || smsSent) deliveredAny++;
+        if ((delivery.email_attempted && !emailSent) || (delivery.sms_attempted && !smsSent)) partialAny++;
+      }
+
+      if (createdCount === 0) {
+        throw new Error(failures[0] || 'No requests were created');
+      }
 
       // Notify owner SMS — one aggregated alert for bulk request
       try {
         await supabase.functions.invoke('send-sms-notification', {
           body: {
             to: '9415279169',
-            message: `📋 BULK lab request from provider: ${rows.length} patient${rows.length === 1 ? '' : 's'}. Draw by ${drawBy}.${fastingRequired ? ' Fasting.' : ''} Check admin → Lab requests.`,
+            message: `📋 BULK lab request from provider: ${createdCount} patient${createdCount === 1 ? '' : 's'}. Draw by ${drawBy}.${nextApptDate ? ` Provider follow-up ${nextApptDate}.` : ''}${fastingRequired ? ' Fasting.' : ''} Check admin → Lab requests.`,
           },
         });
       } catch { /* non-blocking */ }
 
-      // HIPAA-aware: send each patient a consent/notification SMS so the
-      // request doesn't land as a surprise. Patient can reply STOP to
-      // opt out of further SMS, or click the access_token link in their
-      // existing reminder cron flow to schedule. Non-blocking per patient.
-      // Quiet-hours gate is applied in send-sms-notification.
-      try {
-        for (const r of rows) {
-          if (!r.patient_phone) continue;
-          const firstName = r.patient_name.split(' ')[0] || 'there';
-          const site = typeof window !== 'undefined' ? window.location.origin : 'https://convelabs.com';
-          const link = `${site}/lab-request/${r.access_token}`;
-          const body = `Hi ${firstName}, your doctor's office requested new labs through ConveLabs. Pick a time that works for you: ${link}${fastingRequired ? ' (Fasting required.)' : ''} Reply STOP to opt out.`;
-          supabase.functions.invoke('send-sms-notification', {
-            body: { to: r.patient_phone, message: body, category: 'reminder' },
-          }).catch(() => { /* non-blocking per-patient */ });
-        }
-      } catch { /* non-blocking */ }
+      if (failures.length === 0) {
+        toast.success(
+          `Submitted ${createdCount} lab request${createdCount === 1 ? '' : 's'}. ${deliveredAny === createdCount ? 'Patients were notified by the available channels.' : 'Requests were created and delivery status was recorded.'}`
+        );
+      } else {
+        toast.warning(
+          `Submitted ${createdCount} request${createdCount === 1 ? '' : 's'} with ${failures.length} issue${failures.length === 1 ? '' : 's'}.`,
+          { description: failures.slice(0, 3).join(' · '), duration: 12000 }
+        );
+      }
 
-      toast.success(`Submitted ${count || rows.length} lab request${(count || rows.length) === 1 ? '' : 's'}. Patients will be notified.`);
+      if (partialAny > 0) {
+        toast.info(`${partialAny} patient notification${partialAny === 1 ? '' : 's'} had a partial channel failure. Open Lab Requests to inspect delivery status.`, {
+          duration: 10000,
+        });
+      }
+
       setSelected(new Set());
       setLabFile(null);
       setNotes('');
+      setNextApptDate('');
       setBulkOpen(false);
       onRequestCreated?.();
       load();
@@ -698,6 +728,19 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated }) => 
             <div>
               <Label className="text-xs">Draw by date *</Label>
               <Input type="date" value={drawBy} onChange={e => setDrawBy(e.target.value)} className="text-xs" />
+            </div>
+            <div>
+              <Label className="text-xs">Provider follow-up date <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <Input
+                type="date"
+                value={nextApptDate}
+                min={drawBy || new Date().toISOString().substring(0, 10)}
+                onChange={e => setNextApptDate(e.target.value)}
+                className="text-xs"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                If set, this appears in the patient message and in your lab-request tracker so staff know the booking deadline context.
+              </p>
             </div>
             <div className="flex items-start gap-2 p-2 border rounded-lg">
               <Checkbox id="fasting-bulk" checked={fastingRequired} onCheckedChange={(c) => setFastingRequired(c === true)} className="mt-0.5" />

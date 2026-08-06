@@ -85,6 +85,12 @@ function tomorrowET(): { iso: string; label: string } {
   return { iso, label };
 }
 
+function plusDaysDateOnly(dateOnlyIso: string, days: number): string {
+  const d = new Date(`${dateOnlyIso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Evening send window (ET hours, inclusive). The fasting reminder is a
 // NIGHT-BEFORE message — it must land in the evening (before the 9 PM
 // quiet-hours floor), not the morning. Before this guard, the every-30-min
@@ -127,8 +133,8 @@ Deno.serve(async (req) => {
   try {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const tomorrow = tomorrowET();
-    const rangeStart = `${tomorrow.iso}T00:00:00`;
-    const rangeEnd = `${tomorrow.iso}T23:59:59`;
+    const rangeStart = tomorrow.iso;
+    const rangeEndExclusive = plusDaysDateOnly(tomorrow.iso, 1);
 
     // Pull all fasting-required appointments for tomorrow that still need a reminder.
     // urine_required is now selected so the SMS / email can prompt the patient to
@@ -141,7 +147,7 @@ Deno.serve(async (req) => {
       .is('fasting_reminder_sent_at', null)
       .not('status', 'in', '(cancelled,completed)')
       .gte('appointment_date', rangeStart)
-      .lte('appointment_date', rangeEnd);
+      .lt('appointment_date', rangeEndExclusive);
     if (q) throw q;
 
     let sent = 0, skippedAfternoon = 0, skippedNoContact = 0;

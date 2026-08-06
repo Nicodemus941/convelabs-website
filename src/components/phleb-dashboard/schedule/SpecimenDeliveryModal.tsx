@@ -52,6 +52,15 @@ const LABS = [
 const LABS_WITHOUT_SPECIMEN_ID = ['adventhealth'];
 const labRequiresSpecimenId = (lab: string) => !!lab && !LABS_WITHOUT_SPECIMEN_ID.includes(lab);
 
+const classifyScannedCode = (value: string): string => {
+  const s = String(value || '').replace(/\s+/g, '').toUpperCase();
+  if (/^1Z[A-Z0-9]{16}$/.test(s)) return 'ups';
+  if ((/^\d{12}$/.test(s) || /^\d{15}$/.test(s)) || (/^\d{20,22}$/.test(s) && s.startsWith('96'))) return 'fedex';
+  if (/^(94|93|92|420)\d{18,24}$/.test(s)) return 'usps';
+  if (/^[A-Z]{1,4}[-_]?\d{4,}/.test(s) || /^\d{7,11}$/.test(s)) return 'accession';
+  return 'other';
+};
+
 // A visit needs multiple specimen deliveries when it has BOTH a conventional
 // blood draw (lab_order_panels) AND a specialty kit — the draw drops at a lab
 // and the kit ships to a different lab. Auto-detected so the phleb doesn't have
@@ -530,7 +539,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
       for (const v of barcodeValues) {
         const key = v.replace(/\s+/g, '').toUpperCase();
         if (seen.has(key)) continue; seen.add(key);
-        codes.push({ value: v, format: 'barcode', kind: 'barcode', confidence: 'high' });
+        codes.push({ value: v, format: classifyScannedCode(v), kind: 'barcode', confidence: 'high' });
       }
       for (const c of (ocr?.codes || [])) {
         const key = String(c.value || '').replace(/\s+/g, '').toUpperCase();
