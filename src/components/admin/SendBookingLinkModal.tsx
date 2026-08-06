@@ -85,6 +85,10 @@ interface CompanionDraft {
   dateOfBirth: string;
 }
 
+interface BookingPrefillAudit {
+  missingFields: string[];
+}
+
 const SendBookingLinkModal: React.FC<Props> = ({
   open, onClose, patient, onSent,
   presetOrganizationId, presetOrganizationName, presetLabOrderPath, presetServiceType,
@@ -97,6 +101,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [selectedHouseholdIds, setSelectedHouseholdIds] = useState<string[]>([]);
   const [manualCompanions, setManualCompanions] = useState<CompanionDraft[]>([]);
+  const [prefillAudit, setPrefillAudit] = useState<BookingPrefillAudit>({ missingFields: [] });
   const [labOrderFile, setLabOrderFile] = useState<File | null>(null);
   const [labOrderUploading, setLabOrderUploading] = useState(false);
   const [uploadedPath, setUploadedPath] = useState<string | null>(null);
@@ -133,6 +138,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
     if (!open || !patient?.id) {
       setHouseholdMembers([]);
       setSelectedHouseholdIds([]);
+      setPrefillAudit({ missingFields: [] });
       return;
     }
     let cancelled = false;
@@ -141,9 +147,17 @@ const SendBookingLinkModal: React.FC<Props> = ({
       try {
         const { data: primary } = await supabase
           .from('tenant_patients')
-          .select('id, household_id')
+          .select('id, household_id, email, phone, date_of_birth, address, city, state, zipcode')
           .eq('id', patient.id)
           .maybeSingle();
+        if (!cancelled) {
+          const missingFields: string[] = [];
+          if (!primary?.date_of_birth) missingFields.push('DOB');
+          if (!primary?.address || !primary?.zipcode) missingFields.push('address');
+          if (!primary?.email) missingFields.push('email');
+          if (!primary?.phone) missingFields.push('phone');
+          setPrefillAudit({ missingFields });
+        }
         if (cancelled || !primary?.household_id) {
           if (!cancelled) setHouseholdMembers([]);
           return;
@@ -157,7 +171,10 @@ const SendBookingLinkModal: React.FC<Props> = ({
           .order('first_name', { ascending: true });
         if (!cancelled) setHouseholdMembers((members || []) as HouseholdMember[]);
       } catch {
-        if (!cancelled) setHouseholdMembers([]);
+        if (!cancelled) {
+          setHouseholdMembers([]);
+          setPrefillAudit({ missingFields: [] });
+        }
       } finally {
         if (!cancelled) setHouseholdLoading(false);
       }
@@ -351,6 +368,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
       .map((entry) => `${entry.firstName || ''} ${entry.lastName || ''}`.trim())
       .filter(Boolean),
   ];
+  const prefillReady = prefillAudit.missingFields.length === 0;
 
   const hipaaMode = !!(orgs.find(o => o.id === selectedOrgId) || manualOrgName.trim());
 
@@ -443,7 +461,9 @@ const SendBookingLinkModal: React.FC<Props> = ({
               <p className="text-[11px] text-blue-800 leading-relaxed">
                 Their booking link opens with their information already filled in.
                 {householdCount > 0 ? ` The same visit will also include ${householdCount} additional patient${householdCount === 1 ? '' : 's'}.` : ''}
-                They just upload the lab order if needed, choose a date and time, and pay.
+                {prefillReady
+                  ? ' They just upload the lab order if needed, choose a date and time, and pay.'
+                  : ` They will still need to confirm ${prefillAudit.missingFields.join(', ')} before checkout.`}
               </p>
               {householdSummary.length > 0 && (
                 <p className="text-[10px] text-blue-700">
@@ -451,6 +471,16 @@ const SendBookingLinkModal: React.FC<Props> = ({
                 </p>
               )}
             </div>
+
+            {!prefillReady && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+                <p className="text-xs font-semibold text-amber-900">This chart is not fully prefilled yet</p>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Missing on file: {prefillAudit.missingFields.join(', ')}. The booking link will still work,
+                  but the patient will need to complete those details instead of going straight to date, upload, and payment.
+                </p>
+              </div>
+            )}
 
             {/* Step 1 — Provider's office */}
             <div className="border border-gray-200 rounded-lg p-3 space-y-2">

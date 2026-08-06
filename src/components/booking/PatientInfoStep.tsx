@@ -38,7 +38,7 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
   onFoundingMemberDetected,
 }) => {
   const { user } = useAuth();
-  const { control, watch, setValue, getValues } = useFormContext<BookingFormValues>();
+  const { control, watch, setValue, getValues, trigger } = useFormContext<BookingFormValues>();
   const dateOfBirth = watch('patientDetails.dateOfBirth');
   const [recognized, setRecognized] = useState(false);
   const [recognizedName, setRecognizedName] = useState('');
@@ -279,6 +279,22 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
       setValue('patientDetails.phone', '');
       setRecognized(false);
     }
+  };
+
+  const handleContinue = async () => {
+    const valid = await trigger([
+      'patientDetails.firstName',
+      'patientDetails.lastName',
+      'patientDetails.dateOfBirth',
+      'patientDetails.email',
+      'patientDetails.phone',
+      'additionalPatients',
+    ] as const, { shouldFocus: true });
+    if (!valid) {
+      toast.error('Finish the highlighted patient details before continuing.');
+      return;
+    }
+    onNext();
   };
 
   return (
@@ -702,7 +718,7 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
             
             <Button 
               type="button" 
-              onClick={onNext}
+              onClick={handleContinue}
               className="flex items-center"
             >
               Continue

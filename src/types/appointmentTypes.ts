@@ -1,6 +1,16 @@
 
 import { z } from 'zod';
 
+const optionalEmailSchema = z.string().trim().refine(
+  (value) => value.length === 0 || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value),
+  'Enter a valid email address',
+);
+
+const optionalPhoneSchema = z.string().trim().refine(
+  (value) => value.length === 0 || value.replace(/\D/g, '').length >= 10,
+  'Enter a valid 10-digit phone number',
+);
+
 export interface Appointment {
   id: string;
   // Support both field names for backwards compatibility
@@ -130,15 +140,11 @@ export const bookingFormSchema = z.object({
   patientDetails: z.object({
     firstName: z.string().min(1, "First name is required"),
     lastName: z.string().min(1, "Last name is required"),
-    email: z.string().email("Invalid email address"),
-    // Phone is REQUIRED — the booking confirmation + reminder SMS have no
-    // destination without it, so a phone-less booking silently gets no texts
-    // (root cause of missed confirmations). Lenient 10-digit check so real
-    // formats like "(407) 617-2064" pass. Companions below stay optional.
-    phone: z.string()
-      .trim()
-      .min(1, "Phone number is required")
-      .refine((v) => v.replace(/\D/g, "").length >= 10, "Enter a valid 10-digit phone number"),
+    // Send-booking-link prefill can legitimately arrive with only email OR
+    // phone on file. Accept either channel here, but require at least one
+    // below so referred patients are not stranded by a mismatched schema.
+    email: optionalEmailSchema,
+    phone: optionalPhoneSchema,
     // DOB is REQUIRED — the phleb card + NIIMBOT tube label both depend on
     // it for patient identification at the visit. Previously optional →
     // dropped silently on bookings like Shaun Chambers (2026-05-11), forcing
@@ -146,6 +152,19 @@ export const bookingFormSchema = z.object({
     // picker) or YYYY-MM-DD string (current native input).
     dateOfBirth: z.union([z.date(), z.string().min(1, 'Date of birth is required')]),
     familyMemberId: z.string().nullable().optional(),
+  }).superRefine((value, ctx) => {
+    if (!value.email && !value.phone) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Add an email or phone number so we can confirm the booking.',
+        path: ['email'],
+      });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Add a phone or email so we can confirm the booking.',
+        path: ['phone'],
+      });
+    }
   }),
   additionalPatients: z.array(z.object({
     firstName: z.string().min(1, "First name required"),
