@@ -156,7 +156,7 @@ const ScheduleTab: React.FC<ScheduleTabProps> = ({
             </div>
             <div className="text-center">
               <p className="text-2xl font-bold text-emerald-400">${todayEarnings}</p>
-              <p className="text-[10px] text-gray-400">Earned{todayTips > 0 ? ` (+$${todayTips} tips)` : ''}</p>
+              <p className="text-[10px] text-gray-400">Payout{todayTips > 0 ? ` · $${todayTips} tips` : ''}</p>
             </div>
             <div className="text-center">
               <p className="text-2xl font-bold text-amber-400">{todayRemaining.length}</p>

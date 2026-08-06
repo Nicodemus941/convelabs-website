@@ -339,6 +339,12 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   const labRouteUrl = buildLabRouteUrl(appointment.lab_destination, appointment.zipcode);
   // Detected panels from OCR — shown as chips on the card
   const panelBadges = extractPanelBadges((appointment as any).lab_order_panels);
+  const hasLabOrderOnFile = !!appointment.lab_order_file_path || labOrderJustUploaded || siblingLabOrderPaths.length > 0;
+  const visitPayLabel = (() => {
+    const tip = Number((appointment as any).tip_amount || 0);
+    if (tip > 0) return `Tips on this visit: $${tip.toFixed(0)}`;
+    return 'Tips not added yet';
+  })();
 
   // Persist patient edit modal state so it survives PWA background/reload
   const openPatientEdit = useCallback(() => {
@@ -699,6 +705,42 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
               )}
 
               {/* Date & Address */}
+              <div className="px-4 py-3 border-b bg-[#FBF8F7]">
+                <p className="text-sm font-semibold text-gray-800 mb-2">Visit snapshot</p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div className="rounded-xl border border-[#EFE3E1] bg-white p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8B7C7E]">When</p>
+                    <p className="mt-1 text-sm font-semibold text-[#1A1416]">
+                      {appointment.appointment_time || 'Time TBD'}
+                    </p>
+                    <p className="text-xs text-[#8B7C7E]">{formatAppointmentDate(appointment.appointment_date)}</p>
+                  </div>
+                  <div className="rounded-xl border border-[#EFE3E1] bg-white p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8B7C7E]">Prep</p>
+                    <p className="mt-1 text-sm font-semibold text-[#1A1416]">
+                      {fasting.required ? 'Fasting required' : 'Standard draw'}
+                    </p>
+                    <p className="text-xs text-[#8B7C7E]">
+                      {hasLabOrderOnFile ? `${panelBadges.length > 0 ? `${panelBadges.length} panel${panelBadges.length === 1 ? '' : 's'}` : 'Lab order ready'}` : 'Lab order still needed'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-[#EFE3E1] bg-white p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8B7C7E]">Where</p>
+                    <p className="mt-1 text-sm font-semibold text-[#1A1416] line-clamp-2">
+                      {appointment.address}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-[#EFE3E1] bg-white p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8B7C7E]">Pay</p>
+                    <p className="mt-1 text-sm font-semibold text-[#1A1416]">
+                      {appointment.payment_status === 'completed' ? 'Paid' : appointment.invoice_status === 'sent' || appointment.invoice_status === 'reminded' ? 'Invoice pending' : 'Needs review'}
+                    </p>
+                    <p className="text-xs text-[#8B7C7E]">{visitPayLabel}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Date & Address */}
               <div className="px-4 py-3 space-y-2 border-b">
                 <div className="flex items-center gap-2 text-sm">
                   <Clock className="h-4 w-4 text-muted-foreground" />
@@ -715,7 +757,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
 
               {/* Patient Details */}
               <div className="px-4 py-3 border-b">
-                <p className="text-sm font-semibold text-gray-800 mb-2">Patient Details</p>
+                <p className="text-sm font-semibold text-gray-800 mb-2">Patient + contact</p>
                 {/* Contact info */}
                 <div className="space-y-1 mb-3 text-sm">
                   {appointment.patient_phone ? (

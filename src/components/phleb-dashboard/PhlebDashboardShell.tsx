@@ -199,19 +199,28 @@ const PhlebDashboardShell: React.FC = () => {
 
         {/* Mobile Header — approved mockup: light-on-wash with crimson avatar,
             greeting stack, duty toggle right (replaces the old red banner). */}
-        <div className="md:hidden px-4 pt-3 pb-2" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
-          <div className="max-w-lg mx-auto flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full flex-shrink-0 bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center font-bold text-sm shadow-sm">
-              {`${user?.firstName?.[0] || 'P'}${user?.lastName?.[0] || ''}`.toUpperCase()}
+        <div className="md:hidden px-4 pt-4 pb-3" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
+          <div className="max-w-lg mx-auto space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-full flex-shrink-0 bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                {`${user?.firstName?.[0] || 'P'}${user?.lastName?.[0] || ''}`.toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1 leading-tight pt-0.5">
+                <p className="text-[11.5px] text-[#8B7C7E]">Good {greeting},</p>
+                <h1 className="text-[clamp(1.05rem,4.6vw,1.3rem)] font-extrabold tracking-tight text-[#1A1416] truncate">
+                  {user?.firstName || 'Phlebotomist'}
+                </h1>
+                <p className="text-[10.5px] text-[#B7A9AB]">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
+              </div>
+              <div className="flex-shrink-0 pt-0.5">
+                <NotificationCenter />
+              </div>
             </div>
-            <div className="min-w-0 leading-tight">
-              <p className="text-[11.5px] text-[#8B7C7E]">Good {greeting},</p>
-              <h1 className="text-lg font-extrabold tracking-tight text-[#1A1416] truncate">{user?.firstName || 'Phlebotomist'}</h1>
-              <p className="text-[10.5px] text-[#B7A9AB]">{format(new Date(), 'EEEE, MMMM d, yyyy')}</p>
-            </div>
-            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 pl-[3.25rem]">
+              <p className="text-[11px] text-[#8B7C7E]">
+                Keep the next job obvious.
+              </p>
               <OnDutyToggle variant="mobile" />
-              <NotificationCenter />
             </div>
           </div>
         </div>

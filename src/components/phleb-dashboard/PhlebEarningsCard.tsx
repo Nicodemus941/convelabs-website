@@ -52,13 +52,15 @@ const PhlebEarningsCard: React.FC = () => {
   const [tomorrow, setTomorrow] = useState<DayBucket>(ZERO);
   const [week, setWeek] = useState<DayBucket>(ZERO);
   const [mtd, setMtd] = useState<DayBucket>(ZERO);
-  const [ytd, setYtd] = useState<DayBucket>(ZERO);
   // Last-month banked total — sourced directly from staff_payouts so it
   // automatically reflects the post-2026-05-13 reconciliation row(s) plus
   // any historical Stripe Connect transfers. Hormozi: "Last month banked"
   // is the operator's "did I get paid for what I did?" mirror.
   const [lastMonthCents, setLastMonthCents] = useState<number>(0);
   const [last7, setLast7] = useState<{ date: string; cents: number }[]>([]);
+  const [todayTipCents, setTodayTipCents] = useState<number>(0);
+  const [weekTipCents, setWeekTipCents] = useState<number>(0);
+  const [monthTipCents, setMonthTipCents] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   // Track recent cancellations so we can ghost the lost $X (Hormozi
   // "make the cost of cancellations visible"). Keyed by appt id.
@@ -146,6 +148,9 @@ const PhlebEarningsCard: React.FC = () => {
 
       const buckets: Record<'today' | 'tomorrow' | 'week' | 'mtd', DayBucket> =
         { today: { ...ZERO }, tomorrow: { ...ZERO }, week: { ...ZERO }, mtd: { ...ZERO } };
+      let todayTipTotal = 0;
+      let weekTipTotal = 0;
+      let monthTipTotal = 0;
 
       for (const a of (appts || []) as any[]) {
         const apptDateISO = String(a.appointment_date).substring(0, 10);
@@ -155,6 +160,9 @@ const PhlebEarningsCard: React.FC = () => {
         const isMonth = apptDateISO >= monthStartISO;
 
         const tipCents = Math.round(((a.tip_amount || 0) as number) * 100);
+        if (isToday) todayTipTotal += tipCents;
+        if (isThisWeek) weekTipTotal += tipCents;
+        if (isMonth) monthTipTotal += tipCents;
         const hasCompanion = !!(a.family_group_id && (groupCounts.get(a.family_group_id) || 0) > 1);
 
         let takeCents = 0;
@@ -207,6 +215,9 @@ const PhlebEarningsCard: React.FC = () => {
       setTomorrow(buckets.tomorrow);
       setWeek(buckets.week);
       setMtd(buckets.mtd);
+      setTodayTipCents(todayTipTotal);
+      setWeekTipCents(weekTipTotal);
+      setMonthTipCents(monthTipTotal);
 
       // ── LAST MONTH BANKED ─────────────────────────────────────────
       // Quick sum from staff_payouts for the calendar month BEFORE the
@@ -225,24 +236,6 @@ const PhlebEarningsCard: React.FC = () => {
         .filter(p => !['reversed', 'failed'].includes(String(p.status || '')))
         .reduce((sum, p) => sum + (p.amount_cents || 0), 0);
       setLastMonthCents(lmTotal);
-
-      // ── YTD BANKED + OWED ─────────────────────────────────────────
-      // Sum every payout row whose APPOINTMENT_DATE is in this calendar
-      // year (not its created_at). Excludes prepaid arrangements + the
-      // failed/reversed statuses.
-      const yearStartISO = `${now.getFullYear()}-01-01`;
-      const { data: ytdPayouts } = await supabase
-        .from('staff_payouts' as any)
-        .select(`amount_cents, status, appointment:appointments!inner(appointment_date, payment_arrangement)`)
-        .eq('staff_id', staffId)
-        .gte('appointments.appointment_date', yearStartISO);
-      const ytdTotal = ((ytdPayouts || []) as any[])
-        .filter(p => !['reversed', 'failed'].includes(String(p.status || '')))
-        .filter(p => !((p.appointment?.payment_arrangement || '') in {
-          'standing_order_prepaid': 1, 'bundle_prepaid': 1, 'imported_legacy': 1, 'paid_offline': 1, 'comp': 1
-        }))
-        .reduce((sum, p) => sum + (p.amount_cents || 0), 0);
-      setYtd({ ...ZERO, banked_cents: ytdTotal });
 
       // Last-7-days mini sparkline. Sums per-day across both banked + projected
       // for visits scheduled in those days. Banked dominates for past days,
@@ -385,7 +378,6 @@ const PhlebEarningsCard: React.FC = () => {
   // ────────── Hormozi pace anchors ──────────
   // Monthly goal anchor: $5,040 (Hormozi-pace target the user agreed to)
   const MONTHLY_GOAL_CENTS = 504000;
-  const ANNUAL_GOAL_CENTS = MONTHLY_GOAL_CENTS * 12;     // $60,480
   const goalDailyCents = Math.round(MONTHLY_GOAL_CENTS / 30);  // ~$168/day
   const WEEKLY_GOAL_CENTS = goalDailyCents * 7;          // ~$1,176
 
@@ -393,9 +385,6 @@ const PhlebEarningsCard: React.FC = () => {
   const _daysIntoMonth = _now.getDate();
   const _daysInMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
   const _daysLeftInMonth = _daysInMonth - _daysIntoMonth;
-  const _dayOfYear = Math.floor((_now.getTime() - new Date(_now.getFullYear(), 0, 1).getTime()) / 86400000) + 1;
-  const _daysInYear = (new Date(_now.getFullYear(), 11, 31).getTime() - new Date(_now.getFullYear(), 0, 1).getTime()) / 86400000 + 1;
-  const _ytdGoalProRated = Math.round(ANNUAL_GOAL_CENTS * (_dayOfYear / _daysInYear));
 
   const todayPaceVsGoal = goalDailyCents > 0 ? Math.round((todayTotal / goalDailyCents) * 100) : 0;
   const mtdTotal = mtd.banked_cents + mtd.projected_cents;
@@ -409,7 +398,6 @@ const PhlebEarningsCard: React.FC = () => {
 
   const wtdTotal = week.banked_cents + week.projected_cents;
   const wtdPacePct = WEEKLY_GOAL_CENTS > 0 ? Math.round((wtdTotal / WEEKLY_GOAL_CENTS) * 100) : 0;
-  const ytdPacePct = _ytdGoalProRated > 0 ? Math.round((ytd.banked_cents / _ytdGoalProRated) * 100) : 0;
 
   return (
     <div className="max-w-lg md:max-w-6xl mx-auto px-4 md:px-6 -mt-4 mb-4">
@@ -422,7 +410,7 @@ const PhlebEarningsCard: React.FC = () => {
         >
           <div className="flex items-center justify-between mb-1">
             <p className="text-xs uppercase tracking-wider opacity-90 flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5" /> Today's earnings
+              <DollarSign className="h-3.5 w-3.5" /> Your pay today
               <span className="text-[10px] opacity-70 ml-1">· tap to drill down</span>
             </p>
             {loading && <Loader2 className="h-3.5 w-3.5 animate-spin opacity-70" />}
@@ -430,9 +418,9 @@ const PhlebEarningsCard: React.FC = () => {
           <p className="text-3xl font-bold">{fmt(todayTotal)}</p>
           <div className="flex items-center gap-3 mt-1 text-[11px] opacity-90">
             {today.banked_cents > 0 && <span>✓ {fmt(today.banked_cents)} banked</span>}
-            {today.projected_cents > 0 && <span>⏳ {fmt(today.projected_cents)} projected</span>}
+            {today.projected_cents > 0 && <span>⏳ {fmt(today.projected_cents)} scheduled</span>}
             {today.visit_count > 0 && <span>· {today.visit_count} visit{today.visit_count === 1 ? '' : 's'}</span>}
-            {today.tip_cents > 0 && <span>· incl. tips</span>}
+            {todayTipCents > 0 && <span>· {fmt(todayTipCents)} tips</span>}
           </div>
           {todayPaceVsGoal > 0 && (
             <div className="mt-2.5">
@@ -440,7 +428,7 @@ const PhlebEarningsCard: React.FC = () => {
                 <div className="h-full bg-white" style={{ width: `${Math.min(todayPaceVsGoal, 100)}%` }} />
               </div>
               <p className="text-[10px] mt-1 opacity-80">
-                {todayPaceVsGoal}% of daily $5K-pace target ({fmt(goalDailyCents)})
+                {todayPaceVsGoal}% of daily payout pace ({fmt(goalDailyCents)})
               </p>
             </div>
           )}
@@ -453,12 +441,12 @@ const PhlebEarningsCard: React.FC = () => {
           'bg-red-50 text-red-900'
         }`}>
           <span className="font-semibold">
-            {mtdPacePct}% of May goal · {_daysLeftInMonth} day{_daysLeftInMonth === 1 ? '' : 's'} left
+            {mtdPacePct}% of this month&apos;s payout pace · {_daysLeftInMonth} day{_daysLeftInMonth === 1 ? '' : 's'} left
           </span>
           <span className="font-bold">
             {dailyNeededCents > 0
               ? `Need ${fmt(dailyNeededCents)}/day to close`
-              : '🎯 goal hit'}
+              : 'On pace'}
           </span>
         </div>
 
@@ -467,10 +455,10 @@ const PhlebEarningsCard: React.FC = () => {
             Color tier on MTD (red <70% / amber 70-99 / emerald 100+). */}
         <div className="grid grid-cols-4 divide-x divide-gray-100 text-center bg-white">
           <div className="px-2 py-3" title={`This week (Sun→today). Goal: ${fmt(WEEKLY_GOAL_CENTS)}. You're at ${wtdPacePct}% of weekly target.`}>
-            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">WTD</p>
+            <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">This week</p>
             <p className="text-lg font-bold text-gray-900 mt-0.5">{fmt(wtdTotal)}</p>
             <p className={`text-[10px] mt-0.5 ${wtdPacePct >= 100 ? 'text-emerald-700' : wtdPacePct >= 70 ? 'text-gray-500' : 'text-red-600'}`}>
-              {wtdPacePct}% of {fmt(WEEKLY_GOAL_CENTS)}
+              {wtdPacePct}% of pace
             </p>
           </div>
           <div className={`px-2 py-3 ${mtdPaceColor === 'emerald' ? 'bg-emerald-50/40' : mtdPaceColor === 'amber' ? 'bg-amber-50/40' : 'bg-red-50/40'}`}
@@ -478,26 +466,26 @@ const PhlebEarningsCard: React.FC = () => {
             <p className={`text-[10px] uppercase tracking-wider font-semibold flex items-center justify-center gap-1 ${
               mtdPaceColor === 'emerald' ? 'text-emerald-700' : mtdPaceColor === 'amber' ? 'text-amber-800' : 'text-red-700'
             }`}>
-              <TrendingUp className="h-2.5 w-2.5" /> MTD
+              <TrendingUp className="h-2.5 w-2.5" /> This month
             </p>
             <p className={`text-lg font-bold mt-0.5 ${
               mtdPaceColor === 'emerald' ? 'text-emerald-900' : mtdPaceColor === 'amber' ? 'text-amber-900' : 'text-red-900'
             }`}>{fmt(mtdTotal)}</p>
             <p className={`text-[10px] mt-0.5 ${
               mtdPaceColor === 'emerald' ? 'text-emerald-700' : mtdPaceColor === 'amber' ? 'text-amber-800' : 'text-red-700'
-            }`}>{mtdPacePct}% / $5,040</p>
+            }`}>{mtdPacePct}% of pace</p>
           </div>
-          <div className="px-2 py-3 bg-blue-50/30" title={`Year-to-date phleb earnings. Pro-rated pace target through day ${_dayOfYear}: ${fmt(_ytdGoalProRated)}. Full year: ${fmt(ANNUAL_GOAL_CENTS)}.`}>
-            <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">YTD</p>
-            <p className="text-lg font-bold text-blue-900 mt-0.5">{fmt(ytd.banked_cents)}</p>
-            <p className={`text-[10px] mt-0.5 ${ytdPacePct >= 100 ? 'text-emerald-700' : ytdPacePct >= 70 ? 'text-blue-700' : 'text-red-600'}`}>
-              {ytdPacePct}% of {fmt(_ytdGoalProRated)} pace
+          <div className="px-2 py-3 bg-blue-50/30" title={`Tips captured on booked visits this month: ${fmt(monthTipCents)}.`}>
+            <p className="text-[10px] uppercase tracking-wider text-blue-700 font-semibold">Tips</p>
+            <p className="text-lg font-bold text-blue-900 mt-0.5">{fmt(monthTipCents)}</p>
+            <p className="text-[10px] mt-0.5 text-blue-700">
+              {todayTipCents > 0 ? `${fmt(todayTipCents)} today` : `${fmt(weekTipCents)} this week`}
             </p>
           </div>
           <div className="px-2 py-3 bg-amber-50/40" title="Banked + reconciliation rows for the prior calendar month.">
-            <p className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">Last mo</p>
+            <p className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold">Last month</p>
             <p className="text-lg font-bold text-amber-900 mt-0.5">{fmt(lastMonthCents)}</p>
-            <p className="text-[10px] text-amber-700 mt-0.5">banked + owed</p>
+            <p className="text-[10px] text-amber-700 mt-0.5">banked payout</p>
           </div>
         </div>
 
