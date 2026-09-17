@@ -26,6 +26,7 @@ export interface AuthResult {
   data?: {
     user?: any;
     session?: Session;
+    requiresConfirmation?: boolean;
   };
   error?: {
     message: string;

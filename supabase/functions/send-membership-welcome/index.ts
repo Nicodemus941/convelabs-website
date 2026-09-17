@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
     }
 
     const annualPriceCents = Number(body?.annualPriceCents || 0) || (
-      tier === 'concierge' ? 39900 : tier === 'vip' ? 19900 : 9900
+      tier === 'concierge' ? 4999 : tier === 'vip' ? 1999 : 999
     );
 
     let nextRenewalDate = String(body?.nextRenewalDate || '');

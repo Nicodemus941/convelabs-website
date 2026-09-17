@@ -34,22 +34,22 @@ async function checkExistsRpc(s: SupabaseClient, name: string): Promise<boolean>
 const CHECKS: Array<(s: SupabaseClient) => Promise<CheckOutput>> = [
   // ─── Schema + trigger sanity ───
   async (s) => {
-    const { count, error } = await s.from('membership_plans').select('id', { count: 'exact', head: true }).eq('annual_price', 19900);
+    const { count, error } = await s.from('membership_plans').select('id', { count: 'exact', head: true }).eq('annual_price', 1999);
     return {
       name: 'membership_plans_vip_price',
       result: !error && (count || 0) > 0 ? 'PASS' : 'FAIL',
-      note: 'VIP plan exists at $199/yr',
+      note: 'VIP plan exists at $19.99/yr',
     };
   },
   async (s) => {
     // Both Regular + VIP + Concierge prices must align with hardcoded upsell card values
     const { data } = await s.from('membership_plans').select('name, annual_price').in('name', ['Regular', 'VIP', 'Concierge']);
     const map = new Map((data || []).map((p: any) => [p.name, p.annual_price]));
-    const ok = map.get('Regular') === 9900 && map.get('VIP') === 19900 && map.get('Concierge') === 39900;
+    const ok = map.get('Regular') === 999 && map.get('VIP') === 1999 && map.get('Concierge') === 4999;
     return {
       name: 'tier_pricing_alignment',
       result: ok ? 'PASS' : 'FAIL',
-      note: 'Regular $99 / VIP $199 / Concierge $399 align with upsell card',
+      note: 'Regular $9.99 / VIP $19.99 / Concierge $49.99 align with upsell card',
     };
   },
 

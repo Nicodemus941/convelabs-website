@@ -33,6 +33,77 @@ export const useSignup = () => {
       // pending agreement in sessionStorage never resumed.
       const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
       const desiredRedirect = params?.get('redirect') || `/dashboard/${role}`;
+      const isMembershipResumeSignup = role === 'patient' && params?.get('fromMembership') === '1';
+
+      if (isMembershipResumeSignup) {
+        const { data: created, error: createError } = await supabase.functions.invoke('create-patient-account', {
+          body: { email, password, firstName, lastName },
+        });
+
+        if (createError) {
+          console.error("Membership signup create-account error:", createError);
+          setError(createError.message || "Signup failed");
+          return {
+            success: false,
+            error: { message: createError.message || "Signup failed" },
+          };
+        }
+
+        if (!created?.ok) {
+          const reason = created?.reason === 'already_registered'
+            ? 'already_registered'
+            : created?.message || created?.detail || created?.reason || 'Signup failed';
+          return {
+            success: false,
+            error: { message: reason },
+          };
+        }
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (signInError || !signInData.session || !signInData.user) {
+          console.error("Membership signup sign-in error:", signInError);
+          return {
+            success: false,
+            error: { message: signInError?.message || "Account created, but automatic sign-in failed. Please log in to continue." },
+          };
+        }
+
+        toast({
+          title: "Account created",
+          description: "You're in. Finishing your membership checkout now.",
+        });
+
+        const authResult: AuthResult = {
+          success: true,
+          data: {
+            user: mapUserData(signInData.user, role),
+            session: mapSessionData(signInData.session),
+            requiresConfirmation: false,
+          },
+        };
+
+        sendWelcomeEmail(email, firstName, created.userId || signInData.user.id)
+          .then(result => {
+            if (result.success) {
+              console.log('Welcome email sent successfully');
+            } else {
+              console.error('Failed to send welcome email:', result.error);
+            }
+          })
+          .catch(err => {
+            console.error('Error sending welcome email:', err);
+          });
+
+        setTimeout(() => {
+          navigate(desiredRedirect);
+        }, 100);
+
+        return authResult;
+      }
 
       // Register the new user
       const { data, error: signUpError } = await supabase.auth.signUp({

@@ -77,12 +77,6 @@ const SmartDateTimePicker: React.FC<SmartDateTimePickerProps> = ({
     if (isBefore(date, today)) return true;
     if (isAfter(date, maxDate)) return true;
     
-    // For non-members, only allow Monday-Wednesday
-    if (!isMember) {
-      const dayOfWeek = date.getDay();
-      if (dayOfWeek < 1 || dayOfWeek > 3) return true;
-    }
-    
     return false;
   };
 
@@ -119,19 +113,6 @@ const SmartDateTimePicker: React.FC<SmartDateTimePickerProps> = ({
             className="rounded-md border pointer-events-auto"
           />
           
-          {!isMember && (
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5" />
-                <div className="text-sm">
-                  <p className="font-medium text-amber-800">Non-Member Scheduling</p>
-                  <p className="text-amber-700">
-                    À la carte appointments are available Monday–Wednesday only, from 10:30 AM–1:00 PM.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 

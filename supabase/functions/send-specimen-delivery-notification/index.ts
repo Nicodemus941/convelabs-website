@@ -36,6 +36,7 @@ interface Body {
   appointmentId: string;
   appointment_id?: string; // snake_case fallback
   specimenId?: string;
+  allSpecimenIds?: string[];
   labName?: string;
   tubeCount?: number;
   deliveredAt?: string;
@@ -57,6 +58,24 @@ function carrierTrackingUrl(code: string | null | undefined): string | null {
   return null;
 }
 
+function dedupeSpecimenIds(values: string[] | undefined, selected: string | undefined): string[] {
+  const ordered = [selected || '', ...(values || [])].map(v => String(v || '').trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of ordered) {
+    const key = value.replace(/\s+/g, '').toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+  return unique;
+}
+
+function extraLabelsHtml(allSpecimenIds: string[]): string {
+  if (allSpecimenIds.length <= 1) return '';
+  return `<p style="margin:6px 0 0;"><strong>All extracted labels:</strong> ${allSpecimenIds.join(', ')}</p>`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -70,6 +89,8 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    const allSpecimenIds = dedupeSpecimenIds(body.allSpecimenIds, body.specimenId);
+    const extraLabelsLine = extraLabelsHtml(allSpecimenIds);
 
     // Fetch appointment + linked orgs (primary + cc)
     const { data: appt } = await supabase
@@ -146,6 +167,7 @@ Deno.serve(async (req) => {
       <p style="margin:0;"><strong>Visit:</strong> ${svc} on ${apptDate}</p>
       ${labLine}
       ${trackingLine}
+      ${extraLabelsLine}
     </div>
     <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;border-top:1px solid #f3f4f6;padding-top:12px;">
       ConveLabs · 1800 Pembrook Drive, Suite 300, Orlando, FL 32810 · (941) 527-9169
@@ -234,6 +256,7 @@ Deno.serve(async (req) => {
           delivery_status: twRes.ok ? 'sent' : 'failed',
           twilio_message_sid: (twJson as any)?.sid || null,
           sent_at: new Date().toISOString(),
+          metadata: allSpecimenIds.length > 1 ? { all_specimen_ids: allSpecimenIds } : {},
         }).then(() => {}, (e) => console.warn('[specimen-notify] sms log insert failed:', e));
       } catch (e: any) {
         console.error('[specimen-notify] patient SMS failed:', e?.message);
@@ -247,6 +270,7 @@ Deno.serve(async (req) => {
           patientName: appt.patient_name || 'there',
           labName: labLabel,
           trackingId: body.specimenId || undefined,
+          allTrackingIds: allSpecimenIds,
           tubeCount: body.tubeCount || undefined,
           resultsTimeline: '48-72 hours',
         });
@@ -316,6 +340,7 @@ Deno.serve(async (req) => {
       <p style="margin:0;"><strong>Visit date:</strong> ${apptDateRp}</p>
       ${labLineRp}
       ${trackingRp}
+      ${extraLabelsLine}
     </div>
     <p style="font-size:13px;color:#6b7280;">Results will arrive through the destination lab's standard pipeline. We handle the at-home draw + chain-of-custody — no change to how you receive results.</p>
     <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;border-top:1px solid #f3f4f6;padding-top:12px;">
@@ -435,6 +460,7 @@ Deno.serve(async (req) => {
       <p style="margin:0;"><strong>Visit:</strong> ${svc} on ${apptDate}</p>
       ${labLine}
       ${trackingLink}
+      ${extraLabelsLine}
     </div>
     <p style="font-size:13px;color:#6b7280;">Results will arrive via the destination lab's standard pipeline. If you need us to resend or re-route, just reply to this email.</p>
     <p style="font-size:11px;color:#9ca3af;text-align:center;margin-top:20px;border-top:1px solid #f3f4f6;padding-top:12px;">

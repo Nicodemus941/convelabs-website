@@ -19,6 +19,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+import { createOrRefreshAppointmentPayLink } from '../_shared/appointment-pay-link.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -78,8 +79,12 @@ function emailWrapper(color: string, headline: string, body: string): string {
   </div>`;
 }
 
-async function getPayLink(appt: any): Promise<string | null> {
-  // Prefer existing Stripe invoice hosted URL
+async function getPayLink(admin: any, appt: any): Promise<string | null> {
+  try {
+    return (await createOrRefreshAppointmentPayLink(admin, appt.id)).url;
+  } catch (err) {
+    console.warn('[send-manual-invoice-reminder] branded pay link fallback:', err);
+  }
   if (appt.stripe_invoice_id) {
     try {
       const inv = await stripe.invoices.retrieve(appt.stripe_invoice_id);
@@ -124,7 +129,7 @@ Deno.serve(async (req) => {
 
     const name = (appt.patient_name || 'there').split(' ')[0];
     const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
-    const payLinkRaw = await getPayLink(appt);
+    const payLinkRaw = await getPayLink(admin, appt);
     const payLink = payLinkRaw || 'https://convelabs.com';
     const linkText = payLinkRaw
       ? `<div style="text-align:center;margin:20px 0;"><a href="${payLink}" style="display:inline-block;background:#1e40af;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} Now</a></div>`

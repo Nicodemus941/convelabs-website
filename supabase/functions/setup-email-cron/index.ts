@@ -32,7 +32,21 @@ serve(async (req: Request) => {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
       const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
       
-      // Schedule email reminders to run daily at 8 AM
+      // Clean up legacy reminder jobs first so the reschedule below is idempotent.
+      await connection.queryObject(`
+        SELECT cron.unschedule(jobname)
+        FROM cron.job
+        WHERE jobname IN (
+          'process-daily-emails',
+          'process-appointment-reminders',
+          'appointment-reminders-night-before',
+          'send-fasting-reminders-daily'
+        );
+      `);
+
+      // Keep the legacy scheduled-email umbrella for non-patient traffic.
+      // Patient-facing appointment reminders now self-gate inside their own
+      // edge function so we do not depend on a static UTC hour.
       await connection.queryObject(`
         SELECT cron.schedule(
           'process-daily-emails',
@@ -48,15 +62,35 @@ serve(async (req: Request) => {
         );
       `);
       
-      // Schedule appointment reminders to run every hour
+      // Appointment reminders run every 15 minutes and self-gate to 8 AM ET
+      // inside send-appointment-reminder. This keeps the delivery time fixed
+      // across DST shifts and gives us retry redundancy if one tick fails.
       await connection.queryObject(`
         SELECT cron.schedule(
           'process-appointment-reminders',
-          '0 * * * *',
+          '*/15 * * * *',
           $$
           SELECT
             net.http_post(
               url:='${supabaseUrl}/functions/v1/send-appointment-reminder',
+              headers:='{"Content-Type": "application/json", "Authorization": "Bearer ${supabaseAnonKey}"}'::jsonb,
+              body:='{}'::jsonb
+            ) as request_id;
+          $$
+        );
+      `);
+
+      // Fasting reminders also run every 15 minutes and self-gate to 8 PM ET
+      // inside send-fasting-reminders so winter/summer time changes do not
+      // shift patient prep messages to 7 PM or 9 PM.
+      await connection.queryObject(`
+        SELECT cron.schedule(
+          'send-fasting-reminders-daily',
+          '*/15 * * * *',
+          $$
+          SELECT
+            net.http_post(
+              url:='${supabaseUrl}/functions/v1/send-fasting-reminders',
               headers:='{"Content-Type": "application/json", "Authorization": "Bearer ${supabaseAnonKey}"}'::jsonb,
               body:='{}'::jsonb
             ) as request_id;

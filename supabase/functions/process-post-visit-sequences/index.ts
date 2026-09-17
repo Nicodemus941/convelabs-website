@@ -308,7 +308,7 @@ Deno.serve(async (req) => {
                       ${seatsRemaining === 1 ? 'Last Founding seat available' : `${seatsRemaining} Founding VIP seats left`}
                     </p>
                     <p style="margin:6px 0 0;font-size:13px;color:#78350f;line-height:1.5;">
-                      First 50 VIP members lock $199/yr for life — never raises, not even as our standard rate does.
+                      First 50 VIP members lock $19.99/yr for life — never raises, not even as our standard rate does.
                     </p>
                   </div>
                 `;
@@ -332,14 +332,14 @@ Deno.serve(async (req) => {
 
                     ${seatsLine}
 
-                    <h3 style="margin:20px 0 8px;color:#B91C1C;font-size:15px;">Your $199 Founding VIP unlocks</h3>
+                    <h3 style="margin:20px 0 8px;color:#B91C1C;font-size:15px;">Your $19.99 Founding VIP unlocks</h3>
                     <table cellpadding="0" cellspacing="0" width="100%" style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;margin:10px 0 18px;">
                       <tr style="background:#f9fafb;border-bottom:1px solid #e5e7eb;">
                         <td style="padding:12px 14px;font-size:13px;color:#111827;"><strong>12 months of VIP membership</strong><br><span style="color:#6b7280;font-size:12px;">Visits at $115 (save $35 each draw)</span></td>
-                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#111827;font-size:13px;">$199</td>
+                        <td style="padding:12px 14px;text-align:right;font-weight:700;color:#111827;font-size:13px;">$19.99</td>
                       </tr>
                       <tr style="background:#fef3c7;border-bottom:1px solid #fde68a;">
-                        <td style="padding:12px 14px;font-size:13px;color:#78350f;"><strong>🔒 Founding rate-lock for life</strong><br><span style="color:#92400e;font-size:12px;">Your $199 never raises</span></td>
+                        <td style="padding:12px 14px;font-size:13px;color:#78350f;"><strong>🔒 Founding rate-lock for life</strong><br><span style="color:#92400e;font-size:12px;">Your $19.99 never raises</span></td>
                         <td style="padding:12px 14px;text-align:right;font-weight:700;color:#92400e;font-size:13px;">+$50/yr</td>
                       </tr>
                       <tr style="background:#fef3c7;border-bottom:1px solid #fde68a;">
@@ -358,7 +358,7 @@ Deno.serve(async (req) => {
                         <td style="padding:14px;font-size:14px;font-weight:700;color:#065f46;">Stacked value</td>
                         <td style="padding:14px;text-align:right;color:#065f46;font-size:14px;">
                           <span style="text-decoration:line-through;color:#9ca3af;font-weight:400;margin-right:8px;">$474</span>
-                          <span style="font-weight:800;">$199</span>
+                          <span style="font-weight:800;">$19.99</span>
                         </td>
                       </tr>
                     </table>
@@ -367,7 +367,7 @@ Deno.serve(async (req) => {
 
                     <div style="text-align:center;margin:22px 0 10px;">
                       <a href="${vipCheckoutUrl}" style="display:inline-block;background:#B91C1C;color:#ffffff;padding:15px 38px;border-radius:10px;text-decoration:none;font-weight:800;font-size:15.5px;">
-                        ${seatsOpen ? 'Claim my Founding seat →' : 'Join VIP — $199/yr →'}
+                        ${seatsOpen ? 'Claim my Founding seat →' : 'Join VIP — $19.99/yr →'}
                       </a>
                     </div>
                     <p style="text-align:center;font-size:12px;color:#6b7280;margin:0;">Your email is already on file — one click checkout.</p>

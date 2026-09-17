@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 import { brandedEmailWrapper } from '../_shared/branded-email.ts';
+import { createOrRefreshAppointmentPayLink } from '../_shared/appointment-pay-link.ts';
 import { shouldSendNow, logDeferral } from '../_shared/quiet-hours.ts';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
@@ -200,7 +201,7 @@ Deno.serve(async (req) => {
       // can never collide with org customers on future lookups.
       const existing = await stripe.customers.list({ email: invoiceToEmail, limit: 5 });
       // Prefer a customer that is NOT flagged as an org
-      const patientCustomer = existing.data.find(c => !(c.metadata?.convelabs_org_id)) || null;
+      const patientCustomer = existing.data.find((c: any) => !(c.metadata?.convelabs_org_id)) || null;
       if (patientCustomer) {
         customerId = patientCustomer.id;
       } else {
@@ -452,7 +453,14 @@ Deno.serve(async (req) => {
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
           })
         : '';
-      const paymentUrl = finalizedInvoice.hosted_invoice_url || `https://convelabs.com/book-now`;
+      let paymentUrl = finalizedInvoice.hosted_invoice_url || `https://convelabs.com/book-now`;
+      if (!billedToOrg) {
+        try {
+          paymentUrl = (await createOrRefreshAppointmentPayLink(supabase, appointmentId)).url;
+        } catch (payLinkErr) {
+          console.warn('[send-invoice] branded pay link failed, falling back to hosted invoice:', payLinkErr);
+        }
+      }
 
       const headerTitle = billedToOrg
         ? `Invoice for ${org!.name}`
@@ -460,7 +468,7 @@ Deno.serve(async (req) => {
       const greetingName = billedToOrg ? (org!.contact_name || org!.name) : patientLabel;
       const purposeLine = billedToOrg
         ? `This invoice covers a ConveLabs concierge lab visit completed on behalf of your organization${maskPatient ? '' : ` for ${patientLabel}`}.`
-        : 'Your appointment has been scheduled. Please review the details below and complete your payment to confirm.';
+        : 'Your appointment has been scheduled. Please review the details below, then pay on our secure ConveLabs checkout page to confirm.';
 
       // Compose body inside the unified branded wrapper. Visit-details
       // table + the urgency / VIP / org-net-30 callouts are body HTML.

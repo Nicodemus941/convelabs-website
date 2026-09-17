@@ -780,78 +780,125 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <MessageSquare className="h-3 w-3" /> SMS
                   </Button>
                 </div>
-                {/* Insurance — primary + (optional) secondary, each verifiable */}
-                {patientInsurances.length > 0 && (
-                  <div className="space-y-2 mb-2">
-                    {patientInsurances.map((ins) => {
-                      const isVerified = !!ins.verified_at;
-                      return (
-                        <div key={ins.id} className={`rounded-lg p-3 border ${ins.rank === 'primary' ? 'bg-gray-50 border-gray-200' : 'bg-blue-50/50 border-blue-100'}`}>
-                          <div className="flex items-center justify-between gap-2 mb-1">
-                            <div className="flex items-center gap-2">
-                              <Shield className="h-3.5 w-3.5 text-muted-foreground" />
-                              <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-                                {ins.rank === 'primary' ? 'Primary insurance' : 'Secondary insurance'}
-                              </p>
-                            </div>
-                            {isVerified ? (
-                              <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] gap-1 hover:bg-emerald-100">
-                                <CheckCircle2 className="h-2.5 w-2.5" /> Verified
-                              </Badge>
-                            ) : (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-6 px-2 text-[10px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
-                                onClick={(e) => { e.stopPropagation(); handleVerifyInsurance(ins); }}
-                              >
-                                Verify
-                              </Button>
-                            )}
-                          </div>
-                          {(ins.provider || ins.member_id) ? (
-                            <>
-                              <p className="text-sm font-medium">
-                                {ins.provider || 'Carrier on card'}
-                                {ins.member_id && ` (ID: ${ins.member_id})`}
-                              </p>
-                              {ins.group_number && (
-                                <p className="text-xs text-muted-foreground">Group: {ins.group_number}</p>
-                              )}
-                            </>
-                          ) : (
-                            <p className="text-xs text-amber-700 italic">Card on file — fields not yet OCR'd</p>
-                          )}
-                          {/* Back-of-card status — Hormozi: claims rejected
-                              for "can't reach insurer" cost ~$50-150 each.
-                              The customer-service phone lives on the back.
-                              Capture it to eliminate that whole class of
-                              rejection. */}
-                          {(appointment as any).patient_id && ins.id !== 'legacy' && (
-                            <div className="mt-2 pt-2 border-t border-gray-200/60 flex items-center gap-2 flex-wrap">
-                              {ins.card_back_path ? (
-                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] gap-1 hover:bg-emerald-50">
-                                  <CheckCircle2 className="h-2.5 w-2.5" /> Back of card on file
+                <div className="mb-2 rounded-xl border border-[#EFE3E1] bg-[#FBF8F7] p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Insurance
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-[10px]"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openPatientEdit();
+                      }}
+                    >
+                      <Pencil className="mr-1 h-3 w-3" />
+                      Edit manually
+                    </Button>
+                  </div>
+
+                  {/* Insurance — primary + optional secondary live where the phleb
+                      actually checks patient details, not only further down-card. */}
+                  {patientInsurances.length > 0 ? (
+                    <div className="space-y-2">
+                      {patientInsurances.map((ins) => {
+                        const isVerified = !!ins.verified_at;
+                        return (
+                          <div key={ins.id} className={`rounded-lg p-3 border ${ins.rank === 'primary' ? 'bg-white border-gray-200' : 'bg-blue-50/50 border-blue-100'}`}>
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                                  {ins.rank === 'primary' ? 'Primary insurance' : 'Secondary insurance'}
+                                </p>
+                              </div>
+                              {isVerified ? (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200 text-[10px] gap-1 hover:bg-emerald-100">
+                                  <CheckCircle2 className="h-2.5 w-2.5" /> Verified
                                 </Badge>
                               ) : (
-                                <PhlebUploadInsuranceCardButton
-                                  appointmentId={appointment.id}
-                                  patientId={(appointment as any).patient_id}
-                                  onUploaded={() => setInsuranceJustUploaded(`back-${ins.rank}-${Date.now()}`)}
-                                  onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
-                                  variant="subtle"
-                                  label="+ Add back of card"
-                                  rank={ins.rank}
-                                  side="back"
-                                />
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-6 px-2 text-[10px] gap-1 border-amber-300 text-amber-800 hover:bg-amber-50"
+                                  onClick={(e) => { e.stopPropagation(); handleVerifyInsurance(ins); }}
+                                >
+                                  Verify
+                                </Button>
                               )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                            {(ins.provider || ins.member_id) ? (
+                              <>
+                                <p className="text-sm font-medium">
+                                  {ins.provider || 'Carrier on card'}
+                                  {ins.member_id && ` (ID: ${ins.member_id})`}
+                                </p>
+                                {ins.group_number && (
+                                  <p className="text-xs text-muted-foreground">Group: {ins.group_number}</p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-xs text-amber-700 italic">Card on file — fields not yet OCR'd</p>
+                            )}
+                            {(appointment as any).patient_id && ins.id !== 'legacy' && (
+                              <div className="mt-2 pt-2 border-t border-gray-200/60 flex items-center gap-2 flex-wrap">
+                                {ins.card_back_path ? (
+                                  <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] gap-1 hover:bg-emerald-50">
+                                    <CheckCircle2 className="h-2.5 w-2.5" /> Back of card on file
+                                  </Badge>
+                                ) : (
+                                  <PhlebUploadInsuranceCardButton
+                                    appointmentId={appointment.id}
+                                    patientId={(appointment as any).patient_id}
+                                    onUploaded={() => setInsuranceJustUploaded(`back-${ins.rank}-${Date.now()}`)}
+                                    onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
+                                    variant="subtle"
+                                    label="+ Add back of card"
+                                    rank={ins.rank}
+                                    side="back"
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3">
+                      <p className="text-sm font-medium text-amber-900">No insurance on file yet</p>
+                      <p className="mt-1 text-xs text-amber-700">
+                        Capture a card photo here or enter the carrier and member ID manually.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <PhlebUploadInsuranceCardButton
+                          appointmentId={appointment.id}
+                          patientId={(appointment as any).patient_id || null}
+                          label="Capture insurance card"
+                          variant="primary"
+                          onUploaded={(p) => setInsuranceJustUploaded(p)}
+                          onExtracted={() => setInsuranceRefreshKey(k => k + 1)}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openPatientEdit();
+                          }}
+                        >
+                          <Pencil className="mr-1 h-3 w-3" />
+                          Enter manually
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {/* No secondary on file — offer phleb a one-tap upload */}
                 {primaryInsurance && !secondaryInsurance && (appointment as any).patient_id && (
                   <div className="mb-2">

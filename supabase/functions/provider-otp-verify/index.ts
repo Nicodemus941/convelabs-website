@@ -45,17 +45,18 @@ Deno.serve(async (req) => {
     // Phone lookup — never exposed to client
     const { data: org } = await admin
       .from('organizations')
-      .select('contact_phone')
-      .or(`contact_email.eq.${normalizedEmail},billing_email.eq.${normalizedEmail}`)
+      .select('contact_phone, office_phone')
+      .or(`contact_email.eq.${normalizedEmail},billing_email.eq.${normalizedEmail},front_desk_email.eq.${normalizedEmail},manager_email.eq.${normalizedEmail}`)
       .eq('portal_enabled', true)
       .eq('is_active', true)
       .maybeSingle();
 
-    if (!org?.contact_phone) {
+    const rawPhone = org?.office_phone || org?.contact_phone;
+    if (!rawPhone) {
       return new Response(JSON.stringify({ error: 'Invalid or expired code' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const phone = normalizePhone(org.contact_phone);
+    const phone = normalizePhone(rawPhone);
 
     // Verify via Supabase native phone auth
     const client = createClient(SUPABASE_URL, ANON_KEY);

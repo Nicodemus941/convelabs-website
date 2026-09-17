@@ -4,7 +4,8 @@
  * 5–12 MB at full resolution; OCR doesn't need that detail.
  *
  * Strategy:
- *   - Skip if not an image (PDFs, etc.) or file is already under 4.5 MB
+ *   - Skip if not an image (PDFs, etc.)
+ *   - If the image is already small enough and not HEIC/HEIF, keep it as-is
  *   - Otherwise: render to a canvas at most 1600px on the long edge, encode
  *     as JPEG quality 0.85. This typically lands a 12 MP photo at 600KB-1.2MB
  *     while preserving every legible character on a printed lab order.
@@ -23,11 +24,8 @@ export async function resizeImageForUpload(file: File, opts?: { maxBytes?: numbe
   const quality = opts?.quality ?? 0.85;
 
   if (!file.type.startsWith('image/')) return file;
-  if (file.size <= maxBytes) return file;
-  // HEIC: browsers can't easily decode it via canvas; let it pass through
-  // and the OCR side will surface a useful error. Patient phlebs should
-  // be using JPG/PNG anyway.
-  if (file.type === 'image/heic' || file.type === 'image/heif') return file;
+  const isHeicFamily = file.type === 'image/heic' || file.type === 'image/heif';
+  if (file.size <= maxBytes && !isHeicFamily) return file;
 
   try {
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -60,7 +58,7 @@ export async function resizeImageForUpload(file: File, opts?: { maxBytes?: numbe
       canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), 'image/jpeg', quality);
     });
 
-    if (blob.size >= file.size) return file; // nothing gained
+    if (blob.size >= file.size && !isHeicFamily) return file; // nothing gained
     const safeName = file.name.replace(/\.(jpg|jpeg|png|webp|gif|bmp)$/i, '') + '_resized.jpg';
     return new File([blob], safeName, { type: 'image/jpeg', lastModified: Date.now() });
   } catch (e) {

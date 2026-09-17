@@ -25,11 +25,6 @@
       "source": "/executive-health-orlando",
       "destination": "/concierge-phlebotomy",
       "permanent": true
-    },
-    {
-      "source": "/sales-funnel",
-      "destination": "/",
-      "permanent": true
     }
   ],
   "rewrites": [

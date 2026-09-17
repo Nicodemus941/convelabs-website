@@ -154,8 +154,8 @@ table {border-collapse: collapse;}
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:linear-gradient(135deg,#fef3c7 0%,#fef9c3 100%);border:2px solid #d97706;border-radius:14px;">
           <tr><td style="padding:18px 20px;">
             <p style="margin:0 0 4px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">If you draw labs more than twice a year</p>
-            <p style="margin:0 0 10px;color:#78350f;font-size:17px;font-weight:700;line-height:1.3;">VIP Founding pricing — locked at $199/yr for life</p>
-            <p style="margin:0 0 14px;color:#451a03;font-size:14px;line-height:1.55;">Standard mobile draw is $150 — VIP brings every visit down to <strong>$115</strong>. The membership pays for itself in 2 visits. Founding seats are capped at 50.</p>
+            <p style="margin:0 0 10px;color:#78350f;font-size:17px;font-weight:700;line-height:1.3;">VIP Founding pricing — locked at $19.99/yr for life</p>
+            <p style="margin:0 0 14px;color:#451a03;font-size:14px;line-height:1.55;">Standard mobile draw is $150 — VIP brings every visit down to <strong>$115</strong>. The membership pays for itself in 1 visit. Founding seats are capped at 50.</p>
             <a href="${pricingUrl}" style="display:inline-block;background:#92400e;color:#ffffff;text-decoration:none;font-weight:700;font-size:13.5px;padding:10px 22px;border-radius:8px;line-height:1.2;">See VIP pricing →</a>
           </td></tr>
         </table>

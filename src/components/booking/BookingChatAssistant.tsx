@@ -15,7 +15,7 @@ Services & Pricing:
 - Same-day surcharge: +$50
 - Weekend surcharge: +$75
 
-Hours: Mon-Fri 6AM-1:30PM, Sat 6AM-9:45AM, Sun closed.
+Hours: Mon-Sat 6AM-6PM for standard daytime bookings. VIP / concierge may have later availability. Sunday is typically closed unless separately arranged.
 Service area: Central Florida (Orlando metro).
 
 Common questions:

@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { createOrRefreshAppointmentPayLink } from '../_shared/appointment-pay-link.ts';
 import { stripe } from '../_shared/stripe.ts';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
 
@@ -244,6 +245,11 @@ Deno.serve(async (req) => {
 
     // ── Helper: Stripe pay link ───────────────────────────────────
     const getPayLink = async (appt: any): Promise<string> => {
+      try {
+        return (await createOrRefreshAppointmentPayLink(supabase, appt.id)).url;
+      } catch (err) {
+        console.warn('[invoice-reminders] branded pay link fallback:', err);
+      }
       if (appt.stripe_invoice_url) return appt.stripe_invoice_url;
       if (appt.stripe_invoice_id) {
         try {
@@ -638,7 +644,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('Invoice processing error:', error);
     return new Response(
-      JSON.stringify({ success: false, error: error.message }),
+      JSON.stringify({ success: false, error: (error as Error).message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

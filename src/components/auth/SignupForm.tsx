@@ -106,6 +106,12 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
     setIsSubmitting(true);
 
     try {
+      const isExistingAccountError = (msg: string) =>
+        msg === 'already_registered'
+        || msg.includes('already registered')
+        || msg.includes('already been registered')
+        || msg.includes('User already registered');
+
       // Hard timeout so the spinner can't hang forever — patients reported
       // "Creating Account…" spinning indefinitely. If the network call
       // doesn't resolve in 30s, surface an error instead of locking the form.
@@ -138,15 +144,15 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
       };
 
       if (result.success) {
-        if (onSignupComplete) {
+        if (onSignupComplete && result.data?.requiresConfirmation) {
           onSignupComplete(email);
-        } else {
+        } else if (!onSignupComplete) {
           toast.success("Account created successfully!");
         }
       } else {
         const errorMsg = result.error?.message || "";
         // Check if account already exists
-        if (errorMsg.includes('already registered') || errorMsg.includes('already been registered') || errorMsg.includes('User already registered')) {
+        if (isExistingAccountError(errorMsg)) {
           const ep = await lookupExisting();
           if (ep) {
             // Migrated patient — send password reset via Mailgun (avoid lock)
@@ -167,7 +173,7 @@ export const SignupForm = ({ onSignupComplete }: SignupFormProps = {}) => {
     } catch (error: any) {
       console.error("Signup error:", error);
       const msg = error.message || "";
-      if (msg.includes('already registered') || msg.includes('already been registered')) {
+      if (isExistingAccountError(msg)) {
         // Check tenant_patients
         const { data: tp } = await supabase.from('tenant_patients').select('first_name').ilike('email', email.trim()).maybeSingle();
         if (tp) {

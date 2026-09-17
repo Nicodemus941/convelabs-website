@@ -13,7 +13,7 @@ import { getServicePrice } from '@/services/pricing/pricingService';
  *
  * Patient is already pulling out their card to pay for a $150 draw. We show
  * a right-sized comparison: "Add VIP membership — this draw costs $115 instead
- * of $150. Your 12 months of priority access costs $199 total, billed once."
+ * of $150. Your 12 months of priority access costs $19.99 total, billed once."
  *
  * Tapping "Add VIP" opens the Membership Agreement Dialog, and on agree:
  *   1. Write agreement row to membership_agreements (paper trail)
@@ -47,9 +47,9 @@ interface Props {
 // member upsell wasn't quoting correct savings on partner-routed bookings.
 
 const TIERS = [
-  { planName: 'Regular' as const, shortName: 'Regular', key: 'member' as const, annualCents: 9900, color: 'emerald', icon: Sparkles },
-  { planName: 'VIP' as const, shortName: 'VIP',  key: 'vip' as const, annualCents: 19900, color: 'red', icon: Star,     popular: true },
-  { planName: 'Concierge' as const, shortName: 'Concierge', key: 'concierge' as const, annualCents: 39900, color: 'amber', icon: Crown },
+  { planName: 'Regular' as const, shortName: 'Regular', key: 'member' as const, annualCents: 999, color: 'emerald', icon: Sparkles },
+  { planName: 'VIP' as const, shortName: 'VIP',  key: 'vip' as const, annualCents: 1999, color: 'red', icon: Star,     popular: true },
+  { planName: 'Concierge' as const, shortName: 'Concierge', key: 'concierge' as const, annualCents: 4999, color: 'amber', icon: Crown },
 ];
 
 const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;

@@ -1,12 +1,12 @@
-
-import React, { useMemo } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, CheckCircle, Star, Crown, Users, Heart, Zap, Shield } from "lucide-react";
+import { ArrowLeft, CheckCircle, Star, Crown, Sparkles, Zap } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { FunnelData } from "./SalesFunnel";
-import { withSource, ENROLLMENT_URL } from "@/lib/constants/urls";
+import { withSource } from "@/lib/constants/urls";
+import { analytics } from "@/utils/analytics";
 
 interface FunnelStep5RecommendationProps {
   data: FunnelData;
@@ -14,189 +14,121 @@ interface FunnelStep5RecommendationProps {
 }
 
 interface MembershipPlan {
-  id: string;
+  id: "member" | "vip" | "concierge";
   name: string;
   subtitle: string;
-  monthlyPrice?: number;
   annualPrice: number;
   icon: React.ReactNode;
   badge?: string;
   features: string[];
-  serviceCount: string;
-  perVisitCost: string;
   savings: string;
   idealFor: string;
   popular?: boolean;
-  recommended?: boolean;
-  annualOnly?: boolean;
-  isB2B?: boolean;
-  isUnlimited?: boolean;
 }
 
 const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationProps) => {
-  
   const membershipPlans: MembershipPlan[] = [
     {
-      id: "health_starter",
-      name: "Health Starter",
-      subtitle: "Annual plan for routine health monitoring",
-      annualPrice: 499,
-      icon: <Heart className="h-6 w-6" />,
-      annualOnly: true,
-      serviceCount: "4 lab visits per year",
-      perVisitCost: "$125 per visit",
-      savings: "Save $25/visit vs $150 non-member rate",
+      id: "member",
+      name: "Regular",
+      subtitle: "For people who want faster mornings without full concierge spend",
+      annualPrice: 9.99,
+      icon: <Sparkles className="h-6 w-6" />,
+      savings: "Lower visit pricing and waived admin friction after just a few draws",
       features: [
-        "4 lab visits included per year",
-        "$125 effective per visit",
-        "At-home or in-office visits",
-        "Result tracking included",
-        "7-day scheduling: Mon-Sun, 6 AM - 1:30 PM"
+        "Mon-Fri 6am-12pm access",
+        "Saturday 6-9am access",
+        "$55 family add-on on the same visit",
+        "Complimentary results retrieval",
+        "Reschedule fee waived"
       ],
-      idealFor: "Individuals needing occasional lab monitoring"
+      idealFor: "Best for occasional draws and simpler scheduling needs"
     },
     {
-      id: "proactive_health",
-      name: "Proactive Health",
-      subtitle: "Best for executives and athletes needing regular monitoring",
-      monthlyPrice: 149,
-      annualPrice: 1499,
-      icon: <Users className="h-6 w-6" />,
+      id: "vip",
+      name: "VIP",
+      subtitle: "Priority scheduling plus better family economics",
+      annualPrice: 19.99,
+      icon: <Star className="h-6 w-6" />,
       badge: "Most Popular",
       popular: true,
-      serviceCount: "12 lab visits per year (1/month)",
-      perVisitCost: "$125 per visit",
-      savings: "Save $301/year vs non-member pricing",
+      savings: "Best trade-off for repeat patients who need better access",
       features: [
-        "12 lab visits per year (1/month)",
-        "Same-day scheduling available",
-        "Health insights dashboard",
-        "Credit rollover (up to 3 months)",
-        "Priority booking over non-members",
-        "7-day scheduling: Mon-Sun, 6 AM - 1:30 PM"
+        "Mon-Fri 6am-2pm access",
+        "Saturday 6am-11am access",
+        "30-day booking window",
+        "$45 family add-on on the same visit",
+        "Referral credit and waived reschedules"
       ],
-      idealFor: "Executives, athletes, and anyone needing regular health monitoring"
+      idealFor: "Best for regular monitoring, couples, and busy professionals"
     },
     {
-      id: "concierge_elite",
-      name: "Concierge Elite",
-      subtitle: "White-glove service for celebrities and high-net-worth clients",
-      monthlyPrice: 299,
-      annualPrice: 2999,
+      id: "concierge",
+      name: "Concierge",
+      subtitle: "Maximum flexibility with true white-glove treatment",
+      annualPrice: 49.99,
       icon: <Crown className="h-6 w-6" />,
-      isUnlimited: true,
-      serviceCount: "Unlimited lab visits",
-      perVisitCost: "Unlimited visits included",
-      savings: "Best value for frequent testing",
+      savings: "Highest convenience for high-frequency households and premium patients",
       features: [
-        "Unlimited lab visits",
-        "Dedicated phlebotomist assigned to you",
+        "Anytime 6am-8pm plus Sunday by request",
+        "Guaranteed same-day booking",
+        "Free family add-on for 2 people",
         "NDA available upon request",
-        "Hotel, office, and home visits",
-        "White-glove concierge service",
-        "7-day scheduling: Mon-Sun, 6 AM - 1:30 PM"
+        "Dedicated phlebotomist",
+        "Priority travel support across ConveLabs cities"
       ],
-      idealFor: "Celebrities, executives, and high-net-worth individuals"
-    },
-    {
-      id: "practice_partner",
-      name: "Practice Partner",
-      subtitle: "B2B plan for concierge physicians and medical practices",
-      monthlyPrice: 100,
-      annualPrice: 1200,
-      icon: <Shield className="h-6 w-6" />,
-      isB2B: true,
-      serviceCount: "12 visits per patient/year",
-      perVisitCost: "$100/patient/month",
-      savings: "Save $50/visit vs non-member rate per patient",
-      features: [
-        "$100/patient/month (12 visits per patient/year)",
-        "Minimum 5 patients, maximum 100",
-        "White-label service integration",
-        "Dedicated account management",
-        "Priority scheduling and routing",
-        "7-day scheduling: Mon-Sun, 6 AM - 1:30 PM"
-      ],
-      idealFor: "Concierge physicians and medical practices"
+      idealFor: "Best for executives, families, and patients who want zero scheduling friction"
     }
   ];
 
-  // Enhanced recommendation algorithm
-  const getRecommendedPlan = (): string => {
-    const { householdSize, labFrequency, healthGoals, specialRequirements } = data;
-    
-    // B2B — if they indicate physician/practice needs
-    if (specialRequirements?.includes("practice") || specialRequirements?.includes("physician")) {
-      return "practice_partner";
+  const getRecommendedPlan = (): MembershipPlan["id"] => {
+    const { householdSize, labFrequency, healthGoals, preferredTimes, specialRequirements } = data;
+    const wantsPremiumAccess =
+      preferredTimes.includes("weekend") ||
+      preferredTimes.includes("evening") ||
+      specialRequirements.includes("executive");
+    const hasFamilyNeed = householdSize > 1 || healthGoals.includes("family");
+    const needsFrequentDraws = labFrequency === "monthly" || labFrequency === "quarterly";
+
+    if (needsFrequentDraws && (wantsPremiumAccess || hasFamilyNeed)) {
+      return "concierge";
     }
-    
-    // Concierge Elite for VIP/celebrity/high-frequency needs
-    if (specialRequirements?.includes("nda") || specialRequirements?.includes("vip") || specialRequirements?.includes("celebrity")) {
-      return "concierge_elite";
+    if (needsFrequentDraws || labFrequency === "biannual" || wantsPremiumAccess || hasFamilyNeed) {
+      return "vip";
     }
-    
-    // Proactive Health for regular testing
-    if (labFrequency === "monthly" || labFrequency === "quarterly") return "proactive_health";
-    if (labFrequency === "biannual") return "proactive_health";
-    
-    // Health Starter for minimal testing
-    if (labFrequency === "annual" || labFrequency === "never") return "health_starter";
-    
-    // Default to Proactive Health (most popular)
-    return "proactive_health";
+    return "member";
   };
 
   const recommendedPlanId = getRecommendedPlan();
   const recommendedPlan = membershipPlans.find(plan => plan.id === recommendedPlanId);
   const otherPlans = membershipPlans.filter(plan => plan.id !== recommendedPlanId);
 
-  const handleEnrollClick = (planId: string) => {
-    if (planId === "practice_partner") {
-      window.location.href = "/contact";
-      return;
-    }
-    window.location.href = withSource(ENROLLMENT_URL, `funnel_${planId}`);
+  const handleEnrollClick = (planId: MembershipPlan["id"]) => {
+    analytics.trackFunnelStage("try_funnel_plan_selected", 5, {
+      recommended_plan: recommendedPlanId,
+      selected_plan: planId,
+    });
+
+    window.location.href = withSource(`/pricing?tier=${planId}&checkout=1`, `try_funnel_${planId}`);
   };
 
   const getPersonalizedMessage = (): string => {
-    const { healthGoals, labFrequency } = data;
-    
-    if (recommendedPlanId === "practice_partner") {
-      return "Our Practice Partner plan provides seamless white-label phlebotomy for your patients with dedicated account management.";
+    if (recommendedPlanId === "concierge") {
+      return "You look like a strong fit for Concierge because your answers point to premium scheduling flexibility and repeat use.";
     }
-    
-    if (recommendedPlanId === "concierge_elite") {
-      return "Our Concierge Elite plan delivers unlimited, white-glove service with a dedicated phlebotomist and complete privacy.";
+
+    if (recommendedPlanId === "vip") {
+      return "VIP fits best when you need repeat draws, broader booking windows, or better family economics without going full concierge.";
     }
-    
-    if (recommendedPlanId === "proactive_health") {
-      return "Our Proactive Health plan offers the perfect balance of services and savings for regular health monitoring with priority scheduling.";
-    }
-    
-    return "Our Health Starter plan provides excellent value for annual health monitoring at just $125 per visit.";
+
+    return "Regular gives you a lower-commitment way to unlock better booking windows and member pricing without overbuying.";
   };
 
   const formatPricing = (plan: MembershipPlan) => {
-    if (plan.annualOnly) {
-      return {
-        primary: `$${plan.annualPrice}/year`,
-        secondary: null,
-        monthly: `~$${Math.round(plan.annualPrice / 12)}/month`
-      };
-    }
-    
-    if (plan.isB2B) {
-      return {
-        primary: `$${plan.monthlyPrice}/patient/mo`,
-        secondary: null,
-        monthly: `Min 5 patients ($${(plan.monthlyPrice || 0) * 5}/mo)`
-      };
-    }
-    
     return {
-      primary: `$${plan.monthlyPrice}/month`,
-      secondary: `or $${plan.annualPrice}/year`,
-      monthly: `Save ${Math.round((1 - plan.annualPrice / ((plan.monthlyPrice || 1) * 12)) * 100)}% annually`
+      primary: `$${plan.annualPrice.toFixed(2)}/year`,
+      secondary: null,
+      monthly: `~$${(plan.annualPrice / 12).toFixed(2)}/month billed annually`
     };
   };
 
@@ -257,20 +189,14 @@ const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationPr
                           {formatPricing(recommendedPlan).primary}
                         </span>
                       </div>
-                      {formatPricing(recommendedPlan).secondary && (
-                        <p className="text-sm text-green-600 font-semibold mb-1">
-                          {formatPricing(recommendedPlan).secondary}
-                        </p>
-                      )}
                       <p className="text-sm text-gray-500">
-                        {formatPricing(recommendedPlan).monthly} • {recommendedPlan.serviceCount}
+                        {formatPricing(recommendedPlan).monthly}
                       </p>
                     </div>
 
                     <div className="mb-4">
                       <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
-                        <p className="text-sm font-semibold text-green-800">{recommendedPlan.perVisitCost}</p>
-                        <p className="text-sm text-green-700">{recommendedPlan.savings}</p>
+                        <p className="text-sm text-green-800 font-semibold">{recommendedPlan.savings}</p>
                       </div>
                     </div>
 
@@ -294,7 +220,7 @@ const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationPr
                       className="luxury-button text-xl py-6 px-12 font-semibold tracking-wide mb-4 w-full"
                       size="lg"
                     >
-                      {recommendedPlan.isB2B ? "Contact Us" : "Start Your Membership"}
+                      Continue With {recommendedPlan.name}
                       <Zap className="ml-3 h-6 w-6" />
                     </Button>
                     
@@ -338,11 +264,6 @@ const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationPr
                     <div className="text-2xl font-bold text-conve-red mb-1">
                       {formatPricing(plan).primary}
                     </div>
-                    {formatPricing(plan).secondary && (
-                      <p className="text-sm text-green-600 font-semibold">
-                        {formatPricing(plan).secondary}
-                      </p>
-                    )}
                     <p className="text-sm text-gray-500">
                       {formatPricing(plan).monthly}
                     </p>
@@ -350,7 +271,6 @@ const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationPr
 
                   <div className="mb-4">
                     <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-                      <p className="text-sm font-semibold text-gray-800">{plan.perVisitCost}</p>
                       <p className="text-xs text-gray-600">{plan.savings}</p>
                     </div>
                   </div>
@@ -369,7 +289,7 @@ const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationPr
                     variant="outline" 
                     className="w-full luxury-button-outline"
                   >
-                    {plan.isB2B ? "Contact Us" : "Choose This Plan"}
+                    Choose {plan.name}
                   </Button>
                 </Card>
               ))}

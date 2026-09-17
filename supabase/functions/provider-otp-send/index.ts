@@ -49,20 +49,21 @@ Deno.serve(async (req) => {
     // Phone lookup — service role only, client never sees this
     const { data: org } = await admin
       .from('organizations')
-      .select('contact_phone')
-      .or(`contact_email.eq.${normalizedEmail},billing_email.eq.${normalizedEmail}`)
+      .select('contact_phone, office_phone')
+      .or(`contact_email.eq.${normalizedEmail},billing_email.eq.${normalizedEmail},front_desk_email.eq.${normalizedEmail},manager_email.eq.${normalizedEmail}`)
       .eq('portal_enabled', true)
       .eq('is_active', true)
       .maybeSingle();
 
-    if (!org?.contact_phone) {
+    const rawPhone = org?.office_phone || org?.contact_phone;
+    if (!rawPhone) {
       // Generic response — don't leak whether the email exists
       return new Response(JSON.stringify({ success: true, phone_hint: null, delivery: 'none' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const phone = normalizePhone(org.contact_phone);
+    const phone = normalizePhone(rawPhone);
 
     // Trigger the OTP via Supabase native phone auth (Twilio under the hood).
     // Uses ANON key because signInWithOtp is a public-by-design method; the

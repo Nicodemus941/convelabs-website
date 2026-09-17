@@ -192,11 +192,11 @@ const buildPatientEmailHtml = (opts: {
       <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#ffffff;border:1.5px solid #e5e7eb;border-radius:12px;margin:0 0 10px;">
         <tr><td style="padding:18px 20px;">
           <p style="margin:0 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#6b7280;font-weight:800;">Tier 1 · Member</p>
-          <p style="margin:0 0 10px;color:#111827;font-size:28px;font-weight:800;line-height:1.1;">$99<span style="font-size:14px;font-weight:500;color:#6b7280;"> / year</span></p>
+          <p style="margin:0 0 10px;color:#111827;font-size:28px;font-weight:800;line-height:1.1;">$9.99<span style="font-size:14px;font-weight:500;color:#6b7280;"> / year</span></p>
           <p style="margin:0 0 8px;background:#d1fae5;color:#065f46;display:inline-block;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;">$130 per visit · save $20 each draw</p>
           <p style="margin:10px 0 0;font-size:13.5px;color:#374151;line-height:1.5;">Weekend appointments · patient portal · 10% off family add-ons</p>
           <div style="text-align:center;margin:14px 0 0;">
-            <a href="${portalUrl}&tier=member" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Lock in Member — $99 →</a>
+            <a href="${portalUrl}&tier=member" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Lock in Member — $9.99 →</a>
           </div>
         </td></tr>
       </table>
@@ -207,16 +207,16 @@ const buildPatientEmailHtml = (opts: {
             <span style="background:#fde68a;color:#78350f;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Most popular</span>
           </p>
           <p style="margin:6px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#fecaca;font-weight:800;">Tier 2 · VIP</p>
-          <p style="margin:0 0 10px;color:#ffffff;font-size:28px;font-weight:800;line-height:1.1;">$199<span style="font-size:14px;font-weight:500;color:#fecaca;"> / year</span></p>
+          <p style="margin:0 0 10px;color:#ffffff;font-size:28px;font-weight:800;line-height:1.1;">$19.99<span style="font-size:14px;font-weight:500;color:#fecaca;"> / year</span></p>
           <p style="margin:0 0 8px;background:#fde68a;color:#78350f;display:inline-block;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;">$115 per visit · save $35 each draw</p>
           <p style="margin:10px 0 12px;font-size:13.5px;color:#fef3c7;line-height:1.5;">Priority same-day booking · family add-ons at $45 · extended hours · everything in Member</p>
           <div style="background:rgba(255,255,255,0.12);border:1px dashed #fecaca;border-radius:10px;padding:12px 14px;margin:0 0 12px;">
             <p style="margin:0 0 6px;font-size:11px;color:#fef3c7;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">Founding VIP bonuses</p>
             <p style="margin:0 0 4px;font-size:13px;color:#fef3c7;line-height:1.5;">🎁 <strong>Free family add-on (1 extra member)</strong> — bring your spouse, parent, or child to one appointment at no extra cost <span style="color:#fecaca;">(value: $75)</span></p>
-            <p style="margin:0;font-size:13px;color:#fef3c7;line-height:1.5;">🔒 <strong>Founding-rate lock for life</strong> — your $199 annual rate never raises as long as you stay a member <span style="color:#fecaca;">(value: $50+/yr)</span></p>
+            <p style="margin:0;font-size:13px;color:#fef3c7;line-height:1.5;">🔒 <strong>Founding-rate lock for life</strong> — your $19.99 annual rate never raises as long as you stay a member <span style="color:#fecaca;">(value: $50+/yr)</span></p>
           </div>
           <div style="text-align:center;margin:6px 0 0;">
-            <a href="${portalUrl}&tier=vip" style="display:inline-block;background:#fde68a;color:#78350f;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:800;font-size:13.5px;">Claim VIP + bonuses — $199 →</a>
+            <a href="${portalUrl}&tier=vip" style="display:inline-block;background:#fde68a;color:#78350f;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:800;font-size:13.5px;">Claim VIP + bonuses — $19.99 →</a>
           </div>
         </td></tr>
       </table>
@@ -227,11 +227,11 @@ const buildPatientEmailHtml = (opts: {
             <span style="background:#92400e;color:#fef3c7;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;">Best value per visit</span>
           </p>
           <p style="margin:6px 0 2px;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#92400e;font-weight:800;">Tier 3 · Concierge</p>
-          <p style="margin:0 0 10px;color:#111827;font-size:28px;font-weight:800;line-height:1.1;">$399<span style="font-size:14px;font-weight:500;color:#6b7280;"> / year</span></p>
+          <p style="margin:0 0 10px;color:#111827;font-size:28px;font-weight:800;line-height:1.1;">$49.99<span style="font-size:14px;font-weight:500;color:#6b7280;"> / year</span></p>
           <p style="margin:0 0 8px;background:#d1fae5;color:#065f46;display:inline-block;padding:4px 10px;border-radius:6px;font-size:13px;font-weight:700;">$99 per visit · save $51 each draw</p>
           <p style="margin:10px 0 0;font-size:13.5px;color:#374151;line-height:1.5;">Same-day guaranteed · dedicated phlebotomist · NDA available on request · concierge support · everything in VIP <em>(including founding-rate lock)</em></p>
           <div style="text-align:center;margin:14px 0 0;">
-            <a href="${portalUrl}&tier=concierge" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Lock in Concierge — $399 →</a>
+            <a href="${portalUrl}&tier=concierge" style="display:inline-block;background:#111827;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">Lock in Concierge — $49.99 →</a>
           </div>
         </td></tr>
       </table>
@@ -240,7 +240,7 @@ const buildPatientEmailHtml = (opts: {
         <p style="margin:0 0 6px;font-size:12px;color:#92400e;font-weight:800;text-transform:uppercase;letter-spacing:.5px;">The math (at 6 visits a year)</p>
         <p style="margin:0;font-size:13.5px;color:#451a03;line-height:1.6;">
           <strong>Member</strong> saves $120 — pays for itself at visit #5<br>
-          <strong>VIP</strong> saves $210 + $75 family bonus = <strong>$285 value</strong> for $199<br>
+          <strong>VIP</strong> saves $210 + $75 family bonus = <strong>$285 value</strong> for $19.99<br>
           <strong>Concierge</strong> saves $306 — pays for itself at visit #5<br>
           <span style="color:#92400e;">If you run labs more than 2×/year, membership is cheaper than paying per visit.</span>
         </p>

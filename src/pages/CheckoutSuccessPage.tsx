@@ -47,7 +47,7 @@ const TIER_META: Record<string, { label: string; color: string; benefits: string
       '$10 off every lab visit — forever',
       'Priority same-day mobile booking',
       'One free family member under your account',
-      'Founding rate-lock: your $199 never goes up',
+      'Founding rate-lock: your $19.99 never goes up',
       '48-hour priority result delivery window',
       'Founding Member badge · first access to new services',
     ],

@@ -132,18 +132,18 @@ const ServicesPricingModal: React.FC<Props> = ({ open, onOpenChange, onSchedule,
             </div>
             <div className="text-center px-1">
               <div className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-emerald-700">Member</div>
-              <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">$99/yr · ~13%</div>
+              <div className="text-[10px] text-gray-500 mt-0.5 leading-tight">$9.99/yr · ~13%</div>
             </div>
             <div className="text-center px-1 relative pt-3">
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 whitespace-nowrap">
                 <Badge className="bg-amber-500 text-white border-amber-500 text-[9px] px-1.5 py-0 h-4 leading-none">★ Most popular</Badge>
               </div>
               <div className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-amber-700">VIP</div>
-              <div className="text-[10px] text-amber-700/80 mt-0.5 leading-tight">$199/yr · ~23%</div>
+              <div className="text-[10px] text-amber-700/80 mt-0.5 leading-tight">$19.99/yr · ~23%</div>
             </div>
             <div className="text-center px-1">
               <div className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-purple-700">Concierge</div>
-              <div className="text-[10px] text-purple-600/80 mt-0.5 leading-tight">$399/yr · ~34%</div>
+              <div className="text-[10px] text-purple-600/80 mt-0.5 leading-tight">$49.99/yr · ~34%</div>
             </div>
           </div>
 
@@ -193,7 +193,7 @@ const ServicesPricingModal: React.FC<Props> = ({ open, onOpenChange, onSchedule,
             <div className="flex items-start gap-2 mb-3">
               <Crown className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
               <div>
-                <div className="text-sm font-bold text-amber-900">VIP — $199/yr unlocks $474 of value</div>
+              <div className="text-sm font-bold text-amber-900">VIP — $19.99/yr unlocks $474 of value</div>
                 <div className="text-[11px] text-amber-700">Pays for itself in one Mobile draw. Most patients break even by visit #2.</div>
               </div>
             </div>

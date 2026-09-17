@@ -129,6 +129,20 @@ interface RowState {
   labelPath: string | null;
 }
 
+const dedupeLabelValues = (codes: Array<{ value: string }>): string[] => {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const code of codes || []) {
+    const value = String(code?.value || '').trim();
+    if (!value) continue;
+    const key = value.replace(/\s+/g, '').toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ordered.push(value);
+  }
+  return ordered;
+};
+
 /** Loose person-name match: ≥2 shared name tokens (handles "Brittany Owle" vs
  *  "OWLE, BRITTANY A"). Sharing ONLY a last name does NOT match — family
  *  members share surnames and mixing up their specimen IDs is exactly the
@@ -528,10 +542,19 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
 
       // 3. Vision OCR for lab name / patient name / printed codes
       let ocr: any = null;
+      let ocrErrorMessage: string | null = null;
       try {
         const { data, error } = await supabase.functions.invoke('ocr-specimen-label', { body: { path } });
-        if (!error) ocr = data;
-      } catch { /* fall through to barcode-only results */ }
+        if (error) {
+          ocrErrorMessage = error.message || 'Label OCR failed';
+        } else if (data?.error) {
+          ocrErrorMessage = String(data.error);
+        } else {
+          ocr = data;
+        }
+      } catch (err: any) {
+        ocrErrorMessage = err?.message || 'Label OCR failed';
+      }
 
       // 4. Merge codes (barcode hits first — they're exact), dedupe by value
       const seen = new Set<string>();
@@ -561,9 +584,10 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         scanCodes: codes,
         scanPatientName: ocr?.patient_name || null,
         scanLab: ocr?.lab_company || null,
+        labelPath: path,
       };
       const current = rowsRef.current.find(r => rowKey(r) === id);
-      if (best && !(current?.specimenId || '').trim()) patch.specimenId = best.value;
+      if (best) patch.specimenId = best.value;
       // Map the OCR'd lab/carrier onto the dropdown when it's still unset
       const labVal = labValueFromDestination(ocr?.lab_company);
       if (labVal && !current?.labName) patch.labName = labVal;
@@ -580,7 +604,13 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
         }
       }
       if (codes.length === 0) {
+        if (ocrErrorMessage && /unsupported_image_type/i.test(ocrErrorMessage)) {
+          toast.error('This camera photo format is not OCR-friendly yet. Please retake it as JPG/Most Compatible, or type the label manually.');
+        } else if (ocrErrorMessage) {
+          toast.info('Label photo was saved, but OCR could not read a usable code. Please type the specimen ID manually.');
+        } else {
         toast.info('No codes legible on the photo — type the specimen ID manually. (Photo saved as proof of delivery.)');
+        }
       } else {
         toast.success(`Label scanned — ${codes.length} code${codes.length === 1 ? '' : 's'} found`);
       }
@@ -663,6 +693,13 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
     try {
       const lab = labLabel(row.labName);
       const nowIso = new Date().toISOString();
+      const extractedSpecimenIds = dedupeLabelValues(row.scanCodes);
+      const selectedSpecimenId = row.specimenId.trim();
+      const deliveryNoteBits = [
+        row.deliveryNotes?.trim() || '',
+        extractedSpecimenIds.length > 1 ? `Extracted labels: ${extractedSpecimenIds.join(' | ')}` : '',
+      ].filter(Boolean);
+      const deliveryNotes = deliveryNoteBits.join('\n');
       const deliveredBy = (() => {
         try {
           const stored = localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token');
@@ -686,7 +723,7 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           tube_count: parseInt(row.tubeCount) || 1,
           tube_types: row.tubeTypes || null,
           service_type: row.serviceType,
-          delivery_notes: row.deliveryNotes || (row.labOrderId ? `lab_order:${row.labOrderId}` : null),
+          delivery_notes: deliveryNotes || (row.labOrderId ? `lab_order:${row.labOrderId}` : null),
           collection_time: nowIso,
           delivered_at: nowIso,
           delivered_by: deliveredBy,
@@ -837,7 +874,8 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
             labOrderId: row.labOrderId,
             patientName: row.patientName,
             organizationId: row.organizationId,
-            specimenId: row.specimenId.trim(),
+            specimenId: selectedSpecimenId,
+            allSpecimenIds: extractedSpecimenIds.length > 0 ? extractedSpecimenIds : undefined,
             labName: lab,
             tubeCount: parseInt(row.tubeCount) || 1,
             deliveredAt: nowIso,

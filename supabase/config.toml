@@ -170,6 +170,9 @@ verify_jwt = false
 [functions.provider-otp-verify]
 verify_jwt = false
 
+[functions.create-patient-account]
+verify_jwt = false
+
 [functions.get-lab-request]
 verify_jwt = false
 

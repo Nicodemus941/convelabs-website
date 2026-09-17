@@ -70,6 +70,10 @@ Deno.serve(async (req) => {
     const drawLine = drawShort ? ` Please schedule before ${drawShort}.` : '';
 
     let smsSent = false, emailSent = false;
+    let smsError: string | null = null;
+    let emailError: string | null = null;
+    let twilioSid: string | null = null;
+    let mailgunId: string | null = null;
     if (lr.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
       const body = `Hi ${firstName} — ConveLabs.${orgLine}.${coverLine}${drawLine} Your booking link: ${url}`;
       const fd = new URLSearchParams({ To: normPhone(lr.patient_phone), From: TWILIO_FROM, Body: body });
@@ -79,6 +83,23 @@ Deno.serve(async (req) => {
         body: fd.toString(),
       });
       smsSent = tw.ok;
+      const twText = await tw.text().catch(() => '');
+      try { twilioSid = JSON.parse(twText)?.sid || null; } catch { twilioSid = null; }
+      smsError = tw.ok ? null : `Twilio ${tw.status}: ${twText.slice(0, 300)}`;
+      try {
+        await admin.from('sms_notifications').insert({
+          phone_number: normPhone(lr.patient_phone),
+          notification_type: 'provider_portal_lab_invite',
+          message_content: body,
+          delivery_status: tw.ok ? 'sent' : 'failed',
+          twilio_message_sid: twilioSid,
+          appointment_id: null,
+          sent_at: new Date().toISOString(),
+          metadata: { lab_request_id: lr.id, organization_id: lr.organization_id, source: 'resend-lab-request-link', error: smsError },
+        });
+      } catch (logErr) {
+        console.warn('[resend-lab-request-link] sms log failed (non-blocking):', logErr);
+      }
     }
     if (lr.patient_email && MAILGUN_API_KEY) {
       const html = `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e5e7eb;">
@@ -101,9 +122,30 @@ Deno.serve(async (req) => {
         body: fd,
       });
       emailSent = mg.ok;
+      const mgText = await mg.text().catch(() => '');
+      try { mailgunId = JSON.parse(mgText)?.id || null; } catch { mailgunId = null; }
+      emailError = mg.ok ? null : `Mailgun ${mg.status}: ${mgText.slice(0, 300)}`;
+      try {
+        await admin.from('email_send_log').insert({
+          to_email: lr.patient_email,
+          subject: `${org?.name || 'Your provider'} ordered your bloodwork — book your draw`,
+          email_type: 'provider_portal_lab_invite',
+          status: mg.ok ? 'sent' : 'failed',
+          mailgun_id: mailgunId,
+          organization_id: lr.organization_id,
+          campaign_tag: 'lab_request_invite',
+          appointment_id: null,
+          last_error: emailError,
+          sent_at: new Date().toISOString(),
+        });
+      } catch (logErr) {
+        console.warn('[resend-lab-request-link] email log failed (non-blocking):', logErr);
+      }
     }
-    await admin.from('patient_lab_requests').update({ patient_notified_at: new Date().toISOString() }).eq('id', lr.id);
-    return new Response(JSON.stringify({ ok: true, sms_sent: smsSent, email_sent: emailSent, url }), {
+    if (smsSent || emailSent) {
+      await admin.from('patient_lab_requests').update({ patient_notified_at: new Date().toISOString() }).eq('id', lr.id);
+    }
+    return new Response(JSON.stringify({ ok: true, sms_sent: smsSent, email_sent: emailSent, sms_error: smsError, email_error: emailError, url }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (e: any) {

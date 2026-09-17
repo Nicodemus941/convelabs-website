@@ -111,7 +111,7 @@ const Dashboard = () => {
         const { data: org } = await supabase
           .from('organizations')
           .select('id')
-          .or(`billing_email.eq.${user.email},contact_email.eq.${user.email}`)
+          .or(`billing_email.eq.${user.email},contact_email.eq.${user.email},front_desk_email.eq.${user.email},manager_email.eq.${user.email}`)
           .eq('portal_enabled', true)
           .eq('is_active', true)
           .maybeSingle();

@@ -4,8 +4,8 @@ import { Check, Lock, Users, Zap, Award, Sparkles } from 'lucide-react';
 /**
  * BonusStackCard — the Hormozi $100M Offers "value ladder" display.
  *
- * Shows VIP at $199/yr as a stack of distinct bonuses, each with a
- * visible dollar value. Stacked value totals $474 for a $199 price —
+ * Shows VIP at $19.99/yr as a stack of distinct bonuses, each with a
+ * visible dollar value. Stacked value totals $474 for a $19.99 price —
  * the classic "pays for itself" anchor.
  *
  * Hormozi rule: each bonus has a name, an outcome, and a dollar value
@@ -25,12 +25,12 @@ const VIP_BONUSES: BonusRow[] = [
     icon: Sparkles,
     label: '12 months of VIP membership',
     description: 'Visits at $115 ($35 off standard rate)',
-    value: '$199',
+    value: '$19.99',
   },
   {
     icon: Lock,
     label: 'Founding rate-lock for life',
-    description: 'Your $199/yr never raises — even when we do',
+    description: 'Your $19.99/yr never raises — even when we do',
     value: '+$50/yr',
     highlight: true,
   },
@@ -67,7 +67,7 @@ const BonusStackCard: React.FC<Props> = ({ className = '', showCTA = false, ctaT
     <div className={`bg-gradient-to-br from-white to-rose-50 border-2 border-conve-red/30 rounded-2xl overflow-hidden shadow-sm ${className}`}>
       {/* Header */}
       <div className="bg-gradient-to-r from-conve-red to-red-900 text-white px-5 py-3">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-rose-200">Your $199 Founding VIP unlocks</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-rose-200">Your $19.99 Founding VIP unlocks</p>
         <p className="text-lg font-bold">The full stack — one price</p>
       </div>
 
@@ -111,7 +111,7 @@ const BonusStackCard: React.FC<Props> = ({ className = '', showCTA = false, ctaT
           </div>
           <div className="text-right">
             <span className="line-through text-gray-400 text-xs mr-2">$474</span>
-            <span className="text-emerald-700 font-bold text-lg">$199</span>
+            <span className="text-emerald-700 font-bold text-lg">$19.99</span>
           </div>
         </div>
         <p className="text-[11px] text-emerald-700 mt-1">

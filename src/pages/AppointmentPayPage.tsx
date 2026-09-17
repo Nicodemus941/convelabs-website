@@ -13,6 +13,7 @@ import { useParams } from 'react-router-dom';
 import { Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
 import ReferringProviderCapture from '@/components/patient/ReferringProviderCapture';
+import { analytics } from '@/utils/analytics';
 
 const SUPABASE_URL = 'https://yluyonhrxxtyuiyrdixl.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
@@ -57,6 +58,7 @@ const AppointmentPayPage: React.FC = () => {
   const [providerOpen, setProviderOpen] = useState(true);
   const checkoutRef = useRef<HTMLDivElement | null>(null);
   const checkoutInstanceRef = useRef<any>(null);
+  const abandonmentTrackedRef = useRef(false);
 
   useEffect(() => {
     if (!token) return;
@@ -66,10 +68,19 @@ const AppointmentPayPage: React.FC = () => {
           headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
         });
         const j = await res.json();
-        if (!res.ok) setError('We couldn\'t find this payment link.');
-        else setData(j);
+        if (!res.ok) {
+          setError('We couldn\'t find this payment link.');
+          analytics.trackFunnelStage('invoice_pay_link_invalid', 30, { tokenPresent: Boolean(token) });
+        } else {
+          setData(j);
+          analytics.trackFunnelStage('invoice_pay_page_viewed', 20, {
+            status: j?.status || 'unknown',
+            hasAppointment: Boolean(j?.appointment),
+          });
+        }
       } catch {
         setError('Something went wrong loading your invoice.');
+        analytics.trackFunnelStage('invoice_pay_page_error', 30, { phase: 'load_details' });
       } finally {
         setLoading(false);
       }
@@ -86,6 +97,9 @@ const AppointmentPayPage: React.FC = () => {
   // entry stays on this page — no redirect to Stripe).
   useEffect(() => {
     if (!clientSecret) return;
+    analytics.trackFunnelStage('invoice_embedded_checkout_loaded', 22, {
+      total_cents: total,
+    });
     let cancelled = false;
     (async () => {
       try {
@@ -101,6 +115,7 @@ const AppointmentPayPage: React.FC = () => {
       } catch {
         setSubmitError('Could not load the payment form. Please refresh or call (941) 527-9169.');
         setClientSecret(null);
+        analytics.trackFunnelStage('invoice_pay_page_error', 30, { phase: 'embedded_checkout_mount' });
       }
     })();
     return () => {
@@ -113,6 +128,11 @@ const AppointmentPayPage: React.FC = () => {
   async function handlePay() {
     if (!token || submitting || !acceptTc) return;
     setSubmitting(true); setSubmitError(null);
+    analytics.trackFunnelStage('invoice_checkout_started', 21, {
+      tip_cents: effectiveTip,
+      subtotal_cents: subtotal,
+      total_cents: total,
+    });
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/proceed-to-stripe-checkout`, {
         method: 'POST',
@@ -124,19 +144,51 @@ const AppointmentPayPage: React.FC = () => {
         setClientSecret(j.client_secret);
       } else if (j.error === 'tip_too_large') {
         setSubmitError('That tip is larger than we can accept — please lower it.');
+        analytics.trackFunnelStage('invoice_pay_page_error', 30, { phase: 'tip_validation' });
       } else if (j.error === 'already_paid') {
         setSubmitError('This invoice has already been paid.');
+        analytics.trackFunnelStage('invoice_pay_page_error', 30, { phase: 'already_paid' });
       } else if (j.error === 'expired' || j.error === 'voided') {
         setSubmitError('This payment link is no longer valid. Please contact us for a new one.');
+        analytics.trackFunnelStage('invoice_pay_link_invalid', 30, { phase: j.error });
       } else {
         setSubmitError('We couldn\'t start checkout. Please try again or call (941) 527-9169.');
+        analytics.trackFunnelStage('invoice_pay_page_error', 30, { phase: 'checkout_start' });
       }
     } catch {
       setSubmitError('We couldn\'t start checkout. Please try again or call (941) 527-9169.');
+      analytics.trackFunnelStage('invoice_pay_page_error', 30, { phase: 'checkout_request' });
     } finally {
       setSubmitting(false);
     }
   }
+
+  useEffect(() => {
+    const handlePageExit = () => {
+      if (abandonmentTrackedRef.current || paidInline || loading) return;
+      abandonmentTrackedRef.current = true;
+      analytics.trackFunnelStage('invoice_pay_page_abandoned', 29, {
+        stage: clientSecret ? 'embedded_checkout' : 'review',
+        status: data?.status || 'unknown',
+      });
+    };
+
+    window.addEventListener('pagehide', handlePageExit);
+    window.addEventListener('beforeunload', handlePageExit);
+    return () => {
+      window.removeEventListener('pagehide', handlePageExit);
+      window.removeEventListener('beforeunload', handlePageExit);
+    };
+  }, [clientSecret, data?.status, loading, paidInline]);
+
+  useEffect(() => {
+    if (!paidInline || abandonmentTrackedRef.current) return;
+    abandonmentTrackedRef.current = true;
+    analytics.trackFunnelStage('invoice_payment_success', 23, {
+      total_cents: total,
+      tip_cents: effectiveTip,
+    });
+  }, [effectiveTip, paidInline, total]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>;
 

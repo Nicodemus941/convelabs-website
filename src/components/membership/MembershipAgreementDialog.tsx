@@ -178,7 +178,7 @@ or "our"), and the individual identified at checkout ("Member," "you," or
        a unique founding-member number (#1 through #50) recorded in
        their account.
    6.2 Rate-Lock for Life. Your annual rate is locked at the rate
-       disclosed at the time of your initial enrollment ($199 for the
+       disclosed at the time of your initial enrollment ($19.99 for the
        initial Founding-50 cohort) for the duration of your continuous
        membership, EVEN AS STANDARD RATES INCREASE for non-Founding
        members. ConveLabs covenants in good faith that future

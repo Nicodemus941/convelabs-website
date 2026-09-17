@@ -18,6 +18,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { createOrRefreshAppointmentPayLink } from '../_shared/appointment-pay-link.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,13 +38,6 @@ const ADMIN_ROLES = new Set(['super_admin', 'admin', 'owner']);
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-}
-
-function newToken(): string {
-  // URL-safe random token, ~32 chars.
-  const bytes = new Uint8Array(24);
-  crypto.getRandomValues(bytes);
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 Deno.serve(async (req) => {
@@ -78,29 +72,7 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!appt) return json({ error: 'appointment_not_found' }, 404);
 
-    // Revoke any prior active token for this appointment (keeps the partial
-    // unique index happy + invalidates stale links).
-    await admin.from('appointment_pay_tokens')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('appointment_id', appointment_id)
-      .is('revoked_at', null)
-      .is('paid_at', null);
-
-    // Expiry = min(appointment_date + 1 day, now + 30 days).
-    const apptDate = new Date(String(appt.appointment_date).substring(0, 10) + 'T23:59:59-04:00');
-    const apptPlus1 = new Date(apptDate.getTime() + 24 * 60 * 60 * 1000);
-    const nowPlus30 = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    const expiresAt = new Date(Math.min(apptPlus1.getTime(), nowPlus30.getTime()));
-
-    const token = newToken();
-    const { error: insErr } = await admin.from('appointment_pay_tokens').insert({
-      appointment_id,
-      access_token: token,
-      expires_at: expiresAt.toISOString(),
-    });
-    if (insErr) return json({ error: insErr.message }, 500);
-
-    const url = `${SITE}/pay/${token}`;
+    const { token, url } = await createOrRefreshAppointmentPayLink(admin, appointment_id, SITE);
 
     // ── EMAIL (gated) ─────────────────────────────────────────────
     let emailed = false;

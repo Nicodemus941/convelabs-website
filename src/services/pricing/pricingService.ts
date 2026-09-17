@@ -63,7 +63,7 @@ export type MembershipTier = 'none' | 'member' | 'vip' | 'concierge';
 // Hormozi rule: member's tier price is the floor — they never pay more than
 // their tier price on ANY service, including partner visits. Combined with
 // the server-side `lowest_wins` stacking rule on each partner org, this
-// guarantees every member sees their $99/$199/$399/yr benefit on every
+// guarantees every member sees their $9.99/$19.99/$49.99/yr benefit on every
 // single visit, regardless of referral source.
 const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
   'dev-testing':        { none: 1,   member: 1,   vip: 1,   concierge: 1 },
@@ -75,7 +75,7 @@ const TIER_PRICING: Record<string, Record<MembershipTier, number>> = {
   'therapeutic':        { none: 200, member: 180, vip: 165, concierge: 150 },
   'additional':         { none: 75,  member: 55,  vip: 45,  concierge: 35 },
   // Partner services — members must see a discount here too, otherwise the
-  // $199/yr VIP fee feels worthless when referred in by a partner practice.
+  // $19.99/yr VIP fee feels worthless when referred in by a partner practice.
   'partner-restoration-place':       { none: 125,   member: 115,   vip: 99,    concierge: 85 },
   'partner-naturamed':               { none: 85,    member: 80,    vip: 75,    concierge: 65 },
   'partner-nd-wellness':             { none: 85,    member: 80,    vip: 75,    concierge: 65 },
@@ -124,9 +124,9 @@ function getDbServicePrice(serviceId: string, tier: MembershipTier): number | un
 
 // Membership annual fees
 export const MEMBERSHIP_FEES: Record<string, { name: string; fee: number; label: string }> = {
-  member: { name: 'Member', fee: 99, label: '$99/year' },
-  vip: { name: 'VIP', fee: 199, label: '$199/year' },
-  concierge: { name: 'Concierge', fee: 399, label: '$399/year' },
+  member: { name: 'Member', fee: 9.99, label: '$9.99/year' },
+  vip: { name: 'VIP', fee: 19.99, label: '$19.99/year' },
+  concierge: { name: 'Concierge', fee: 49.99, label: '$49.99/year' },
 };
 
 // Provider partner pricing (flat, no tiers).
@@ -294,19 +294,17 @@ export function calculateBasePrice(serviceId: string): number {
  * Promises by perk:
  *
  *   Same-day STAT ($100 surcharge):
- *     • Regular VIP card lists "Same-day booking" as ✗ → still pays
- *     • Founding-50 stack: "Priority same-day booking — Skip the +$100
- *       STAT surcharge on urgent draws" → WAIVED for founding VIP
- *     • Concierge tier: always waived (top-shelf perk)
+ *     • VIP members: waived
+ *     • Concierge tier: waived
+ *     • Founding-50 VIP inherits the same waiver (plus its other perks)
  *
  *   Weekend service ($75 surcharge):
  *     • Regular VIP card: "Saturday access: 6am–11am" → WAIVED
  *     • Concierge: also waived
  *     • Member tier: still pays (not promised at member tier)
  */
-function isSameDayWaived(tier: MembershipTier, isFoundingMember: boolean): boolean {
-  if (tier === 'concierge') return true;
-  if (tier === 'vip' && isFoundingMember) return true;
+function isSameDayWaived(tier: MembershipTier, _isFoundingMember: boolean): boolean {
+  if (tier === 'concierge' || tier === 'vip') return true;
   return false;
 }
 
@@ -379,7 +377,7 @@ export function calculateTotal(
     const perPatient = getAdditionalPatientPrice(serviceId, tier);
     // Free family-slot rules per public pricing card promises:
     //   • Founding-50 VIP: 1 free family member per visit
-    //   • Concierge ($399/yr): 2 free family members per visit (per
+    //   • Concierge ($49.99/yr): 2 free family members per visit (per
     //     pricing card: "Family add-on (same visit): FREE for 2 family
     //     members")
     // Both stack the same way: free slots reduce the billable count to

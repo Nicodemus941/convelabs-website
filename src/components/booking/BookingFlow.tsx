@@ -51,6 +51,11 @@ enum BookingStep {
 // therapeutic) jump from display 0 to display 2 directly.
 const STEP_LABELS = ['Visit Type', 'Service', 'Date & Time', 'Patient Info', 'Address', 'Lab Order', 'Checkout'];
 
+interface DateTimeResetNotice {
+  title: string;
+  message: string;
+}
+
 /**
  * Compute the display marker index (0..6) from the internal step state.
  * Keeps progress UI honest with the actual screen the patient is looking at.
@@ -97,6 +102,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const [isServicesLoading, setIsServicesLoading] = useState(true);
   const [labOrderFiles, setLabOrderFiles] = useState<File[]>([]);
   const [insuranceFile, setInsuranceFile] = useState<File | null>(null);
+  const [dateTimeResetNotice, setDateTimeResetNotice] = useState<DateTimeResetNotice | null>(null);
   // Membership tier — detected in CheckoutStep via callback. MUST be at
   // this level so calculateTotal() in handleCheckout applies member pricing.
   // Prior bug: memberTier was local to CheckoutStep only, so the Stripe
@@ -349,6 +355,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   const handleNext = () => {
     prevStepRef.current = currentStep;
+    if (currentStep === BookingStep.ServiceAndDate) setDateTimeResetNotice(null);
 
     // Smart skip logic based on visit type
     if (currentStep === BookingStep.VisitType) {
@@ -809,7 +816,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // Hormozi rule: never let a buyer leave empty-handed. Every error
         // gets a clear plain-English message + a specific recovery action.
         const code = (result as any).errorCode || '';
-        const goToDateTime = () => {
+        const goToDateTime = (notice?: DateTimeResetNotice) => {
+          setDateTimeResetNotice(notice || null);
           setShowLabOrder(false);
           setShowDatePicker(true);
           prevStepRef.current = currentStep;
@@ -829,38 +837,56 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         }
 
         if (code === 'destination_required') {
+          const notice = {
+            title: 'Choose the specimen destination before payment',
+            message: 'We sent you back here because the booking could not continue until you picked where the specimen should be delivered after the draw.',
+          };
           toast.error('Pick where you want your specimen delivered (LabCorp, Quest, AdventHealth, etc.) before checkout.', {
             duration: 8000,
-            action: { label: 'Pick lab', onClick: goToDateTime },
+            action: { label: 'Pick lab', onClick: () => goToDateTime(notice) },
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
         if (code === 'fasting_not_required') {
+          const notice = {
+            title: 'Your appointment needs a new time selection',
+            message: "Your lab order doesn't require fasting, so we reopened the time picker under the routine-draw rules before payment can continue.",
+          };
           toast.warning("Your lab order doesn't require fasting — we'll switch you to a routine draw and reopen the slot picker.", {
             duration: 8000,
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
         if (code === 'date_blocked') {
+          const msg = result.error || 'That day is not available because the calendar is blocked for a closure window.';
+          const notice = {
+            title: 'That date is blocked on the calendar',
+            message: msg,
+          };
           toast.error('That day isn\'t available (holiday or office closure). Please pick a different date.', {
             duration: 7000,
-            action: { label: 'Pick another date', onClick: goToDateTime },
+            action: { label: 'Pick another date', onClick: () => goToDateTime(notice) },
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
         if (code === 'outside_partner_window' || code === 'outside_booking_window') {
           // Server-supplied message contains the actual hours
+          const msg = result.error || 'That time is outside our available booking window.';
+          const notice = {
+            title: 'That time is no longer bookable',
+            message: msg,
+          };
           toast.error(result.error || 'That time is outside our booking hours. Please pick a different time.', {
             duration: 9000,
-            action: { label: 'Pick another time', onClick: goToDateTime },
+            action: { label: 'Pick another time', onClick: () => goToDateTime(notice) },
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
@@ -1159,6 +1185,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                     <DateTimeSelectionStep
                       onNext={handleNext}
                       onBack={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                      resetNotice={dateTimeResetNotice}
+                      onClearResetNotice={() => setDateTimeResetNotice(null)}
                     />
                   );
                 }
@@ -1186,6 +1214,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   <DateTimeSelectionStep
                     onNext={handleNext}
                     onBack={() => setShowDatePicker(false)}
+                    resetNotice={dateTimeResetNotice}
+                    onClearResetNotice={() => setDateTimeResetNotice(null)}
                   />
                 );
               })()}

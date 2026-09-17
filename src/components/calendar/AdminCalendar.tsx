@@ -18,6 +18,7 @@ import SeriesConflictModal, { type Resolution } from './SeriesConflictModal';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { detectSeriesConflicts, type Conflict, type ProposedSlot } from '@/lib/seriesConflicts';
 import './calendar-styles.css';
+import { filterCalendarAppointments, isInvoiceOnlyAppointment } from '@/lib/appointmentCalendarFilters';
 
 const STATUS_COLORS: Record<string, string> = {
   scheduled: '#2563eb',
@@ -299,11 +300,12 @@ const AdminCalendar: React.FC = () => {
       weekStart.setDate(now.getDate() - now.getDay());
 
       const appts = data || [];
+      const visibleAppts = filterCalendarAppointments(appts);
       setAppointments(appts);
       setStats({
-        today: appts.filter(a => a.appointment_date?.startsWith(todayStr) && a.status !== 'cancelled').length,
-        thisWeek: appts.filter(a => new Date(a.appointment_date) >= weekStart && a.status !== 'cancelled').length,
-        upcoming: appts.filter(a => ['scheduled', 'confirmed'].includes(a.status)).length,
+        today: visibleAppts.filter(a => a.appointment_date?.startsWith(todayStr)).length,
+        thisWeek: visibleAppts.filter(a => new Date(a.appointment_date) >= weekStart).length,
+        upcoming: visibleAppts.filter(a => ['scheduled', 'confirmed'].includes(a.status)).length,
       });
     } catch (err) {
       console.error('Failed to fetch appointments:', err);
@@ -391,7 +393,9 @@ const AdminCalendar: React.FC = () => {
   // Filter: always hide cancelled appointments from the calendar
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const [currentView, setCurrentView] = useState(isMobile ? 'timeGridDay' : 'timeGridWeek');
-  const nonCancelled = appointments.filter(a => a.status !== 'cancelled');
+  const activeCalendarRows = appointments.filter(
+    (a) => a.status !== 'cancelled' && !isInvoiceOnlyAppointment(a)
+  );
 
   // Family-group dedupe: when a household books multiple patients in the
   // same visit, the modal creates one primary row + one row per companion
@@ -401,16 +405,14 @@ const AdminCalendar: React.FC = () => {
   // Convention: primary row has id === family_group_id (or family_group_id NULL).
   // Companion rows have family_group_id pointing to the primary's id.
   const companionsByGroup = new Map<string, string[]>();
-  for (const a of nonCancelled) {
+  for (const a of activeCalendarRows) {
     if (a.family_group_id && a.id !== a.family_group_id && a.companion_role) {
       const list = companionsByGroup.get(a.family_group_id) || [];
       list.push(a.patient_name || 'Companion');
       companionsByGroup.set(a.family_group_id, list);
     }
   }
-  const visibleAppointments = nonCancelled.filter(a =>
-    !a.family_group_id || a.id === a.family_group_id || !a.companion_role
-  );
+  const visibleAppointments = filterCalendarAppointments(activeCalendarRows);
 
   // Convert appointments to FullCalendar events
   const calendarEvents = visibleAppointments.map(appt => {

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { format, addDays, subDays } from 'date-fns';
-import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown } from 'lucide-react';
+import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import MemberOtpUnlockButton from './MemberOtpUnlockButton';
 import JoinWaitlistButton from './JoinWaitlistButton';
@@ -30,7 +30,7 @@ import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
-import { VISIT_DURATIONS, DEFAULT_APPOINTMENT_DURATION } from '@/services/pricing/pricingService';
+import { VISIT_DURATIONS, DEFAULT_APPOINTMENT_DURATION, MEMBERSHIP_FEES } from '@/services/pricing/pricingService';
 
 // US Government holidays - ConveLabs is closed on these dates
 function getBlockedHolidays(year: number): Date[] {
@@ -107,12 +107,17 @@ interface DateTimeSelectionStepProps {
    *  is the entry point of the booking flow (Hormozi simplification). */
   onBack?: () => void;
   considerDistance?: boolean;
+  resetNotice?: {
+    title: string;
+    message: string;
+  } | null;
+  onClearResetNotice?: () => void;
 }
 
-// Operational hours (simplified 2026-04-25):
-//   ALL TIERS, ALL DAYS: 6 AM – 6 PM (Mon–Sun). Last slot start: 5:30 PM.
-// Tier becomes a pricing/perks lever, not an access lever. Per-visit price
-// drops as the tier rises — see TIER_VISIT_PRICE_CENTS in tier-gating.ts.
+// Operational grid (updated 2026-08-11):
+//   ALL TIERS can see the daytime grid, but bookingWindows tier-gates the
+//   premium 6:00-6:45 AM lane to VIP / Concierge only.
+//   Last standard slot start: 5:45 PM.
 // Real constraint = phleb's actual calendar (live availability + buffers).
 // 15-min increments per owner request 2026-04-25 — patients can now pick
 // :00, :15, :30, :45 of every hour. Generated programmatically (was 24
@@ -142,30 +147,10 @@ const allDayWindows = (() => {
   return out;
 })();
 
-// Helper: parse "9:15 AM" → 24h-minutes-of-day (e.g. 555)
-function timeToMinOfDay(t: string): number {
-  const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
-  if (!m) return 0;
-  let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
-  const p = m[3].toUpperCase();
-  if (p === 'PM' && h !== 12) h += 12;
-  if (p === 'AM' && h === 12) h = 0;
-  return h * 60 + mm;
-}
-
-// Routine blood draws — non-fasting non-member window (9am-1:30pm).
-// 15-min step compatible (filters by minutes-of-day, not by string).
-const routineWindows = allDayWindows.filter(w => {
-  const min = timeToMinOfDay(w.time);
-  return min >= 9 * 60 && min <= 13 * 60 + 30;  // 9:00 ... 1:30 PM
-});
-
-// Saturday — VIP 6am-11am, Regular 6-9am. Show up to 10:45 start (11am end).
-const weekendWindows = allDayWindows.filter(w => {
-  const min = timeToMinOfDay(w.time);
-  return min >= 6 * 60 && min < 11 * 60;
-});
-
+// Public daytime access now uses the same core grid for routine, fasting,
+// weekday, and weekend booking. We do not narrow the standard flow to
+// morning-only or 1:30 PM cutoffs unless an explicit lab-routing choice
+// requires it.
 // After-hours windows (5:30 PM - 8:00 PM at 15-min increments) — only shown
 // when user requests it via the after-hours toggle. 11 slots: 5:30, 5:45,
 // 6:00, 6:15, 6:30, 6:45, 7:00, 7:15, 7:30, 7:45.
@@ -182,15 +167,16 @@ const afterHoursWindows = (() => {
   return out;
 })();
 
-// Services that use routine hours (9am-1:30pm) — FORCES isFasting=false at the slot level
-const ROUTINE_SERVICES = ['routine-blood-draw'];
-// Services that require fasting — FORCES isFasting=true at the slot level,
-// so slot-gating uses fastingRanges instead of the pre-9am heuristic
-const FASTING_SERVICES = ['fasting-blood-draw'];
 // Services that skip time selection (STAT/same-day)
 const STAT_SERVICES = ['stat-blood-draw'];
 
-const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, onBack, considerDistance }) => {
+const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({
+  onNext,
+  onBack,
+  considerDistance,
+  resetNotice,
+  onClearResetNotice,
+}) => {
   const methods = useFormContext<BookingFormValues>();
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");
@@ -482,10 +468,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   
   const selectedService = methods.watch('serviceDetails.selectedService');
   const isWeekend = selectedDate && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6);
-  const isSunday = selectedDate && selectedDate.getDay() === 0;
   const isStat = STAT_SERVICES.includes(selectedService || '');
-  const isRoutine = ROUTINE_SERVICES.includes(selectedService || '');
-  const isFastingService = FASTING_SERVICES.includes(selectedService || '');
 
   // Get Current Date
   const today = new Date();
@@ -496,6 +479,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
       && selectedDate.getMonth() === today.getMonth()
       && selectedDate.getDate() === today.getDate()
     : false;
+  const sameDaySurchargeWaived = patientTier === 'vip' || patientTier === 'concierge';
 
   // SAME-DAY LEAD TIME: 90 minutes minimum before appointment
   const SAME_DAY_LEAD_MINUTES = 90;
@@ -560,53 +544,20 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     }
   }, [selectedDate, selectedTime]);
 
-  // Lab destination — synced bidirectionally with form's labOrder.labDestination
-  // (the same field set on step 6's LabDestinationSelector). Pre-asking it here
-  // lets the slot grid expose AdventHealth's afternoon hours immediately and
-  // hide non-bookable post-cutoff slots for LabCorp / Quest.
+  // Lab destination — synced bidirectionally with form's labOrder.labDestination.
+  // Patients can still book a broad daytime window even if they are unsure;
+  // explicit lab selection only narrows timing when that destination has a
+  // genuine handoff cutoff we need to respect.
   const labDestination = methods.watch('labOrder.labDestination' as any) as string | undefined;
   const isAdventHealth = labDestination === 'adventhealth';
-  const isLabCorp = labDestination === 'labcorp' || labDestination === 'labcorp_extended';
-  const isQuest = labDestination === 'quest' || labDestination === 'quest_diagnostics';
   const destinationPicked = !!labDestination && labDestination !== 'pending-doctor-confirmation';
 
-  // Choose windows based on service type + after-hours toggle + destination.
-  // AdventHealth → full grid (6 AM – 5:30 PM, 7 days) — overrides routine + weekend caps.
-  // LabCorp/Quest → cap by cutoff.
-  // Unspecified → only show the universal subset (6 AM – 1:30 PM) so we never
-  // show a slot that won't actually work post-checkout.
+  // Standard daytime access is 6 AM – 6 PM for everyone. Lab destination is
+  // still collected for ops, but it should not reintroduce the old public
+  // afternoon lockout in the booking grid.
   let baseWindows = isAdventHealth
     ? allDayWindows
-    : isWeekend
-    ? weekendWindows
-    : isRoutine
-    ? routineWindows
     : allDayWindows;
-
-  // Filter to lab-cutoff for LabCorp / Quest
-  if (isLabCorp || isQuest) {
-    const cutoffMin = isLabCorp ? (12 * 60 + 30) : (13 * 60 + 30);
-    baseWindows = baseWindows.filter(w => {
-      const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(w.time);
-      if (!m) return true;
-      let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
-      if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-      if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
-      return h * 60 + mm <= cutoffMin;
-    });
-  }
-  // No destination picked yet → cap at 1:30 PM (universal — works for all labs).
-  if (!destinationPicked) {
-    baseWindows = baseWindows.filter(w => {
-      const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(w.time);
-      if (!m) return true;
-      let h = parseInt(m[1], 10); const mm = parseInt(m[2], 10);
-      if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-      if (m[3].toUpperCase() === 'AM' && h === 12) h = 0;
-      return h * 60 + mm <= (13 * 60 + 30);
-    });
-  }
-
   // Auto-include after-hours slots when a phleb is on-duty and this is
   // a same-day booking. The deprecated showAfterHours toggle is preserved
   // for any future manual-override path. Filter after-hours slots down to
@@ -672,19 +623,40 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         <CardDescription>Choose when you'd like our phlebotomist to visit</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Lab destination picker — surfaced here so the slot grid can adjust
-            in real time. AdventHealth opens the afternoon. LabCorp / Quest cap
-            at their drop-off cutoff. "Not sure" shows the universal subset. */}
+        {resetNotice && (
+          <div role="alert" className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-700 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-900">{resetNotice.title}</p>
+              <p className="text-sm text-amber-800 mt-0.5 break-words">{resetNotice.message}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onClearResetNotice?.()}
+                  className="text-xs font-semibold text-amber-800 underline underline-offset-2"
+                >
+                  Dismiss
+                </button>
+                <a href="tel:+19415279169" className="text-xs font-semibold text-amber-800 underline underline-offset-2">
+                  Or call (941) 527-9169
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Lab destination picker — surfaced here so ops knows the likely
+            routing path. It should not choke the public daytime booking grid. */}
         <div className="bg-gradient-to-br from-gray-50 to-blue-50 border border-gray-200 rounded-lg p-3 sm:p-4">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-gray-700">Where will your specimen go?</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
-              { id: 'adventhealth', label: 'AdventHealth', sub: '24/7 — full hours' },
-              { id: 'labcorp', label: 'LabCorp', sub: 'Closes 2:30 PM' },
-              { id: 'quest', label: 'Quest', sub: 'Closes 3:30 PM' },
-              { id: 'pending-doctor-confirmation', label: 'Not sure yet', sub: '6 AM – 1:30 PM' },
+              { id: 'adventhealth', label: 'AdventHealth', sub: 'Good if your order already routes there' },
+              { id: 'labcorp', label: 'LabCorp', sub: 'Choose if your order specifically routes there' },
+              { id: 'quest', label: 'Quest', sub: 'Choose if your order specifically routes there' },
+              { id: 'pending-doctor-confirmation', label: 'Not sure yet', sub: 'Book now — we will confirm routing after' },
             ].map(opt => {
               const selected = labDestination === opt.id;
               return (
@@ -706,12 +678,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
           </div>
           {!destinationPicked && (
             <p className="text-xs text-gray-600 mt-2 leading-snug">
-              Pick a lab so we can show all hours that work. AdventHealth deliveries unlock our afternoon slots up to 6 PM.
+              If you are not sure which lab your order goes to, you can still book now. We will confirm the routing after the appointment is placed.
             </p>
           )}
           {isAdventHealth && (
             <p className="text-xs text-emerald-700 mt-2 font-medium leading-snug">
-              ✓ AdventHealth — afternoon hours unlocked, 7 days a week.
+              ✓ AdventHealth selected — we will route the handoff accordingly after booking.
             </p>
           )}
         </div>
@@ -865,7 +837,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             Members pay <span className="tabular-nums">${p.vip}</span>. You'd save <span className="tabular-nums">${save}</span> today + every future visit.
                           </p>
                           <p className="text-[11px] text-amber-700 mt-0.5">
-                            VIP membership $199/yr — recoups itself in <span className="tabular-nums">{Math.ceil(199 / save)}</span> visit{Math.ceil(199 / save) === 1 ? '' : 's'}.
+                            {`VIP membership $${MEMBERSHIP_FEES.vip.fee.toFixed(2)}/yr — recoups itself in `}
+                            <span className="tabular-nums">{Math.ceil(MEMBERSHIP_FEES.vip.fee / save)}</span>
+                            {` visit${Math.ceil(MEMBERSHIP_FEES.vip.fee / save) === 1 ? '' : 's'}.`}
                           </p>
                         </div>
                       </div>
@@ -877,7 +851,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-2">
                       <p className="text-sm font-medium text-amber-900">Same-Day Booking</p>
                       <p className="text-xs text-amber-700 mt-1">
-                        A $100 same-day surcharge applies. Slots within 90 minutes of the current time are unavailable to allow travel time.
+                        {sameDaySurchargeWaived
+                          ? 'Your membership waives the same-day fee. Slots within 90 minutes of the current time are unavailable to allow travel time.'
+                          : 'A $100 same-day surcharge applies. Slots within 90 minutes of the current time are unavailable to allow travel time.'}
                       </p>
                     </div>
                   )}
@@ -913,7 +889,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
                         <p className="font-medium text-amber-900">STAT / Same-Day Appointment</p>
                         <p className="text-sm text-amber-700 mt-1">
-                          We'll schedule you for the next available window during operating hours. An additional $100 surcharge applies.
+                          {sameDaySurchargeWaived
+                            ? "We'll schedule you for the next available window during operating hours. Your membership waives the same-day fee."
+                            : "We'll schedule you for the next available window during operating hours. An additional $100 surcharge applies."}
                         </p>
                       </div>
                       {(() => {
@@ -983,17 +961,14 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     </div>
                   ) : activeWindows.length === 0 ? (
                     /* No slots offered at all — usually means the date is
-                       outside business hours (e.g., Sunday non-AdventHealth)
-                       or the lab destination has a same-day cutoff already passed. */
+                       outside business hours or fully sold/blocked. */
                     <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center space-y-2">
                       <p className="text-sm font-semibold text-gray-800">No available times for this day.</p>
                       <p className="text-xs text-gray-600">
                         {isAdventHealth
                           ? 'Try a different date.'
                           : isWeekend
-                          ? 'We have limited weekend hours — try a weekday or pick AdventHealth as your lab (open 7 days).'
-                          : labDestination && labDestination !== 'pending-doctor-confirmation'
-                          ? `${labDestination === 'quest' || labDestination === 'quest_diagnostics' ? 'Quest' : labDestination === 'labcorp' || labDestination === 'labcorp_extended' ? 'LabCorp' : 'Your lab'} closes early — pick a different date or switch to AdventHealth (24/7).`
+                          ? 'That day is full right now. Try another date or join the waitlist.'
                           : 'Pick a different date.'}
                       </p>
                       <Button
@@ -1038,12 +1013,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                           const hhmm = normalizeTime(window.time);
                           if (hhmm) {
                             const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                            const isFasting = isFastingService
-                              ? true
-                              : isRoutine
-                              ? false
-                              : hhmm < '09:00';
-                            const check = isBookingAllowed({ tier: patientTier, dateIso, time: window.time, isFasting });
+                            const check = isBookingAllowed({ tier: patientTier, dateIso, time: window.time });
                             if (!check.allowed) {
                               tierLocked = true;
                               tierReason = check.upgradeCTA?.message || check.reason || 'Not available in your tier';
@@ -1105,7 +1075,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             {isAfterHours && !isUnavailable && !tierLocked && (
                               <span className="block text-[9px] opacity-70 mt-0.5">+$50</span>
                             )}
-                            {isSameDay && !isAfterHours && !isUnavailable && !tierLocked && (
+                            {isSameDay && !sameDaySurchargeWaived && !isAfterHours && !isUnavailable && !tierLocked && (
                               <span className="block text-[9px] opacity-70 mt-0.5">+$100</span>
                             )}
                           </button>
@@ -1140,12 +1110,14 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
 
                   <FormDescription>
                     {isStat
-                      ? "Next available within operating hours (+$100)"
+                      ? sameDaySurchargeWaived
+                        ? "Next available within operating hours. Same-day fee waived."
+                        : "Next available within operating hours (+$100)"
                       : isSameDay
-                      ? "Same-day booking (+$100 surcharge) · 90-min lead time"
-                      : isRoutine
-                      ? "Routine non-fasting hours: 9 AM – 1:30 PM (extended to 6 PM if AdventHealth is your destination)"
-                      : "Open Mon–Sun · 6 AM – 1:30 PM (everyone) · 1:30–2:30 PM (VIP) · 1:30 PM – 6 PM (anyone, AdventHealth deliveries)"}
+                      ? sameDaySurchargeWaived
+                        ? "Same-day booking with no added fee for your tier · 90-min lead time"
+                        : "Same-day booking (+$100 surcharge) · 90-min lead time"
+                      : "Standard daytime booking: 7 AM – 6 PM for standard access. VIP / Concierge unlock the 6 AM hour, and later after-hours access appears when a phlebotomist is on duty or your tier supports it."}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -1180,7 +1152,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
       {unlockSlot && (() => {
         const tier = unlockSlot.requiredTier;
         const tierName = tier === 'concierge' ? 'Concierge' : tier === 'vip' ? 'VIP' : 'Member';
-        const tierPrice = tier === 'concierge' ? 399 : tier === 'vip' ? 199 : 99;
+        const tierPrice = tier === 'concierge' ? 49.99 : tier === 'vip' ? 19.99 : 9.99;
         const tierPerVisit = tier === 'concierge' ? 99 : tier === 'vip' ? 115 : 130;
         const standardVisit = 150;
         const perVisitSavings = standardVisit - tierPerVisit;

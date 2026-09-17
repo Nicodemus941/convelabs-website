@@ -145,6 +145,11 @@ const PatientBenefitsCard: React.FC = () => {
   const isVip = membership?.tier === 'vip' || membership?.tier === 'concierge';
   const isConcierge = membership?.tier === 'concierge';
   const isFoundingVip = isVip && Boolean(membership?.founding_member);
+  const membershipAnnualCents = membership?.tier === 'concierge'
+    ? 4999
+    : membership?.tier === 'vip'
+      ? (membership?.founding_locked_rate_cents ?? 1999)
+      : 999;
 
   // Free family-slot tracker. Two tiers earn comps:
   //   • Concierge: 2 free family members per visit (perk on pricing card)
@@ -171,7 +176,7 @@ const PatientBenefitsCard: React.FC = () => {
 
   const tierLabel = membership.tier === 'concierge' ? 'Concierge'
     : membership.tier === 'vip' ? 'VIP'
-    : 'Member';
+    : 'Regular';
 
   return (
     <Card className="border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-white to-white shadow-md mb-6">
@@ -211,7 +216,7 @@ const PatientBenefitsCard: React.FC = () => {
                 <p className="text-2xl font-bold text-emerald-800">${(ytdSavingsCents / 100).toFixed(0)}</p>
                 <p className="text-[11px] text-emerald-700 mt-0.5">{visitCountYTD} visit{visitCountYTD === 1 ? '' : 's'} at {tierLabel} pricing</p>
               </div>
-              {ytdSavingsCents >= 19900 && (
+              {ytdSavingsCents >= membershipAnnualCents && (
                 <Badge className="bg-emerald-600 text-white text-[10px]">
                   ✓ Membership paid for itself
                 </Badge>
@@ -265,8 +270,8 @@ const PatientBenefitsCard: React.FC = () => {
           {isFoundingVip && (
             <PerkRow
               icon={Lock}
-              label="$199 rate locked for life"
-              detail={`Your $${((membership.founding_locked_rate_cents ?? 19900) / 100).toFixed(0)}/yr never raises — even when we raise the public rate.`}
+              label="$19.99 rate locked for life"
+              detail={`Your $${((membership.founding_locked_rate_cents ?? 1999) / 100).toFixed(2)}/yr never raises — even when we raise the public rate.`}
               tone="amber"
             />
           )}

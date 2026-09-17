@@ -100,20 +100,30 @@ const configCache: {
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Business hours configuration (Eastern Time)
-// Default hardcoded hours — overridden by GHS office_hours API when available
+// Public booking policy should not fall back to the legacy morning-only
+// windows. Treat Mon-Sat 6 AM-6 PM as the minimum daytime inventory even if
+// older upstream defaults/configs are missing or stale.
 const DEFAULT_BUSINESS_HOURS: Record<number, { start: string; end: string } | null> = {
   0: null, // Sunday — closed
-  1: { start: '06:00', end: '13:30' },
-  2: { start: '06:00', end: '13:30' },
-  3: { start: '06:00', end: '13:30' },
-  4: { start: '06:00', end: '13:30' },
-  5: { start: '06:00', end: '13:30' },
-  6: { start: '06:00', end: '09:45' },
+  1: { start: '06:00', end: '18:00' },
+  2: { start: '06:00', end: '18:00' },
+  3: { start: '06:00', end: '18:00' },
+  4: { start: '06:00', end: '18:00' },
+  5: { start: '06:00', end: '18:00' },
+  6: { start: '06:00', end: '18:00' },
 };
 
 function getBusinessHours(dayOfWeek: number, dynamicHours?: Record<number, { start: string; end: string } | null>): { start: string; end: string } | null {
   const source = dynamicHours || DEFAULT_BUSINESS_HOURS;
   return source[dayOfWeek] ?? null;
+}
+
+function widenToPublicDaytime(dayNum: number, hours: { start: string; end: string } | null): { start: string; end: string } | null {
+  if (dayNum === 0) return null;
+  return {
+    start: '06:00',
+    end: '18:00',
+  };
 }
 
 // Fetch dynamic business hours from GHS office_hours API (with 5-min cache)
@@ -154,12 +164,12 @@ async function fetchDynamicBusinessHours(): Promise<Record<number, { start: stri
           : dayNameMap[String(entry.day || entry.day_of_week || entry.name || '').toLowerCase()] ?? -1;
         if (dayNum < 0 || dayNum > 6) continue;
         if (entry.closed || entry.is_closed || !entry.open_time) {
-          result[dayNum] = null;
+          result[dayNum] = widenToPublicDaytime(dayNum, null);
         } else {
-          result[dayNum] = {
+          result[dayNum] = widenToPublicDaytime(dayNum, {
             start: normalizeTimeToHHMM(entry.open_time || entry.start || entry.start_time) || '06:00',
-            end: normalizeTimeToHHMM(entry.close_time || entry.end || entry.end_time) || '13:30',
-          };
+            end: normalizeTimeToHHMM(entry.close_time || entry.end || entry.end_time) || '18:00',
+          });
         }
       }
     } else if (typeof hoursData === 'object') {
@@ -168,12 +178,12 @@ async function fetchDynamicBusinessHours(): Promise<Record<number, { start: stri
         if (isNaN(dayNum) || dayNum < 0 || dayNum > 6) continue;
         const v = value as any;
         if (v === null || v?.closed || v?.is_closed) {
-          result[dayNum] = null;
+          result[dayNum] = widenToPublicDaytime(dayNum, null);
         } else {
-          result[dayNum] = {
+          result[dayNum] = widenToPublicDaytime(dayNum, {
             start: normalizeTimeToHHMM(v?.open_time || v?.start || v?.start_time) || '06:00',
-            end: normalizeTimeToHHMM(v?.close_time || v?.end || v?.end_time) || '13:30',
-          };
+            end: normalizeTimeToHHMM(v?.close_time || v?.end || v?.end_time) || '18:00',
+          });
         }
       }
     }
@@ -210,10 +220,10 @@ async function fetchSchedulingConfig(): Promise<{ slotDuration: number; bufferMi
     if (!res.ok) return null;
     const json = await res.json();
     const cfg = json?.data || json;
-    const configResult = {
+      const configResult = {
       slotDuration: Number(cfg?.service_duration_minutes || cfg?.slot_duration_minutes || cfg?.appointment_duration || 60),
       bufferMinutes: Number(cfg?.buffer_minutes || cfg?.travel_buffer_minutes || cfg?.slot_interval_minutes || 15),
-      sameDayAllowed: Boolean(cfg?.same_day_allowed ?? cfg?.allow_same_day ?? false),
+      sameDayAllowed: Boolean(cfg?.same_day_allowed ?? cfg?.allow_same_day ?? true),
     };
     configCache.schedulingConfig = { data: configResult, expiresAt: Date.now() + CACHE_TTL_MS };
     return configResult;
@@ -1008,11 +1018,12 @@ Deno.serve(async (req) => {
       const effectiveHours = dynamicHours || DEFAULT_BUSINESS_HOURS;
       const APPOINTMENT_DURATION_MINUTES = schedulingConfig?.slotDuration || 60;
       const BUFFER_MINUTES = schedulingConfig?.bufferMinutes || 15;
-      const sameDayAllowed = schedulingConfig?.sameDayAllowed || false;
+      const sameDayAllowed = schedulingConfig?.sameDayAllowed ?? true;
 
       console.log(`[Availability] Dynamic config: duration=${APPOINTMENT_DURATION_MINUTES}, buffer=${BUFFER_MINUTES}, sameDayAllowed=${sameDayAllowed}, dynamicHours=${!!dynamicHours}`);
 
-      // GHS does not allow same-day bookings (unless scheduling_config says otherwise) — always start from tomorrow (Eastern Time)
+      // Public booking should allow same-day inventory unless an upstream
+      // caller intentionally overrides it elsewhere.
       const todayET = todayEasternStr();
       const requestedDate = (!sameDayAllowed && rawRequestedDate <= todayET)
         ? (() => { const d = nowEastern(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })()

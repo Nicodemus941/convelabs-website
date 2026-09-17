@@ -47,7 +47,7 @@ function shell(params: {
     ? `<div style="margin:0 0 14px;padding:10px 16px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;display:inline-block;">
          <span style="font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:#92400E;font-weight:bold;">✦ Founding 50 · ${params.foundingSeatsRemaining} ${params.foundingSeatsRemaining === 1 ? 'seat remains' : 'seats remain'}</span>
          <span style="display:inline-block;margin-left:8px;color:#6B4513;font-size:12px;">·</span>
-         <a href="https://www.convelabs.com/pricing" style="margin-left:6px;color:#B91C1C;text-decoration:none;font-size:12px;font-weight:600;border-bottom:1px solid #B91C1C;">Lock $199 for life →</a>
+         <a href="https://www.convelabs.com/pricing" style="margin-left:6px;color:#B91C1C;text-decoration:none;font-size:12px;font-weight:600;border-bottom:1px solid #B91C1C;">Lock $19.99 for life →</a>
        </div>`
     : '';
   return `<!DOCTYPE html>
@@ -458,11 +458,16 @@ export function renderMembershipWelcome(p: CommonPatientParams & {
 export function renderSpecimenDelivered(p: CommonPatientParams & {
   labName: string;
   trackingId?: string;
+  allTrackingIds?: string[];
   tubeCount?: number;
   resultsTimeline?: string;    // e.g. "48-72 hours"
 }): string {
   const phone = p.supportPhone || DEFAULT_SUPPORT_PHONE;
   const timeline = p.resultsTimeline || '48-72 hours';
+  const allTrackingIds = Array.isArray(p.allTrackingIds)
+    ? p.allTrackingIds.map(v => String(v || '').trim()).filter(Boolean)
+    : [];
+  const extraTrackingIds = allTrackingIds.filter(v => v !== p.trackingId);
   const body = `
     <p style="margin:0 0 16px;color:#111827;font-size:17px;line-height:1.6;">Hi ${p.patientName},</p>
     <p style="margin:0 0 24px;color:#374151;font-size:15px;line-height:1.7;">Good news — your specimens have been safely delivered to <strong>${p.labName}</strong>. Your results will be processed next.</p>
@@ -477,6 +482,12 @@ export function renderSpecimenDelivered(p: CommonPatientParams & {
             <td style="padding:10px 0;border-bottom:1px solid #e0e7ff;width:34%;color:#6b7280;font-size:13px;font-weight:500;letter-spacing:0.3px;text-transform:uppercase;vertical-align:top;">Tracking&nbsp;ID</td>
             <td style="padding:10px 0;border-bottom:1px solid #e0e7ff;vertical-align:top;">
               <code style="font-family:'SF Mono','Monaco','Consolas',monospace;font-size:16px;color:#1e40af;background:#ffffff;padding:4px 10px;border-radius:6px;letter-spacing:0.5px;font-weight:600;border:1px solid #dbeafe;">${p.trackingId}</code>
+            </td>
+          </tr>` : ''}
+          ${extraTrackingIds.length > 0 ? `<tr>
+            <td style="padding:10px 0;border-bottom:1px solid #e0e7ff;width:34%;color:#6b7280;font-size:13px;font-weight:500;letter-spacing:0.3px;text-transform:uppercase;vertical-align:top;">Other&nbsp;labels</td>
+            <td style="padding:10px 0;border-bottom:1px solid #e0e7ff;vertical-align:top;color:#1f2937;font-size:14px;line-height:1.6;">
+              ${extraTrackingIds.map(v => `<div><code style="font-family:'SF Mono','Monaco','Consolas',monospace;font-size:14px;color:#1e40af;background:#ffffff;padding:3px 8px;border-radius:6px;letter-spacing:0.4px;font-weight:600;border:1px solid #dbeafe;">${v}</code></div>`).join('')}
             </td>
           </tr>` : ''}
           ${p.tubeCount ? detailRow('Tubes', String(p.tubeCount)) : ''}

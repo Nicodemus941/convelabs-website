@@ -19,7 +19,7 @@ export const PricingFAQ = () => {
           <CardContent className="pt-6">
             <h3 className="font-bold text-lg mb-2">Do unused visits roll over?</h3>
             <p className="text-muted-foreground">
-              Proactive Health members get credit rollover for up to 3 months. Health Starter visits are annual and do not roll over. Concierge Elite members have unlimited visits.
+              These memberships do not use visit credits. You keep the pricing tier and booking perks for 12 months, and your discounts apply each time you book.
             </p>
           </CardContent>
         </Card>

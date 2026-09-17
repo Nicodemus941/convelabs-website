@@ -17,10 +17,10 @@ const FunnelStep1Welcome = ({ onNext }: FunnelStep1WelcomeProps) => {
   ];
 
   const benefits = [
-    "Personalized plan recommendations based on your unique needs",
-    "Save up to 64% compared to traditional lab testing",
-    "Convenient at-home or office blood collection",
-    "Expert phlebotomists with 99% first-stick success rate"
+    "A recommendation tied to your booking habits, family needs, and schedule",
+    "Transparent annual membership options from $9.99/year",
+    "Earlier mornings, Saturday access, and lower family add-on pricing",
+    "At-home or office blood draws with expert phlebotomists"
   ];
 
   return (

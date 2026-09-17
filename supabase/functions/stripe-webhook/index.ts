@@ -1101,7 +1101,7 @@ async function handleMembershipSignup(session: any, isSupernovaMember = false) {
       } catch { /* non-fatal */ }
 
       const annualPriceCents = Number(planData?.annual_price_cents || 0)
-        || (welcomeTier === 'concierge' ? 39900 : welcomeTier === 'vip' ? 19900 : 9900);
+        || (welcomeTier === 'concierge' ? 4999 : welcomeTier === 'vip' ? 1999 : 999);
 
       await supabaseClient.functions.invoke('send-membership-welcome', {
         body: {
@@ -1883,7 +1883,7 @@ async function handleAppointmentPayment(session: any) {
 
       // Find or create plan in membership_plans
       const planName = tier.charAt(0).toUpperCase() + tier.slice(1);
-      const prices: Record<string, number> = { member: 9900, vip: 19900, concierge: 39900 };
+      const prices: Record<string, number> = { member: 999, vip: 1999, concierge: 4999 };
       let { data: plan } = await supabaseClient.from('membership_plans').select('id').ilike('name', `%${tier}%`).maybeSingle();
       if (!plan) {
         const { data: newPlan } = await supabaseClient.from('membership_plans').insert({
@@ -2655,7 +2655,7 @@ async function handleAppointmentPayment(session: any) {
         let { data: plan } = await supabaseClient
           .from('membership_plans').select('id').ilike('name', `%${tier}%`).maybeSingle();
         if (!plan) {
-          const annualPriceMap: Record<string, number> = { member: 9900, vip: 19900, concierge: 39900 };
+          const annualPriceMap: Record<string, number> = { member: 999, vip: 1999, concierge: 4999 };
           const { data: newPlan } = await supabaseClient.from('membership_plans').insert({
             name: tier.charAt(0).toUpperCase() + tier.slice(1),
             annual_price: annualPriceMap[tier],
@@ -3799,6 +3799,9 @@ async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?:
     const nextVisitPart = nextShort ? ` to have results ready for your ${nextShort} visit` : '';
 
     // ── PATIENT EMAIL ─────────────────────────────────────────────
+    let primaryEmailSent = false;
+    let primarySmsSent = false;
+
     if (existing.patient_email && MAILGUN_API_KEY) {
       try {
         const html = `<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;margin:0;padding:20px;background:#f4f4f5;">
@@ -3837,10 +3840,27 @@ async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?:
         fd.append('subject', `${org.name} ordered your bloodwork — ${daysLeft}d to book (covered by your provider)`);
         fd.append('html', html);
         fd.append('o:tracking-clicks', 'no');
-        await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+        const mg = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
           method: 'POST',
           headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
           body: fd,
+        });
+        primaryEmailSent = mg.ok;
+        const mgText = await mg.text().catch(() => '');
+        let mailgunId: string | null = null;
+        try { mailgunId = JSON.parse(mgText)?.id || null; } catch { mailgunId = null; }
+        const emailError = mg.ok ? null : `Mailgun ${mg.status}: ${mgText.slice(0, 300)}`;
+        await supabaseClient.from('email_send_log').insert({
+          to_email: existing.patient_email,
+          subject: `${org.name} ordered your bloodwork — ${daysLeft}d to book (covered by your provider)`,
+          email_type: 'provider_portal_lab_invite',
+          status: mg.ok ? 'sent' : 'failed',
+          mailgun_id: mailgunId,
+          organization_id: existing.organization_id,
+          campaign_tag: 'lab_request_invite',
+          appointment_id: null,
+          last_error: emailError,
+          sent_at: new Date().toISOString(),
         });
       } catch (e) { console.warn('[lab-request-org-pay] patient email failed:', e); }
     }
@@ -3852,17 +3872,34 @@ async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?:
         const phoneClean = existing.patient_phone.replace(/\D/g, '');
         const phoneE164 = phoneClean.length === 10 ? `+1${phoneClean}` : phoneClean.length === 11 && phoneClean.startsWith('1') ? `+${phoneClean}` : `+${phoneClean}`;
         const fd = new URLSearchParams({ To: phoneE164, From: TWILIO_FROM, Body: smsBody });
-        await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+        const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
           method: 'POST',
           headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
           body: fd.toString(),
         });
+        primarySmsSent = tw.ok;
+        const twText = await tw.text().catch(() => '');
+        let twilioSid: string | null = null;
+        try { twilioSid = JSON.parse(twText)?.sid || null; } catch { twilioSid = null; }
+        const smsError = tw.ok ? null : `Twilio ${tw.status}: ${twText.slice(0, 300)}`;
+        await supabaseClient.from('sms_notifications').insert({
+          phone_number: phoneE164,
+          notification_type: 'provider_portal_lab_invite',
+          message_content: smsBody,
+          delivery_status: tw.ok ? 'sent' : 'failed',
+          twilio_message_sid: twilioSid,
+          appointment_id: null,
+          sent_at: new Date().toISOString(),
+          metadata: { lab_request_id: existing.id, organization_id: existing.organization_id, source: 'stripe-webhook-org-pay', error: smsError },
+        });
       } catch (e) { console.warn('[lab-request-org-pay] patient SMS failed:', e); }
     }
 
-    await supabaseClient.from('patient_lab_requests').update({
-      patient_notified_at: new Date().toISOString(),
-    }).eq('id', labRequestId);
+    if (primaryEmailSent || primarySmsSent) {
+      await supabaseClient.from('patient_lab_requests').update({
+        patient_notified_at: new Date().toISOString(),
+      }).eq('id', labRequestId);
+    }
 
     console.log(`[lab-request-org-pay] paid + notified: ${labRequestId} for ${existing.patient_name} via ${org.name}`);
 
@@ -3878,6 +3915,8 @@ async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?:
         const sUrl = `${PUBLIC_SITE_URL}/lab-request/${(s as any).access_token}`;
         const sFirst = String((s as any).patient_name || '').split(' ')[0] || 'there';
         const sFast = (s as any).fasting_required ? ' Fasting required — no food 12h before.' : '';
+        let siblingEmailSent = false;
+        let siblingSmsSent = false;
         if ((s as any).patient_email && MAILGUN_API_KEY) {
           try {
             const fd = new FormData();
@@ -3886,7 +3925,24 @@ async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?:
             fd.append('subject', `${org.name} ordered your bloodwork — pick a time (covered)`);
             fd.append('html', `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;"><div style="background:linear-gradient(135deg,#B91C1C,#7F1D1D);color:#fff;padding:20px;border-radius:12px 12px 0 0;"><strong>${org.name} ordered your bloodwork</strong></div><div style="padding:22px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;"><p>Hi ${sFirst}, your provider has covered the cost — no payment at booking.${sFast}</p><p style="text-align:center;margin:22px 0;"><a href="${sUrl}" style="background:#B91C1C;color:#fff;padding:13px 34px;border-radius:10px;text-decoration:none;font-weight:700;">📅 Pick my time →</a></p><p style="font-size:12px;color:#6b7280;">You can book together with your household. Questions? (941) 527-9169.</p></div></div>`);
             fd.append('o:tracking-clicks', 'no');
-            await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+            const mg = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
+            siblingEmailSent = mg.ok;
+            const mgText = await mg.text().catch(() => '');
+            let mailgunId: string | null = null;
+            try { mailgunId = JSON.parse(mgText)?.id || null; } catch { mailgunId = null; }
+            const emailError = mg.ok ? null : `Mailgun ${mg.status}: ${mgText.slice(0, 300)}`;
+            await supabaseClient.from('email_send_log').insert({
+              to_email: (s as any).patient_email,
+              subject: `${org.name} ordered your bloodwork — pick a time (covered)`,
+              email_type: 'provider_portal_lab_invite',
+              status: mg.ok ? 'sent' : 'failed',
+              mailgun_id: mailgunId,
+              organization_id: existing.organization_id,
+              campaign_tag: 'lab_request_invite',
+              appointment_id: null,
+              last_error: emailError,
+              sent_at: new Date().toISOString(),
+            });
           } catch (e) { console.warn('[lab-request-org-pay] sibling email failed:', e); }
         }
         if ((s as any).patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
@@ -3897,10 +3953,27 @@ async function handleLabRequestProviderPayment(session: any, opts: { cardSetup?:
             const scb = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
             const fd = new URLSearchParams({ To: pE, From: TWILIO_FROM, Body: body });
             if (scb.startsWith('http')) fd.append('StatusCallback', scb);
-            await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd.toString() });
+            const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: fd.toString() });
+            siblingSmsSent = tw.ok;
+            const twText = await tw.text().catch(() => '');
+            let twilioSid: string | null = null;
+            try { twilioSid = JSON.parse(twText)?.sid || null; } catch { twilioSid = null; }
+            const smsError = tw.ok ? null : `Twilio ${tw.status}: ${twText.slice(0, 300)}`;
+            await supabaseClient.from('sms_notifications').insert({
+              phone_number: pE,
+              notification_type: 'provider_portal_lab_invite',
+              message_content: body,
+              delivery_status: tw.ok ? 'sent' : 'failed',
+              twilio_message_sid: twilioSid,
+              appointment_id: null,
+              sent_at: new Date().toISOString(),
+              metadata: { lab_request_id: (s as any).id, organization_id: existing.organization_id, source: 'stripe-webhook-org-pay', error: smsError },
+            });
           } catch (e) { console.warn('[lab-request-org-pay] sibling SMS failed:', e); }
         }
-        await supabaseClient.from('patient_lab_requests').update({ patient_notified_at: new Date().toISOString() }).eq('id', (s as any).id);
+        if (siblingEmailSent || siblingSmsSent) {
+          await supabaseClient.from('patient_lab_requests').update({ patient_notified_at: new Date().toISOString() }).eq('id', (s as any).id);
+        }
       }
     }
   } catch (e: any) {

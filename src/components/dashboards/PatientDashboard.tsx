@@ -15,9 +15,9 @@ import MemberSavingsBanner from "@/components/patient/MemberSavingsBanner";
 import PatientBenefitsCard from "@/components/dashboards/patient/PatientBenefitsCard";
 
 const PLANS = [
-  { name: 'Member', price: 99, color: 'border-blue-200', badge: '', mobile: '$130', save: '$20', features: ['Mobile visits: $130 (save $20)', 'Weekend appointments', 'Patient portal'] },
-  { name: 'VIP', price: 199, color: 'border-[#B91C1C]', badge: 'Most Popular', mobile: '$115', save: '$35', features: ['Mobile visits: $115 (save $35)', 'Priority same-day', 'Family add-ons $45', 'Extended hours'] },
-  { name: 'Concierge', price: 399, color: 'border-amber-400', badge: 'Best Value', mobile: '$99', save: '$51', features: ['Mobile visits: $99 (save $51)', 'Dedicated phlebotomist', 'Same-day guaranteed', 'NDA available', 'Concierge support'] },
+  { name: 'Member', price: 9.99, color: 'border-blue-200', badge: '', mobile: '$130', save: '$20', features: ['Mobile visits: $130 (save $20)', 'Weekend appointments', 'Patient portal'] },
+  { name: 'VIP', price: 19.99, color: 'border-[#B91C1C]', badge: 'Most Popular', mobile: '$115', save: '$35', features: ['Mobile visits: $115 (save $35)', 'Priority same-day', 'Family add-ons $45', 'Extended hours'] },
+  { name: 'Concierge', price: 49.99, color: 'border-amber-400', badge: 'Best Value', mobile: '$99', save: '$51', features: ['Mobile visits: $99 (save $51)', 'Dedicated phlebotomist', 'Same-day guaranteed', 'NDA available', 'Concierge support'] },
 ];
 
 const PatientDashboard = () => {
@@ -57,11 +57,11 @@ const PatientDashboard = () => {
     if (!user) return;
     setSubscribing(planName);
     try {
-      const prices: Record<string, number> = { Member: 99, VIP: 199, Concierge: 399 };
+      const prices: Record<string, number> = { Member: 9.99, VIP: 19.99, Concierge: 49.99 };
       const { data, error } = await supabase.functions.invoke('create-appointment-checkout', {
         body: {
           serviceType: 'membership', serviceName: `ConveLabs ${planName} Membership (Annual)`,
-          amount: (prices[planName] || 99) * 100, tipAmount: 0,
+          amount: Math.round((prices[planName] || 9.99) * 100), tipAmount: 0,
           appointmentDate: new Date().toISOString().split('T')[0], appointmentTime: '',
           patientDetails: { firstName: user.firstName || '', lastName: user.lastName || '', email: user.email || '' },
           locationDetails: { address: '', city: '', state: 'FL', zipCode: '' },
@@ -494,7 +494,7 @@ const PatientDashboard = () => {
               <div key={plan.name} className={`border-2 ${plan.color} rounded-xl p-4 relative ${plan.badge ? 'ring-1 ring-[#B91C1C]/20' : ''}`}>
                 {plan.badge && <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#B91C1C] text-white text-[10px] font-bold px-3 py-0.5 rounded-full">{plan.badge}</div>}
                 <h3 className="font-bold text-lg">{plan.name}</h3>
-                <div className="flex items-baseline gap-1 mt-1"><span className="text-2xl font-bold">${plan.price}</span><span className="text-xs text-muted-foreground">/year</span></div>
+                <div className="flex items-baseline gap-1 mt-1"><span className="text-2xl font-bold">${plan.price.toFixed(2)}</span><span className="text-xs text-muted-foreground">/year</span></div>
                 <div className="bg-green-50 text-green-700 text-xs font-semibold px-2 py-1 rounded-full inline-block mt-2">Mobile from {plan.mobile}</div>
                 <ul className="mt-3 space-y-1.5">
                   {plan.features.map(f => (<li key={f} className="flex items-start gap-1.5 text-xs"><Check className="h-3.5 w-3.5 text-green-600 mt-0.5 flex-shrink-0" /><span>{f}</span></li>))}
@@ -507,7 +507,7 @@ const PatientDashboard = () => {
                   <div className="mt-3 pt-3 border-t border-dashed border-[#B91C1C]/30">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-[#B91C1C] mb-1.5">Founding Stack</p>
                     <div className="space-y-0.5 text-[11px]">
-                      <div className="flex justify-between"><span className="text-gray-600">12 mo VIP membership</span><span className="font-medium tabular-nums">$199</span></div>
+                      <div className="flex justify-between"><span className="text-gray-600">12 mo VIP membership</span><span className="font-medium tabular-nums">$19.99</span></div>
                       <div className="flex justify-between"><span className="text-gray-600">Rate locked for life</span><span className="font-medium tabular-nums text-green-700">+$50</span></div>
                       <div className="flex justify-between"><span className="text-gray-600">1 free family / visit</span><span className="font-medium tabular-nums text-green-700">+$75</span></div>
                       <div className="flex justify-between"><span className="text-gray-600">Priority same-day</span><span className="font-medium tabular-nums text-green-700">+$150</span></div>

@@ -44,9 +44,9 @@ type Tab = 'offer' | 'register';
 type Tier = 'member' | 'vip' | 'concierge';
 
 const TIER_META: Record<Tier, { label: string; price: number; value: number; color: string; icon: any; oneliner: string }> = {
-  member:     { label: 'Member',       price: 99,  value: 204, color: '#0F766E', icon: Heart,     oneliner: '$10 off every visit + priority booking' },
-  vip:        { label: 'VIP Founding', price: 199, value: 474, color: '#B91C1C', icon: Sparkles,  oneliner: 'Founding rate-lock + family add-on + priority (50 seats ever)' },
-  concierge:  { label: 'Concierge',    price: 399, value: 939, color: '#7C3AED', icon: Crown,     oneliner: 'Unlimited reschedules + dedicated coordinator' },
+  member:     { label: 'Member',       price: 9.99,  value: 204, color: '#0F766E', icon: Heart,     oneliner: '$10 off every visit + priority booking' },
+  vip:        { label: 'VIP Founding', price: 19.99, value: 474, color: '#B91C1C', icon: Sparkles,  oneliner: 'Founding rate-lock + family add-on + priority (50 seats ever)' },
+  concierge:  { label: 'Concierge',    price: 49.99, value: 939, color: '#7C3AED', icon: Crown,     oneliner: 'Unlimited reschedules + dedicated coordinator' },
 };
 
 const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, patientName, defaultTier = 'vip', currentTier = '', onSuccess }) => {

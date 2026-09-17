@@ -116,7 +116,7 @@ const SlotConflictModal: React.FC<Props> = ({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-amber-900">VIP members get priority booking — never get bumped.</p>
                   <p className="text-xs text-amber-800 leading-snug mt-1">
-                    $199/yr locks $115 per visit (vs. $150) and gives you the after-hours slots first. <a href="/pricing" className="underline font-semibold">See VIP →</a>
+                    $19.99/yr locks $115 per visit (vs. $150) and gives you the after-hours slots first. <a href="/pricing" className="underline font-semibold">See VIP →</a>
                   </p>
                 </div>
               </div>

@@ -75,6 +75,9 @@ Deno.serve(async (req) => {
     if (lower.endsWith('.png')) mediaType = 'image/png';
     else if (lower.endsWith('.webp')) mediaType = 'image/webp';
     else if (lower.endsWith('.gif')) mediaType = 'image/gif';
+    else if (lower.endsWith('.heic') || lower.endsWith('.heif')) {
+      return json({ error: 'unsupported_image_type', detail: 'Convert HEIC/HEIF label photos to JPG before OCR.' }, 415);
+    }
 
     const prompt = `This is a photo of a laboratory specimen label, requisition sticker, or shipping label taken by a mobile phlebotomist at specimen drop-off.
 

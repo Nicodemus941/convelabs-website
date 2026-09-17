@@ -181,7 +181,9 @@ const PatientStatusChip: React.FC<Props> = ({ patientId, patientEmail, compact }
 
   // Formal membership
   const Icon = status.kind === 'concierge' ? Sparkles : status.kind === 'vip' ? Crown : Star;
-  const tierLabel = status.kind.charAt(0).toUpperCase() + status.kind.slice(1);
+  const tierLabel = status.kind === 'member'
+    ? 'Regular'
+    : status.kind.charAt(0).toUpperCase() + status.kind.slice(1);
   const colors =
     status.kind === 'concierge' ? 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-50'
     : status.kind === 'vip' ? 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-100'
@@ -192,7 +194,7 @@ const PatientStatusChip: React.FC<Props> = ({ patientId, patientEmail, compact }
       <Icon className={compact ? 'h-2.5 w-2.5' : 'h-3 w-3'} />
       {compact
         ? `${tierLabel}${status.foundingNumber ? ` #${status.foundingNumber}` : ''}`
-        : <>Member · {tierLabel}{status.foundingNumber ? ` #${status.foundingNumber}` : ''}{status.saveAmount ? ` · save $${status.saveAmount}` : ''}</>
+        : <>Paid membership · {tierLabel}{status.foundingNumber ? ` #${status.foundingNumber}` : ''}{status.saveAmount ? ` · save $${status.saveAmount}` : ''}</>
       }
     </Badge>
   );

@@ -8,7 +8,7 @@ import FoundingSeatsCounter from '@/components/membership/FoundingSeatsCounter';
 const TIERS = [
   {
     name: 'Member',
-    price: 99,
+    price: 9.99,
     period: '/year',
     highlight: 'Mobile visits from $130',
     badge: null,
@@ -22,7 +22,7 @@ const TIERS = [
   },
   {
     name: 'VIP',
-    price: 199,
+    price: 19.99,
     period: '/year',
     highlight: 'Mobile visits from $115',
     badge: 'Most Popular',
@@ -37,7 +37,7 @@ const TIERS = [
   },
   {
     name: 'Concierge',
-    price: 399,
+    price: 49.99,
     period: '/year',
     highlight: 'Mobile visits from $99',
     badge: 'Best Value',
@@ -89,7 +89,7 @@ const MembershipSection = () => {
               <h3 className="text-xl font-bold">{tier.name}</h3>
 
               <div className="mt-3">
-                <span className="text-4xl font-bold">${tier.price}</span>
+                <span className="text-4xl font-bold">${tier.price.toFixed(2)}</span>
                 <span className="text-muted-foreground">{tier.period}</span>
               </div>
 

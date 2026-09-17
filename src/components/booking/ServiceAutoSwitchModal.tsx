@@ -14,8 +14,8 @@ import { Sparkles, ArrowRight, CalendarClock } from 'lucide-react';
  *
  * The modal explains the switch in warm language ("our OCR read your
  * order — here's what it found"), tells the patient we adjusted their
- * service, and sends them back to re-pick a time slot that fits the
- * new service's scheduling window.
+ * service, and sends them back to re-pick a time slot for the updated
+ * service.
  *
  * We ALWAYS clear the previously-picked date + slot on switch — cleanest
  * path, avoids "wait, was my 7 AM still valid?" ambiguity.
@@ -113,9 +113,7 @@ const ServiceAutoSwitchModal: React.FC<Props> = ({
             <CalendarClock className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="text-xs text-amber-800 leading-relaxed">
               <span className="font-semibold">Please pick a new time slot.</span>{' '}
-              {toService === 'fasting-blood-draw'
-                ? 'Fasting draws have different windows (members unlock more). Click below to choose.'
-                : 'Routine draws use the standard scheduling window. Click below to choose.'}
+              We refreshed the time picker because your service changed. Click below to choose the appointment time that works best for you.
             </div>
           </div>
 

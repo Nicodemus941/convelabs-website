@@ -1955,7 +1955,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
                   <div className="mt-1.5 text-[11px]">
                     {detectedTier === 'none'
                       ? <>This patient is a non-member. Either <strong>move the appointment earlier</strong>, <strong>upgrade them to VIP</strong>, or flip <strong>Override Availability</strong> above to book anyway.</>
-                      : <>This patient is a <strong>Member ($99/yr)</strong> tier — same window as non-members. VIP upgrade removes this restriction.</>}
+                      : <>This patient is a <strong>Member ($9.99/yr)</strong> tier — same window as non-members. VIP upgrade removes this restriction.</>}
                   </div>
                 </div>
               );

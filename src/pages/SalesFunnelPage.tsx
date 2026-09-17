@@ -14,7 +14,7 @@ const SalesFunnelPage: React.FC = () => {
           content="Discover the ideal ConveLabs membership plan for your health and wellness needs. Complete our personalized assessment to get expert recommendations." 
         />
         <meta name="keywords" content="ConveLabs membership plans, personalized health assessment, mobile phlebotomy plans, at-home lab services" />
-        <link rel="canonical" href="https://funnel.convelabs.com" />
+        <link rel="canonical" href="https://convelabs.com/try" />
       </Helmet>
       
       <MetaPixel />

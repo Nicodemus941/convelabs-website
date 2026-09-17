@@ -7,7 +7,7 @@ import SubscribeAtCheckoutCard from './SubscribeAtCheckoutCard';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { ChevronLeft, Loader2, CreditCard, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronDown, ChevronUp, Loader2, CreditCard, AlertTriangle } from 'lucide-react';
 import { FormField, FormItem, FormControl, FormLabel, FormMessage } from '@/components/ui/form';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { BookingFormValues } from '@/types/appointmentTypes';
@@ -116,6 +116,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const [promoPreview, setPromoPreview] = useState<{ type: string; value: number } | null>(null);
   const [addOns, setAddOns] = useState<any[]>([]);
   const [selectedAddOns, setSelectedAddOns] = useState<Set<string>>(new Set());
+  const [showOptionalExtras, setShowOptionalExtras] = useState(false);
   const [memberTier, setMemberTier] = useState<'none' | 'member' | 'vip' | 'concierge'>('none');
   // Founding-50 VIP: unlocks the FREE family add-on (1st additional patient
   // comped to $0). Detected by the membership lookup below — see the
@@ -272,6 +273,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     });
   }, [serviceId]);
 
+  React.useEffect(() => {
+    if (referralApplied || !!referralCode || !!promoCode || familyMembers.length > 0 || bundleEnabled || selectedAddOns.size > 0) {
+      setShowOptionalExtras(true);
+    }
+  }, [referralApplied, referralCode, promoCode, familyMembers.length, bundleEnabled, selectedAddOns]);
+
   const addOnTotal = addOns.filter(a => selectedAddOns.has(a.id)).reduce((s, a) => s + (a.price || 0), 0);
   // Bundle extra: patient prepays for 3 MORE visits (total of 4) at 15% off the 4-pack.
   // bundleExtra = servicePrice × ((BUNDLE_COUNT × (1 - DISCOUNT)) - 1)
@@ -324,6 +331,13 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   }, tipAmount, isSpecialtyKit ? 0 : additionalPatients.length, memberTier, isFoundingMember);
 
   const effectiveReferralDiscount = referralApplied ? referralDiscount : 0;
+  const optionalExtrasCount = [
+    referralApplied || !!referralCode,
+    !!promoCode,
+    selectedAddOns.size > 0,
+    bundleEnabled,
+    familyMembers.length > 0,
+  ].filter(Boolean).length;
   // Founding VIPs get their FIRST family member free — the perk promised
   // in BonusStackCard.tsx ("Free family add-on · +$75 value"). The 2nd, 3rd,
   // etc. still bill at the VIP tier rate. Matches the comp logic inside
@@ -641,312 +655,6 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         </div>
 
-        {/* Add-ons */}
-        {addOns.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="font-medium text-sm flex items-center gap-1.5"><Plus className="h-4 w-4" /> Add-Ons</h3>
-            {addOns.map((addon: any) => (
-              <div key={addon.id} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/30 transition">
-                <div className="flex items-center gap-3">
-                  <Checkbox
-                    checked={selectedAddOns.has(addon.id)}
-                    onCheckedChange={(checked) => {
-                      setSelectedAddOns(prev => {
-                        const next = new Set(prev);
-                        checked ? next.add(addon.id) : next.delete(addon.id);
-                        return next;
-                      });
-                    }}
-                  />
-                  <div>
-                    <p className="text-sm font-medium">{addon.name}</p>
-                    {addon.description && <p className="text-xs text-muted-foreground">{addon.description}</p>}
-                  </div>
-                </div>
-                <span className="text-sm font-medium">+${Number(addon.price).toFixed(2)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Multi-visit bundle — highest LTV lever */}
-        <div className={`rounded-xl p-4 space-y-2 transition ${bundleEnabled ? 'bg-emerald-50 border-2 border-emerald-400' : 'bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200'}`}>
-          <div className="flex items-start gap-3">
-            <Checkbox
-              checked={bundleEnabled}
-              onCheckedChange={(c) => setBundleEnabled(!!c)}
-              className="mt-0.5"
-            />
-            <div className="flex-1">
-              <p className="font-semibold text-sm flex items-center gap-1.5">
-                <Layers className="h-4 w-4 text-purple-700" /> Book 4 visits, save 15%
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Lock in today's pricing for your next 4 visits.{' '}
-                <span className="font-bold text-emerald-700">
-                  ${(breakdown.servicePrice * BUNDLE_COUNT).toFixed(0)} → ${(breakdown.servicePrice * BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)).toFixed(0)}
-                </span>{' '}
-                (save ${(breakdown.servicePrice * BUNDLE_COUNT * BUNDLE_DISCOUNT).toFixed(0)})
-              </p>
-              {bundleEnabled && (
-                <p className="text-[11px] text-emerald-700 mt-1 font-medium">
-                  ✓ Today's visit is the first of 4. Schedule the remaining 3 anytime within 12 months.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Family member upsell */}
-        <div
-          id="family-member-panel"
-          className={`bg-blue-50 border ${foundingFamilyFreeSlots > 0 ? 'border-amber-300 bg-amber-50' : 'border-blue-200'} rounded-xl p-3 space-y-2`}
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-semibold text-sm text-blue-900">
-                👨‍👩‍👧 Bringing a family member?
-                {foundingFamilyFreeSlots > 0 && familyMembers.length === 0 && (
-                  <span className="ml-2 inline-block bg-amber-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 align-middle">
-                    1st FREE · Founding VIP
-                  </span>
-                )}
-              </p>
-              {/* Pricing line — shows $0 for the founding-50 free first slot */}
-              {foundingFamilyFreeSlots > 0 && familyMembers.length === 0 ? (
-                <p className="text-xs text-amber-900">
-                  Your first household member is <span className="font-bold">FREE</span> as a Founding VIP perk
-                  (then ${familyMemberPrice} each after).
-                </p>
-              ) : (
-                <p className="text-xs text-blue-700">
-                  Add them to this visit for just <span className="font-bold">${familyMemberPrice}</span> each.
-                  {memberTier !== 'none' && (
-                    <span className="block mt-0.5 text-emerald-700 font-medium">
-                      ✓ {memberLabel} rate applied — save ${75 - familyMemberPrice} per companion
-                    </span>
-                  )}
-                </p>
-              )}
-              {/* Operational rule: must be drawn at THIS appointment, not separate. */}
-              <p className="text-[11px] text-blue-900 mt-1.5 bg-white border border-blue-200 rounded px-2 py-1">
-                <span className="font-bold">Same-visit rule:</span> family members are drawn at this same appointment —
-                not a separate one. The phlebotomist sees everyone at the same address, same time slot.
-              </p>
-            </div>
-          </div>
-
-          {/* Running count + clear "you can add more" hint — without it,
-              users assume "Confirm" closes the affordance for good. */}
-          {familyMembers.length > 0 && (
-            <p className="text-[11px] text-blue-900 -mt-1 mb-1.5">
-              <strong>{familyMembers.length} family member{familyMembers.length === 1 ? '' : 's'} added</strong>
-              {' '}({familyMembers.length} × ${familyMemberPrice} = ${familyMemberTotal}). Add another below, or continue when done.
-            </p>
-          )}
-
-          {/* Added family members list */}
-          {familyMembers.map((fm, i) => (
-            <div key={i} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {fm.name}
-                  {(fm as any).fastingRequired && (
-                    <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">fasting</span>
-                  )}
-                </p>
-                <p className="text-[11px] text-muted-foreground">{fm.relationship} · DOB: {fm.dob}</p>
-              </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <span className="text-xs font-semibold text-blue-800">+${familyMemberPrice}</span>
-                <button type="button" onClick={() => handleRemoveFamilyMember(i)} className="text-red-400 hover:text-red-600 p-0.5">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
-
-          {/* Add family member form */}
-          {showFamilyForm ? (
-            <div className="bg-white border border-blue-200 rounded-lg p-3 space-y-3">
-              <div>
-                <Label className="text-xs font-medium">Full Name *</Label>
-                <Input
-                  value={familyForm.name}
-                  onChange={e => setFamilyForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Jane Smith"
-                  className="mt-1 h-9 text-sm"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs font-medium">Date of Birth *</Label>
-                  <div className="mt-1">
-                    <DateOfBirthInput
-                      value={familyForm.dob}
-                      onChange={(iso) => setFamilyForm(f => ({ ...f, dob: iso }))}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Relationship</Label>
-                  <select
-                    value={familyForm.relationship}
-                    onChange={e => setFamilyForm(f => ({ ...f, relationship: e.target.value }))}
-                    className="mt-1 h-9 w-full text-sm border rounded-md px-2 bg-white"
-                  >
-                    <option>Spouse</option>
-                    <option>Child</option>
-                    <option>Parent</option>
-                    <option>Sibling</option>
-                    <option>Other</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Per-patient fasting toggle — the Amy/Robert case (couple,
-                  one fasts, one doesn't). We drive a separate fasting-aware
-                  night-before reminder for THIS person off this flag. */}
-              <div className="rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 flex items-center justify-between gap-3">
-                <div className="text-[11px] text-amber-900 leading-snug">
-                  <strong>Fasting required for this person?</strong><br/>
-                  <span className="text-amber-800">We'll send them their own night-before reminder if so.</span>
-                </div>
-                <label className="flex items-center gap-1.5 cursor-pointer select-none flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={!!familyForm.fastingRequired}
-                    onChange={(e) => setFamilyForm(f => ({ ...f, fastingRequired: e.target.checked }))}
-                    className="h-4 w-4 accent-amber-600"
-                  />
-                  <span className="text-xs font-medium text-amber-900">{familyForm.fastingRequired ? 'Yes' : 'No'}</span>
-                </label>
-              </div>
-
-              <div className="flex gap-2">
-                <Button type="button" size="sm" className="text-xs bg-blue-600 hover:bg-blue-700 text-white flex-1" onClick={handleAddFamilyMember}>
-                  <UserPlus className="h-3.5 w-3.5 mr-1" /> Confirm (+${familyMemberPrice})
-                </Button>
-                <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setShowFamilyForm(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 w-full"
-              onClick={() => setShowFamilyForm(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> {familyMembers.length === 0 ? `Add Family Member — $${familyMemberPrice}` : `Add Another (+$${familyMemberPrice})`}
-            </Button>
-          )}
-        </div>
-
-        {/* Promo code input — server validates + applies discount at checkout.
-            For new patients, prominently nudges WELCOME25 ($25 off first visit). */}
-        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-semibold text-gray-700">Promo code (optional)</label>
-            {promoStatus !== 'valid' && !promoCode && (
-              <button
-                type="button"
-                onClick={() => {
-                  setPromoCode('WELCOME25');
-                  setPromoStatus('idle');
-                  setPromoMessage('');
-                }}
-                className="text-[11px] font-semibold text-conve-red hover:underline"
-              >
-                New patient? Use WELCOME25 — $25 off
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={promoCode}
-              onChange={(e) => {
-                setPromoCode(e.target.value);
-                if (promoStatus !== 'idle') { setPromoStatus('idle'); setPromoMessage(''); setPromoPreview(null); }
-              }}
-              disabled={promoStatus === 'valid'}
-              placeholder="Enter code"
-              className="flex-1 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white disabled:bg-gray-100 disabled:text-gray-500 uppercase"
-              style={{ textTransform: 'uppercase' }}
-            />
-            {promoStatus === 'valid' ? (
-              <button
-                type="button"
-                onClick={() => { setPromoCode(''); setPromoStatus('idle'); setPromoMessage(''); setPromoPreview(null); }}
-                className="px-3 py-2 text-sm font-semibold rounded-md border border-gray-300 bg-white hover:bg-gray-50"
-              >Remove</button>
-            ) : (
-              <button
-                type="button"
-                disabled={!promoCode.trim() || promoStatus === 'checking'}
-                onClick={async () => {
-                  setPromoStatus('checking');
-                  setPromoMessage('');
-                  try {
-                    const email = getValues('patientDetails.email') || '';
-                    const phone = getValues('patientDetails.phone') || '';
-                    const firstName = getValues('patientDetails.firstName') || '';
-                    const lastName = getValues('patientDetails.lastName') || '';
-                    const { data, error } = await supabase.rpc('validate_promo_code', {
-                      p_code: promoCode.trim(),
-                      p_email: email,
-                      p_phone: phone,
-                      p_first_name: firstName,
-                      p_last_name: lastName,
-                    });
-                    if (error) throw error;
-                    if (data?.valid) {
-                      setPromoStatus('valid');
-                      setPromoPreview({ type: data.discount_type, value: data.discount_value });
-                      setPromoMessage(
-                        data.discount_type === 'full_waiver'
-                          ? '✓ Code applied — visit fee fully waived. Add any tip amount to complete booking.'
-                          : data.discount_type === 'percent'
-                          ? `✓ Code applied — ${data.discount_value}% off`
-                          : `✓ Code applied — $${(data.discount_value / 100).toFixed(2)} off`
-                      );
-                    } else {
-                      setPromoStatus('invalid');
-                      // BUG FIX 2026-05-25 (Joshua Hoskins case): the generic
-                      // "Invalid promo code" message confused patients with
-                      // membership-signup codes (HOSKINS24, etc.). Those codes
-                      // live in Stripe and only apply at the payment page AFTER
-                      // adding the membership bundle. Now we surface a clear
-                      // hint when validation fails with no specific reason —
-                      // points patients to the right place.
-                      setPromoMessage(
-                        data?.reason === 'email_not_authorized'
-                          ? 'This code is not available on this account. Make sure your email is correct.'
-                          : data?.reason === 'expired'
-                          ? 'This code has expired.'
-                          : data?.reason === 'max_uses_reached'
-                          ? 'This code has reached its usage limit.'
-                          : data?.reason === 'max_uses_per_email_reached'
-                          ? 'You\'ve already used this code.'
-                          : data?.reason === 'not_first_time'
-                          ? 'WELCOME25 is for new patients only. VIP membership saves more on every visit.'
-                          : 'This code can\'t be applied here. If it\'s a membership signup code (e.g. one we texted you for Concierge), add the membership above first — then enter it on the secure payment page after you press Pay.'
-                      );
-                    }
-                  } catch (e: any) {
-                    setPromoStatus('invalid');
-                    setPromoMessage('Could not validate — please try again.');
-                  }
-                }}
-                className="px-4 py-2 text-sm font-semibold rounded-md bg-[#B91C1C] text-white disabled:bg-gray-300 hover:bg-[#991B1B]"
-              >{promoStatus === 'checking' ? '…' : 'Apply'}</button>
-            )}
-          </div>
-          {promoMessage && (
-            <p className={`mt-1.5 text-xs ${promoStatus === 'valid' ? 'text-green-700' : 'text-red-600'}`}>
-              {promoMessage}
-            </p>
-          )}
-        </div>
-
         {/* Tip selector */}
         {/* Pass the visit subtotal so the preset chips become percentage-
             based (15% / 20% / 25%) — better anchor than flat $5/$10/$15. */}
@@ -996,25 +704,339 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           <span>${Math.max(0, breakdown.total + addOnTotal + (bundleEnabled ? breakdown.servicePrice * ((BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)) - 1) : 0) - effectiveReferralDiscount).toFixed(2)}</span>
         </div>
 
-        {/* Referral Code */}
-        {!referralApplied ? (
-          <div className="flex gap-2">
-            <Input
-              value={referralCode}
-              onChange={e => setReferralCode(e.target.value)}
-              placeholder="Referral code (optional)"
-              className="flex-1 text-sm"
-            />
-            <Button type="button" variant="outline" size="sm" onClick={() => applyReferral(referralCode)} disabled={!referralCode.trim()}>
-              <Tag className="h-3.5 w-3.5 mr-1" /> Apply
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
-            <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
-              <Gift className="h-4 w-4" /> Referral: -{`$${referralDiscount}`} applied
-            </span>
-            <button onClick={() => { setReferralApplied(false); setReferralDiscount(0); setReferralCode(''); }} className="text-xs text-muted-foreground hover:text-red-500">Remove</button>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => setShowOptionalExtras((open) => !open)}
+            className="w-full flex items-center justify-between gap-3 text-left"
+          >
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Optional extras</p>
+              <p className="text-xs text-slate-600">
+                Promo codes, referrals, add-ons, bundles, or family members.
+                {optionalExtrasCount > 0 ? ` ${optionalExtrasCount} active.` : ' Skip this if you just want to pay now.'}
+              </p>
+            </div>
+            {showOptionalExtras ? (
+              <ChevronUp className="h-4 w-4 text-slate-500 flex-shrink-0" />
+            ) : (
+              <ChevronDown className="h-4 w-4 text-slate-500 flex-shrink-0" />
+            )}
+          </button>
+        </div>
+
+        {showOptionalExtras && (
+          <div className="space-y-4">
+            {/* Add-ons */}
+            {addOns.length > 0 && (
+              <div className="space-y-2">
+                <h3 className="font-medium text-sm flex items-center gap-1.5"><Plus className="h-4 w-4" /> Add-Ons</h3>
+                {addOns.map((addon: any) => (
+                  <div key={addon.id} className="flex items-center justify-between p-2.5 border rounded-lg hover:bg-muted/30 transition">
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        checked={selectedAddOns.has(addon.id)}
+                        onCheckedChange={(checked) => {
+                          setSelectedAddOns(prev => {
+                            const next = new Set(prev);
+                            checked ? next.add(addon.id) : next.delete(addon.id);
+                            return next;
+                          });
+                        }}
+                      />
+                      <div>
+                        <p className="text-sm font-medium">{addon.name}</p>
+                        {addon.description && <p className="text-xs text-muted-foreground">{addon.description}</p>}
+                      </div>
+                    </div>
+                    <span className="text-sm font-medium">+${Number(addon.price).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Multi-visit bundle — highest LTV lever */}
+            <div className={`rounded-xl p-4 space-y-2 transition ${bundleEnabled ? 'bg-emerald-50 border-2 border-emerald-400' : 'bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200'}`}>
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  checked={bundleEnabled}
+                  onCheckedChange={(c) => setBundleEnabled(!!c)}
+                  className="mt-0.5"
+                />
+                <div className="flex-1">
+                  <p className="font-semibold text-sm flex items-center gap-1.5">
+                    <Layers className="h-4 w-4 text-purple-700" /> Book 4 visits, save 15%
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Lock in today's pricing for your next 4 visits.{' '}
+                    <span className="font-bold text-emerald-700">
+                      ${(breakdown.servicePrice * BUNDLE_COUNT).toFixed(0)} → ${(breakdown.servicePrice * BUNDLE_COUNT * (1 - BUNDLE_DISCOUNT)).toFixed(0)}
+                    </span>{' '}
+                    (save ${(breakdown.servicePrice * BUNDLE_COUNT * BUNDLE_DISCOUNT).toFixed(0)})
+                  </p>
+                  {bundleEnabled && (
+                    <p className="text-[11px] text-emerald-700 mt-1 font-medium">
+                      Today's visit is the first of 4. Schedule the remaining 3 anytime within 12 months.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Family member upsell */}
+            <div
+              id="family-member-panel"
+              className={`bg-blue-50 border ${foundingFamilyFreeSlots > 0 ? 'border-amber-300 bg-amber-50' : 'border-blue-200'} rounded-xl p-3 space-y-2`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold text-sm text-blue-900">
+                    👨‍👩‍👧 Bringing a family member?
+                    {foundingFamilyFreeSlots > 0 && familyMembers.length === 0 && (
+                      <span className="ml-2 inline-block bg-amber-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5 align-middle">
+                        1st FREE · Founding VIP
+                      </span>
+                    )}
+                  </p>
+                  {foundingFamilyFreeSlots > 0 && familyMembers.length === 0 ? (
+                    <p className="text-xs text-amber-900">
+                      Your first household member is <span className="font-bold">FREE</span> as a Founding VIP perk
+                      (then ${familyMemberPrice} each after).
+                    </p>
+                  ) : (
+                    <p className="text-xs text-blue-700">
+                      Add them to this visit for just <span className="font-bold">${familyMemberPrice}</span> each.
+                      {memberTier !== 'none' && (
+                        <span className="block mt-0.5 text-emerald-700 font-medium">
+                          {memberLabel} rate applied — save ${75 - familyMemberPrice} per companion
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  <p className="text-[11px] text-blue-900 mt-1.5 bg-white border border-blue-200 rounded px-2 py-1">
+                    <span className="font-bold">Same-visit rule:</span> family members are drawn at this same appointment —
+                    not a separate one. The phlebotomist sees everyone at the same address, same time slot.
+                  </p>
+                </div>
+              </div>
+
+              {familyMembers.length > 0 && (
+                <p className="text-[11px] text-blue-900 -mt-1 mb-1.5">
+                  <strong>{familyMembers.length} family member{familyMembers.length === 1 ? '' : 's'} added</strong>
+                  {' '}({familyMembers.length} × ${familyMemberPrice} = ${familyMemberTotal}). Add another below, or continue when done.
+                </p>
+              )}
+
+              {familyMembers.map((fm, i) => (
+                <div key={i} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {fm.name}
+                      {(fm as any).fastingRequired && (
+                        <span className="ml-1.5 text-[10px] bg-amber-100 text-amber-800 border border-amber-200 rounded-full px-1.5 py-0.5">fasting</span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">{fm.relationship} · DOB: {fm.dob}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-xs font-semibold text-blue-800">+${familyMemberPrice}</span>
+                    <button type="button" onClick={() => handleRemoveFamilyMember(i)} className="text-red-400 hover:text-red-600 p-0.5">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {showFamilyForm ? (
+                <div className="bg-white border border-blue-200 rounded-lg p-3 space-y-3">
+                  <div>
+                    <Label className="text-xs font-medium">Full Name *</Label>
+                    <Input
+                      value={familyForm.name}
+                      onChange={e => setFamilyForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Jane Smith"
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs font-medium">Date of Birth *</Label>
+                      <div className="mt-1">
+                        <DateOfBirthInput
+                          value={familyForm.dob}
+                          onChange={(iso) => setFamilyForm(f => ({ ...f, dob: iso }))}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs font-medium">Relationship</Label>
+                      <select
+                        value={familyForm.relationship}
+                        onChange={e => setFamilyForm(f => ({ ...f, relationship: e.target.value }))}
+                        className="mt-1 h-9 w-full text-sm border rounded-md px-2 bg-white"
+                      >
+                        <option>Spouse</option>
+                        <option>Child</option>
+                        <option>Parent</option>
+                        <option>Sibling</option>
+                        <option>Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 flex items-center justify-between gap-3">
+                    <div className="text-[11px] text-amber-900 leading-snug">
+                      <strong>Fasting required for this person?</strong><br/>
+                      <span className="text-amber-800">We'll send them their own night-before reminder if so.</span>
+                    </div>
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none flex-shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={!!familyForm.fastingRequired}
+                        onChange={(e) => setFamilyForm(f => ({ ...f, fastingRequired: e.target.checked }))}
+                        className="h-4 w-4 accent-amber-600"
+                      />
+                      <span className="text-xs font-medium text-amber-900">{familyForm.fastingRequired ? 'Yes' : 'No'}</span>
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" className="text-xs bg-blue-600 hover:bg-blue-700 text-white flex-1" onClick={handleAddFamilyMember}>
+                      <UserPlus className="h-3.5 w-3.5 mr-1" /> Confirm (+${familyMemberPrice})
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" className="text-xs" onClick={() => setShowFamilyForm(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button type="button" variant="outline" size="sm" className="text-xs border-blue-300 text-blue-800 hover:bg-blue-100 w-full"
+                  onClick={() => setShowFamilyForm(true)}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> {familyMembers.length === 0 ? `Add Family Member — $${familyMemberPrice}` : `Add Another (+$${familyMemberPrice})`}
+                </Button>
+              )}
+            </div>
+
+            {/* Promo code input — server validates + applies discount at checkout. */}
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-semibold text-gray-700">Promo code (optional)</label>
+                {promoStatus !== 'valid' && !promoCode && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPromoCode('WELCOME25');
+                      setPromoStatus('idle');
+                      setPromoMessage('');
+                    }}
+                    className="text-[11px] font-semibold text-conve-red hover:underline"
+                  >
+                    New patient? Use WELCOME25 — $25 off
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={promoCode}
+                  onChange={(e) => {
+                    setPromoCode(e.target.value);
+                    if (promoStatus !== 'idle') { setPromoStatus('idle'); setPromoMessage(''); setPromoPreview(null); }
+                  }}
+                  disabled={promoStatus === 'valid'}
+                  placeholder="Enter code"
+                  className="flex-1 px-3 py-2 text-sm rounded-md border border-gray-300 bg-white disabled:bg-gray-100 disabled:text-gray-500 uppercase"
+                  style={{ textTransform: 'uppercase' }}
+                />
+                {promoStatus === 'valid' ? (
+                  <button
+                    type="button"
+                    onClick={() => { setPromoCode(''); setPromoStatus('idle'); setPromoMessage(''); setPromoPreview(null); }}
+                    className="px-3 py-2 text-sm font-semibold rounded-md border border-gray-300 bg-white hover:bg-gray-50"
+                  >Remove</button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!promoCode.trim() || promoStatus === 'checking'}
+                    onClick={async () => {
+                      setPromoStatus('checking');
+                      setPromoMessage('');
+                      try {
+                        const email = getValues('patientDetails.email') || '';
+                        const phone = getValues('patientDetails.phone') || '';
+                        const firstName = getValues('patientDetails.firstName') || '';
+                        const lastName = getValues('patientDetails.lastName') || '';
+                        const { data, error } = await supabase.rpc('validate_promo_code', {
+                          p_code: promoCode.trim(),
+                          p_email: email,
+                          p_phone: phone,
+                          p_first_name: firstName,
+                          p_last_name: lastName,
+                        });
+                        if (error) throw error;
+                        if (data?.valid) {
+                          setPromoStatus('valid');
+                          setPromoPreview({ type: data.discount_type, value: data.discount_value });
+                          setPromoMessage(
+                            data.discount_type === 'full_waiver'
+                              ? 'Code applied — visit fee fully waived. Add any tip amount to complete booking.'
+                              : data.discount_type === 'percent'
+                              ? `Code applied — ${data.discount_value}% off`
+                              : `Code applied — $${(data.discount_value / 100).toFixed(2)} off`
+                          );
+                        } else {
+                          setPromoStatus('invalid');
+                          setPromoMessage(
+                            data?.reason === 'email_not_authorized'
+                              ? 'This code is not available on this account. Make sure your email is correct.'
+                              : data?.reason === 'expired'
+                              ? 'This code has expired.'
+                              : data?.reason === 'max_uses_reached'
+                              ? 'This code has reached its usage limit.'
+                              : data?.reason === 'max_uses_per_email_reached'
+                              ? 'You have already used this code.'
+                              : data?.reason === 'not_first_time'
+                              ? 'WELCOME25 is for new patients only. VIP membership saves more on every visit.'
+                              : 'This code cannot be applied here. If it is a membership signup code, add the membership above first and enter it on the secure payment page after you press Pay.'
+                          );
+                        }
+                      } catch (e: any) {
+                        setPromoStatus('invalid');
+                        setPromoMessage('Could not validate — please try again.');
+                      }
+                    }}
+                    className="px-4 py-2 text-sm font-semibold rounded-md bg-[#B91C1C] text-white disabled:bg-gray-300 hover:bg-[#991B1B]"
+                  >{promoStatus === 'checking' ? '…' : 'Apply'}</button>
+                )}
+              </div>
+              {promoMessage && (
+                <p className={`mt-1.5 text-xs ${promoStatus === 'valid' ? 'text-green-700' : 'text-red-600'}`}>
+                  {promoMessage}
+                </p>
+              )}
+            </div>
+
+            {/* Referral Code */}
+            {!referralApplied ? (
+              <div className="flex gap-2">
+                <Input
+                  value={referralCode}
+                  onChange={e => setReferralCode(e.target.value)}
+                  placeholder="Referral code (optional)"
+                  className="flex-1 text-sm"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={() => applyReferral(referralCode)} disabled={!referralCode.trim()}>
+                  <Tag className="h-3.5 w-3.5 mr-1" /> Apply
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-sm">
+                <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
+                  <Gift className="h-4 w-4" /> Referral: -{`$${referralDiscount}`} applied
+                </span>
+                <button onClick={() => { setReferralApplied(false); setReferralDiscount(0); setReferralCode(''); }} className="text-xs text-muted-foreground hover:text-red-500">Remove</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1022,6 +1044,10 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
         <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
           <Shield className="h-4 w-4 text-[#B91C1C]" />
           <span className="text-xs text-muted-foreground">Protected by the <a href="/guarantee" target="_blank" className="text-[#B91C1C] font-medium hover:underline">ConveLabs Guarantee</a></span>
+        </div>
+
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          After you press <strong>Proceed to Payment</strong>, you will finish securely in Stripe. If anything looks off, you can back out before completing payment.
         </div>
 
         {/* Terms — anchor id used by the Continue button to scroll-to + flash

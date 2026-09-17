@@ -74,7 +74,7 @@ const ForProviders: React.FC = () => (
             </div>
             <div className="text-xs text-gray-600 space-y-1 pt-2 border-t">
               <p><strong>Surcharges:</strong> Same-day +$100 · Weekend +$75 · Extended-area cities (Clermont, Sanford, Lake Mary, etc.) +$75</p>
-              <p><strong>Membership tiers:</strong> Member ($99/yr) saves $35 per visit · VIP ($199/yr) saves $50 + priority booking · Concierge ($399/yr) saves $85 + same-day at no surcharge</p>
+              <p><strong>Membership tiers:</strong> Member ($9.99/yr) saves $35 per visit · VIP ($19.99/yr) saves $50 + priority booking · Concierge ($49.99/yr) saves $85 + same-day at no surcharge</p>
             </div>
           </CardContent>
         </Card>

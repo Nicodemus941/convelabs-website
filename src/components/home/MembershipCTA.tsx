@@ -33,7 +33,7 @@ const MembershipCTA = () => {
     "Mobile visits from $99 — save up to $51 per visit",
     "Weekend appointments: Saturday 6 AM - 9:30 AM (members only)",
     "Priority and same-day scheduling",
-    "Plans from just $99/year — pays for itself in 5 visits",
+    "Plans from just $9.99/year — pays for itself in 1 visit",
     "Family member add-ons from $35 per person",
     "Trusted by 500+ patients across Central Florida"
   ];

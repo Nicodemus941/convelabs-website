@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import MembershipAgreementDialog from '@/components/membership/MembershipAgreementDialog';
 import FoundingSeatsCounter from '@/components/membership/FoundingSeatsCounter';
 import BonusStackCard from '@/components/membership/BonusStackCard';
+import { useSearchParams } from 'react-router-dom';
+import { analytics } from '@/utils/analytics';
 
 /**
  * PRICING PAGE — Hormozi-structured 4-tier annual offer.
@@ -70,7 +72,7 @@ const TIERS: Tier[] = [
     key: 'member',
     name: 'Regular',
     planName: 'Regular',
-    annualPrice: 99,
+    annualPrice: 9.99,
     tagline: 'Morning lab access whenever you need it',
     ctaLabel: 'Become a Regular Member',
     color: 'border-brand-gold/25',
@@ -81,7 +83,7 @@ const TIERS: Tier[] = [
       { label: 'Saturday access', value: '6–9am', highlight: true },
       { label: 'Advance booking window', value: '14 days' },
       { label: 'Same-day booking', value: false },
-      { label: 'Family add-on (same visit)', value: '$60 (20% off)', highlight: true },
+      { label: 'Family add-on (same visit)', value: '$55 member rate', highlight: true },
       { label: 'Referral bonuses', value: '$10 credit (auto-applied to your next booking) + friend gets 10% off', highlight: true },
       { label: 'Results retrieval', value: 'Complimentary', highlight: true },
       { label: 'Reschedule fee', value: 'Waived', highlight: true },
@@ -93,7 +95,7 @@ const TIERS: Tier[] = [
     key: 'vip',
     name: 'VIP',
     planName: 'VIP',
-    annualPrice: 199,
+    annualPrice: 19.99,
     tagline: 'Priority slots + family discounts',
     highlight: 'Most Popular',
     ctaLabel: 'Go VIP',
@@ -117,7 +119,7 @@ const TIERS: Tier[] = [
     key: 'concierge',
     name: 'Concierge',
     planName: 'Concierge',
-    annualPrice: 399,
+    annualPrice: 49.99,
     tagline: 'Your own phleb, anytime, zero friction',
     highlight: 'Best Value',
     ctaLabel: 'Become Concierge',
@@ -165,9 +167,14 @@ interface PendingMembership {
 
 const Pricing: React.FC = () => {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [selectedTier, setSelectedTier] = useState<Tier | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const resumeFiredRef = useRef(false);
+  const autoOpenRef = useRef(false);
+  const requestedTierKey = (searchParams.get('tier') || '').toLowerCase() as Tier['key'] | '';
+  const requestedTier = TIERS.find((tier) => tier.key === requestedTierKey && tier.key !== 'none') || null;
+  const shouldAutoOpenRequestedTier = searchParams.get('checkout') === '1';
 
   const handleSubscribe = async (tier: Tier, agreementMeta: { agreementVersion: string; agreementSha: string }) => {
     if (!user) {
@@ -206,7 +213,7 @@ const Pricing: React.FC = () => {
           user_email: user.email,
           user_name: [user.firstName, user.lastName].filter(Boolean).join(' ') || null,
           plan_name: tier.planName,
-          plan_annual_price_cents: tier.annualPrice * 100,
+          plan_annual_price_cents: Math.round(tier.annualPrice * 100),
           billing_frequency: 'annual',
           agreement_version: agreementMeta.agreementVersion,
           agreement_text_sha256: agreementMeta.agreementSha,
@@ -281,6 +288,16 @@ const Pricing: React.FC = () => {
     });
   }, [user]);
 
+  useEffect(() => {
+    if (!requestedTier || !shouldAutoOpenRequestedTier || autoOpenRef.current) return;
+    autoOpenRef.current = true;
+    analytics.trackFunnelStage('pricing_recommended_tier_arrived', 6, {
+      tier: requestedTier.key,
+      source: searchParams.get('utm_source') || 'unknown',
+    });
+    setSelectedTier(requestedTier);
+  }, [requestedTier, searchParams, shouldAutoOpenRequestedTier]);
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Header />
@@ -299,6 +316,11 @@ const Pricing: React.FC = () => {
             Annual memberships unlock earlier mornings, Saturday access, lower family-add-on pricing,
             referral rewards, and more. Billed once a year — full refund for 30 days.
           </p>
+          {requestedTier && (
+            <p className="mt-4 text-sm font-medium text-[#B91C1C]">
+              Recommended for you from the `/try` assessment: {requestedTier.name}
+            </p>
+          )}
         </div>
       </section>
 
@@ -314,10 +336,20 @@ const Pricing: React.FC = () => {
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 max-w-7xl mx-auto">
             {TIERS.map((tier) => (
-              <Card key={tier.key} className={`border-2 ${tier.color} bg-gradient-to-b ${tier.gradient} relative flex flex-col`}>
+              <Card
+                key={tier.key}
+                className={`border-2 ${tier.color} bg-gradient-to-b ${tier.gradient} relative flex flex-col ${
+                  requestedTier?.key === tier.key ? 'ring-2 ring-offset-2 ring-[#B91C1C]/35' : ''
+                }`}
+              >
                 {tier.highlight && (
                   <div className={`absolute -top-3 left-1/2 -translate-x-1/2 ${tier.key === 'concierge' ? 'bg-brand-gold-deep' : 'bg-[#B91C1C]'} text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-[0.12em]`}>
                     {tier.highlight}
+                  </div>
+                )}
+                {requestedTier?.key === tier.key && (
+                  <div className="absolute top-3 left-3 rounded-full bg-[#B91C1C] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
+                    Recommended
                   </div>
                 )}
                 <CardContent className="p-5 flex flex-col flex-1">
@@ -336,11 +368,11 @@ const Pricing: React.FC = () => {
                     {tier.annualPrice ? (
                       <>
                         <div className="flex items-baseline gap-1">
-                          <span className="text-3xl font-bold">${tier.annualPrice}</span>
+                          <span className="text-3xl font-bold">${tier.annualPrice.toFixed(2)}</span>
                           <span className="text-xs text-muted-foreground">/year</span>
                         </div>
                         <p className="text-[10px] text-muted-foreground mt-0.5">
-                          That's ~${Math.round(tier.annualPrice / 12)}/mo · billed annually · one charge
+                          That's ~${(tier.annualPrice / 12).toFixed(2)}/mo · billed annually · one charge
                         </p>
                         {/* Plain-English math anchor — what they pay today + what
                             future visits cost — Hormozi "trade visible" rule */}
@@ -351,7 +383,7 @@ const Pricing: React.FC = () => {
                           const breakEven = savePerVisit > 0 ? Math.ceil(tier.annualPrice / savePerVisit) : null;
                           return (
                             <div className="mt-2 rounded-md bg-brand-gold/10 border border-brand-gold/30 p-2 text-[10.5px] leading-relaxed">
-                              <p className="font-semibold text-conve-black mb-0.5">Today: just ${tier.annualPrice} (one charge)</p>
+                              <p className="font-semibold text-conve-black mb-0.5">Today: just ${tier.annualPrice.toFixed(2)} (one charge)</p>
                               <p className="text-gray-700">
                                 Future mobile draws: <span className="line-through text-gray-400">$150</span>{' '}
                                 <strong>${visitMemberPrice}</strong> each (save ${savePerVisit}/visit)

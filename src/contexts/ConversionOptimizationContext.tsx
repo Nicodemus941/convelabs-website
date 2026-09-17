@@ -149,6 +149,11 @@ export const ConversionOptimizationProvider: React.FC<ConversionOptimizationProv
       case '/pricing':
         analytics.trackPricingView();
         break;
+      case '/try':
+      case '/funnel':
+      case '/sales-funnel':
+        analytics.trackFunnelStage('try_funnel_landing', 1, { path: location.pathname });
+        break;
     }
   }, [location.pathname]);
   

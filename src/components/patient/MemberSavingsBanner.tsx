@@ -27,7 +27,7 @@ interface SavingsData {
 }
 
 const TIER_META: Record<string, { label: string; bg: string; text: string; border: string; accent: string }> = {
-  regular_member: { label: 'Member', bg: 'bg-amber-50', text: 'text-amber-900', border: 'border-amber-300', accent: 'text-amber-600' },
+  regular_member: { label: 'Regular', bg: 'bg-amber-50', text: 'text-amber-900', border: 'border-amber-300', accent: 'text-amber-600' },
   vip: { label: 'VIP', bg: 'bg-red-50', text: 'text-red-900', border: 'border-red-300', accent: 'text-red-600' },
   concierge: { label: 'Concierge', bg: 'bg-purple-50', text: 'text-purple-900', border: 'border-purple-300', accent: 'text-purple-600' },
 };
@@ -93,7 +93,7 @@ const MemberSavingsBanner: React.FC = () => {
           {ytdSaved > 0 && (
             <p className={`mt-3 text-xs ${meta.text} opacity-80 flex items-center gap-1`}>
               <TrendingUp className="h-3 w-3" />
-              Your {meta.label.toLowerCase()} perks paid for themselves {ytdSaved >= 199 ? 'and then some' : 'already'} this year.
+              Your {meta.label.toLowerCase()} perks paid for themselves {ytdSaved >= 19.99 ? 'and then some' : 'already'} this year.
             </p>
           )}
         </div>

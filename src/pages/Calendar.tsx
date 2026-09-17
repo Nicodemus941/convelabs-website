@@ -23,6 +23,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format, startOfWeek, endOfWeek, addDays } from 'date-fns';
+import { filterCalendarAppointments } from '@/lib/appointmentCalendarFilters';
 
 const Calendar = () => {
   const { user } = useAuth();
@@ -74,8 +75,8 @@ const Calendar = () => {
           .lt('appointment_date', format(addDays(new Date(), 1), 'yyyy-MM-dd'))
       ]);
 
-      const weekAppointments = appointmentsResult.data || [];
-      const todayAppointments = todayResult.data || [];
+      const weekAppointments = filterCalendarAppointments(appointmentsResult.data || []);
+      const todayAppointments = filterCalendarAppointments(todayResult.data || []);
 
       return {
         weekTotal: weekAppointments.length,

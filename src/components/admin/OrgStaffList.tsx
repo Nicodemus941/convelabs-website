@@ -14,7 +14,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, RefreshCw, UserPlus, Mail, Clock, CheckCircle2, AlertTriangle, Send } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Loader2, RefreshCw, UserPlus, Clock, CheckCircle2, AlertTriangle, Send, Pencil, Check, X } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -37,13 +38,36 @@ interface OrgStaffRow {
 interface Props {
   organizationId: string;
   organizationName: string;
+  onStaffNameUpdated?: (update: { userId: string; email: string; fullName: string }) => void;
 }
 
-const OrgStaffList: React.FC<Props> = ({ organizationId, organizationName }) => {
+const OrgStaffList: React.FC<Props> = ({ organizationId, organizationName, onStaffNameUpdated }) => {
   const [rows, setRows] = useState<OrgStaffRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [resendingFor, setResendingFor] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [canEditAnyName, setCanEditAnyName] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [savingNameFor, setSavingNameFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (cancelled) return;
+      const authUser = data.user;
+      setCurrentUserId(authUser?.id || null);
+      const role = String(authUser?.user_metadata?.role || '').toLowerCase();
+      setCanEditAnyName(['super_admin', 'admin', 'owner'].includes(role));
+    }).catch(() => {
+      if (!cancelled) {
+        setCurrentUserId(null);
+        setCanEditAnyName(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -62,6 +86,56 @@ const OrgStaffList: React.FC<Props> = ({ organizationId, organizationName }) => 
   }, [organizationId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const beginEdit = (row: OrgStaffRow) => {
+    setEditingUserId(row.user_id);
+    setEditingName((row.full_name || '').trim());
+  };
+
+  const cancelEdit = () => {
+    setEditingUserId(null);
+    setEditingName('');
+  };
+
+  const canEditRow = (row: OrgStaffRow) => canEditAnyName || row.user_id === currentUserId;
+
+  const handleSaveName = async (row: OrgStaffRow) => {
+    const fullName = editingName.trim().replace(/\s+/g, ' ');
+    if (!fullName) {
+      toast.error('Staff name is required');
+      return;
+    }
+    setSavingNameFor(row.user_id);
+    try {
+      const { data, error } = await supabase.functions.invoke('update-org-staff-name', {
+        body: {
+          organizationId,
+          targetUserId: row.user_id,
+          fullName,
+        },
+      });
+      if (error) throw error;
+      const result = data as any;
+      if (!result?.ok) throw new Error(result?.error || 'Could not update name');
+
+      setRows((current) => current.map((entry) => (
+        entry.user_id === row.user_id ? { ...entry, full_name: fullName } : entry
+      )));
+      onStaffNameUpdated?.({ userId: row.user_id, email: row.email, fullName });
+
+      if (row.user_id === currentUserId) {
+        await supabase.auth.refreshSession().catch(() => {});
+      }
+
+      toast.success('Staff name updated');
+      cancelEdit();
+      load();
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not update staff name');
+    } finally {
+      setSavingNameFor(null);
+    }
+  };
 
   const handleResend = async (row: OrgStaffRow) => {
     setResendingFor(row.email);
@@ -134,7 +208,51 @@ const OrgStaffList: React.FC<Props> = ({ organizationId, organizationName }) => 
               {rows.map(row => (
                 <div key={row.user_id} className="py-3 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate">{row.full_name || row.email.split('@')[0]}</p>
+                    {editingUserId === row.user_id ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editingName}
+                          onChange={(event) => setEditingName(event.target.value)}
+                          placeholder="Full name"
+                          className="h-8 text-sm"
+                        />
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          className="h-8 w-8"
+                          onClick={() => handleSaveName(row)}
+                          disabled={savingNameFor === row.user_id}
+                          aria-label="Save staff name"
+                        >
+                          {savingNameFor === row.user_id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={cancelEdit}
+                          disabled={savingNameFor === row.user_id}
+                          aria-label="Cancel name edit"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm truncate">{row.full_name || row.email.split('@')[0]}</p>
+                        {canEditRow(row) && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 shrink-0 text-gray-500 hover:text-gray-900"
+                            onClick={() => beginEdit(row)}
+                            aria-label={`Edit ${row.full_name || row.email}'s name`}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     <p className="text-xs text-gray-500 truncate">
                       {row.email}
                       {row.role_label && <span className="ml-1.5 text-gray-400">· {row.role_label}</span>}

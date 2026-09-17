@@ -48,8 +48,8 @@ const MOBILE_SENIOR_SERVICES = ['routine-blood-draw', 'fasting-blood-draw', 'sta
 
 // All services for other visit types
 const ALL_SERVICES: Service[] = [
-  { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. 9 AM – 1:30 PM, Mon–Sat. AdventHealth deliveries extend to 6 PM.' },
-  { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. 6–9 AM Mon–Fri for non-members; members unlock wider windows. We verify against your uploaded lab order — if fasting isn\'t required, booking will be rejected.' },
+  { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. Choose the daytime appointment that works best for you.' },
+  { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. You can choose any available appointment time that works best for you. We verify the order before payment.' },
   { id: 'stat-blood-draw', name: 'STAT / Same-Day', duration: 60, credits: 1, description: 'Next available slot. +$100 surcharge.' },
   { id: 'therapeutic-phlebotomy', name: 'Therapeutic Phlebotomy', duration: 75, credits: 1, description: 'Blood removal per doctor order. 1hr 15min.' },
   { id: 'glucose-tolerance', name: 'Glucose Tolerance Test (GTT)', duration: 120, credits: 1, description: 'Measures how your body processes sugar.' },
@@ -120,6 +120,11 @@ const ServiceSelectionStep: React.FC<ServiceSelectionStepProps> = ({
             ? 'What type of blood draw do you need?'
             : 'What type of lab work do you need?'}
         </p>
+        {isMobileOrSenior && (
+          <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
+            Most patients should choose <strong>Routine Blood Draw</strong>. Choose <strong>Fasting</strong> only if your lab order says to fast, or <strong>STAT</strong> if your doctor asked for urgent same-day service.
+          </p>
+        )}
       </div>
 
       {/* Card grid for Mobile/Senior (3 cards) or list for others */}
@@ -164,7 +169,7 @@ const ServiceSelectionStep: React.FC<ServiceSelectionStepProps> = ({
                 )}
                 {service.id === 'fasting-blood-draw' && isSelected && (
                   <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 leading-snug">
-                    ⚠ We verify fasting against your uploaded lab order. If your order doesn't require fasting, please select Routine Blood Draw instead.
+                    We verify fasting against your lab order. Fasting prep affects your instructions, not which daytime slots you can book.
                   </div>
                 )}
               </div>

@@ -1,23 +1,77 @@
-
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { getRenderedTemplate, sendEmail, logEmailSend, userHasOptedIn } from "../_shared/email/index.ts";
+import { getRenderedTemplate, userHasOptedIn } from "../_shared/email/index.ts";
+import { createOrRefreshAppointmentPayLink } from "../_shared/appointment-pay-link.ts";
 import { shouldSendNow } from "../_shared/quiet-hours.ts";
 import { formatApptDateLong, formatApptTime, todayInETPlusDays } from "../_shared/format-appt-date.ts";
+import { verifyRecipientEmail, verifyRecipientPhone } from "../_shared/verify-recipient.ts";
+import { logOrgEmail } from "../_shared/email-log.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// This function can be called manually or triggered via a scheduled job
+const SEND_WINDOW_START_ET = 8;
+const SEND_WINDOW_END_ET = 9;
+
+function isUSEasternDST(date: Date): boolean {
+  const year = date.getUTCFullYear();
+  const marchStart = (() => {
+    const d = new Date(Date.UTC(year, 2, 1));
+    const firstSun = 1 + ((7 - d.getUTCDay()) % 7);
+    return Date.UTC(year, 2, firstSun + 7, 7);
+  })();
+  const novEnd = (() => {
+    const d = new Date(Date.UTC(year, 10, 1));
+    const firstSun = 1 + ((7 - d.getUTCDay()) % 7);
+    return Date.UTC(year, 10, firstSun, 6);
+  })();
+  const t = date.getTime();
+  return t >= marchStart && t < novEnd;
+}
+
+function etOffsetHours(date: Date): number {
+  return isUSEasternDST(date) ? -4 : -5;
+}
+
+function hourET(now: Date = new Date()): number {
+  const shifted = new Date(now.getTime() + etOffsetHours(now) * 3600 * 1000);
+  return shifted.getUTCHours();
+}
+
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return phone.startsWith('+') ? phone : `+${digits}`;
+}
+
+type ReminderStatus = 'already_sent' | 'sent' | 'retryable_failure' | 'blocked' | 'unavailable';
+
+interface ChannelResult {
+  channel: 'email' | 'sms';
+  status: ReminderStatus;
+  detail?: string;
+}
+
+interface ExistingReminderState {
+  emailSent: boolean;
+  smsSent: boolean;
+}
+
 serve(async (req: Request) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Quiet-hours guardrail — no patient SMS/email 9pm-8am ET.
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   const gate = shouldSendNow('reminder');
   if (!gate.allow) {
     console.log(`[quiet-hours] send-appointment-reminder deferred: ${gate.reason}`);
@@ -31,36 +85,34 @@ serve(async (req: Request) => {
       Deno.env.get('SUPABASE_URL') || '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
     );
-    
-    // Get individual appointment or process batch
+
     let appointmentId: string | undefined;
+    let force = false;
     try {
       const body = await req.json();
-      appointmentId = body.appointmentId;
-    } catch (e) {
-      // No JSON body or parse error, assume batch processing
+      appointmentId = body?.appointmentId;
+      force = !!body?.force;
+    } catch {
+      // Batch processing without a JSON body.
     }
-    
-    // Process single appointment if ID provided
+
+    const etHour = hourET();
+    if (!force && (etHour < SEND_WINDOW_START_ET || etHour >= SEND_WINDOW_END_ET)) {
+      return new Response(JSON.stringify({
+        skipped: true,
+        reason: 'outside-morning-send-window',
+        etHour,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     if (appointmentId) {
       return await processSingleAppointment(appointmentId, supabaseClient);
     }
-    
-    // Otherwise, send the night-before reminder for TOMORROW's calendar
-    // date in ET — never today's. The cron runs once daily in the early ET
-    // evening (`process-appointment-reminders` pg_cron — 0 22 * * * UTC ≈
-    // 6 PM ET). Targeting tomorrow's DATE (rather than a rolling [now,+24h]
-    // window) makes it structurally impossible for a mid-day invocation to
-    // send a "tomorrow" reminder for a same-day visit. (2026-07-07 audit —
-    // also the fix for the rolling window firing ~1.5 days early when the
-    // cron ran hourly; Melissa Neptune got a July-1 reminder on June 29.)
-    const targetDateStr = todayInETPlusDays(1);
 
-    // Include `confirmed` — most appointments are confirmed by the day
-    // before, so filtering to only `scheduled` meant confirmed patients got
-    // no reminder at all. (This fix was in-repo since 2026-06-29 but never
-    // deployed — deployed v286 still had .eq('status','scheduled'), which is
-    // why zero reminders went out after 6/30.)
+    const targetDateStr = todayInETPlusDays(1);
     const { data: appointments, error } = await supabaseClient
       .from('appointments')
       .select(`
@@ -71,12 +123,11 @@ serve(async (req: Request) => {
       .in('status', ['scheduled', 'confirmed'])
       .gte('appointment_date', `${targetDateStr}T00:00:00`)
       .lte('appointment_date', `${targetDateStr}T23:59:59`);
-    
+
     if (error) {
       throw new Error(`Error fetching appointments: ${error.message}`);
     }
-    
-    // Process each appointment
+
     const results = [];
     for (const appointment of appointments || []) {
       try {
@@ -85,35 +136,39 @@ serve(async (req: Request) => {
         results.push({
           appointmentId: appointment.id,
           success: resultData.success,
-          error: resultData.error
+          skipped: resultData.skipped || false,
+          channels: resultData.channels || [],
+          error: resultData.error,
         });
       } catch (err) {
         results.push({
           appointmentId: appointment.id,
           success: false,
-          error: err.message
+          error: err instanceof Error ? err.message : String(err)
         });
       }
     }
-    
+
     return new Response(
-      JSON.stringify({ 
-        success: true, 
+      JSON.stringify({
+        success: true,
         processedCount: results.length,
-        results 
+        sentCount: results.filter((r) => r.success && !r.skipped).length,
+        skippedCount: results.filter((r) => r.skipped).length,
+        results
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
-    
+
   } catch (error) {
     console.error('Error in appointment reminder function:', error);
-    
+
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error.message 
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
       }),
-      { 
+      {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500,
       }
@@ -121,15 +176,7 @@ serve(async (req: Request) => {
   }
 });
 
-// Helper function to process a single appointment reminder
 async function processSingleAppointment(appointmentId: string, supabaseClient: any) {
-  // Get appointment details. The previous JOIN syntax
-  // `patient:patient_id (id, email)` doesn't resolve — there's no FK
-  // relation registered under that alias, so PostgREST returned
-  // "Could not find a relationship between 'appointments' and 'patient_id'
-  // in the schema cache" and every reminder silently failed. Fix: use the
-  // appointment's own patient_email column and look up the rest via
-  // tenant_patients separately.
   const { data: appointment, error } = await supabaseClient
     .from('appointments')
     .select('*')
@@ -149,85 +196,75 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
     );
   }
 
-  // Resolve patient email — appointment row carries it directly; fall
-  // back to tenant_patients lookup if blank.
+  let patientName = appointment.patient_name || 'there';
   let patientEmail: string | null = appointment.patient_email || null;
-  if (!patientEmail && appointment.patient_id) {
+  let patientPhone: string | null = appointment.patient_phone || null;
+
+  if ((patientName === 'there' || !patientEmail || !patientPhone) && appointment.patient_id) {
     const { data: tp } = await supabaseClient
-      .from('tenant_patients').select('email').eq('id', appointment.patient_id).maybeSingle();
-    patientEmail = tp?.email || null;
+      .from('tenant_patients')
+      .select('first_name, last_name, email, phone')
+      .eq('id', appointment.patient_id)
+      .maybeSingle();
+    if (tp) {
+      if (patientName === 'there') {
+        patientName = `${tp.first_name || ''} ${tp.last_name || ''}`.trim() || 'there';
+      }
+      patientEmail = patientEmail || tp.email || null;
+      patientPhone = patientPhone || tp.phone || null;
+    }
   }
-  if (!patientEmail) {
-    return new Response(
-      JSON.stringify({ success: false, error: 'Patient email not found' }),
-      { headers: { 'Content-Type': 'application/json' }, status: 400 }
-    );
+
+  if (patientName === 'there' && appointment.notes) {
+    const match = String(appointment.notes).match(/Patient:\s*([^|]+)/);
+    if (match) patientName = match[1].trim();
   }
-  
-  // Check if user has opted in for appointment reminders
+
+  const existing = await getExistingReminderState(supabaseClient, appointmentId, appointment.patient_id);
+  const channels: ChannelResult[] = [];
+
   const hasOptedIn = await userHasOptedIn(appointment.patient_id, 'appointment_reminders');
   if (!hasOptedIn) {
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: "User has opted out of appointment reminder emails",
-        skipped: true
-      }),
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    channels.push({ channel: 'email', status: 'blocked', detail: 'patient opted out of appointment reminder emails' });
   }
-  
-  // ── DATE-BUG FIX (2026-05-06) ────────────────────────────────────
-  // appointment_date is stored as `2026-05-08 00:00:00+00` (UTC midnight
-  // on the visit day). When that's converted to Date and formatted in
-  // America/New_York, DST drops it back to the prior evening
-  // (Thursday May 7 8 PM ET) and the patient sees the WRONG WEEKDAY.
-  // Hawthorn Mertz got "tomorrow Thursday" on Wednesday for a Friday
-  // visit. (2026-05-06.)
-  //
-  // Fix: treat appointment_date as a CALENDAR-DATE STRING (slice the
-  // first 10 chars) and format with timeZone:'UTC' anchored at noon UTC.
-  // Noon UTC can't roll into a different day in any worldwide timezone.
-  // appointment_time is the patient-facing clock value — render as-is.
-  //
-  // The shared `_shared/format-appt-date.ts` helper makes this the only
-  // correct path forward; every reminder/confirmation/notice email
-  // should use it.
+
   const formattedDate = formatApptDateLong(appointment.appointment_date);
   const formattedTime = formatApptTime(appointment.appointment_time);
-  
-  // Create data for the template
+  const visitUrl = appointment.view_token
+    ? `${Deno.env.get('SITE_URL') || 'https://convelabs.com'}/visit/${appointment.view_token}`
+    : `${Deno.env.get('SITE_URL') || 'https://convelabs.com'}/dashboard/patient`;
+
   const templateData = {
     appointmentDate: formattedDate,
     appointmentTime: formattedTime,
     appointmentLocation: (appointment.address || '').includes('ConveLabs Office') ? 'ConveLabs Office' : 'Your Home',
-    serviceType: 'Lab Draw', // You may want to fetch the actual service type
+    serviceType: 'Lab Draw',
     phlebotomistAssigned: !!appointment.phlebotomist_id,
-    phlebotomistName: appointment.phlebotomist ? 
+    phlebotomistName: appointment.phlebotomist ?
       `${appointment.phlebotomist.firstName} ${appointment.phlebotomist.lastName}` : '',
     appointmentAddress: appointment.address,
     labOrderSubmitted: appointment.lab_order_file_path ? true : false,
-    uploadLabOrderUrl: `${Deno.env.get('SITE_URL') || 'https://convelabs.com'}/dashboard/patient/upload-order?appointment=${appointmentId}`,
-    rescheduleUrl: `${Deno.env.get('SITE_URL') || 'https://convelabs.com'}/dashboard/patient/reschedule?appointment=${appointmentId}`,
-    cancelUrl: `${Deno.env.get('SITE_URL') || 'https://convelabs.com'}/dashboard/patient/cancel?appointment=${appointmentId}`
+    uploadLabOrderUrl: visitUrl,
+    rescheduleUrl: visitUrl,
+    cancelUrl: visitUrl
   };
-  
-  // Render the reminder email template
+
   const renderedTemplate = await getRenderedTemplate('appointment_reminder', templateData);
 
-  // ─── INVOICE NUDGE — soft pay-link reminder when invoice is open ───
-  // VIPs are normally exempt from dunning, but if the visit is tomorrow
-  // and they haven't paid, a friendly nudge with the appointment
-  // confirmation IS service, not dunning. Same goes for any patient
-  // whose invoice is sent/reminded/final_warning when the visit lands.
   let nudgeHtml = '';
   let nudgeText = '';
   try {
     const isUnpaid =
       appointment.payment_status === 'pending' &&
-      ['sent','reminded','final_warning','pending_send'].includes(appointment.invoice_status || '');
+      ['sent', 'reminded', 'final_warning', 'pending_send'].includes(appointment.invoice_status || '');
     if (isUnpaid) {
-      const payUrl: string | null = appointment.stripe_invoice_url || null;
+      let payUrl: string | null = null;
+      try {
+        payUrl = (await createOrRefreshAppointmentPayLink(supabaseClient, appointment.id)).url;
+      } catch (err) {
+        console.warn('[appt-reminder] branded pay link fallback:', err);
+        payUrl = appointment.stripe_invoice_url || null;
+      }
       const amount = `$${Number(appointment.total_amount || 0).toFixed(2)}`;
       if (payUrl) {
         nudgeHtml = `
@@ -242,7 +279,6 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
           </div>`;
         nudgeText = `\n\nQuick reminder: your ${amount} invoice is still open. Pay: ${payUrl}\n`;
       } else {
-        // No hosted Stripe URL on file — surface a callable line instead
         nudgeHtml = `
           <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:14px 16px;margin:18px 0;font-family:Arial,sans-serif;">
             <p style="margin:0;font-size:13px;color:#78350f;line-height:1.5;">
@@ -256,18 +292,12 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
     console.warn('[appt-reminder] nudge build failed (non-blocking):', e);
   }
 
-  // Inject the nudge near the top of the rendered HTML body — between
-  // <body> and the actual content. Falls back to prepending if no <body>.
   const baseHtml = nudgeHtml
     ? (renderedTemplate.html.includes('<body')
         ? renderedTemplate.html.replace(/(<body[^>]*>)/i, `$1${nudgeHtml}`)
         : nudgeHtml + renderedTemplate.html)
     : renderedTemplate.html;
 
-  // E-Labus companion-app cross-promo — appended to the bottom of every
-  // reminder (before </body> if the DB template is a full doc, else
-  // appended). Same block the branded confirmation/specimen emails use,
-  // so the app CTA is consistent across all three patient touchpoints.
   const promoHtml = elabusAppPromo();
   const finalHtml = baseHtml.includes('</body>')
     ? baseHtml.replace('</body>', `${promoHtml}</body>`)
@@ -275,44 +305,253 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
   const finalText = (renderedTemplate.text || '') + nudgeText
     + '\n\nWant to understand your lab results? Download E-Labus — App Store: https://apps.apple.com/app/id6784433707 · Google Play: https://play.google.com/store/apps/details?id=com.elabus.app\n';
 
-  // Send the reminder email
-  const result = await sendEmail({
-    to: patientEmail,
-    subject: renderedTemplate.subject,
-    html: finalHtml,
-    text: finalText
-  });
-  
-  // Log the email
-  await logEmailSend({
-    userId: appointment.patient_id,
-    recipientEmail: patientEmail,
-    subject: renderedTemplate.subject,
-    bodyHtml: renderedTemplate.html,
-    bodyText: renderedTemplate.text,
-    status: result.success ? 'sent' : 'failed',
-    error: result.error,
-    metadata: {
-      appointmentId,
-      templateName: 'appointment_reminder'
+  if (existing.emailSent) {
+    channels.push({ channel: 'email', status: 'already_sent' });
+  } else if (!patientEmail) {
+    channels.push({ channel: 'email', status: 'unavailable', detail: 'patient email not found' });
+  } else if (!hasOptedIn) {
+    // already recorded above
+  } else {
+    const emailCheck = await verifyRecipientEmail(appointmentId, patientEmail, patientName);
+    if (!emailCheck.safe) {
+      channels.push({ channel: 'email', status: 'blocked', detail: emailCheck.reason });
+    } else {
+      const emailResult = await sendReminderEmail({
+        appointmentId,
+        patientEmail,
+        subject: renderedTemplate.subject,
+        html: finalHtml,
+        text: finalText,
+        supabaseClient,
+      });
+      channels.push(emailResult);
     }
-  });
-  
-  if (!result.success) {
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: result.error 
-      }),
-      { headers: { 'Content-Type': 'application/json' } }
-    );
   }
-  
+
+  if (existing.smsSent) {
+    channels.push({ channel: 'sms', status: 'already_sent' });
+  } else if (!patientPhone) {
+    channels.push({ channel: 'sms', status: 'unavailable', detail: 'patient phone not found' });
+  } else {
+    const phoneCheck = await verifyRecipientPhone(appointmentId, patientPhone, patientName);
+    if (!phoneCheck.safe) {
+      channels.push({ channel: 'sms', status: 'blocked', detail: phoneCheck.reason });
+    } else {
+      const smsResult = await sendReminderSms({
+        appointment,
+        patientName,
+        patientPhone,
+        formattedDate,
+        formattedTime,
+        supabaseClient,
+      });
+      channels.push(smsResult);
+    }
+  }
+
+  const materiallySent = channels.some((channel) =>
+    channel.status === 'sent' || channel.status === 'already_sent'
+  );
+
   return new Response(
-    JSON.stringify({ 
-      success: true, 
-      id: result.id 
+    JSON.stringify({
+      success: materiallySent,
+      skipped: channels.every((channel) => channel.status === 'already_sent'),
+      channels,
+      error: materiallySent ? null : 'No reminder channel could be delivered',
     }),
     { headers: { 'Content-Type': 'application/json' } }
   );
+}
+
+async function getExistingReminderState(supabaseClient: any, appointmentId: string, patientId?: string | null): Promise<ExistingReminderState> {
+  const [emailLogResult, legacyEmailResult, smsResult] = await Promise.all([
+    supabaseClient
+      .from('email_send_log')
+      .select('status')
+      .eq('appointment_id', appointmentId)
+      .eq('email_type', 'appointment_reminder')
+      .limit(10),
+    patientId
+      ? supabaseClient
+          .from('email_logs')
+          .select('status, metadata')
+          .eq('user_id', patientId)
+          .limit(25)
+      : Promise.resolve({ data: [], error: null }),
+    supabaseClient
+      .from('sms_notifications')
+      .select('delivery_status')
+      .eq('appointment_id', appointmentId)
+      .eq('notification_type', 'appointment_reminder')
+      .limit(10),
+  ]);
+
+  const emailStatuses = new Set(['sent', 'opened', 'clicked']);
+  const smsStatuses = new Set(['queued', 'accepted', 'sending', 'sent', 'delivered']);
+
+  const emailSent =
+    !!emailLogResult.data?.some((row: any) => emailStatuses.has(String(row.status || '').toLowerCase())) ||
+    !!legacyEmailResult.data?.some((row: any) => {
+      const metadata = row?.metadata || {};
+      return metadata?.appointmentId === appointmentId &&
+        metadata?.templateName === 'appointment_reminder' &&
+        String(row.status || '').toLowerCase() === 'sent';
+    });
+
+  const smsSent = !!smsResult.data?.some((row: any) => smsStatuses.has(String(row.delivery_status || '').toLowerCase()));
+
+  return { emailSent, smsSent };
+}
+
+async function sendReminderEmail(args: {
+  appointmentId: string;
+  patientEmail: string;
+  subject: string;
+  html: string;
+  text: string;
+  supabaseClient: any;
+}): Promise<ChannelResult> {
+  const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
+  const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
+
+  if (!MAILGUN_API_KEY) {
+    return { channel: 'email', status: 'unavailable', detail: 'Mailgun not configured' };
+  }
+
+  const formData = new FormData();
+  formData.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
+  formData.append('to', args.patientEmail);
+  formData.append('subject', args.subject);
+  formData.append('html', args.html);
+  formData.append('text', args.text);
+
+  const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+    body: formData,
+  });
+
+  await logOrgEmail(args.supabaseClient, {
+    appointmentId: args.appointmentId,
+    toEmail: args.patientEmail,
+    emailType: 'appointment_reminder',
+    subject: args.subject,
+    mailgunResponse: mgRes,
+    retryPayload: { appointmentId: args.appointmentId, force: true },
+  });
+
+  if (!mgRes.ok) {
+    const err = await mgRes.text().catch(() => 'Mailgun request failed');
+    return { channel: 'email', status: 'retryable_failure', detail: err.substring(0, 500) };
+  }
+
+  return { channel: 'email', status: 'sent' };
+}
+
+async function sendReminderSms(args: {
+  appointment: any;
+  patientName: string;
+  patientPhone: string;
+  formattedDate: string;
+  formattedTime: string;
+  supabaseClient: any;
+}): Promise<ChannelResult> {
+  const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN');
+  const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER');
+
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+    return { channel: 'sms', status: 'unavailable', detail: 'Twilio not configured' };
+  }
+
+  const isFasting = !!args.appointment.fasting_required;
+  const needsUrine = !!args.appointment.urine_required;
+  const hasLabOrder = !!args.appointment.lab_order_file_path;
+  const isSubscription = !!args.appointment.recurrence_group_id && !args.appointment.visit_bundle_id;
+  const prepLine = isFasting && needsUrine
+    ? ` Fasting required (8h) and bring a morning urine sample. Full fasting details arrive tonight at 8 PM ET.`
+    : isFasting
+      ? ` Fasting required (8h before draw). Full details arrive tonight at 8 PM ET.`
+      : needsUrine
+        ? ` Bring a morning urine sample for tomorrow's visit.`
+        : '';
+
+  const baseBody = hasLabOrder
+    ? `Hi ${args.patientName}! Your ConveLabs appointment is tomorrow, ${args.formattedDate} at ${args.formattedTime}. Your lab order is on file.${prepLine} Please have a clean, well-lit area ready and wear a short-sleeved shirt.`
+    : `Hi ${args.patientName}! Your ConveLabs appointment is tomorrow, ${args.formattedDate} at ${args.formattedTime}. Please have your lab order and insurance card ready.${prepLine} If you need to manage your visit, use convelabs.com/dashboard.`;
+
+  const smsBody = isSubscription
+    ? `${baseBody}\n\nThis is a recurring visit. Need to push it? Log in and tap "Skip next" or reply CALL to talk to us.`
+    : baseBody;
+
+  const formattedPhone = normalizePhone(args.patientPhone);
+  const formData = new URLSearchParams();
+  formData.append('To', formattedPhone);
+  formData.append('From', TWILIO_PHONE_NUMBER);
+  formData.append('Body', smsBody);
+
+  const statusCallback = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
+  if (statusCallback.startsWith('http')) {
+    formData.append('StatusCallback', statusCallback);
+  }
+
+  const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: formData,
+  });
+
+  let deliveryStatus = 'failed';
+  let smsSid: string | null = null;
+  if (smsRes.ok) {
+    deliveryStatus = 'sent';
+    try {
+      smsSid = (await smsRes.json())?.sid ?? null;
+    } catch {
+      smsSid = null;
+    }
+  }
+
+  try {
+    await args.supabaseClient.from('sms_notifications').insert({
+      appointment_id: args.appointment.id,
+      notification_type: 'appointment_reminder',
+      phone_number: formattedPhone,
+      message_content: smsBody,
+      sent_at: new Date().toISOString(),
+      delivery_status: deliveryStatus,
+      twilio_message_sid: smsSid,
+      metadata: { source: 'send-appointment-reminder' },
+    });
+  } catch (logErr) {
+    console.warn('appt reminder SMS log insert failed (non-blocking)', args.appointment.id, logErr);
+  }
+
+  if (!smsRes.ok) {
+    const err = await smsRes.text().catch(() => 'Twilio request failed');
+    return { channel: 'sms', status: 'retryable_failure', detail: err.substring(0, 500) };
+  }
+
+  return { channel: 'sms', status: 'sent' };
+}
+
+function elabusAppPromo(): string {
+  return `
+  <div style="margin-top:24px;padding:18px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;font-family:Arial,sans-serif;">
+    <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#111827;">Understand your results after your draw</p>
+    <p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:#374151;">
+      Download E-Labus to track biomarkers, view trends, and get AI-guided explanations once your labs are ready.
+    </p>
+    <p style="margin:0;font-size:13px;line-height:1.6;">
+      App Store:
+      <a href="https://apps.apple.com/app/id6784433707" style="color:#B91C1C;text-decoration:none;">Download</a>
+      <br />
+      Google Play:
+      <a href="https://play.google.com/store/apps/details?id=com.elabus.app" style="color:#B91C1C;text-decoration:none;">Download</a>
+    </p>
+  </div>`;
 }

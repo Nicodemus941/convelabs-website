@@ -129,12 +129,12 @@ function buildHtml(params: {
       <tr><td style="padding:36px 32px 24px;">
         <p style="margin:0 0 16px;color:#111827;font-size:16px;line-height:1.6;">Hi ${greeting} — Nico here, founder of ConveLabs.</p>
         <p style="margin:0 0 16px;color:#374151;font-size:15px;line-height:1.7;"><strong>${orgName}</strong> is now in our provider network — which means any patient you see today can have their blood drawn at their kitchen table, on their schedule.</p>
-        <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.7;">You don't pay us anything. Your practice stays out of the billing loop. We just help your patients actually show up to their blood work.</p>
+        <p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.7;">We configure each practice one of two ways during setup: patient-billed per visit, or org-billed when your practice wants to cover the draw experience. Nothing is charged until that setup is confirmed.</p>
 
         <!-- Billing clarity — up front so no surprises -->
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;margin-bottom:28px;">
           <tr><td style="padding:14px 18px;">
-            <p style="margin:0;color:#78350f;font-size:13px;line-height:1.6;"><strong style="color:#92400e;">One thing to know:</strong> we don't bill insurance for our service. Your patient pays a flat out-of-pocket fee for the at-home draw (their insurance still covers the actual lab tests via LabCorp / Quest / AdventHealth). Most patients tell us it's cheaper than their copay + time off work.</p>
+            <p style="margin:0;color:#78350f;font-size:13px;line-height:1.6;"><strong style="color:#92400e;">One thing to know:</strong> we don't bill insurance for our service. In patient-billed setups, the patient pays a flat out-of-pocket fee for the at-home draw while insurance still covers the actual lab tests through the lab's normal rail. Org-billed setups are configured separately with your practice.</p>
           </td></tr>
         </table>
 
@@ -232,7 +232,7 @@ function buildHtml(params: {
         <p style="margin:0 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#6b7280;font-weight:bold;">Three quick answers</p>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
           <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Do you bill insurance?</strong><br><span style="color:#6b7280;">No — our at-home draw fee is out-of-pocket for the patient. Their insurance still covers the actual lab tests via the lab's normal rail.</span></td></tr>
-          <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Does my practice pay anything?</strong><br><span style="color:#6b7280;">No. Ever.</span></td></tr>
+          <tr><td style="padding:8px 0;color:#374151;font-size:13px;border-bottom:1px solid #f3f4f6;"><strong>Does my practice pay anything?</strong><br><span style="color:#6b7280;">Only if we configure your practice on an org-billed plan. Otherwise patients pay per visit.</span></td></tr>
           <tr><td style="padding:8px 0;color:#374151;font-size:13px;"><strong>What if they already have Quest?</strong><br><span style="color:#6b7280;">We deliver to Quest too. Results rail stays intact.</span></td></tr>
         </table>
 
@@ -272,7 +272,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: org } = await admin.from('organizations')
-      .select('id, name, contact_name, contact_email, billing_email, cc_emails, portal_enabled, welcomed_at')
+      .select('id, name, contact_name, contact_email, billing_email, manager_email, front_desk_email, cc_emails, portal_enabled, welcomed_at')
       .eq('id', organization_id)
       .maybeSingle();
 
@@ -288,9 +288,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const recipient = org.contact_email || org.billing_email;
+    const recipient = org.contact_email || (org as any).manager_email || (org as any).front_desk_email || org.billing_email;
     if (!recipient) {
-      return new Response(JSON.stringify({ error: 'no_contact_email', message: 'Add a contact_email before welcoming this org.' }), {
+      return new Response(JSON.stringify({ error: 'no_contact_email', message: 'Add a contact, manager, front-desk, or billing email before welcoming this org.' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

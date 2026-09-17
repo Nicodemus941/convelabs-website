@@ -58,10 +58,10 @@ interface TierMeta {
 const TIER_META: Record<string, TierMeta> = {
   member: {
     label: 'ConveLabs Member',
-    price: 99, monthly: 8.25,
+    price: 9.99, monthly: 0.83,
     stackedValue: 254,
     perks: [
-      { label: '12 months of Member-tier discounts', value: '$99' },
+      { label: '12 months of Member-tier discounts', value: '$9.99' },
       { label: 'Morning + Saturday booking access', value: '$50' },
       { label: 'Member-rate family add-ons', value: '$30' },
       { label: 'Free recollection if your draw is rejected', value: 'priceless' },
@@ -71,10 +71,10 @@ const TIER_META: Record<string, TierMeta> = {
   },
   vip: {
     label: 'VIP Founding Member',
-    price: 199, monthly: 16.58,
+    price: 19.99, monthly: 1.67,
     stackedValue: 474,
     perks: [
-      { label: '12 months of VIP-tier savings', value: '$199' },
+      { label: '12 months of VIP-tier savings', value: '$19.99' },
       { label: 'Founding rate-lock for life (never raises)', value: '$50/yr' },
       { label: 'Free family add-on — 1 extra member', value: '$75' },
       { label: 'Priority same-day booking (no surcharge)', value: '$150' },
@@ -84,10 +84,10 @@ const TIER_META: Record<string, TierMeta> = {
   },
   concierge: {
     label: 'Concierge',
-    price: 399, monthly: 33.25,
+    price: 49.99, monthly: 4.17,
     stackedValue: 925,
     perks: [
-      { label: '12 months of Concierge-tier — every visit fee waived', value: '$399' },
+      { label: '12 months of Concierge-tier access', value: '$49.99' },
       { label: 'Dedicated phlebotomist for your draws', value: '$200' },
       { label: 'Same-day + after-hours included', value: '$250' },
       { label: 'Quarterly lab-results review (white-glove)', value: 'priceless' },

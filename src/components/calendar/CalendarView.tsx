@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addDays } from 'date-fns';
 import { formatAppointmentDate, toDateOnly } from '@/lib/appointmentDate';
+import { filterCalendarAppointments } from '@/lib/appointmentCalendarFilters';
 import { Clock, MapPin, User, Phone, Mail } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
@@ -20,6 +21,8 @@ interface Appointment {
   patient_id: string;
   phlebotomist_id?: string;
   duration_minutes?: number;
+  family_group_id?: string | null;
+  companion_role?: string | null;
   // Profile data
   patient_name?: string;
   patient_phone?: string;
@@ -76,9 +79,11 @@ const CalendarView: React.FC<CalendarViewProps> = ({
 
       if (!appointmentsData) return [];
 
+      const visibleAppointments = filterCalendarAppointments(appointmentsData as Appointment[]);
+
       // Get unique patient and phlebotomist IDs
-      const patientIds = [...new Set(appointmentsData.map(apt => apt.patient_id))];
-      const phlebotomistIds = [...new Set(appointmentsData.map(apt => apt.phlebotomist_id).filter(Boolean))];
+      const patientIds = [...new Set(visibleAppointments.map(apt => apt.patient_id))];
+      const phlebotomistIds = [...new Set(visibleAppointments.map(apt => apt.phlebotomist_id).filter(Boolean))];
 
       // Fetch patient profiles
       const { data: patientProfiles } = await supabase
@@ -93,7 +98,7 @@ const CalendarView: React.FC<CalendarViewProps> = ({
         .in('id', phlebotomistIds);
 
       // Transform the data to include names
-      return appointmentsData.map(apt => {
+      return visibleAppointments.map(apt => {
         const patientProfile = patientProfiles?.find(p => p.id === apt.patient_id);
         const phlebotomistProfile = phlebotomistProfiles?.find(p => p.id === apt.phlebotomist_id);
 

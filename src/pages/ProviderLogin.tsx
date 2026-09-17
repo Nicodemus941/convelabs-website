@@ -86,7 +86,7 @@ const ProviderLogin: React.FC = () => {
         const { data } = await supabase
           .from('organizations')
           .select('name')
-          .or(`billing_email.eq.${email.trim()},contact_email.eq.${email.trim()}`)
+          .or(`billing_email.eq.${email.trim()},contact_email.eq.${email.trim()},front_desk_email.eq.${email.trim()},manager_email.eq.${email.trim()}`)
           .eq('portal_enabled', true)
           .eq('is_active', true)
           .maybeSingle();

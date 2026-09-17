@@ -25,6 +25,8 @@ import OrgNotesTab from '@/components/admin/OrgNotesTab';
 import OrgStaffList from '@/components/admin/OrgStaffList';
 import OrgSubscriptionStatusCard from '@/components/admin/OrgSubscriptionStatusCard';
 import OrgCommunicationsTab from '@/components/admin/OrgCommunicationsTab';
+import OrgReadinessCard from '@/components/admin/OrgReadinessCard';
+import OrgPilotReportCard from '@/components/admin/OrgPilotReportCard';
 import DiscoveredZipClusters from './DiscoveredZipClusters';
 import MergeDuplicatesDialog from './MergeDuplicatesDialog';
 
@@ -32,6 +34,11 @@ interface Org {
   id: string; name: string; contact_name: string | null; contact_email: string | null;
   contact_phone: string | null; billing_email: string | null; billing_address: string | null;
   notes: string | null; is_active: boolean; created_at: string;
+  address?: string | null;
+  fax?: string | null;
+  manager_email?: string | null;
+  front_desk_email?: string | null;
+  tax_id?: string | null;
   cc_emails?: string[] | null;       // additional staff recipients
   welcomed_at?: string | null;        // set once the welcome email fires
   // Partner-rule fields (added by earlier migrations)
@@ -43,6 +50,8 @@ interface Org {
   locked_price_cents?: number | null;
   org_invoice_price_cents?: number | null;
   member_stacking_rule?: 'lowest_wins' | 'partner_only' | 'org_covers' | null;
+  subscription_tier?: string | null;
+  subscription_status?: string | null;
   // Partnership flywheel fields (Phase 1 migration)
   source?: 'manual' | 'discovered_from_ocr' | 'partner_signup' | null;
   discovered_from_lab_order?: boolean | null;
@@ -95,7 +104,8 @@ const OrganizationsTab: React.FC = () => {
   // Full edit form — covers everything including partner rules
   const [editForm, setEditForm] = useState<{
     name: string; contactName: string; contactEmail: string; contactPhone: string;
-    billingEmail: string; billingAddress: string; notes: string;
+    billingEmail: string; billingAddress: string; address: string; fax: string;
+    managerEmail: string; frontDeskEmail: string; taxId: string; notes: string;
     isActive: boolean; portalEnabled: boolean;
     defaultBilledTo: 'patient' | 'org';
     allowBillOverride: boolean;
@@ -107,7 +117,8 @@ const OrganizationsTab: React.FC = () => {
     ccEmails: { email: string; label: string }[];
   }>({
     name: '', contactName: '', contactEmail: '', contactPhone: '',
-    billingEmail: '', billingAddress: '', notes: '',
+    billingEmail: '', billingAddress: '', address: '', fax: '',
+    managerEmail: '', frontDeskEmail: '', taxId: '', notes: '',
     isActive: true, portalEnabled: false,
     defaultBilledTo: 'patient',
     allowBillOverride: true,
@@ -118,6 +129,33 @@ const OrganizationsTab: React.FC = () => {
     memberStackingRule: 'lowest_wins',
     ccEmails: [],
   });
+
+  const syncOrgContactStaffName = useCallback(async (organizationId: string, contactEmail: string | null, fullName: string | null) => {
+    const normalizedEmail = (contactEmail || '').trim().toLowerCase();
+    const normalizedName = (fullName || '').trim().replace(/\s+/g, ' ');
+    if (!normalizedEmail || !normalizedName) return false;
+
+    const { data, error } = await supabase.rpc('list_org_staff_admin' as any, {
+      p_organization_id: organizationId,
+    });
+    if (error) throw error;
+
+    const match = ((data as any[]) || []).find((row: any) => String(row.email || '').trim().toLowerCase() === normalizedEmail);
+    if (!match?.user_id) return false;
+
+    const { data: syncData, error: syncError } = await supabase.functions.invoke('update-org-staff-name', {
+      body: {
+        organizationId,
+        targetUserId: match.user_id,
+        fullName: normalizedName,
+      },
+    });
+    if (syncError) throw syncError;
+    if (!(syncData as any)?.ok) {
+      throw new Error((syncData as any)?.error || 'Could not sync staff name');
+    }
+    return true;
+  }, []);
 
   const openEditModal = (org: Org) => {
     // Hydrate existing cc_emails into editable rows; keep label empty since
@@ -130,8 +168,13 @@ const OrganizationsTab: React.FC = () => {
       contactName: org.contact_name || '',
       contactEmail: org.contact_email || '',
       contactPhone: org.contact_phone || '',
+      address: org.address || '',
+      fax: org.fax || '',
+      managerEmail: org.manager_email || '',
+      frontDeskEmail: org.front_desk_email || '',
       billingEmail: org.billing_email || '',
       billingAddress: org.billing_address || '',
+      taxId: org.tax_id || '',
       notes: org.notes || '',
       isActive: org.is_active ?? true,
       portalEnabled: org.portal_enabled ?? false,
@@ -164,8 +207,13 @@ const OrganizationsTab: React.FC = () => {
         contact_name: editForm.contactName.trim() || null,
         contact_email: editForm.contactEmail.trim() || null,
         contact_phone: editForm.contactPhone.trim() || null,
+        address: editForm.address.trim() || null,
+        fax: editForm.fax.trim() || null,
+        manager_email: editForm.managerEmail.trim() || null,
+        front_desk_email: editForm.frontDeskEmail.trim() || null,
         billing_email: editForm.billingEmail.trim() || null,
         billing_address: editForm.billingAddress.trim() || null,
+        tax_id: editForm.taxId.trim() || null,
         notes: editForm.notes.trim() || null,
         cc_emails: ccClean,
         is_active: editForm.isActive,
@@ -185,7 +233,21 @@ const OrganizationsTab: React.FC = () => {
         .select('*')
         .single();
       if (error) throw error;
+
+      const syncedContact = await syncOrgContactStaffName(
+        selectedOrg.id,
+        payload.contact_email,
+        payload.contact_name,
+      ).catch((syncError: any) => {
+        console.error('[OrganizationsTab] staff name sync failed:', syncError);
+        toast.error(syncError?.message || 'Organization saved, but staff name sync failed');
+        return false;
+      });
+
       toast.success('Organization updated');
+      if (syncedContact) {
+        toast.success('Staff roster name synced');
+      }
       setShowEditOrg(false);
       setSelectedOrg(data as unknown as Org);
       fetchOrgs();
@@ -645,7 +707,6 @@ ConveLabs · (941) 527-9169`
                   e.preventDefault();
                   e.stopPropagation();
                   const alreadyWelcomed = !!(selectedOrg as any).welcomed_at;
-                  // eslint-disable-next-line no-console
                   console.log('[send-welcome click]', { orgId: selectedOrg.id, recipient: selectedOrg.contact_email, resend: alreadyWelcomed });
                   handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, alreadyWelcomed);
                 }}
@@ -684,6 +745,8 @@ ConveLabs · (941) 527-9169`
 
           {/* ─── OVERVIEW ─────────────────────────────────────────── */}
           <TabsContent value="overview" className="space-y-4 mt-4">
+            <OrgReadinessCard org={selectedOrg} onEdit={() => openEditModal(selectedOrg)} />
+            <OrgPilotReportCard org={selectedOrg} />
             <OrgSubscriptionStatusCard orgId={selectedOrg.id} />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-[#B91C1C]">${totalInvoiced.toFixed(0)}</p><p className="text-[10px] text-muted-foreground">Total Invoiced</p></CardContent></Card>
@@ -703,6 +766,10 @@ ConveLabs · (941) 527-9169`
             <OrgStaffList
               organizationId={selectedOrg.id}
               organizationName={selectedOrg.name}
+              onStaffNameUpdated={({ email, fullName }) => {
+                if (email.trim().toLowerCase() !== (selectedOrg.contact_email || '').trim().toLowerCase()) return;
+                setSelectedOrg((current) => current ? { ...current, contact_name: fullName } : current);
+              }}
             />
           </TabsContent>
 
@@ -800,6 +867,14 @@ ConveLabs · (941) 527-9169`
                   <Label>Contact Email</Label>
                   <Input type="email" value={editForm.contactEmail} onChange={e => setEditForm(p => ({ ...p, contactEmail: e.target.value }))} />
                 </div>
+                <div>
+                  <Label>Practice Address</Label>
+                  <Input value={editForm.address} onChange={e => setEditForm(p => ({ ...p, address: e.target.value }))} placeholder="Used for readiness + result routing" />
+                </div>
+                <div>
+                  <Label>Fax</Label>
+                  <Input value={editForm.fax} onChange={e => setEditForm(p => ({ ...p, fax: e.target.value }))} placeholder="Used for result routing" />
+                </div>
 
                 {/* CC additional staff — parity with Add Org modal */}
                 <div className="border-t pt-3">
@@ -875,6 +950,20 @@ ConveLabs · (941) 527-9169`
 
               {/* Billing section */}
               <div className="space-y-3 pt-2 border-t">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Team routing</p>
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <Label>Office Manager Email</Label>
+                    <Input type="email" value={editForm.managerEmail} onChange={e => setEditForm(p => ({ ...p, managerEmail: e.target.value }))} placeholder="Escalations route here" />
+                  </div>
+                  <div>
+                    <Label>Front Desk Email</Label>
+                    <Input type="email" value={editForm.frontDeskEmail} onChange={e => setEditForm(p => ({ ...p, frontDeskEmail: e.target.value }))} placeholder="Booking notifications route here" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-2 border-t">
                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Billing</p>
                 <div>
                   <Label>Billing Email</Label>
@@ -883,6 +972,10 @@ ConveLabs · (941) 527-9169`
                 <div>
                   <Label>Billing Address</Label>
                   <Input value={editForm.billingAddress} onChange={e => setEditForm(p => ({ ...p, billingAddress: e.target.value }))} />
+                </div>
+                <div>
+                  <Label>Tax ID</Label>
+                  <Input value={editForm.taxId} onChange={e => setEditForm(p => ({ ...p, taxId: e.target.value }))} placeholder="Required for fully complete org-billed setup" />
                 </div>
               </div>
 

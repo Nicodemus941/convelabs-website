@@ -50,7 +50,7 @@ const FoundingMemberBadge: React.FC<Props> = ({ className = '', compact = false 
   if (loading) return compact ? null : <div className={`h-8 ${className}`}><Loader2 className="h-4 w-4 animate-spin text-gray-400" /></div>;
   if (!row || !row.founding_member_number) return null;
 
-  const rateDollars = row.founding_locked_rate_cents ? row.founding_locked_rate_cents / 100 : 199;
+  const rateDollars = row.founding_locked_rate_cents ? row.founding_locked_rate_cents / 100 : 19.99;
 
   if (compact) {
     return (
@@ -76,7 +76,7 @@ const FoundingMemberBadge: React.FC<Props> = ({ className = '', compact = false 
           <div className="flex items-center gap-1.5 mt-1 text-xs text-amber-800">
             <Lock className="h-3 w-3" />
             <span>
-              ${rateDollars.toFixed(0)}/yr rate locked for life
+              ${rateDollars.toFixed(2)}/yr rate locked for life
             </span>
           </div>
         </div>

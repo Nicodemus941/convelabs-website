@@ -6,6 +6,7 @@ import FunnelStep3HealthAssessment from "./FunnelStep3HealthAssessment";
 import FunnelStep4Preferences from "./FunnelStep4Preferences";
 import FunnelStep5Recommendation from "./FunnelStep5Recommendation";
 import FunnelProgressBar from "./FunnelProgressBar";
+import { analytics } from "@/utils/analytics";
 
 export interface FunnelData {
   // Health Assessment
@@ -38,6 +39,22 @@ const SalesFunnel = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [funnelData, setFunnelData] = useState<FunnelData>(initialData);
   const [direction, setDirection] = useState(0);
+
+  useEffect(() => {
+    const stepKey =
+      currentStep === 1
+        ? "welcome"
+        : currentStep === 2
+        ? "health_assessment"
+        : currentStep === 3
+        ? "preferences"
+        : "recommendation";
+
+    analytics.trackFunnelStage("try_funnel_step_viewed", currentStep, {
+      step_key: stepKey,
+      path: typeof window !== "undefined" ? window.location.pathname : "/try",
+    });
+  }, [currentStep]);
 
   // Load from localStorage on mount
   useEffect(() => {

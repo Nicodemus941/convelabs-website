@@ -134,6 +134,25 @@ Deno.serve(async (req) => {
 
     console.log('Found plan:', plan.name);
 
+    const canonicalPatientAnnualPrice: Record<string, number> = {
+      regular: 999,
+      vip: 1999,
+      concierge: 4999,
+    };
+    const normalizedPlanName = String(plan.name || '').toLowerCase();
+    const annualOverride = normalizedPlanName.includes('concierge')
+      ? canonicalPatientAnnualPrice.concierge
+      : normalizedPlanName.includes('vip')
+        ? canonicalPatientAnnualPrice.vip
+        : normalizedPlanName.includes('regular') || normalizedPlanName.includes('member')
+          ? canonicalPatientAnnualPrice.regular
+          : null;
+    if (annualOverride !== null) {
+      plan.annual_price = annualOverride;
+      plan.monthly_price = Math.round(annualOverride / 12);
+      plan.quarterly_price = Math.round(annualOverride / 4);
+    }
+
     // If this is a concierge plan, calculate the price based on patient count
     if (isConciergePlan && patientCount) {
       const { data: pricingData, error: pricingError } = await supabaseClient.rpc(

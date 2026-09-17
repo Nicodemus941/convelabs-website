@@ -91,7 +91,7 @@ const FoundingSeatsCounter: React.FC<Props> = ({ variant = 'full', className = '
             {status.remaining} Founding VIP seats left
           </p>
           <p className="text-xs text-amber-700">
-            First 50 VIP members lock the $199/yr rate for life + free family add-on. {status.claimed}/{status.cap} claimed.
+            First 50 VIP members lock the $19.99/yr rate for life + free family add-on. {status.claimed}/{status.cap} claimed.
           </p>
         </div>
       </div>
@@ -121,8 +121,8 @@ const FoundingSeatsCounter: React.FC<Props> = ({ variant = 'full', className = '
       </h3>
       <p className="text-xs text-amber-800 mb-3 leading-relaxed">
         {closed
-          ? 'Thanks to the first 50 founders. Standard VIP membership is $199/yr — same feature set, standard rate-lock policy.'
-          : 'The first 50 VIP signups lock their $199/yr rate for life, get a free family add-on, and priority same-day booking. When these are gone, they\'re gone.'}
+          ? 'Thanks to the first 50 founders. Standard VIP membership is $19.99/yr — same feature set, standard rate-lock policy.'
+          : 'The first 50 VIP signups lock their $19.99/yr rate for life, get a free family add-on, and priority same-day booking. When these are gone, they\'re gone.'}
       </p>
       {/* Progress bar */}
       <div className="h-2 bg-white/60 rounded-full overflow-hidden border border-amber-200">

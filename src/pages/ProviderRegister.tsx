@@ -1,13 +1,14 @@
 /**
- * /providers/register — public partner-org sign-up form.
+ * /providers/register — public partner-org access request form.
  *
  * Hormozi structure: ask for the bare minimum (5 fields, ~90 seconds).
  * Everything else gets filled in via the in-portal Practice Profile
  * panel after we set them up. Each field has a one-line WHY label so
  * the prospect feels the trade.
  *
- * Submit creates a discovered_orgs row tagged outreach_status='inbound_signup'
- * + SMSes the owner so a real human onboards within 24h.
+ * This intentionally does NOT create a live self-serve org subscription yet.
+ * Submit creates a partnership inquiry so we can review fit, configure the
+ * org billing model, and onboard the practice during the dark-launch window.
  */
 
 import React, { useState } from 'react';
@@ -59,7 +60,7 @@ const ProviderRegister: React.FC = () => {
       });
       if (error) throw error;
       setSubmitted(true);
-      toast.success('Thanks — we\'ll reach out within 24 hours');
+      toast.success('Thanks — we\'ll review your request and follow up within 24 hours');
     } catch (e: unknown) {
       toast.error(`Couldn't submit: ${e instanceof Error ? e.message : 'unknown'}`);
     } finally {
@@ -75,9 +76,9 @@ const ProviderRegister: React.FC = () => {
           <Card className="max-w-md w-full">
             <CardContent className="p-8 text-center space-y-4">
               <CheckCircle2 className="h-12 w-12 text-emerald-500 mx-auto" />
-              <h1 className="text-2xl font-bold">You're on the list</h1>
+              <h1 className="text-2xl font-bold">Request received</h1>
               <p className="text-sm text-gray-600">
-                Nico will reach out within 24 hours with next steps. While you wait, you can review services + pricing here:
+                Nico will review your practice and reach out within 24 hours with next steps. No charge happens from this form.
               </p>
               <Button asChild className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
                 <Link to="/for-providers">Services & pricing</Link>
@@ -93,8 +94,8 @@ const ProviderRegister: React.FC = () => {
   return (
     <>
       <Helmet>
-        <title>Register your practice · ConveLabs</title>
-        <meta name="description" content="Sign up your medical practice for ConveLabs concierge mobile lab services. Org-billed monthly invoicing, patient roster, branded patient portal." />
+        <title>Request provider access · ConveLabs</title>
+        <meta name="description" content="Request provider access for ConveLabs concierge mobile lab services. We review fit, configure billing, and set up your practice portal." />
       </Helmet>
 
       <Header />
@@ -103,8 +104,8 @@ const ProviderRegister: React.FC = () => {
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
             <Building2 className="h-10 w-10 text-[#B91C1C] mx-auto mb-3" />
-            <h1 className="text-3xl font-bold mb-2">Register your practice</h1>
-            <p className="text-sm text-gray-600">90 seconds. No obligation. We'll set up your portal within 24 hours.</p>
+            <h1 className="text-3xl font-bold mb-2">Request provider access</h1>
+            <p className="text-sm text-gray-600">90 seconds. No obligation. We review your setup, confirm billing, and prepare your portal within 24 hours.</p>
           </div>
 
           {/* Value stack */}
@@ -118,8 +119,8 @@ const ProviderRegister: React.FC = () => {
                 <li>✓ Tokenized lab-request links with the order pre-attached</li>
                 <li>✓ Patient roster — saved patients = one-click re-orders</li>
                 <li>✓ Live status: pending, scheduled, completed, results posted</li>
-                <li>✓ Monthly org-billed invoicing once you complete your profile (optional)</li>
-                <li>✓ Live in &lt;48 hours, unlimited team logins, no per-seat pricing</li>
+                <li>✓ Patient-billed or org-billed workflows configured during setup</li>
+                <li>✓ Pilot onboarding in &lt;48 hours once your practice is approved</li>
               </ul>
             </CardContent>
           </Card>
@@ -187,17 +188,17 @@ const ProviderRegister: React.FC = () => {
                   disabled={submitting}
                   className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11 gap-2"
                 >
-                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</> : 'Get my practice set up →'}
+                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</> : 'Request pilot access →'}
                 </Button>
                 <p className="text-[11px] text-gray-500 text-center">
-                  No commitment. Cancel anytime — we delete your roster on request.
+                  No commitment. No charge from this form. We only activate billing after setup is approved.
                 </p>
               </CardContent>
             </Card>
           </form>
 
           <div className="mt-6 text-center text-sm text-gray-600">
-            Already a partner? <Link to="/login" className="text-[#B91C1C] font-medium hover:underline">Sign in to your portal</Link>
+            Already a partner? <Link to="/provider" className="text-[#B91C1C] font-medium hover:underline">Sign in to your portal</Link>
           </div>
         </div>
       </main>

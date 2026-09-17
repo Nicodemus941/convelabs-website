@@ -11,7 +11,8 @@ import { Crown, TrendingUp, Sparkles, Loader2, Check } from 'lucide-react';
 /**
  * SubscribeYourPracticeCard — provider-dashboard enrollment CTA.
  *
- * Pricing: $85/patient/month. Provider picks estimated volume; total
+ * Pricing: $85/patient/month for practices configured on the ORG-BILLED plan.
+ * Provider picks estimated volume; total
  * = per_seat × seat_cap. Stripe Checkout in subscription mode via
  * create-org-subscription-checkout edge fn.
  *
@@ -86,7 +87,7 @@ const SubscribeYourPracticeCard: React.FC<Props> = ({ orgName }) => {
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground mt-1.5 leading-relaxed">
-          Cover your patients' at-home draws on one monthly bill. Re-bill each patient through your own practice membership and keep the spread.
+          For practices configured as org-billed: cover your patients' at-home draws on one monthly bill, then decide whether you absorb that cost or re-bill it through your own membership.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">

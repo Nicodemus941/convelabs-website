@@ -1,20 +1,15 @@
 /**
  * Booking-window rules by membership tier.
  *
- * Time-of-day scarcity is ConveLabs's PRIMARY value lever for membership —
- * morning fasting slots are the genuinely scarce resource, so tiers unlock
- * windows of the day progressively:
- *
- * Updated 2026-04-25 (after VIP carve-out for 1:30–2:30 PM):
- *   Non-member / Regular: Mon–Sun 6 AM – 1:30 PM
- *   VIP / Concierge:      Mon–Sun 6 AM – 2:30 PM
- *   AdventHealth destination override: 6 AM – 6 PM Mon–Sun, ALL TIERS
- *   5 PM-prior unlock: if no VIP has booked tomorrow by 5 PM, the 1:30–2:30
- *   window opens to everyone (waitlist notified first).
- *
- * The server (create-appointment-checkout) MUST mirror this logic — this
- * file is the source of truth for the frontend; the server duplicates
- * the relevant checks inline since edge fns can't import from src/.
+ * Updated 2026-08-11:
+ *   - Standard patient booking should not be choked by legacy morning-only
+ *     or 1:30 PM cutoffs in the public flow.
+ *   - Non-members + regular members can book the shared daytime window:
+ *     7 AM – 6 PM.
+ *   - VIP / Concierge unlock the premium early-morning lane:
+ *     6 AM – 6 PM.
+ *   - After-hours access beyond 6 PM is handled elsewhere in the booking
+ *     flow (phleb on-duty / concierge logic), not here.
  */
 
 export type MemberTier = 'none' | 'member' | 'vip' | 'concierge';
@@ -31,30 +26,28 @@ export interface TimeRange {
 export interface BookingWindow {
   /** 0=Sun, 1=Mon, ... 6=Sat */
   dayOfWeek: number;
-  /** Ranges allowed when patient IS fasting. Empty = no fasting slots that day. */
-  fastingRanges: TimeRange[];
-  /** Ranges allowed when patient is NOT fasting. */
-  nonFastingRanges: TimeRange[];
+  /** Shared slot ranges for the tier. Fasting prep never changes slot access. */
+  ranges: TimeRange[];
 }
 
 // ─────────────────────────────────────────────────────────────
 // TIER RULES
 // ─────────────────────────────────────────────────────────────
 
-// Non-member / Regular: 6 AM – 1:30 PM Mon-Sun
-const PUBLIC_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
+// Shared public/member window: 7 AM – 6 PM.
+const STANDARD_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
   dayOfWeek: d,
-  fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
-  nonFastingRanges: [{ start: '06:00', end: '13:30', label: '6 AM – 1:30 PM' }],
+  ranges: [{ start: '07:00', end: '18:00', label: '7 AM – 6 PM' }],
 }));
-// VIP / Concierge: extra hour 1:30–2:30 PM (the VIP after-hours)
+
+// VIP / Concierge unlock the earlier 6-7 AM lane.
 const VIP_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
   dayOfWeek: d,
-  fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
-  nonFastingRanges: [{ start: '06:00', end: '14:30', label: '6 AM – 2:30 PM (VIP after-hours)' }],
+  ranges: [{ start: '06:00', end: '18:00', label: '6 AM – 6 PM' }],
 }));
-const NON_MEMBER = PUBLIC_HOURS;
-const REGULAR = PUBLIC_HOURS;
+
+const NON_MEMBER = STANDARD_HOURS;
+const REGULAR = STANDARD_HOURS;
 const VIP = VIP_HOURS;
 const CONCIERGE = VIP_HOURS;
 
@@ -127,7 +120,7 @@ export interface AllowedCheck {
 }
 
 /**
- * Given a proposed (date, time) + patient tier + fasting flag, returns whether
+ * Given a proposed (date, time) + patient tier, returns whether
  * the booking is allowed and, if not, a short reason + alternative slots +
  * optional upgrade CTA ("Upgrade to VIP to book at 1pm").
  */
@@ -135,7 +128,6 @@ export function isBookingAllowed(opts: {
   tier: MemberTier;
   dateIso: string;     // YYYY-MM-DD
   time: string;        // any parseable
-  isFasting: boolean;
 }): AllowedCheck {
   const hhmm = normalizeTime(opts.time);
   if (!hhmm) {
@@ -166,7 +158,7 @@ export function isBookingAllowed(opts: {
     };
   }
 
-  const relevantRanges = opts.isFasting ? dayRule.fastingRanges : dayRule.nonFastingRanges;
+  const relevantRanges = dayRule.ranges;
 
   // Is the time within ANY allowed range?
   const allowed = relevantRanges.some(r => timeInRange(hhmm, r));
@@ -180,12 +172,11 @@ export function isBookingAllowed(opts: {
   ).slice(0, 5).map(formatTo12h);
 
   // Could a higher tier book this time? Build the upgrade CTA.
-  const betterTier = nextTierThatAllows(dow, hhmm, opts.isFasting, opts.tier);
+  const betterTier = nextTierThatAllows(dow, hhmm, opts.tier);
 
-  const fastingLabel = opts.isFasting ? 'fasting' : 'non-fasting';
   return {
     allowed: false,
-    reason: `Your tier's ${fastingLabel} booking windows on ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow]} don't include ${formatTo12h(hhmm)}.`,
+    reason: `Your tier's booking window on ${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dow]} doesn't include ${formatTo12h(hhmm)}.`,
     suggestions,
     upgradeCTA: betterTier
       ? { toTier: betterTier, message: `Upgrade to ${betterTier.toUpperCase()} to unlock ${formatTo12h(hhmm)}.` }
@@ -193,7 +184,7 @@ export function isBookingAllowed(opts: {
   };
 }
 
-function nextTierThatAllows(dow: number, hhmm: string, isFasting: boolean, fromTier: MemberTier): MemberTier | null {
+function nextTierThatAllows(dow: number, hhmm: string, fromTier: MemberTier): MemberTier | null {
   const chain: MemberTier[] = ['none', 'member', 'vip', 'concierge'];
   const idx = chain.indexOf(fromTier);
   for (let i = idx + 1; i < chain.length; i++) {
@@ -201,29 +192,26 @@ function nextTierThatAllows(dow: number, hhmm: string, isFasting: boolean, fromT
     const rules = TIER_RULES[t];
     const day = rules.find(r => r.dayOfWeek === dow);
     if (!day) continue;
-    const ranges = isFasting ? day.fastingRanges : day.nonFastingRanges;
+    const ranges = day.ranges;
     if (ranges.some(r => timeInRange(hhmm, r))) return t;
   }
   return null;
 }
 
 /**
- * Returns every allowed 30-min slot for a tier on a given date + fasting flag.
+ * Returns every allowed 30-min slot for a tier on a given date.
  * Used by the booking-form time picker to grey out disallowed times.
  */
 export function getAllowedSlotsForDate(opts: {
   tier: MemberTier;
   dateIso: string;
-  isFasting: boolean;
 }): string[] {
-  const hhmm = normalizeTime('06:00')!;
   const d = new Date(opts.dateIso + 'T12:00:00');
   const dow = d.getDay();
   const rules = TIER_RULES[opts.tier] || TIER_RULES['none'];
   const dayRule = rules.find(r => r.dayOfWeek === dow);
   if (!dayRule) return [];
-  const ranges = opts.isFasting ? dayRule.fastingRanges : dayRule.nonFastingRanges;
-  return Array.from(new Set(ranges.flatMap(rangeToSlots))).map(formatTo12h);
+  return Array.from(new Set(dayRule.ranges.flatMap(rangeToSlots))).map(formatTo12h);
 }
 
 // ─────────────────────────────────────────────────────────────

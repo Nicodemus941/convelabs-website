@@ -36,29 +36,29 @@ const faqData = {
   membership: [
     {
       question: "What membership plans does ConveLabs offer?",
-      answer: "ConveLabs offers four tiers: Health Starter ($499/year, 4 visits), Proactive Health ($149/month or $1,499/year, 12 visits), Concierge Elite ($299/month or $2,999/year, unlimited visits), and Practice Partner ($100/patient/month for medical practices)."
+      answer: "ConveLabs offers three patient memberships plus a practice plan: Regular ($9.99/year), VIP ($19.99/year), Concierge ($49.99/year), and Practice Partner pricing for medical offices."
     },
     {
       question: "How do visits work?",
-      answer: "Each plan includes a set number of lab visits per year. A visit covers a professional blood draw at your location, specimen handling, and delivery to partner labs. Concierge Elite members get unlimited visits."
+      answer: "Memberships do not include visit credits. Instead, they unlock lower visit pricing, broader booking windows, and tier-specific perks whenever you book a draw."
     },
     {
       question: "Do unused visits roll over?",
-      answer: "Proactive Health members enjoy credit rollover for up to 3 months. Health Starter visits are annual and do not roll over. Concierge Elite has unlimited visits so rollover isn't needed."
+      answer: "There are no visit credits to roll over. Your membership benefits stay active for the full annual term and apply every time you schedule."
     },
     {
       question: "What happens if I need more visits than my plan includes?",
-      answer: "You can purchase additional visits at the non-member rate ($150/visit), or upgrade to a higher tier. Concierge Elite members have unlimited visits with no overage concerns."
+      answer: "You can always book more visits at your active member rate, or upgrade if you want better scheduling access or richer perks."
     }
   ],
   billing: [
     {
       question: "How much does a membership cost?",
-      answer: "Health Starter is $499/year (annual only). Proactive Health is $149/month or $1,499/year. Concierge Elite is $299/month or $2,999/year. Practice Partner is $100/patient/month (min 5 patients). Non-member visits are $150 each."
+      answer: "Regular is $9.99/year, VIP is $19.99/year, and Concierge is $49.99/year. Practice Partner pricing is separate for medical offices. Non-member mobile visits start at $150 each."
     },
     {
       question: "Is there a fee for home visits?",
-      answer: "Home visits are included in your membership at no extra charge within our service area. Non-members pay $150 per visit which covers the at-home service."
+      answer: "Membership lowers the per-visit price, but it does not make home visits free. Non-members pay $150 for a standard mobile draw, while members pay their tier-specific discounted rate."
     },
     {
       question: "Will my insurance cover ConveLabs services?",

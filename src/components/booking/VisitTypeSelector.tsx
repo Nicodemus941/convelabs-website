@@ -26,6 +26,15 @@ const PROVIDER_PARTNERS = PROVIDER_PARTNERS_ALL
   .filter(p => !p.hidden)
   .sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
 
+// Temporary public-booking guardrail: these catalog rows are operationally
+// useful for admin/manual scheduling, but they should not be selectable by
+// patients in the self-serve visit-type grid.
+const PUBLIC_VISIT_TYPE_EXCLUSIONS = new Set([
+  'blood-draw-and-specialty-collection-kit',
+  'couples-wellness-stack',
+  'specialty-kit-genova',
+]);
+
 const VISIT_TYPES = [
   {
     id: 'dev-testing',
@@ -174,6 +183,9 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
     // Drop entries whose service_code collides with a hardcoded id — legacy
     // card wins for layout/iconography; price already merged above.
     .filter(d => !VISIT_TYPES.some(v => v.id === d.service_code))
+    // Manual-only rows should stay available to admins without leaking into
+    // the public patient booking grid.
+    .filter(d => !PUBLIC_VISIT_TYPE_EXCLUSIONS.has(d.service_code))
     // Only TRUE visit types belong in this grid. Exclude:
     //  • QA / dev test services (qa-*) — accidental public leak
     //  • procedure rows (routine/fasting/stat) — see note above
@@ -239,7 +251,10 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="text-2xl md:text-3xl font-bold tracking-tight">How would you like to be seen?</h2>
-        <p className="text-muted-foreground mt-2">Choose your preferred visit type</p>
+        <p className="text-muted-foreground mt-2">Choose the visit that fits your situation</p>
+        <p className="text-xs text-muted-foreground/90 mt-2 max-w-2xl mx-auto leading-relaxed">
+          Most patients should choose <strong>Mobile Blood Draw</strong>. Only choose a partnered-practice option if your doctor's office specifically sent you here.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -333,7 +348,7 @@ const VisitTypeSelector: React.FC<VisitTypeSelectorProps> = ({ onNext }) => {
                     })}
                   </div>
                   <p className="text-[11px] text-emerald-800 bg-emerald-50 rounded-lg p-2">
-                    <strong>Not sure?</strong> If your doctor's office isn't listed, tap outside and pick <strong>Mobile Blood Draw</strong> instead.
+                    <strong>Not sure?</strong> If your practice did not specifically tell you to choose one of these names, go back and pick <strong>Mobile Blood Draw</strong>.
                   </p>
                 </div>
               )}

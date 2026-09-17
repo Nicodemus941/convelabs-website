@@ -72,7 +72,7 @@ Deno.serve(async (req) => {
 
     // Fetch org (for name + existing Stripe customer)
     const { data: org, error: orgErr } = await admin.from('organizations')
-      .select('id, name, contact_name, contact_email, billing_email, stripe_customer_id, subscription_status')
+      .select('id, name, contact_name, contact_email, billing_email, manager_email, front_desk_email, stripe_customer_id, subscription_status')
       .eq('id', orgId)
       .maybeSingle();
     if (orgErr || !org) {
@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
     // from pointing checkout at another org's Stripe customer.
     if (!trustedOrgId) {
       const email = (user.email || '').toLowerCase();
-      const orgEmails = [org.contact_email, org.billing_email]
+      const orgEmails = [org.contact_email, org.billing_email, (org as any).manager_email, (org as any).front_desk_email]
         .filter(Boolean).map((e: string) => e.toLowerCase());
       if (!email || !orgEmails.includes(email)) {
         return new Response(JSON.stringify({ error: 'not_authorized_for_org' }), {
