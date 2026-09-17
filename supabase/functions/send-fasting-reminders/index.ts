@@ -1,23 +1,13 @@
 // send-fasting-reminders
-// Nightly cron (daily at 8 PM ET = midnight UTC during DST). Finds tomorrow-
-// morning appointments where fasting_required = true and sends a reminder
-// SMS + email telling the patient exactly when to stop eating and drinking
-// (8 hours before appointment time).
-//
-// QUIET-HOURS RULE: this cron runs at 8 PM ET. 9 PM ET is the TCPA quiet-
-// hours floor for non-emergency SMS. We send BEFORE 9 PM so the patient
-// gets ~1 hour of runway before their fasting cutoff (for an 8 AM draw,
-// cutoff is midnight; reminder at 8 PM = 4 hours of warning).
-//
-// Skips:
-//   - appointments already completed / cancelled
-//   - appointments already reminded (fasting_reminder_sent_at set)
-//   - afternoon appointments (>= 12 PM — no same-night fast issue)
-//   - appointments with no phone or email on file
+// Runs on a frequent cron and self-gates to the 8 PM ET window so DST shifts
+// and missed invocations do not move patient messaging off the promised time.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
 import { parseTimeOrNull } from '../_shared/parse-time.ts';
+import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
+import { userHasOptedIn } from '../_shared/email/index.ts';
+import { logOrgEmail } from '../_shared/email-log.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -26,7 +16,9 @@ const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
 const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
 const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
-const FASTING_HOURS = 8; // per business rule
+const FASTING_HOURS = 8;
+const SEND_WINDOW_START_ET = 20;
+const SEND_WINDOW_END_ET = 21;
 
 function normalizePhone(p: string): string {
   const d = p.replace(/\D/g, '');
@@ -36,28 +28,19 @@ function normalizePhone(p: string): string {
   return `+${d}`;
 }
 
-// Local wrapper — defers to the shared parser (Hormozi Layer-1 discipline).
-// Returns the strict {h,m} on success and a SENTINEL {h:-1,m:-1} on failure
-// so the caller can skip messaging instead of producing wrong copy.
 function parseTime(t: string): { h: number; m: number } {
   const r = parseTimeOrNull(t);
   return r || { h: -1, m: -1 };
 }
 
-// Returns a human-friendly cutoff time string, or null if the appointment
-// time can't be parsed. Caller MUST skip outbound messaging when this
-// returns null — Hormozi Layer-1: never produce wrong copy from bad input.
 function formatCutoff(apptTimeStr: string): string | null {
   const { h, m } = parseTime(apptTimeStr);
   if (h < 0 || m < 0) return null;
   const apptMin = h * 60 + m;
-  const cutoffMin = apptMin - FASTING_HOURS * 60; // negative = previous day
+  const cutoffMin = apptMin - FASTING_HOURS * 60;
 
   let cutH: number, cutM: number, suffix: 'tonight' | 'tomorrow';
   if (cutoffMin >= 0) {
-    // Cutoff is same day as appointment (e.g., early-morning draws where
-    // 8 hrs back lands before midnight). But since we only run for morning
-    // appointments, most cases land in the "tomorrow" branch below.
     cutH = Math.floor(cutoffMin / 60);
     cutM = cutoffMin % 60;
     suffix = 'tomorrow';
@@ -76,7 +59,6 @@ function formatCutoff(apptTimeStr: string): string | null {
   return `by ${displayH}${mStr} ${period} ${suffix}`;
 }
 
-// ET date helpers
 function tomorrowET(): { iso: string; label: string } {
   const et = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
   et.setDate(et.getDate() + 1);
@@ -91,27 +73,45 @@ function plusDaysDateOnly(dateOnlyIso: string, days: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-// Evening send window (ET hours, inclusive). The fasting reminder is a
-// NIGHT-BEFORE message — it must land in the evening (before the 9 PM
-// quiet-hours floor), not the morning. Before this guard, the every-30-min
-// public-endpoint smoke test POSTed this function and the first allowed
-// run after 8 AM ET fired tomorrow's batch at 8 AM — 12 hours early
-// (2026-07-07 audit). Now ANY invocation outside 4-8:59 PM ET no-ops.
-// Pass { force: true } in the body for a deliberate manual run.
-const SEND_WINDOW_START_ET = 16; // 4 PM
-const SEND_WINDOW_END_ET = 21;   // exclusive — 9 PM (quiet hours floor)
+function isUSEasternDST(date: Date): boolean {
+  const year = date.getUTCFullYear();
+  const marchStart = (() => {
+    const d = new Date(Date.UTC(year, 2, 1));
+    const firstSun = 1 + ((7 - d.getUTCDay()) % 7);
+    return Date.UTC(year, 2, firstSun + 7, 7);
+  })();
+  const novEnd = (() => {
+    const d = new Date(Date.UTC(year, 10, 1));
+    const firstSun = 1 + ((7 - d.getUTCDay()) % 7);
+    return Date.UTC(year, 10, firstSun, 6);
+  })();
+  const t = date.getTime();
+  return t >= marchStart && t < novEnd;
+}
 
-function hourET(): number {
-  return parseInt(
-    new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })
-      .format(new Date()),
-    10,
-  );
+function etOffsetHours(date: Date): number {
+  return isUSEasternDST(date) ? -4 : -5;
+}
+
+function hourET(now: Date = new Date()): number {
+  const shifted = new Date(now.getTime() + etOffsetHours(now) * 3600 * 1000);
+  return shifted.getUTCHours();
+}
+
+type ChannelStatus = 'already_sent' | 'sent' | 'failed' | 'blocked' | 'unavailable';
+
+interface ExistingReminderState {
+  emailSent: boolean;
+  smsSent: boolean;
 }
 
 Deno.serve(async (req) => {
-  // Quiet-hours guardrail — no patient SMS/email 9pm-8am ET. Reminders
-  // deferred; the next cron tick after 8am picks up the backlog.
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ success: true, suspended: true, message: 'Notifications suspended' }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const gate = shouldSendNow('reminder');
   if (!gate.allow) {
     console.log(`[quiet-hours] send-fasting-reminders deferred: ${gate.reason}; resume ${gate.nextAllowedAt}`);
@@ -120,9 +120,16 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Evening-window guard — fasting reminders only go out 4-9 PM ET.
   let force = false;
-  try { force = !!(await req.json())?.force; } catch { /* no body */ }
+  let appointmentId: string | undefined;
+  try {
+    const body = await req.json();
+    force = !!body?.force;
+    appointmentId = body?.appointmentId;
+  } catch {
+    // No body for scheduled runs.
+  }
+
   const h = hourET();
   if (!force && (h < SEND_WINDOW_START_ET || h >= SEND_WINDOW_END_ET)) {
     console.log(`[evening-window] send-fasting-reminders no-op: ET hour ${h} outside ${SEND_WINDOW_START_ET}-${SEND_WINDOW_END_ET}`);
@@ -130,114 +137,150 @@ Deno.serve(async (req) => {
       status: 200, headers: { 'Content-Type': 'application/json' },
     });
   }
+
   try {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const tomorrow = tomorrowET();
     const rangeStart = tomorrow.iso;
     const rangeEndExclusive = plusDaysDateOnly(tomorrow.iso, 1);
 
-    // Pull all fasting-required appointments for tomorrow that still need a reminder.
-    // urine_required is now selected so the SMS / email can prompt the patient to
-    // collect a morning urine sample alongside the fasting cutoff. (Gap surfaced
-    // in 2026-05-18 audit — was silently omitted, patients arrived without urine.)
-    const { data: appts, error: q } = await admin
+    let query = admin
       .from('appointments')
-      .select('id, patient_name, patient_email, patient_phone, appointment_time, address, lab_order_panels, urine_required')
+      .select('id, patient_id, patient_name, patient_email, patient_phone, appointment_time, address, lab_order_panels, urine_required, status, fasting_reminder_sent_at, appointment_date')
       .eq('fasting_required', true)
-      .is('fasting_reminder_sent_at', null)
-      .not('status', 'in', '(cancelled,completed)')
-      .gte('appointment_date', rangeStart)
-      .lt('appointment_date', rangeEndExclusive);
+      .not('status', 'in', '(cancelled,completed)');
+
+    if (appointmentId) {
+      query = query.eq('id', appointmentId);
+    } else {
+      query = query
+        .is('fasting_reminder_sent_at', null)
+        .gte('appointment_date', rangeStart)
+        .lt('appointment_date', rangeEndExclusive);
+    }
+
+    const { data: appts, error: q } = await query;
     if (q) throw q;
 
-    let sent = 0, skippedAfternoon = 0, skippedNoContact = 0;
+    let sent = 0, skippedAfternoon = 0, skippedNoContact = 0, skippedAlreadySent = 0;
     const report: any[] = [];
 
     for (const a of appts || []) {
-      // Only reminders for morning appointments — afternoon draws don't have a
-      // night-before fasting issue.
       const parsed = parseTime(String(a.appointment_time || ''));
-      // Hormozi Layer-1: if we cannot parse the time, DO NOT send a wrong
-      // SMS. Skip + log; cron health monitor surfaces stuck rows.
       if (parsed.h < 0) {
         console.warn(`[fasting] unparseable appointment_time for ${a.id}: ${JSON.stringify(a.appointment_time)} — skipping`);
+        report.push({ id: a.id, status: 'skipped', reason: 'unparseable-time' });
         continue;
       }
-      if (parsed.h >= 12) { skippedAfternoon++; continue; }
-      if (!a.patient_phone && !a.patient_email) { skippedNoContact++; continue; }
+      if (parsed.h >= 12) {
+        skippedAfternoon++;
+        report.push({ id: a.id, status: 'skipped', reason: 'afternoon-appointment' });
+        continue;
+      }
+      if (!a.patient_phone && !a.patient_email) {
+        skippedNoContact++;
+        report.push({ id: a.id, status: 'skipped', reason: 'no-contact-info' });
+        continue;
+      }
+
+      const existing = await getExistingReminderState(admin, a.id);
+      if (!appointmentId && a.fasting_reminder_sent_at && existing.emailSent && existing.smsSent) {
+        skippedAlreadySent++;
+        report.push({ id: a.id, status: 'skipped', reason: 'already-sent' });
+        continue;
+      }
 
       const cutoff = formatCutoff(String(a.appointment_time));
       if (!cutoff) {
         console.warn(`[fasting] formatCutoff returned null for ${a.id} — skipping`);
+        report.push({ id: a.id, status: 'skipped', reason: 'invalid-cutoff' });
         continue;
       }
+
       const firstName = String(a.patient_name || 'there').split(' ')[0];
       const addrShort = a.address ? String(a.address).substring(0, 40) : '';
-      // Format the appointment time as "9:00 AM" instead of the raw
-      // "09:00:00" stored in Postgres — was rendering military-style in
-      // every SMS/email line that interpolated a.appointment_time.
       const apptTimeFriendly = (() => {
         const { h, m } = parsed;
         const period = h >= 12 ? 'PM' : 'AM';
         const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
         return `${h12}:${String(m).padStart(2, '0')} ${period}`;
       })();
-      // Urine sample prompt — only when the appointment row has
-      // urine_required=true. Phrased to dovetail with the fasting rule
-      // (you can drink water; you'll need to collect first urine of the
-      // morning when you wake up). (2026-05-18 audit.)
       const urineNeeded = !!(a as any).urine_required;
       const urineSmsLine = urineNeeded
         ? ` Bring a urine sample: collect your FIRST urine of the morning in the cup we'll provide (or any clean container — we'll transfer it).`
         : '';
       const urineEmailBlock = urineNeeded
         ? `<div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:14px 16px;margin:14px 0;">
-      <p style="margin:0;font-size:14px;color:#1e40af;"><strong>💧 Urine sample needed</strong></p>
+      <p style="margin:0;font-size:14px;color:#1e40af;"><strong>Urine sample needed</strong></p>
       <p style="margin:6px 0 0;font-size:13px;color:#1e3a8a;">Collect your <strong>first morning urine</strong> in a clean container — we'll transfer it to the lab cup on arrival. Drink water normally; do not save urine from earlier in the night.</p>
     </div>`
         : '';
 
-      // ── SMS ────────────────────────────────────────────────────────────
-      if (a.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
-        const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${apptTimeFriendly}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water).${urineSmsLine} Arriving at ${addrShort}. Reply HELP.`;
-        const toNum = normalizePhone(a.patient_phone);
-        let smsStatus = 'failed';
-        let smsSid: string | null = null;
-        try {
-          const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
-          const fd = new URLSearchParams({ To: toNum, From: TWILIO_FROM, Body: smsBody });
-          const _scb = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
-          if (_scb.startsWith('http')) fd.append('StatusCallback', _scb);
-          const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-            method: 'POST',
-            headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: fd.toString(),
-          });
-          if (r.ok) { smsStatus = 'sent'; try { smsSid = (await r.json())?.sid ?? null; } catch { /* body parse */ } }
-          else { console.warn('fasting SMS failed', a.id, await r.text()); }
-        } catch (e) { console.warn('fasting SMS error', a.id, e); }
-        // Log EVERY send attempt (success or failure) so the SMS log is complete.
-        try {
-          await admin.from('sms_notifications').insert({
-            appointment_id: a.id,
-            notification_type: 'fasting_reminder',
-            phone_number: toNum,
-            message_content: smsBody,
-            sent_at: new Date().toISOString(),
-            delivery_status: smsStatus,
-            twilio_message_sid: smsSid,
-            metadata: { urine_required: urineNeeded, source: 'send-fasting-reminders' },
-          });
-        } catch (logErr) { console.warn('fasting SMS log insert failed (non-blocking)', a.id, logErr); }
+      let emailStatus: ChannelStatus = existing.emailSent ? 'already_sent' : 'unavailable';
+      let smsStatus: ChannelStatus = existing.smsSent ? 'already_sent' : 'unavailable';
+
+      if (!existing.smsSent && a.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+        const phoneCheck = await verifyRecipientPhone(a.id, a.patient_phone, a.patient_name || firstName);
+        if (!phoneCheck.safe) {
+          smsStatus = 'blocked';
+        } else {
+          const smsBody = `ConveLabs fasting reminder: ${firstName}, your draw is tomorrow at ${apptTimeFriendly}. STOP ${cutoff}: food, juice, coffee, tea, soda, gum, mints, cough drops. OK: water + any meds you take daily (with water).${urineSmsLine} Arriving at ${addrShort}. Reply HELP.`;
+          const toNum = normalizePhone(a.patient_phone);
+          let deliveryStatus = 'failed';
+          let smsSid: string | null = null;
+          try {
+            const twilioAuth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
+            const fd = new URLSearchParams({ To: toNum, From: TWILIO_FROM, Body: smsBody });
+            const scb = `${Deno.env.get('SUPABASE_URL') || ''}/functions/v1/twilio-status-callback`;
+            if (scb.startsWith('http')) fd.append('StatusCallback', scb);
+            const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
+              method: 'POST',
+              headers: { 'Authorization': `Basic ${twilioAuth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: fd.toString(),
+            });
+            if (r.ok) {
+              deliveryStatus = 'sent';
+              smsStatus = 'sent';
+              try { smsSid = (await r.json())?.sid ?? null; } catch { smsSid = null; }
+            } else {
+              smsStatus = 'failed';
+              console.warn('fasting SMS failed', a.id, await r.text());
+            }
+          } catch (e) {
+            smsStatus = 'failed';
+            console.warn('fasting SMS error', a.id, e);
+          }
+
+          try {
+            await admin.from('sms_notifications').insert({
+              appointment_id: a.id,
+              notification_type: 'fasting_reminder',
+              phone_number: toNum,
+              message_content: smsBody,
+              sent_at: new Date().toISOString(),
+              delivery_status: deliveryStatus,
+              twilio_message_sid: smsSid,
+              metadata: { urine_required: urineNeeded, source: 'send-fasting-reminders' },
+            });
+          } catch (logErr) {
+            console.warn('fasting SMS log insert failed (non-blocking)', a.id, logErr);
+          }
+        }
+      } else if (!existing.smsSent && a.patient_phone) {
+        smsStatus = 'unavailable';
       }
 
-      // ── EMAIL ──────────────────────────────────────────────────────────
-      if (a.patient_email && MAILGUN_API_KEY) {
-        try {
-          const panelChips = (Array.isArray(a.lab_order_panels) ? a.lab_order_panels.slice(0, 6) : []).map((p: any) =>
-            `<span style="display:inline-block;background:#fef2f2;color:#B91C1C;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;margin:2px 3px 0 0;">${typeof p === 'string' ? p : p.name || ''}</span>`
-          ).join(' ');
-          const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;">
+      const emailOptedIn = await userHasOptedIn(a.patient_id, 'appointment_reminders');
+      if (!existing.emailSent && a.patient_email && MAILGUN_API_KEY && emailOptedIn) {
+        const emailCheck = await verifyRecipientEmail(a.id, a.patient_email, a.patient_name || firstName);
+        if (!emailCheck.safe) {
+          emailStatus = 'blocked';
+        } else {
+          try {
+            const panelChips = (Array.isArray(a.lab_order_panels) ? a.lab_order_panels.slice(0, 6) : []).map((p: any) =>
+              `<span style="display:inline-block;background:#fef2f2;color:#B91C1C;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;margin:2px 3px 0 0;">${typeof p === 'string' ? p : p.name || ''}</span>`
+            ).join(' ');
+            const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;">
   <div style="background:linear-gradient(135deg,#B91C1C,#7F1D1D);color:#fff;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
     <h2 style="margin:0;font-size:18px;">Fasting reminder — draw tomorrow at ${apptTimeFriendly}</h2>
   </div>
@@ -245,7 +288,7 @@ Deno.serve(async (req) => {
     <p>Hi ${firstName},</p>
     <p>Quick reminder: your ConveLabs blood draw is <strong>tomorrow (${tomorrow.label}) at ${apptTimeFriendly}</strong>.</p>
     <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:14px 16px;margin:16px 0;">
-      <p style="margin:0;font-size:15px;color:#78350f;"><strong>🍽️ Stop ${cutoff}</strong></p>
+      <p style="margin:0;font-size:15px;color:#78350f;"><strong>Stop ${cutoff}</strong></p>
       <p style="margin:8px 0 0;font-size:13px;color:#92400e;"><strong>Avoid:</strong> food, juice, coffee, tea, soda, energy drinks, gum, mints, cough drops, breath strips.</p>
       <p style="margin:4px 0 0;font-size:13px;color:#92400e;"><strong>OK:</strong> plain water (as much as you like) + any daily medications you normally take with water.</p>
       <p style="margin:8px 0 0;font-size:12px;color:#92400e;font-style:italic;">If you're on insulin or have a medical reason you can't fast safely, call us at (941) 527-9169 — we'll reschedule.</p>
@@ -256,45 +299,99 @@ Deno.serve(async (req) => {
     <p style="font-size:13px;color:#6b7280;">Running late or need to reschedule? Call/text (941) 527-9169.</p>
   </div>
 </div>`;
-          const subject = `Fasting reminder — draw tomorrow at ${apptTimeFriendly}`;
-          const fd = new FormData();
-          fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
-          fd.append('to', a.patient_email);
-          fd.append('subject', subject);
-          fd.append('html', html);
-          fd.append('o:tracking-clicks', 'no');
-          let emailStatus = 'failed';
-          let mgId: string | null = null;
-          const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, { method: 'POST', headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` }, body: fd });
-          if (mgRes.ok) { emailStatus = 'sent'; try { mgId = (await mgRes.json())?.id ?? null; } catch { /* body parse */ } }
-          else { console.warn('fasting email failed', a.id, await mgRes.text()); }
-          // Log every reminder email.
-          try {
-            await admin.from('email_send_log').insert({
-              appointment_id: a.id,
-              to_email: a.patient_email,
-              email_type: 'fasting_reminder',
-              subject,
-              sent_at: new Date().toISOString(),
-              status: emailStatus,
-              mailgun_id: mgId,
-              campaign_tag: 'reminder',
+            const subject = `Fasting reminder — draw tomorrow at ${apptTimeFriendly}`;
+            const fd = new FormData();
+            fd.append('from', `Nicodemme Jean-Baptiste <info@convelabs.com>`);
+            fd.append('to', a.patient_email);
+            fd.append('subject', subject);
+            fd.append('html', html);
+            fd.append('o:tracking-clicks', 'no');
+            const mgRes = await fetch(`https://api.mailgun.net/v3/${MAILGUN_DOMAIN}/messages`, {
+              method: 'POST',
+              headers: { 'Authorization': `Basic ${btoa(`api:${MAILGUN_API_KEY}`)}` },
+              body: fd
             });
-          } catch (logErr) { console.warn('fasting email log insert failed (non-blocking)', a.id, logErr); }
-        } catch (e) { console.warn('fasting email error', a.id, e); }
+            await logOrgEmail(admin, {
+              appointmentId: a.id,
+              toEmail: a.patient_email,
+              emailType: 'fasting_reminder',
+              subject,
+              mailgunResponse: mgRes,
+              retryPayload: { appointmentId: a.id, force: true },
+            });
+            if (mgRes.ok) {
+              emailStatus = 'sent';
+            } else {
+              emailStatus = 'failed';
+              console.warn('fasting email failed', a.id, await mgRes.text());
+            }
+          } catch (e) {
+            emailStatus = 'failed';
+            console.warn('fasting email error', a.id, e);
+          }
+        }
+      } else if (!existing.emailSent && !emailOptedIn) {
+        emailStatus = 'blocked';
+      } else if (!existing.emailSent && a.patient_email) {
+        emailStatus = 'unavailable';
       }
 
-      await admin.from('appointments').update({ fasting_reminder_sent_at: new Date().toISOString() }).eq('id', a.id);
-      sent++;
-      report.push({ id: a.id, patient: a.patient_name, time: a.appointment_time, cutoff });
+      const anyDelivered = ['sent', 'already_sent'].includes(emailStatus) || ['sent', 'already_sent'].includes(smsStatus);
+      if (anyDelivered) {
+        await admin
+          .from('appointments')
+          .update({ fasting_reminder_sent_at: new Date().toISOString() })
+          .eq('id', a.id);
+        sent++;
+      }
+
+      report.push({
+        id: a.id,
+        patient: a.patient_name,
+        time: a.appointment_time,
+        cutoff,
+        emailStatus,
+        smsStatus,
+        sent: anyDelivered,
+      });
     }
 
     return new Response(JSON.stringify({
-      success: true, sent, skipped_afternoon: skippedAfternoon, skipped_no_contact: skippedNoContact,
-      tomorrow: tomorrow.iso, report,
+      success: true,
+      sent,
+      skipped_afternoon: skippedAfternoon,
+      skipped_no_contact: skippedNoContact,
+      skipped_already_sent: skippedAlreadySent,
+      tomorrow: tomorrow.iso,
+      report,
     }), { headers: { 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('send-fasting-reminders error:', error);
     return new Response(JSON.stringify({ error: error.message || String(error) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
   }
 });
+
+async function getExistingReminderState(admin: any, appointmentId: string): Promise<ExistingReminderState> {
+  const [emailRows, smsRows] = await Promise.all([
+    admin
+      .from('email_send_log')
+      .select('status')
+      .eq('appointment_id', appointmentId)
+      .eq('email_type', 'fasting_reminder')
+      .limit(10),
+    admin
+      .from('sms_notifications')
+      .select('delivery_status')
+      .eq('appointment_id', appointmentId)
+      .eq('notification_type', 'fasting_reminder')
+      .limit(10),
+  ]);
+
+  const emailStatuses = new Set(['sent', 'opened', 'clicked']);
+  const smsStatuses = new Set(['queued', 'accepted', 'sending', 'sent', 'delivered']);
+
+  return {
+    emailSent: !!emailRows.data?.some((row: any) => emailStatuses.has(String(row.status || '').toLowerCase())),
+    smsSent: !!smsRows.data?.some((row: any) => smsStatuses.has(String(row.delivery_status || '').toLowerCase())),
+  };
+}
