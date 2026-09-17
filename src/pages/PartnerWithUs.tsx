@@ -149,6 +149,9 @@ const PartnerWithUs: React.FC = () => {
           preferredBilling: form.preferredBilling || undefined,
           notes: form.notes || undefined,
           referralSource,
+          utmMedium: params.get('utm_medium') || undefined,
+          utmCampaign: params.get('utm_campaign') || undefined,
+          utmContent: params.get('utm_content') || undefined,
           landingUrl: document.referrer || undefined,
         },
       });
