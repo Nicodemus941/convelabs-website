@@ -150,7 +150,15 @@ Deno.serve(async (req) => {
     // B2B contact details only; no patient information is ever in this form.
     const source = [body.referralSource || 'direct', clip(body.utmCampaign)].filter(Boolean).join(' / ');
     const who = `${body.contactName.trim()}${body.contactRole?.trim() ? ` (${body.contactRole.trim()})` : ''}`;
-    const smsBody = `ConveLabs partner inquiry: ${body.practiceName.trim().slice(0, 60)} — ${who.slice(0, 60)}. Source: ${source}. Reply within 24h — details in info@convelabs.com.`;
+    const phone = body.contactPhone?.trim() || 'no phone given';
+    const smsBody = [
+      'ConveLabs partner inquiry',
+      `Practice: ${body.practiceName.trim().slice(0, 60)}`,
+      `Contact: ${who.slice(0, 60)}`,
+      `Phone: ${phone.slice(0, 30)}`,
+      `Source: ${source}`,
+      'Reply within 24h. Full details in info@convelabs.com.',
+    ].join('\n');
     const ownerSms = sendOwnerAlert(supabase, smsBody)
       .then((r) => { if (r.errors.length) console.warn('[submit-partner-inquiry] owner SMS errors:', r.errors); })
       .catch((e) => console.warn('[submit-partner-inquiry] owner SMS failed:', e));
