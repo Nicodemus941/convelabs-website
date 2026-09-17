@@ -16,7 +16,8 @@
 // Quiet-hours: does NOT apply here. These emails are transactional
 // replies to a form the submitter just filled out; HIPAA-irrelevant.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { sendOwnerAlert } from '../_shared/alert-recipients.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,13 +42,16 @@ interface InquiryPayload {
   preferredBilling?: string;
   notes?: string;
   referralSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmContent?: string;
   landingUrl?: string;
 }
 
 async function sendMailgun(to: string, subject: string, html: string, replyTo = 'info@convelabs.com') {
   if (!MAILGUN_API_KEY) return;
   const fd = new FormData();
-  fd.append('from', `Nico at Nicodemme Jean-Baptiste <info@convelabs.com>`);
+  fd.append('from', `Nico at ConveLabs <noreply@${MAILGUN_DOMAIN}>`);
   fd.append('to', to);
   fd.append('h:Reply-To', replyTo);
   fd.append('subject', subject);
@@ -100,6 +104,9 @@ Deno.serve(async (req) => {
         preferred_billing: body.preferredBilling || null,
         notes: body.notes?.trim() || null,
         referral_source: body.referralSource || 'direct',
+        utm_medium: clip(body.utmMedium),
+        utm_campaign: clip(body.utmCampaign),
+        utm_content: clip(body.utmContent),
         landing_url: body.landingUrl || null,
       })
       .select('id')
@@ -137,6 +144,28 @@ Deno.serve(async (req) => {
         </div>
       </div>`;
     sendMailgun('info@convelabs.com', `🤝 Partner inquiry — ${body.practiceName}`, adminNote, body.contactEmail).catch(() => {});
+
+    // 2b. TEXT THE OWNER — the page promises a founder reply within 24h, and
+    // an inbox-only alert is easy to miss once the founder isn't at a desk.
+    // B2B contact details only; no patient information is ever in this form.
+    const source = [body.referralSource || 'direct', clip(body.utmCampaign)].filter(Boolean).join(' / ');
+    const who = `${body.contactName.trim()}${body.contactRole?.trim() ? ` (${body.contactRole.trim()})` : ''}`;
+    const phone = body.contactPhone?.trim() || 'no phone given';
+    const smsBody = [
+      'ConveLabs partner inquiry',
+      `Practice: ${body.practiceName.trim().slice(0, 60)}`,
+      `Contact: ${who.slice(0, 60)}`,
+      `Phone: ${phone.slice(0, 30)}`,
+      `Source: ${source}`,
+      'Reply within 24h. Full details in info@convelabs.com.',
+    ].join('\n');
+    const ownerSms = sendOwnerAlert(supabase, smsBody)
+      .then((r) => { if (r.errors.length) console.warn('[submit-partner-inquiry] owner SMS errors:', r.errors); })
+      .catch((e) => console.warn('[submit-partner-inquiry] owner SMS failed:', e));
+    // Keep the worker alive until the text is handed to Twilio; without this
+    // the runtime can shut down as soon as the response is returned.
+    const runtime = (globalThis as any).EdgeRuntime;
+    if (runtime?.waitUntil) runtime.waitUntil(ownerSms); else await ownerSms;
 
     // 3. AUTO-REPLY TO SUBMITTER (warm founder-voice confirmation)
     const firstName = (body.contactName || '').trim().split(/\s+/)[0] || 'there';
@@ -190,6 +219,11 @@ Deno.serve(async (req) => {
     );
   }
 });
+
+function clip(v?: string): string | null {
+  const t = (v || '').trim();
+  return t ? t.slice(0, 120) : null;
+}
 
 function escapeHtml(s: string): string {
   return String(s)
