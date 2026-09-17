@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { format, addDays, subDays } from 'date-fns';
-import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown } from 'lucide-react';
+import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import MemberOtpUnlockButton from './MemberOtpUnlockButton';
 import JoinWaitlistButton from './JoinWaitlistButton';
@@ -107,6 +107,9 @@ interface DateTimeSelectionStepProps {
    *  is the entry point of the booking flow (Hormozi simplification). */
   onBack?: () => void;
   considerDistance?: boolean;
+  /** Why checkout sent the patient back to this step (recoverable server error). */
+  resetNotice?: { title: string; message: string } | null;
+  onClearResetNotice?: () => void;
 }
 
 // Operational hours (simplified 2026-04-25):
@@ -190,7 +193,7 @@ const FASTING_SERVICES = ['fasting-blood-draw'];
 // Services that skip time selection (STAT/same-day)
 const STAT_SERVICES = ['stat-blood-draw'];
 
-const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, onBack, considerDistance }) => {
+const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, onBack, considerDistance, resetNotice, onClearResetNotice }) => {
   const methods = useFormContext<BookingFormValues>();
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");
@@ -672,6 +675,27 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         <CardDescription>Choose when you'd like our phlebotomist to visit</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {resetNotice && (
+          <div role="alert" className="bg-amber-50 border-2 border-amber-300 rounded-lg p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-700 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-900">{resetNotice.title}</p>
+              <p className="text-sm text-amber-800 mt-0.5 break-words">{resetNotice.message}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onClearResetNotice?.()}
+                  className="text-xs font-semibold text-amber-800 underline underline-offset-2"
+                >
+                  Dismiss
+                </button>
+                <a href="tel:+19415279169" className="text-xs font-semibold text-amber-800 underline underline-offset-2">
+                  Or call (941) 527-9169
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Lab destination picker — surfaced here so the slot grid can adjust
             in real time. AdventHealth opens the afternoon. LabCorp / Quest cap
             at their drop-off cutoff. "Not sure" shows the universal subset. */}

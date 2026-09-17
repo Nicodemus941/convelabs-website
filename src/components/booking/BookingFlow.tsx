@@ -124,6 +124,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // Slot-conflict modal state. Fires when create-appointment-checkout returns
   // 409 slot_unavailable. Hormozi: never let a buyer leave empty-handed —
   // surface 3 closest open times, allow inline retry, fall back to waitlist.
+  // Shown on the date/time step when checkout sends the patient back to fix something.
+  const [resetNotice, setResetNotice] = useState<{ title: string; message: string } | null>(null);
   const [conflictModal, setConflictModal] = useState<{
     open: boolean;
     originalDate: string;
@@ -809,7 +811,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // Hormozi rule: never let a buyer leave empty-handed. Every error
         // gets a clear plain-English message + a specific recovery action.
         const code = (result as any).errorCode || '';
-        const goToDateTime = () => {
+        const goToDateTime = (notice?: { title: string; message: string }) => {
+          setResetNotice(notice || null);
           setShowLabOrder(false);
           setShowDatePicker(true);
           prevStepRef.current = currentStep;
@@ -829,11 +832,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         }
 
         if (code === 'destination_required') {
+          const notice = {
+            title: 'Choose the specimen destination before payment',
+            message: 'We sent you back here because the booking could not continue until you picked where the specimen should be delivered after the draw.',
+          };
           toast.error('Pick where you want your specimen delivered (LabCorp, Quest, AdventHealth, etc.) before checkout.', {
             duration: 8000,
-            action: { label: 'Pick lab', onClick: goToDateTime },
+            action: { label: 'Pick lab', onClick: () => goToDateTime(notice) },
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
@@ -841,26 +848,37 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           toast.warning("Your lab order doesn't require fasting — we'll switch you to a routine draw and reopen the slot picker.", {
             duration: 8000,
           });
-          goToDateTime();
+          goToDateTime({
+            title: 'Your appointment needs a new time selection',
+            message: "Your lab order doesn't require fasting, so we reopened the time picker under the routine-draw rules before payment can continue.",
+          });
           return;
         }
 
         if (code === 'date_blocked') {
+          const notice = {
+            title: 'That date is blocked on the calendar',
+            message: result.error || 'That day is not available because the calendar is blocked for a closure window.',
+          };
           toast.error('That day isn\'t available (holiday or office closure). Please pick a different date.', {
             duration: 7000,
-            action: { label: 'Pick another date', onClick: goToDateTime },
+            action: { label: 'Pick another date', onClick: () => goToDateTime(notice) },
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
         if (code === 'outside_partner_window' || code === 'outside_booking_window') {
           // Server-supplied message contains the actual hours
+          const notice = {
+            title: 'That time is no longer bookable',
+            message: result.error || 'That time is outside our available booking window.',
+          };
           toast.error(result.error || 'That time is outside our booking hours. Please pick a different time.', {
             duration: 9000,
-            action: { label: 'Pick another time', onClick: goToDateTime },
+            action: { label: 'Pick another time', onClick: () => goToDateTime(notice) },
           });
-          goToDateTime();
+          goToDateTime(notice);
           return;
         }
 
@@ -1159,6 +1177,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                     <DateTimeSelectionStep
                       onNext={handleNext}
                       onBack={() => { prevStepRef.current = currentStep; setCurrentStep(BookingStep.VisitType); }}
+                      resetNotice={resetNotice}
+                      onClearResetNotice={() => setResetNotice(null)}
                     />
                   );
                 }
@@ -1186,6 +1206,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                   <DateTimeSelectionStep
                     onNext={handleNext}
                     onBack={() => setShowDatePicker(false)}
+                    resetNotice={resetNotice}
+                    onClearResetNotice={() => setResetNotice(null)}
                   />
                 );
               })()}
