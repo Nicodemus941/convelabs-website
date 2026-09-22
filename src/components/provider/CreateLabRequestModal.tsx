@@ -30,6 +30,19 @@ interface Props {
   onCreated: () => void;
 }
 
+type Step = 1 | 2 | 3;
+const STEPS = ['Patient', 'Lab order', 'Draw and billing'];
+
+interface HouseholdMember {
+  name: string;
+  email: string;
+  phone: string;
+  dob: string;
+  /** Their own order, uploaded here; the server gives each sibling its own. */
+  labOrderPath: string | null;
+  labOrderName: string | null;
+}
+
 interface OcrPreview {
   panels: Array<{ name?: string } | string>;
   fastingRequired?: boolean;
@@ -78,7 +91,12 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   // provider to schedule the slot themselves.
   const [postPaymentAction, setPostPaymentAction] = useState<'send_link' | 'provider_schedule'>('send_link');
   // Household members ordered in the same visit (combined into one payment).
-  const [householdMembers, setHouseholdMembers] = useState<{ name: string; email: string; phone: string; dob: string }[]>([]);
+  // Each family member keeps their own lab order and, on the server, their own
+  // booking link -- so a household can be ordered together but drawn on
+  // different days.
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
+  const [memberUploading, setMemberUploading] = useState<number | null>(null);
+  const [step, setStep] = useState<Step>(1);
 
   // NEW: OCR preview
   const [ocr, setOcr] = useState<OcrPreview | null>(null);
@@ -273,6 +291,9 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                 patient_email: m.email.trim() || null,
                 patient_phone: m.phone.trim() || null,
                 patient_dob: m.dob || null,
+                // Their own order, so the phlebotomist draws the right panels
+                // for each person in the house.
+                lab_order_file_path: m.labOrderPath || null,
               }))
             : [],
         }),
@@ -344,10 +365,33 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
 
   // Reset billing default when modal re-opens
   useEffect(() => {
-    if (open) setBilledTo(orgDefaultBilledTo || 'patient');
+    if (open) { setBilledTo(orgDefaultBilledTo || 'patient'); setStep(1); }
   }, [open, orgDefaultBilledTo]);
 
   const orgPriceDollars = orgInvoicePriceCents ? (orgInvoicePriceCents / 100).toFixed(2) : null;
+  const namedMembers = householdMembers.filter(m => m.name.trim());
+  // Step 1 is done when we have the two things the booking gate needs.
+  const stepOneDone = !!(patientName.trim() && patientDob);
+  // Family ordering rides on one practice-paid charge on the server; patient-pays
+  // families would silently become practice-billed, so we stop instead.
+  const familyNeedsOrgPays = namedMembers.length > 0 && billedTo !== 'org';
+
+  /** A family member's own lab order, straight to storage. */
+  const uploadMemberOrder = async (index: number, f: File) => {
+    if (f.size > 20 * 1024 * 1024) { toast.error('That file is over 20MB.'); return; }
+    setMemberUploading(index);
+    try {
+      const ext = (f.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const path = `${orgId}/${Date.now()}-${index}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+      const { error } = await supabase.storage.from('lab-orders').upload(path, f, { upsert: false });
+      if (error) throw error;
+      setHouseholdMembers(hm => hm.map((x, ix) => ix === index ? { ...x, labOrderPath: path, labOrderName: f.name } : x));
+    } catch (e: any) {
+      toast.error(e?.message || "That order didn't upload. Please try again.");
+    } finally {
+      setMemberUploading(null);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -358,6 +402,23 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
         </DialogHeader>
 
         <div className="space-y-4 pt-2">
+          {/* Three steps: who they are, what to draw, when and who pays. */}
+          <div className="flex items-center gap-1.5 pb-1">
+            {STEPS.map((label, i) => (
+              <React.Fragment key={label}>
+                <div className={`flex items-center gap-1.5 ${step === i + 1 ? 'text-[#B91C1C]' : step > i + 1 ? 'text-emerald-700' : 'text-gray-400'}`}>
+                  <span className={`h-5 w-5 rounded-full grid place-items-center text-[10px] font-semibold ${
+                    step === i + 1 ? 'bg-[#B91C1C] text-white' : step > i + 1 ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100'
+                  }`}>{step > i + 1 ? '✓' : i + 1}</span>
+                  <span className="text-[11px] font-medium whitespace-nowrap">{label}</span>
+                </div>
+                {i < STEPS.length - 1 && <div className="flex-1 h-px bg-gray-200" />}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {step === 1 && (
+            <>
           {/* PATIENT */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -491,86 +552,70 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
             </div>
           </div>
 
-          {/* BILLING TOGGLE — Hormozi's #1 gap */}
+          {/* FAMILY — one household, one card, but each person keeps their own
+              lab order and their own booking link, so they can go on different
+              days. Siblings are created by create-lab-request. */}
           <div className="space-y-2 pt-3 border-t">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5" /> Who pays for this visit?
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setBilledTo('patient')}
-                className={`flex items-start gap-2 p-3 rounded-lg border-2 text-left transition ${
-                  billedTo === 'patient' ? 'border-[#B91C1C] bg-red-50' : 'border-gray-200 hover:border-gray-300 bg-white'
-                }`}
-              >
-                <User className={`h-4 w-4 mt-0.5 flex-shrink-0 ${billedTo === 'patient' ? 'text-[#B91C1C]' : 'text-gray-400'}`} />
-                <div>
-                  <div className="text-sm font-semibold">Patient pays</div>
-                  <div className="text-[11px] text-gray-500 leading-tight">Patient checks out at booking (credit card or insurance).</div>
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => setBilledTo('org')}
-                className={`flex items-start gap-2 p-3 rounded-lg border-2 text-left transition ${
-                  billedTo === 'org' ? 'border-[#B91C1C] bg-red-50' : 'border-gray-200 hover:border-gray-300 bg-white'
-                }`}
-              >
-                <Building2 className={`h-4 w-4 mt-0.5 flex-shrink-0 ${billedTo === 'org' ? 'text-[#B91C1C]' : 'text-gray-400'}`} />
-                <div>
-                  <div className="text-sm font-semibold">{orgName} pays{orgPriceDollars ? ` · $${orgPriceDollars}` : ''}</div>
-                  <div className="text-[11px] text-gray-500 leading-tight">Your practice covers the cost. Patient sees no charge.</div>
-                </div>
-              </button>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">Family</p>
+              {householdMembers.length === 0 && (
+                <Button type="button" size="sm" variant="outline" className="h-7 text-[11px] gap-1.5"
+                  onClick={() => setHouseholdMembers([{ name: '', email: '', phone: '', dob: '', labOrderPath: null, labOrderName: null }])}>
+                  <Users className="h-3 w-3" /> Add family members
+                </Button>
+              )}
             </div>
-
-            {/* Org pays → upfront via Stripe (net-30 invoicing retired 2026-06-15) */}
-            {billedTo === 'org' && (
-              <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg space-y-2.5">
-                <p className="text-xs font-semibold text-gray-900">Save a card now — charged only when the patient books</p>
-                <p className="text-[11px] text-gray-600 -mt-1.5">If they never schedule, your card is never charged.</p>
-
-                {/* After the card is saved: who schedules? */}
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">After your card is saved</p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button type="button" onClick={() => setPostPaymentAction('send_link')}
-                      className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'send_link' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
-                      <div className="text-xs font-semibold">Text/email them the link</div>
-                      <div className="text-[10px] text-gray-500">Patient picks their own time</div>
-                    </button>
-                    <button type="button" onClick={() => setPostPaymentAction('provider_schedule')}
-                      className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'provider_schedule' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
-                      <div className="text-xs font-semibold">I'll schedule them</div>
-                      <div className="text-[10px] text-gray-500">Book the slot yourself</div>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Household members → combined into one visit + one payment */}
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">Household members <span className="font-normal normal-case text-gray-400">(same address, one visit)</span></p>
-                  {householdMembers.map((m, i) => (
-                    <div key={i} className="flex gap-1.5 mb-1.5">
-                      <input value={m.name} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))} placeholder="Name" className="flex-1 min-w-0 border border-gray-200 rounded px-2 py-1 text-xs" />
-                      <input value={m.phone} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, phone: e.target.value } : x))} placeholder="Mobile" inputMode="tel" className="w-24 border border-gray-200 rounded px-2 py-1 text-xs" />
-                      <input value={m.dob} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, dob: e.target.value } : x))} type="date" className="w-32 border border-gray-200 rounded px-1 py-1 text-xs" />
-                      <button type="button" onClick={() => setHouseholdMembers(hm => hm.filter((_, ix) => ix !== i))} className="text-gray-400 hover:text-red-600 px-1 text-sm">×</button>
+            {householdMembers.length === 0 ? (
+              <p className="text-[11px] text-gray-500">Drawing more than one person at this address? Add them here and they share one order and one charge.</p>
+            ) : (
+              <div className="space-y-2">
+                {householdMembers.map((m, i) => (
+                  <div key={i} className="rounded-lg border border-gray-200 p-2.5 space-y-2 bg-gray-50/60">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold text-gray-700">Family member {i + 1}</p>
+                      <button type="button" onClick={() => setHouseholdMembers(hm => hm.filter((_, ix) => ix !== i))}
+                        className="text-gray-400 hover:text-[#B91C1C] text-xs">Remove</button>
                     </div>
-                  ))}
-                  <button type="button" onClick={() => setHouseholdMembers(hm => [...hm, { name: '', email: '', phone: '', dob: '' }])}
-                    className="text-[11px] text-[#B91C1C] font-medium">+ Add household member</button>
-                </div>
-
-                <p className="text-[11px] text-gray-600">
-                  You'll save a card on Stripe covering {householdMembers.filter(m => m.name.trim()).length + 1} draw{householdMembers.filter(m => m.name.trim()).length ? 's' : ''} — charged only when the patient books.
-                  {postPaymentAction === 'send_link' ? ' Booking link sends the moment your card is saved.' : ' You schedule once your card is saved.'}
-                </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input value={m.name} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, name: e.target.value } : x))}
+                        placeholder="Full name" className="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white" />
+                      <input value={m.dob} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, dob: e.target.value } : x))}
+                        type="date" className="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white" />
+                      <input value={m.phone} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, phone: e.target.value } : x))}
+                        placeholder="Mobile" inputMode="tel" className="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white" />
+                      <input value={m.email} onChange={e => setHouseholdMembers(hm => hm.map((x, ix) => ix === i ? { ...x, email: e.target.value } : x))}
+                        placeholder="Email" inputMode="email" className="border border-gray-200 rounded px-2 py-1.5 text-xs bg-white" />
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input id={`member-order-${i}`} type="file" accept=".pdf,image/*" className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadMemberOrder(i, f); }} />
+                      <Button type="button" size="sm" variant="outline" className="h-7 text-[11px] gap-1.5 bg-white"
+                        disabled={memberUploading === i}
+                        onClick={() => document.getElementById(`member-order-${i}`)?.click()}>
+                        {memberUploading === i
+                          ? <><Loader2 className="h-3 w-3 animate-spin" /> Uploading…</>
+                          : <><UploadCloud className="h-3 w-3" /> {m.labOrderPath ? 'Replace their order' : 'Their lab order'}</>}
+                      </Button>
+                      {m.labOrderName && (
+                        <span className="text-[11px] text-emerald-700 inline-flex items-center gap-1 min-w-0">
+                          <CheckCircle2 className="h-3 w-3 flex-shrink-0" /><span className="truncate">{m.labOrderName}</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-gray-500">They get their own booking link, so they can pick a different day.</p>
+                  </div>
+                ))}
+                <button type="button"
+                  onClick={() => setHouseholdMembers(hm => [...hm, { name: '', email: '', phone: '', dob: '', labOrderPath: null, labOrderName: null }])}
+                  className="text-[11px] text-[#B91C1C] font-medium">+ Add another family member</button>
               </div>
             )}
           </div>
+            </>
+          )}
 
+          {step === 2 && (
+            <>
           {/* LAB ORDER — with OCR readback */}
           <div className="space-y-2 pt-3 border-t">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">Lab order</p>
@@ -638,19 +683,6 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
             )}
           </div>
 
-          {/* TIMING */}
-          <div className="space-y-3 pt-3 border-t">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">Timing</p>
-            <div>
-              <Label>Draw no later than *</Label>
-              <Input type="date" value={drawByDate} min={new Date().toISOString().substring(0, 10)} onChange={e => setDrawByDate(e.target.value)} />
-            </div>
-            <div>
-              <Label>Their next visit with you <span className="text-[11px] text-gray-400">(optional — adds urgency context)</span></Label>
-              <Input type="date" value={nextApptDate} min={drawByDate || new Date().toISOString().substring(0, 10)} onChange={e => setNextApptDate(e.target.value)} />
-            </div>
-          </div>
-
           {/* NOTES — with quick-chip inserts */}
           <div className="space-y-2 pt-3 border-t">
             <Label>Notes for the patient <span className="text-[11px] text-gray-400">(optional)</span></Label>
@@ -687,6 +719,103 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
             </div>
             <Textarea value={adminNotes} onChange={e => setAdminNotes(e.target.value)} rows={2}
               placeholder="e.g. 'Remember the 12-hour fast', or 'Please arrive at a LabCorp location — we're waiting for a delivery slot'" />
+          </div>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              {familyNeedsOrgPays && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                  <p className="text-xs font-medium text-amber-900">
+                    You've added {namedMembers.length} family member{namedMembers.length === 1 ? '' : 's'}, which the practice has to cover.
+                  </p>
+                  <p className="text-[11px] text-amber-800 mt-0.5">Choose &ldquo;Practice pays&rdquo; below, or go back and remove them.</p>
+                </div>
+              )}
+          {/* TIMING */}
+          <div className="space-y-3 pt-3 border-t">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-700">Timing</p>
+            <div>
+              <Label>Draw no later than *</Label>
+              <Input type="date" value={drawByDate} min={new Date().toISOString().substring(0, 10)} onChange={e => setDrawByDate(e.target.value)} />
+            </div>
+            <div>
+              <Label>Their next visit with you <span className="text-[11px] text-gray-400">(optional — adds urgency context)</span></Label>
+              <Input type="date" value={nextApptDate} min={drawByDate || new Date().toISOString().substring(0, 10)} onChange={e => setNextApptDate(e.target.value)} />
+            </div>
+          </div>
+
+          {/* BILLING TOGGLE — Hormozi's #1 gap */}
+          <div className="space-y-2 pt-3 border-t">
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+              <DollarSign className="h-3.5 w-3.5" /> Who pays for this visit?
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setBilledTo('patient')}
+                className={`flex items-start gap-2 p-3 rounded-lg border-2 text-left transition ${
+                  billedTo === 'patient' ? 'border-[#B91C1C] bg-red-50' : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <User className={`h-4 w-4 mt-0.5 flex-shrink-0 ${billedTo === 'patient' ? 'text-[#B91C1C]' : 'text-gray-400'}`} />
+                <div>
+                  <div className="text-sm font-semibold">Patient pays</div>
+                  <div className="text-[11px] text-gray-500 leading-tight">Patient checks out at booking (credit card or insurance).</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBilledTo('org')}
+                className={`flex items-start gap-2 p-3 rounded-lg border-2 text-left transition ${
+                  billedTo === 'org' ? 'border-[#B91C1C] bg-red-50' : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <Building2 className={`h-4 w-4 mt-0.5 flex-shrink-0 ${billedTo === 'org' ? 'text-[#B91C1C]' : 'text-gray-400'}`} />
+                <div>
+                  <div className="text-sm font-semibold">{orgName} pays{orgPriceDollars ? ` · $${orgPriceDollars}` : ''}</div>
+                  <div className="text-[11px] text-gray-500 leading-tight">Your practice covers the cost. Patient sees no charge.</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Org pays → upfront via Stripe (net-30 invoicing retired 2026-06-15) */}
+            {billedTo === 'org' && (
+              <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg space-y-2.5">
+                <p className="text-xs font-semibold text-gray-900">Save a card now — charged only when the patient books</p>
+                <p className="text-[11px] text-gray-600 -mt-1.5">If they never schedule, your card is never charged.</p>
+
+                {/* After the card is saved: who schedules? */}
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-700 mb-1">After your card is saved</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" onClick={() => setPostPaymentAction('send_link')}
+                      className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'send_link' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
+                      <div className="text-xs font-semibold">Text/email them the link</div>
+                      <div className="text-[10px] text-gray-500">Patient picks their own time</div>
+                    </button>
+                    <button type="button" onClick={() => setPostPaymentAction('provider_schedule')}
+                      className={`text-left p-2 rounded border-2 transition ${postPaymentAction === 'provider_schedule' ? 'border-[#B91C1C] bg-white' : 'border-transparent hover:border-gray-300 bg-white/50'}`}>
+                      <div className="text-xs font-semibold">I'll schedule them</div>
+                      <div className="text-[10px] text-gray-500">Book the slot yourself</div>
+                    </button>
+                  </div>
+                </div>
+                {namedMembers.length > 0 && orgInvoicePriceCents ? (
+                  <div className="rounded-lg border border-red-100 bg-white p-2.5">
+                    <p className="text-[11px] font-semibold text-gray-900">
+                      {namedMembers.length + 1} draws × ${(orgInvoicePriceCents / 100).toFixed(2)} = ${(((namedMembers.length + 1) * orgInvoicePriceCents) / 100).toFixed(2)}
+                    </p>
+                    <p className="text-[11px] text-gray-600 mt-0.5">{patientFirstName || 'The patient'} and {namedMembers.length} family member{namedMembers.length === 1 ? '' : 's'}, on one card.</p>
+                  </div>
+                ) : null}
+                <p className="text-[11px] text-gray-600">
+                  You'll save a card on Stripe covering {namedMembers.length + 1} draw{namedMembers.length ? 's' : ''} — charged only when the patient books.
+                  {postPaymentAction === 'send_link' ? ' Booking link sends the moment your card is saved.' : ' You schedule once your card is saved.'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* SMS + EMAIL PREVIEW */}
@@ -725,21 +854,37 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
               )}
             </div>
           )}
+            </>
+          )}
         </div>
 
         <DialogFooter className="gap-2 pt-4 sticky bottom-0 bg-white border-t -mx-6 px-6 pb-2">
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={!canSubmit || saving}
-            className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 transition"
-          >
-            {saving || uploading ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> {uploading ? 'Uploading…' : 'Sending…'}</>
-            ) : (
-              `Send ${patientFirstName}'s booking link`
-            )}
+          <Button variant="outline" onClick={() => (step === 1 ? onClose() : setStep((step - 1) as Step))} disabled={saving}>
+            {step === 1 ? 'Cancel' : 'Back'}
           </Button>
+          {step < 3 ? (
+            <Button
+              onClick={() => setStep((step + 1) as Step)}
+              disabled={!stepOneDone || saving}
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5"
+            >
+              {step === 1 ? 'Next: lab order' : 'Next: draw and billing'}
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSubmit}
+              disabled={!canSubmit || saving || familyNeedsOrgPays}
+              className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 transition"
+            >
+              {saving || uploading ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> {uploading ? 'Uploading…' : 'Sending…'}</>
+              ) : namedMembers.length ? (
+                `Send ${namedMembers.length + 1} booking links`
+              ) : (
+                `Send ${patientFirstName}'s booking link`
+              )}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
