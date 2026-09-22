@@ -29,7 +29,10 @@ import ServicesPricingModal from '@/components/provider/ServicesPricingModal';
 import OrgAttachLabOrderModal from '@/components/provider/OrgAttachLabOrderModal';
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 import { Activity, Paperclip } from 'lucide-react';
-import { FileHeart, Send, Copy, BellRing, FileSignature, Download } from 'lucide-react';
+// Download is already imported above; importing it twice is a SyntaxError in
+// dev ("Identifier 'Download' has already been declared") and took the whole
+// provider dashboard down locally.
+import { FileHeart, Send, Copy, BellRing, FileSignature } from 'lucide-react';
 
 /**
  * PROVIDER PORTAL DASHBOARD — Phase 1
@@ -62,6 +65,16 @@ interface DashboardData {
   labRequests: any[];
 }
 
+const PROVIDER_TABS = [
+  { key: 'today', label: 'Today' },
+  { key: 'patients', label: 'Patients' },
+  { key: 'orders', label: 'Orders' },
+  { key: 'billing', label: 'Billing' },
+  { key: 'practice', label: 'Practice' },
+] as const;
+
+type ProviderTab = (typeof PROVIDER_TABS)[number]['key'];
+
 const ProviderDashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -69,6 +82,20 @@ const ProviderDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [showInvite, setShowInvite] = useState(false);
+  // Five tabs instead of one endless scroll. The tab lives in the URL
+  // (?tab=patients) so a link back from a patient's page lands in the right
+  // place and a refresh doesn't dump the practice back at Today.
+  const [tab, setTab] = useState<ProviderTab>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return (PROVIDER_TABS.some(x => x.key === t) ? t : 'today') as ProviderTab;
+  });
+  const goTab = (next: ProviderTab) => {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === 'today') url.searchParams.delete('tab');
+    else url.searchParams.set('tab', next);
+    window.history.replaceState({}, '', url);
+  };
   const [showLabRequest, setShowLabRequest] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   // Sprint 1 (2026-05-13): per-row "Upload lab order" modal for the
@@ -384,6 +411,28 @@ const ProviderDashboard: React.FC = () => {
         </div>
       </header>
 
+      {/* TABS — the whole portal in five places, so nothing is "further down
+          the page". */}
+      <nav className="bg-white border-b border-gray-200 sticky top-[57px] z-10" aria-label="Sections">
+        <div className="max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto">
+          {PROVIDER_TABS.map(t => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => goTab(t.key)}
+              aria-current={tab === t.key ? 'page' : undefined}
+              className={`px-4 py-3 text-sm whitespace-nowrap border-b-2 transition ${
+                tab === t.key
+                  ? 'border-[#B91C1C] text-[#B91C1C] font-semibold'
+                  : 'border-transparent text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
       <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
         {/* WELCOME + PRIMARY CTA */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -409,18 +458,7 @@ const ProviderDashboard: React.FC = () => {
           <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <Button onClick={() => setShowLabRequest(true)}
               className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-12 px-5 gap-2 text-[15px]">
-              <FileHeart className="h-4 w-4" /> Request labs for a patient
-            </Button>
-            {/* "Schedule a visit" now opens the same CreateLabRequestModal
-                used by "Request labs for a patient". One unified flow:
-                provider/staff fills in patient + lab order + draw_by_date,
-                we send the patient the booking link with the order
-                attached. Different label, same modal — Hormozi: don't make
-                staff learn two flows for the same outcome.
-                (2026-05-07 Lara/Littleton UX gap.) */}
-            <Button onClick={() => setShowLabRequest(true)}
-              variant="outline" className="h-12 px-5 gap-2 text-[15px]">
-              <Calendar className="h-4 w-4" /> Schedule a visit
+              <FileHeart className="h-4 w-4" /> Add patient
             </Button>
             {/* "Services & pricing" opens an in-page modal — Hormozi-style
                 tier comparison with VIP anchored as "Most popular". Avoids
@@ -452,7 +490,8 @@ const ProviderDashboard: React.FC = () => {
             </div>
           </div>
         )}
-
+        {tab === 'today' && (
+          <>
         {/* FIRST-ACTION COACHMARK — shows on the genuinely-empty dashboard.
             Hormozi UX: don't dump invited staff into a cold roster with no
             breadcrumb of what to do first. Tells them the exact next two
@@ -497,41 +536,6 @@ const ProviderDashboard: React.FC = () => {
             <LiveOpCard label="Total patients" value={patients.length} detail={`${team.length} team ${team.length === 1 ? 'member' : 'members'}`} icon={<Users className="h-5 w-5 text-emerald-600" />} />
           </div>
         </div>
-
-        {/* SUBSCRIPTION CARD — toggles between enroll / manage based on status */}
-        {org.subscription_status === 'active' ? (
-          <ManageSubscriptionCard orgId={org.id} orgName={org.name} />
-        ) : (
-          <SubscribeYourPracticeCard orgName={org.name} />
-        )}
-
-        {/* PRACTICE PROFILE — completion-driven onboarding nudge */}
-        <PracticeProfilePanel orgId={org.id} />
-
-        {/* LINKED PATIENTS + BULK RE-REQUEST */}
-        <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} labRequests={data.labRequests || []} />
-
-        {/* LAB REQUESTS */}
-        <LabRequestsSection
-          labRequests={data.labRequests || []}
-          onCreate={() => setShowLabRequest(true)}
-          onRefresh={loadData}
-          onOpenPatient={openPatientDrawer}
-        />
-
-        {/* THIS MONTH */}
-        <Card className="shadow-sm border-[#EFE3E1]">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2"><DollarSign className="h-4 w-4 text-emerald-600" /> This month</CardTitle>
-            <CardDescription className="text-xs">Live data — as of {format(new Date(), 'MMM d, h:mm a')}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Stat label="MTD visits" value={String(thisMonth.mtdVisits)} hint={thisMonth.predictedEomVisits > thisMonth.mtdVisits ? `On pace for ~${thisMonth.predictedEomVisits}` : 'At full pace'} />
-            <Stat label="MTD spend" value={`$${thisMonth.mtdSpend.toFixed(2)}`} hint="Completed + paid visits only" />
-            <Stat label="Avg turnaround" value={thisMonth.avgTurnaroundHrs != null ? `${thisMonth.avgTurnaroundHrs.toFixed(0)} hrs` : '—'} hint="Collection → results" />
-            <Stat label="EOM estimate" value={`${thisMonth.predictedEomVisits} visits`} hint="At current pace" />
-          </CardContent>
-        </Card>
 
         {/* UPCOMING 7 DAYS */}
         <Card className="shadow-sm border-[#EFE3E1]">
@@ -669,6 +673,50 @@ const ProviderDashboard: React.FC = () => {
             )}
           </CardContent>
         </Card>
+          </>
+        )}
+
+        {tab === 'patients' && (
+          <>
+        {/* LINKED PATIENTS + BULK RE-REQUEST */}
+        <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} labRequests={data.labRequests || []} />
+          </>
+        )}
+
+        {tab === 'orders' && (
+          <>
+        {/* LAB REQUESTS */}
+        <LabRequestsSection
+          labRequests={data.labRequests || []}
+          onCreate={() => setShowLabRequest(true)}
+          onRefresh={loadData}
+          onOpenPatient={openPatientDrawer}
+        />
+          </>
+        )}
+
+        {tab === 'billing' && (
+          <>
+        {/* SUBSCRIPTION CARD — toggles between enroll / manage based on status */}
+        {org.subscription_status === 'active' ? (
+          <ManageSubscriptionCard orgId={org.id} orgName={org.name} />
+        ) : (
+          <SubscribeYourPracticeCard orgName={org.name} />
+        )}
+
+        {/* THIS MONTH */}
+        <Card className="shadow-sm border-[#EFE3E1]">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2"><DollarSign className="h-4 w-4 text-emerald-600" /> This month</CardTitle>
+            <CardDescription className="text-xs">Live data — as of {format(new Date(), 'MMM d, h:mm a')}</CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Stat label="MTD visits" value={String(thisMonth.mtdVisits)} hint={thisMonth.predictedEomVisits > thisMonth.mtdVisits ? `On pace for ~${thisMonth.predictedEomVisits}` : 'At full pace'} />
+            <Stat label="MTD spend" value={`$${thisMonth.mtdSpend.toFixed(2)}`} hint="Completed + paid visits only" />
+            <Stat label="Avg turnaround" value={thisMonth.avgTurnaroundHrs != null ? `${thisMonth.avgTurnaroundHrs.toFixed(0)} hrs` : '—'} hint="Collection → results" />
+            <Stat label="EOM estimate" value={`${thisMonth.predictedEomVisits} visits`} hint="At current pace" />
+          </CardContent>
+        </Card>
 
         {/* PARTNERSHIP RULES */}
         <Card className="shadow-sm border-[#EFE3E1]">
@@ -681,41 +729,6 @@ const ProviderDashboard: React.FC = () => {
             <div><p className="text-xs text-gray-500 uppercase tracking-wider">Patient price</p><p className="font-semibold mt-1">{patientPrice}</p></div>
             <div><p className="text-xs text-gray-500 uppercase tracking-wider">Org invoice price</p><p className="font-semibold mt-1">{orgInvoicePrice}</p></div>
             <div><p className="text-xs text-gray-500 uppercase tracking-wider">Scheduling window</p><p className="font-semibold mt-1">{schedulingWindow || 'Anytime'}</p></div>
-          </CardContent>
-        </Card>
-
-        {/* PATIENTS */}
-        <Card className="shadow-sm border-[#EFE3E1]">
-          <CardHeader className="pb-3 flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-base">My patients</CardTitle>
-              <CardDescription className="text-xs">{patients.length} {patients.length === 1 ? 'patient' : 'patients'} from recent visits</CardDescription>
-            </div>
-            <Button onClick={() => setShowLabRequest(true)} variant="outline" size="sm" className="gap-1">
-              <Plus className="h-3.5 w-3.5" /> Add patient
-            </Button>
-          </CardHeader>
-          <CardContent className="p-0">
-            {patients.length === 0 ? (
-              <div className="text-center py-8 text-sm text-gray-500">No patients yet.</div>
-            ) : (
-              <div className="divide-y max-h-80 overflow-y-auto">
-                {patients.map((p: any, i: number) => (
-                  <div key={i} className="p-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium truncate text-sm">{p.name || 'Unnamed'}</p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {p.email && <>{p.email} · </>}
-                        {p.phone}
-                      </p>
-                    </div>
-                    <p className="text-[11px] text-gray-400 flex-shrink-0">
-                      Last: {p.last_visit ? format(new Date(p.last_visit), 'MMM d') : '—'}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
 
@@ -753,6 +766,13 @@ const ProviderDashboard: React.FC = () => {
             )}
           </CardContent>
         </Card>
+          </>
+        )}
+
+        {tab === 'practice' && (
+          <>
+        {/* PRACTICE PROFILE — completion-driven onboarding nudge */}
+        <PracticeProfilePanel orgId={org.id} />
 
         {/* TEAM — org self-serve staff invites (Hormozi G1, 2026-05-07).
             Replaces the legacy InviteTeamMemberDialog that used the older
@@ -831,6 +851,8 @@ const ProviderDashboard: React.FC = () => {
               </div>
             </CardContent>
           </Card>
+        )}
+          </>
         )}
       </main>
 

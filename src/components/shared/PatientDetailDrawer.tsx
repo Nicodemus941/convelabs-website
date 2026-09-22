@@ -55,6 +55,15 @@ interface PatientProfile {
   lab_reminder_deadline_at?: string | null;
   lab_reminder_last_sent_at?: string | null;
   overdue_flagged_at?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipcode?: string | null;
+  gate_code?: string | null;
+  insurance_provider?: string | null;
+  insurance_member_id?: string | null;
+  insurance_group_number?: string | null;
+  insurance_card_path?: string | null;
 }
 
 interface SpecimenRow {
@@ -75,7 +84,40 @@ interface Props {
   tenantPatientId?: string | null;
   organizationId: string;
   canEdit?: boolean;      // admin passes true; provider view may hide edit
+  // Render as a full page (provider portal /patients/:id) instead of the
+  // slide-in sheet. Same content either way -- one chart, two frames.
+  asPage?: boolean;
 }
+
+// Module scope, not inside the component: a wrapper redefined on every render
+// would remount the body and drop focus mid-edit.
+const RecordShell: React.FC<{
+  asPage?: boolean;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  children: React.ReactNode;
+}> = ({ asPage, open, onOpenChange, children }) =>
+  asPage ? (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">{children}</div>
+  ) : (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto p-0">{children}</SheetContent>
+    </Sheet>
+  );
+
+const RecordHeader: React.FC<{ asPage?: boolean; children: React.ReactNode }> = ({ asPage, children }) =>
+  asPage ? (
+    <div className="border-b p-5 bg-white">{children}</div>
+  ) : (
+    <SheetHeader className="border-b p-5 sticky top-0 bg-white z-10">{children}</SheetHeader>
+  );
+
+const RecordTitle: React.FC<{ asPage?: boolean; children: React.ReactNode }> = ({ asPage, children }) =>
+  asPage ? (
+    <h1 className="text-2xl font-semibold text-gray-900 truncate">{children}</h1>
+  ) : (
+    <SheetTitle className="text-xl text-gray-900 truncate">{children}</SheetTitle>
+  );
 
 const STATUS_COLORS: Record<string, string> = {
   completed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
@@ -88,14 +130,21 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const PatientDetailDrawer: React.FC<Props> = ({
-  open, onOpenChange, patientName, tenantPatientId = null, organizationId, canEdit = true,
+  open, onOpenChange, patientName, tenantPatientId = null, organizationId, canEdit = true, asPage,
 }) => {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<PatientProfile | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [specimens, setSpecimens] = useState<Map<string, SpecimenRow>>(new Map());
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '' });
+  // The practice keeps these up to date themselves: a wrong address or a
+  // missing insurance card is what turns a draw into a wasted trip.
+  const [editForm, setEditForm] = useState({
+    firstName: '', lastName: '', email: '', phone: '', dob: '',
+    address: '', city: '', state: '', zipcode: '', gateCode: '',
+    insurer: '', memberId: '', groupNumber: '',
+  });
+  const [cardUploading, setCardUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -104,7 +153,7 @@ const PatientDetailDrawer: React.FC<Props> = ({
     try {
       // 1. Patient profile — exact id when the caller has it (always correct),
       //    else fall back to the historical first/last name guess.
-      const PROFILE_COLS = 'id, first_name, last_name, email, phone, date_of_birth, lab_reminder_cadence_days, lab_reminder_deadline_at, lab_reminder_last_sent_at, overdue_flagged_at';
+      const PROFILE_COLS = 'id, first_name, last_name, email, phone, date_of_birth, lab_reminder_cadence_days, lab_reminder_deadline_at, lab_reminder_last_sent_at, overdue_flagged_at, address, city, state, zipcode, gate_code, insurance_provider, insurance_member_id, insurance_group_number, insurance_card_path';
       let tp: any = null;
       if (tenantPatientId) {
         const { data } = await supabase.from('tenant_patients')
@@ -133,6 +182,14 @@ const PatientDetailDrawer: React.FC<Props> = ({
           email: (tp as any).email || '',
           phone: (tp as any).phone || '',
           dob: (tp as any).date_of_birth || '',
+          address: (tp as any).address || '',
+          city: (tp as any).city || '',
+          state: (tp as any).state || '',
+          zipcode: (tp as any).zipcode || '',
+          gateCode: (tp as any).gate_code || '',
+          insurer: (tp as any).insurance_provider || '',
+          memberId: (tp as any).insurance_member_id || '',
+          groupNumber: (tp as any).insurance_group_number || '',
         });
       }
 
@@ -201,6 +258,14 @@ const PatientDetailDrawer: React.FC<Props> = ({
         email: editForm.email.trim() || null,
         phone: editForm.phone.trim() || null,
         date_of_birth: editForm.dob || null,
+        address: editForm.address.trim() || null,
+        city: editForm.city.trim() || null,
+        state: editForm.state.trim() || null,
+        zipcode: editForm.zipcode.trim() || null,
+        gate_code: editForm.gateCode.trim() || null,
+        insurance_provider: editForm.insurer.trim() || null,
+        insurance_member_id: editForm.memberId.trim() || null,
+        insurance_group_number: editForm.groupNumber.trim() || null,
       }).eq('id', profile.id);
       if (error) throw error;
       toast.success('Patient updated');
@@ -213,17 +278,42 @@ const PatientDetailDrawer: React.FC<Props> = ({
     }
   };
 
+  /** A photo of the card, straight onto the patient's record. */
+  const uploadInsuranceCard = async (file: File) => {
+    if (!profile) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('That file is over 10MB — a photo of the card is plenty.');
+      return;
+    }
+    setCardUploading(true);
+    try {
+      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const path = `${profile.id}/${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('insurance-cards').upload(path, file, { upsert: false });
+      if (upErr) throw upErr;
+      const { error: saveErr } = await (supabase.from('tenant_patients') as any)
+        .update({ insurance_card_path: path })
+        .eq('id', profile.id);
+      if (saveErr) throw saveErr;
+      toast.success('Insurance card saved');
+      await load();
+    } catch (e: any) {
+      toast.error(e?.message || "That didn't upload. Please try again.");
+    } finally {
+      setCardUploading(false);
+    }
+  };
+
   const completedCount = appointments.filter(a => a.status === 'completed' || a.status === 'specimen_delivered').length;
   const totalSpent = appointments.reduce((s, a) => s + (Number(a.total_amount) || 0), 0);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto p-0">
-        <SheetHeader className="border-b p-5 sticky top-0 bg-white z-10">
+    <RecordShell asPage={asPage} open={open} onOpenChange={onOpenChange}>
+        <RecordHeader asPage={asPage}>
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <SheetTitle className="text-xl text-gray-900 truncate">{patientName}</SheetTitle>
+                <RecordTitle asPage={asPage}>{patientName}</RecordTitle>
                 {profile?.id && (
                   <PatientStatusChip patientId={profile.id} patientEmail={profile.email || null} />
                 )}
@@ -244,7 +334,7 @@ const PatientDetailDrawer: React.FC<Props> = ({
               </Button>
             )}
           </div>
-        </SheetHeader>
+        </RecordHeader>
 
         <div className="p-5 space-y-5">
           {/* Edit mode */}
@@ -299,6 +389,93 @@ const PatientDetailDrawer: React.FC<Props> = ({
                   />
                 </div>
               </div>
+              <div>
+                <Label className="text-xs font-semibold">Street address</Label>
+                <Input
+                  value={editForm.address}
+                  onChange={(e) => setEditForm(f => ({ ...f, address: e.target.value }))}
+                  className="mt-1"
+                  placeholder="Where we draw them"
+                  disabled={saving}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-1">
+                  <Label className="text-xs font-semibold">City</Label>
+                  <Input value={editForm.city} onChange={(e) => setEditForm(f => ({ ...f, city: e.target.value }))} className="mt-1" disabled={saving} />
+                </div>
+                <div className="col-span-1">
+                  <Label className="text-xs font-semibold">State</Label>
+                  <Input value={editForm.state} onChange={(e) => setEditForm(f => ({ ...f, state: e.target.value }))} className="mt-1" maxLength={2} disabled={saving} />
+                </div>
+                <div className="col-span-1">
+                  <Label className="text-xs font-semibold">ZIP</Label>
+                  <Input value={editForm.zipcode} onChange={(e) => setEditForm(f => ({ ...f, zipcode: e.target.value }))} className="mt-1" disabled={saving} />
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs font-semibold">Gate code or access notes</Label>
+                <Input
+                  value={editForm.gateCode}
+                  onChange={(e) => setEditForm(f => ({ ...f, gateCode: e.target.value }))}
+                  className="mt-1"
+                  placeholder="Gate 4821, side door, buzz 12B"
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+                <p className="text-xs font-semibold text-gray-700">Insurance</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs font-semibold">Carrier</Label>
+                    <Input value={editForm.insurer} onChange={(e) => setEditForm(f => ({ ...f, insurer: e.target.value }))} className="mt-1 bg-white" disabled={saving} />
+                  </div>
+                  <div>
+                    <Label className="text-xs font-semibold">Member ID</Label>
+                    <Input value={editForm.memberId} onChange={(e) => setEditForm(f => ({ ...f, memberId: e.target.value }))} className="mt-1 bg-white" disabled={saving} />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Group number</Label>
+                  <Input value={editForm.groupNumber} onChange={(e) => setEditForm(f => ({ ...f, groupNumber: e.target.value }))} className="mt-1 bg-white" disabled={saving} />
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold">Insurance card</Label>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <input
+                      id={`ins-card-${profile.id}`}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (file) void uploadInsuranceCard(file);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="bg-white gap-1.5"
+                      disabled={cardUploading || saving}
+                      onClick={() => document.getElementById(`ins-card-${profile.id}`)?.click()}
+                    >
+                      {cardUploading
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…</>
+                        : <><CreditCard className="h-3.5 w-3.5" /> {profile.insurance_card_path ? 'Replace card' : 'Upload card'}</>}
+                    </Button>
+                    {profile.insurance_card_path && (
+                      <span className="text-[11px] text-emerald-700 inline-flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Card on file
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1">A photo of the front is enough. It travels with the draw, so the lab bills correctly.</p>
+                </div>
+              </div>
+
               <div className="flex gap-2 justify-end pt-1">
                 <Button variant="outline" size="sm" onClick={() => setEditing(false)} disabled={saving}>Cancel</Button>
                 <Button size="sm" onClick={saveProfile} disabled={saving} className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
@@ -405,11 +582,19 @@ const PatientDetailDrawer: React.FC<Props> = ({
                           {/* Specimen delivery details */}
                           {(delivered || trackingId) && (
                             <div className="mt-2.5 pt-2.5 border-t border-gray-100 flex items-center gap-3 flex-wrap text-xs text-gray-600">
+                              {/* The practice asked for the receipt, not a vague
+                                  "delivered recently": which lab, which specimen,
+                                  what date and time. */}
                               <span className="inline-flex items-center gap-1 text-emerald-700">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
-                                Delivered {delivered ? formatDistanceToNow(new Date(delivered), { addSuffix: true }) : ''}
+                                {delivered
+                                  ? <>Delivered {format(new Date(delivered), 'MMM d, yyyy')} at {format(new Date(delivered), 'h:mm a')}</>
+                                  : <>Delivered</>}
                                 {labName && <span className="text-gray-500"> to {labName}</span>}
                               </span>
+                              {delivered && (
+                                <span className="text-gray-400">({formatDistanceToNow(new Date(delivered), { addSuffix: true })})</span>
+                              )}
                               {trackingId && (
                                 <button
                                   type="button"
@@ -453,8 +638,7 @@ const PatientDetailDrawer: React.FC<Props> = ({
             </>
           )}
         </div>
-      </SheetContent>
-    </Sheet>
+    </RecordShell>
   );
 };
 

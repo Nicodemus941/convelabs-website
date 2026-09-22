@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -589,8 +590,15 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated, labRe
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          // A patient we hold an id for gets their own page, which can be
+                          // linked, refreshed and shared inside the practice. Imported rows
+                          // with no id still open the drawer on a name match.
+                          if (p.tenant_patient_id) {
+                            navigate(`/dashboard/provider/patients/${p.tenant_patient_id}`);
+                            return;
+                          }
                           setFocusedPatient(p.patient_name);
-                          setFocusedPatientId(p.tenant_patient_id || null);
+                          setFocusedPatientId(null);
                           setDetailOpen(true);
                         }}
                         className="font-medium truncate text-left hover:text-[#B91C1C] hover:underline underline-offset-2 transition"

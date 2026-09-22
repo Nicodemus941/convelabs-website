@@ -21,11 +21,15 @@ const BookAppointment = lazy(() => import('../pages/BookAppointment'));
 // stripped-down PhlebotomistApp screen.
 const PhlebotomistDashboard = lazy(() => import('../components/dashboards/PhlebotomistDashboard'));
 
+// One patient, as a page: the practice clicks a name and lands somewhere real.
+const ProviderPatientRecord = lazy(() => import('../pages/ProviderPatientRecordPage'));
+
 export const routes = [
   <Route key="profile" path="/profile" element={<ProtectedRoute><UserProfile /></ProtectedRoute>} />,
   <Route key="dashboard" path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
   <Route key="dashboard-role" path="/dashboard/:role" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
   <Route key="dashboard-role-admin-tab" path="/dashboard/:role/:adminTab" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
+  <Route key="provider-patient-record" path="/dashboard/provider/patients/:patientId" element={<ProtectedRoute><ProviderPatientRecord /></ProtectedRoute>} />,
   <Route key="my-appointments" path="/my-appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />,
   <Route key="tenant-onboarding" path="/tenant/onboarding" element={<ProtectedRoute><TenantOnboarding /></ProtectedRoute>} />,
   <Route key="tenant-dashboard" path="/tenant/dashboard/:tenantId" element={<ProtectedRoute><TenantDashboard /></ProtectedRoute>} />,
