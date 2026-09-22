@@ -1341,7 +1341,7 @@ const LabRequestsSection: React.FC<{
               </p>
               {resendTarget.provider_payment_status === 'card_on_file' ? (
                 <p className="text-xs font-semibold text-sky-800 bg-sky-50 border border-sky-200 rounded px-2.5 py-1.5">
-                  💳 Your saved card carries over — charged only when the patient books. They won't be asked to pay.
+                  💳 Your saved card carries over — charged when the samples reach the lab. They won't be asked to pay.
                 </p>
               ) : (resendTarget.provider_payment_status === 'completed' || resendTarget.billed_to === 'org') && (
                 <p className="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-2.5 py-1.5">

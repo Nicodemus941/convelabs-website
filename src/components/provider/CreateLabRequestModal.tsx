@@ -783,8 +783,8 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
             {/* Org pays → upfront via Stripe (net-30 invoicing retired 2026-06-15) */}
             {billedTo === 'org' && (
               <div className="mt-2 p-2.5 bg-red-50/40 border border-red-100 rounded-lg space-y-2.5">
-                <p className="text-xs font-semibold text-gray-900">Save a card now — charged only when the patient books</p>
-                <p className="text-[11px] text-gray-600 -mt-1.5">If they never schedule, your card is never charged.</p>
+                <p className="text-xs font-semibold text-gray-900">Save a card now — charged when the samples reach the lab</p>
+                <p className="text-[11px] text-gray-600 -mt-1.5">Nothing is charged until the draw is done and delivered. No visit, no charge.</p>
 
                 {/* After the card is saved: who schedules? */}
                 <div>
@@ -811,7 +811,7 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                   </div>
                 ) : null}
                 <p className="text-[11px] text-gray-600">
-                  You'll save a card on Stripe covering {namedMembers.length + 1} draw{namedMembers.length ? 's' : ''} — charged only when the patient books.
+                  You'll save a card on Stripe covering {namedMembers.length + 1} draw{namedMembers.length ? 's' : ''} — each one charged when those samples are delivered to the lab.
                   {postPaymentAction === 'send_link' ? ' Booking link sends the moment your card is saved.' : ' You schedule once your card is saved.'}
                 </p>
               </div>

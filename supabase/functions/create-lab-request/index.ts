@@ -818,7 +818,7 @@ Deno.serve(async (req) => {
           amount_cents: combinedCents,
           message: useEmbedded
             ? 'Save your card to confirm — it is only charged when the patient books. Patient(s) notified the moment the card is saved.'
-            : 'Redirecting to Stripe to save your card — charged only when the patient books.',
+            : 'Redirecting to Stripe to save your card — charged when the samples reach the lab.',
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } // end pay_now branch
       } catch (stripeErr: any) {
