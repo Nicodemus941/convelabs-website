@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { orgDrawPricing } from '@/lib/orgDrawPricing';
 import AdminErrorBoundary from '@/components/admin/AdminErrorBoundary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -873,6 +874,29 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
           discountNote += ` (incl. $${surchargeTotal.toFixed(2)} ${surchargeItems.join(', ')})`;
         }
       }
+      // An org that covers its patients owes its agreed rate for EVERY draw it
+      // commissions, each family member included. The companion model below is
+      // a SELF-PAY idea -- one primary at full price plus a cheaper companion
+      // -- and running it against a partner rate priced neither patient at what
+      // the practice had agreed: a household of two for Elite Medical came out
+      // at $69.50 and $75.00 instead of $72.25 each. The two summed to the
+      // right total, which is why nobody caught it.
+      //
+      // Free companion slots are a patient perk (founding VIP, Concierge). An
+      // org is invoiced per draw, so they do not apply to it.
+      //
+      // Self-pay is untouched: orgFlatPerDraw is 0 and every line below falls
+      // back to exactly what it did before.
+      const orgFlatPerDraw = orgCoversPatient && orgInvoiceDollars > 0 ? orgInvoiceDollars : 0;
+      // Null on every self-pay booking, and on a waive (handled just above),
+      // so both keep exactly the behaviour they had.
+      const orgPricing = orgFlatPerDraw > 0 && discountType !== 'waive'
+        ? orgDrawPricing(orgFlatPerDraw, surchargeTotal, billableCompanionCount)
+        : null;
+      if (orgPricing) finalPrice = orgPricing.finalPrice;
+      // What the companion ROWS carry, which is what the primary must not also
+      // carry -- send-appointment-invoice bills a line per companion.
+      const companionChargeTotal = orgPricing ? orgPricing.companionChargeTotal : companionFeeApplied;
       const isWaived = finalPrice === 0;
       const invoiceDueAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
       const billingEmail = orgBilling && orgEmail ? orgEmail : patientEmail;
@@ -912,8 +936,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // send-appointment-invoice adds a line item per companion. If we
         // bake the bundle total into primary here, Stripe double-bills.
         // Subtract companion fees so primary line = base + surcharges only.
-        total_amount: Math.max(0, finalPrice - companionFeeApplied),
-        service_price: basePrice,
+        total_amount: Math.max(0, finalPrice - companionChargeTotal),
+        service_price: orgPricing ? orgFlatPerDraw : basePrice,
         surcharge_amount: surchargeTotal,
         duration_minutes: duration,
         booking_source: 'manual',
@@ -1012,7 +1036,9 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             // First N companion slots ride free (founding VIP = 1, Concierge
             // = 2) — those rows carry $0 so send-appointment-invoice's
             // per-companion line items can't double-bill a waived slot.
-            const compAmount = compIdx < freeCompanionSlots ? 0 : companionPrice;
+            const compAmount = orgPricing
+              ? orgPricing.companionAmount
+              : (compIdx < freeCompanionSlots ? 0 : companionPrice);
             compIdx++;
             const compPayload: any = {
               ...appointmentPayload,
