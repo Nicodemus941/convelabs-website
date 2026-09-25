@@ -112,7 +112,9 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
   // (User's "easy selections" ask: stop re-typing names every lab request.)
   const [rosterOpen, setRosterOpen] = useState(false);
   const [rosterQ, setRosterQ] = useState('');
-  const [roster, setRoster] = useState<Array<{ name: string; email: string | null; phone: string | null; visits: number }>>([]);
+  const [roster, setRoster] = useState<Array<{ name: string; email: string | null; phone: string | null; dob: string | null; visits: number }>>([]);
+  // Why the roster came back empty, when it was not simply empty.
+  const [rosterError, setRosterError] = useState<string | null>(null);
   const [rosterLoaded, setRosterLoaded] = useState(false);
 
   const loadRoster = async () => {
@@ -125,19 +127,28 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
         name: r.patient_name,
         email: r.patient_email,
         phone: r.patient_phone,
+        dob: r.patient_dob ?? null,
         visits: Number(r.visit_count) || 0,
       })));
+      setRosterError(null);
       setRosterLoaded(true);
     } catch (e) {
+      // This used to go to the console and leave "No patients on your roster
+      // yet" on screen -- blaming the practice's data for our own failure.
       console.warn('[create-lab-request] roster load failed:', e);
+      setRosterError(e instanceof Error ? e.message : 'unknown error');
       setRosterLoaded(true);
     }
   };
 
-  const pickFromRoster = (p: { name: string; email: string | null; phone: string | null }) => {
+  const pickFromRoster = (p: { name: string; email: string | null; phone: string | null; dob: string | null }) => {
     setPatientName(p.name);
     setPatientEmail(p.email || '');
     setPatientPhone(p.phone ? formatPhoneDisplay(p.phone) : '');
+    // Step one will not advance without this, and it is the one thing the
+    // roster could not supply -- so picking a patient the practice already
+    // had still meant finding and re-typing their date of birth.
+    if (p.dob) setPatientDob(p.dob);
     setRosterOpen(false);
     setRosterQ('');
   };
@@ -450,7 +461,11 @@ const CreateLabRequestModal: React.FC<Props> = ({ open, onClose, orgId, orgName,
                     <div className="p-3 text-center text-xs text-gray-500"><Loader2 className="h-3 w-3 animate-spin inline mr-1" /> Loading roster…</div>
                   ) : filteredRoster.length === 0 ? (
                     <div className="p-3 text-center text-xs text-gray-500">
-                      {roster.length === 0 ? 'No patients on your roster yet. Add some from the dashboard.' : 'No matches.'}
+                      {roster.length > 0
+                        ? 'No matches.'
+                        : rosterError
+                          ? `Could not load your roster (${rosterError}). This is our end, not your records — please tell ConveLabs support.`
+                          : 'No patients on your roster yet. Add some from the dashboard.'}
                     </div>
                   ) : (
                     filteredRoster.slice(0, 50).map(p => (
