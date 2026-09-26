@@ -39,11 +39,11 @@ export const OFFICE_HOURS_KEY = 'office_hours';
 
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const OPEN_DAY: DayHours = { open: '06:00', close: '20:30', closed: false };
+const OPEN_DAY: DayHours = { open: '06:00', close: '20:00', closed: false };
 
 export const DEFAULT_OFFICE_HOURS: OfficeHours = {
   days: [
-    { open: '06:00', close: '20:30', closed: true }, // Sunday — closed today
+    { open: '06:00', close: '20:00', closed: true }, // Sunday — closed today
     { ...OPEN_DAY },
     { ...OPEN_DAY },
     { ...OPEN_DAY },
@@ -51,7 +51,11 @@ export const DEFAULT_OFFICE_HOURS: OfficeHours = {
     { ...OPEN_DAY },
     { ...OPEN_DAY }, // Saturday
   ],
-  slotMinutes: 30,
+  // 15, not 30: the patient booking grid has run on 15-minute increments
+  // since 2026-04-25 at the owner's request, and it is the screen with the
+  // most at stake. The reschedule modals and the recurring builder widen to
+  // match rather than narrowing patient choice to fit them.
+  slotMinutes: 15,
   afterHoursFrom: '17:30',
 };
 

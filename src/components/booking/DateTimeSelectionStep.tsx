@@ -1,5 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { afterHoursSlots, regularSlots } from '@/lib/officeHours';
+import { useOfficeHours } from '@/hooks/useOfficeHours';
 import { format, addDays, subDays } from 'date-fns';
 import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -117,33 +119,31 @@ interface DateTimeSelectionStepProps {
 // Tier becomes a pricing/perks lever, not an access lever. Per-visit price
 // drops as the tier rises — see TIER_VISIT_PRICE_CENTS in tier-gating.ts.
 // Real constraint = phleb's actual calendar (live availability + buffers).
-// 15-min increments per owner request 2026-04-25 — patients can now pick
-// :00, :15, :30, :45 of every hour. Generated programmatically (was 24
-// hand-typed entries at 30-min intervals).
-const STEP_MIN = 15;
-const GRID_START_HOUR = 6;
-const GRID_END_HOUR = 18; // last slot starts at 5:45 PM, ends 6 PM
+// The grid bounds and the 15-minute step used to live here as constants.
+// Settings > Office Hours owns them now; the shipped defaults reproduce this
+// grid, so nothing moves on screen until someone edits the hours.
 function fmt(h: number, m: number): string {
   const period = h >= 12 ? 'PM' : 'AM';
   const hr = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return `${hr}:${String(m).padStart(2, '0')} ${period}`;
 }
-const allDayWindows = (() => {
-  const out: { time: string; label: string }[] = [];
-  for (let h = GRID_START_HOUR; h < GRID_END_HOUR; h++) {
-    for (let m = 0; m < 60; m += STEP_MIN) {
-      const startH = h, startM = m;
-      const endTotalMin = h * 60 + m + 30; // each booking is a 30-min slot
-      const endH = Math.floor(endTotalMin / 60);
-      const endM = endTotalMin % 60;
-      out.push({
-        time: fmt(startH, startM),
-        label: `${fmt(startH, startM).replace(/:00 /, ' ')} – ${fmt(endH, endM).replace(/:00 /, ' ')}`,
-      });
-    }
-  }
-  return out;
-})();
+
+/**
+ * Turn office-hours start times into the {time,label} windows this screen
+ * renders. Each booking is 30 minutes regardless of how far apart the starts
+ * are, which is why the label's end is start+30 and not the next start.
+ */
+function toWindows(times: string[], tidyTopOfHour: boolean): { time: string; label: string }[] {
+  return times.map((t) => {
+    const startMin = timeToMinOfDay(t);
+    const start = fmt(Math.floor(startMin / 60), startMin % 60);
+    const endMin = startMin + 30;
+    const end = fmt(Math.floor(endMin / 60), endMin % 60);
+    return tidyTopOfHour
+      ? { time: start, label: `${start.replace(/:00 /, ' ')} – ${end.replace(/:00 /, ' ')}` }
+      : { time: start, label: `${start} – ${end}` };
+  });
+}
 
 // Helper: parse "9:15 AM" → 24h-minutes-of-day (e.g. 555)
 function timeToMinOfDay(t: string): number {
@@ -156,35 +156,6 @@ function timeToMinOfDay(t: string): number {
   return h * 60 + mm;
 }
 
-// Routine blood draws — non-fasting non-member window (9am-1:30pm).
-// 15-min step compatible (filters by minutes-of-day, not by string).
-const routineWindows = allDayWindows.filter(w => {
-  const min = timeToMinOfDay(w.time);
-  return min >= 9 * 60 && min <= 13 * 60 + 30;  // 9:00 ... 1:30 PM
-});
-
-// Saturday — VIP 6am-11am, Regular 6-9am. Show up to 10:45 start (11am end).
-const weekendWindows = allDayWindows.filter(w => {
-  const min = timeToMinOfDay(w.time);
-  return min >= 6 * 60 && min < 11 * 60;
-});
-
-// After-hours windows (5:30 PM - 8:00 PM at 15-min increments) — only shown
-// when user requests it via the after-hours toggle. 11 slots: 5:30, 5:45,
-// 6:00, 6:15, 6:30, 6:45, 7:00, 7:15, 7:30, 7:45.
-const afterHoursWindows = (() => {
-  const out: { time: string; label: string }[] = [];
-  for (let totalMin = 17 * 60 + 30; totalMin < 20 * 60; totalMin += STEP_MIN) {
-    const h = Math.floor(totalMin / 60);
-    const m = totalMin % 60;
-    const endMin = totalMin + 30;
-    const eh = Math.floor(endMin / 60);
-    const em = endMin % 60;
-    out.push({ time: fmt(h, m), label: `${fmt(h, m)} – ${fmt(eh, em)}` });
-  }
-  return out;
-})();
-
 // Services that use routine hours (9am-1:30pm) — FORCES isFasting=false at the slot level
 const ROUTINE_SERVICES = ['routine-blood-draw'];
 // Services that require fasting — FORCES isFasting=true at the slot level,
@@ -194,6 +165,40 @@ const FASTING_SERVICES = ['fasting-blood-draw'];
 const STAT_SERVICES = ['stat-blood-draw'];
 
 const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, onBack, considerDistance, resetNotice, onClearResetNotice }) => {
+  // Office hours set the outer envelope only. Every narrowing below --
+  // routine-service hours, the weekend cap, the LabCorp/Quest cutoffs, the
+  // no-destination cap, tier gating, holds and capacity -- still applies on
+  // top of it.
+  const { hours: officeHours } = useOfficeHours();
+
+  // Regular, unsurcharged starts. This stops where the surcharge begins, so
+  // 5:30 PM onward is reachable only through the gated after-hours set below
+  // -- previously the grid ran past that line and any patient could take an
+  // evening slot without passing the tier or toggle check.
+  const allDayWindows = useMemo(() => toWindows(regularSlots(officeHours), true), [officeHours]);
+
+  // Surcharged starts, shown only when includeAfterHours is true.
+  const afterHoursWindows = useMemo(() => toWindows(afterHoursSlots(officeHours), false), [officeHours]);
+
+  // Routine blood draws — non-fasting non-member window (9am-1:30pm).
+  // Filters by minutes-of-day, so it holds at any step size.
+  const routineWindows = useMemo(
+    () => allDayWindows.filter(w => {
+      const min = timeToMinOfDay(w.time);
+      return min >= 9 * 60 && min <= 13 * 60 + 30;  // 9:00 ... 1:30 PM
+    }),
+    [allDayWindows],
+  );
+
+  // Saturday — VIP 6am-11am, Regular 6-9am. Show up to 10:45 start (11am end).
+  const weekendWindows = useMemo(
+    () => allDayWindows.filter(w => {
+      const min = timeToMinOfDay(w.time);
+      return min >= 6 * 60 && min < 11 * 60;
+    }),
+    [allDayWindows],
+  );
+
   const methods = useFormContext<BookingFormValues>();
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");

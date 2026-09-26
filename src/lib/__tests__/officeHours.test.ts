@@ -22,7 +22,7 @@ describe('normalizeOfficeHours', () => {
     // close is the end of the BOOKABLE day, not the end of regular hours --
     // otherwise the after-hours slots the reschedule modals show would have
     // nowhere to come from.
-    expect(DEFAULT_OFFICE_HOURS.days[1]).toEqual({ open: '06:00', close: '20:30', closed: false });
+    expect(DEFAULT_OFFICE_HOURS.days[1]).toEqual({ open: '06:00', close: '20:00', closed: false });
   });
 
   it('keeps a saved day and repairs its neighbours', () => {
@@ -40,7 +40,7 @@ describe('normalizeOfficeHours', () => {
       slotMinutes: 7,
     });
     expect(hours.days[0]).toEqual(DEFAULT_OFFICE_HOURS.days[0]);
-    expect(hours.slotMinutes).toBe(30);
+    expect(hours.slotMinutes).toBe(15);
     expect(normalizeOfficeHours({ days: 'nope' }).days).toHaveLength(7);
   });
 
@@ -102,10 +102,11 @@ describe('slotsForDay', () => {
   it('runs from opening to the last start before closing', () => {
     const monday = slotsForDay(DEFAULT_OFFICE_HOURS, 1);
     expect(monday[0]).toBe('6:00 AM');
-    expect(monday[monday.length - 1]).toBe('8:00 PM');
-    // A closing time is when the last visit ends, so 8:30 PM is not offered.
-    expect(monday).not.toContain('8:30 PM');
-    expect(monday).toHaveLength(29);
+    expect(monday[monday.length - 1]).toBe('7:45 PM');
+    // Close is 20:00 and is not itself offered as a start, which is why the
+    // last visit begins at 7:45 -- matching the live booking grid exactly.
+    expect(monday).not.toContain('8:00 PM');
+    expect(monday).toHaveLength(56);
   });
 
   it('offers nothing on a closed day', () => {
@@ -116,7 +117,7 @@ describe('slotsForDay', () => {
     const hourly = normalizeOfficeHours({ ...DEFAULT_OFFICE_HOURS, slotMinutes: 60 });
     expect(slotsForDay(hourly, 1)).toContain('5:00 PM');
     expect(slotsForDay(hourly, 1)).not.toContain('5:30 PM');
-    expect(slotsForDay(hourly, 1)).toHaveLength(15);
+    expect(slotsForDay(hourly, 1)).toHaveLength(14);
   });
 
   // Someone will type a close earlier than the open. Offering no times that day
@@ -147,7 +148,11 @@ describe('allSlots', () => {
         { closed: true },
       ],
     });
-    expect(allSlots(hours)).toEqual(['6:00 AM', '6:30 AM', '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM']);
+    expect(allSlots(hours)).toEqual([
+      '6:00 AM', '6:15 AM', '6:30 AM', '6:45 AM',
+      '9:00 AM', '9:15 AM', '9:30 AM', '9:45 AM',
+      '10:00 AM', '10:15 AM', '10:30 AM', '10:45 AM',
+    ]);
   });
 
   it('sorts across noon rather than alphabetically', () => {
@@ -211,15 +216,15 @@ describe('the after-hours boundary', () => {
   it('keeps surcharged times out of regularSlots', () => {
     const slots = regularSlots(DEFAULT_OFFICE_HOURS);
     expect(slots[0]).toBe('6:00 AM');
-    expect(slots[slots.length - 1]).toBe('5:00 PM');
+    expect(slots[slots.length - 1]).toBe('5:15 PM');
     expect(slots).not.toContain('5:30 PM');
   });
 
   it('moves with the boundary', () => {
     const later = normalizeOfficeHours({ ...DEFAULT_OFFICE_HOURS, afterHoursFrom: '19:00' });
-    expect(regularSlots(later)).toContain('6:30 PM');
+    expect(regularSlots(later)).toContain('6:45 PM');
     expect(regularSlots(later)).not.toContain('7:00 PM');
-    expect(afterHoursSlots(later)).toEqual(['7:00 PM', '7:30 PM', '8:00 PM']);
+    expect(afterHoursSlots(later)).toEqual(['7:00 PM', '7:15 PM', '7:30 PM', '7:45 PM']);
     const earlier = normalizeOfficeHours({ ...DEFAULT_OFFICE_HOURS, afterHoursFrom: '12:00' });
     expect(regularSlots(earlier)).not.toContain('12:00 PM');
     expect(regularSlots(earlier)).toContain('11:30 AM');
@@ -227,19 +232,29 @@ describe('the after-hours boundary', () => {
 });
 
 describe('afterHoursSlots', () => {
-  // These two lists are what RescheduleAppointmentModal had hardcoded. They
-  // must come back out of the model byte-for-byte, or this stops being a
-  // de-duplication and starts being a change to what staff can book.
-  it('reproduces the two lists the reschedule modal had hardcoded', () => {
-    expect(regularSlots(DEFAULT_OFFICE_HOURS)).toEqual([
-      '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-      '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-      '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM',
-      '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM',
-    ]);
+  // This is the live patient booking grid's after-hours set, element for
+  // element: DateTimeSelectionStep built 17:30 to 20:00 at 15 minutes. It is
+  // what patients see and what the Concierge "6am-8pm" promise rests on, so
+  // it has to come back out of the model unchanged.
+  it('reproduces the live booking flow after-hours set exactly', () => {
     expect(afterHoursSlots(DEFAULT_OFFICE_HOURS)).toEqual([
-      '5:30 PM', '6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM',
+      '5:30 PM', '5:45 PM', '6:00 PM', '6:15 PM', '6:30 PM',
+      '6:45 PM', '7:00 PM', '7:15 PM', '7:30 PM', '7:45 PM',
     ]);
+  });
+
+  // The booking grid ran to 5:45 PM while the after-hours list started at
+  // 5:30, so 5:30 and 5:45 sat in both and any patient could take them
+  // without passing the tier/toggle gate. Regular hours now stop where the
+  // surcharge starts, and those two live only in the gated set.
+  it('stops the regular grid where the surcharge begins', () => {
+    const regular = regularSlots(DEFAULT_OFFICE_HOURS);
+    expect(regular[0]).toBe('6:00 AM');
+    expect(regular[regular.length - 1]).toBe('5:15 PM');
+    expect(regular).not.toContain('5:30 PM');
+    expect(regular).not.toContain('5:45 PM');
+    expect(afterHoursSlots(DEFAULT_OFFICE_HOURS)).toContain('5:30 PM');
+    expect(afterHoursSlots(DEFAULT_OFFICE_HOURS)).toContain('5:45 PM');
   });
 
   it('partitions the day with nothing lost or double-counted', () => {
