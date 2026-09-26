@@ -191,6 +191,10 @@ Deno.serve(async (req) => {
       // referrer, landing page for the current booking session. Stamped on
       // the appointment row (via webhook metadata) for CAC attribution.
       attribution = {},
+      // Nicobot conversation that produced this booking, from the ?cid= on
+      // the chat's /book-now button. Carried INSIDE attribution_json below,
+      // not as its own metadata key -- see the 2026-05-04 50-key incident.
+      chatCid = '',
       // Promo code entered at checkout (optional). Server validates via
       // public.validate_promo_code RPC so the client cannot forge discounts.
       promoCode = null,
@@ -1241,6 +1245,10 @@ Deno.serve(async (req) => {
         t: String(attribution?.utm_term || '').substring(0, 100),
         r: String(attribution?.referrer_url || '').substring(0, 200),
         l: String(attribution?.landing_page || '').substring(0, 200),
+        // Chat conversation id. A uuid is 36 chars; anything else is junk
+        // from a hand-edited link and is dropped rather than stored.
+        cid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+          .test(String(chatCid || '')) ? String(chatCid) : '',
       }).substring(0, 500),
       // Prefill-token attribution (1 metadata key — well within cap)
       prefill_token_id: prefillTokenId ? String(prefillTokenId).substring(0, 64) : '',

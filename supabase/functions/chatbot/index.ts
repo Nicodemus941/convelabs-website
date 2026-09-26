@@ -212,6 +212,70 @@ function isSafeActionUrl(url: string): boolean {
 }
 
 // ═══════ SUGGESTED-ACTIONS + ESCALATION PARSER ═══════════════════════
+/**
+ * Stamp the conversation id on booking links so a booking can be traced back
+ * to the chat that produced it. Without this, chatbot_conversations.booked_at
+ * has no possible writer, which is why it has read zero since April 2026.
+ *
+ * Only our own relative paths are touched -- never sms:, mailto:, or an
+ * absolute URL, which would leak the id off-site.
+ */
+function tagBookingUrl(url: string, conversationId: string): string {
+  if (!url.startsWith('/')) return url;
+  if (!/^\/(book-now|book)\b/.test(url)) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'cid=' + conversationId;
+}
+
+/**
+ * What the visitor has told us, read from their own messages.
+ *
+ * The qualification columns (captured_zip, has_lab_order, timing) were only
+ * ever filled by the widget's "leave your info" card, which patients do not
+ * use -- they type it into the chat instead. Maria gave her zip, her name and
+ * her lab-order status in plain sentences and every one of those columns
+ * stayed null. This reads the conversation the way a person would.
+ *
+ * Deliberately conservative: a miss leaves a column null, which is the status
+ * quo. A false positive writes a wrong zip onto a lead, so patterns only
+ * match when the visitor is clearly answering.
+ */
+function readVisitorSignals(text: string): {
+  zip?: string; email?: string; phone?: string;
+  timing?: string; hasLabOrder?: boolean;
+} {
+  const out: { zip?: string; email?: string; phone?: string; timing?: string; hasLabOrder?: boolean } = {};
+  const t = text.toLowerCase();
+
+  // Florida zips are 32xxx-34xxx. Requiring the 3 avoids swallowing a year,
+  // a quantity, or the back half of a phone number.
+  const zip = text.match(/\b(3[234]\d{3})\b/);
+  if (zip) out.zip = zip[1];
+
+  const email = text.match(/[\w.+-]+@[\w-]+\.[\w.]{2,}/);
+  if (email) out.email = email[0];
+
+  // 10 digits, however the visitor spaced or punctuated them.
+  const digits = text.replace(/[^\d]/g, '');
+  if (/(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/.test(text) && digits.length >= 10 && digits.length <= 11) {
+    out.phone = text.match(/(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/)![1];
+  }
+
+  if (/\b(today|tomorrow|asap|this week|right away|as soon as)\b/.test(t)) out.timing = 'this_week';
+  else if (/\b(next week|next month|couple weeks)\b/.test(t)) out.timing = 'later';
+  else if (/\b(just (research|look)|researching|browsing|not sure yet)\b/.test(t)) out.timing = 'researching';
+
+  // "yes" alone is ambiguous without knowing the question, so only count an
+  // explicit statement about the order itself.
+  if (/\b(i (have|got)|already have|have a|has)\b[^.?!]{0,30}\b(lab )?(order|req|requisition|script)\b/.test(t)
+      || /\b(order|requisition) (is )?(ready|in hand|uploaded)\b/.test(t)) {
+    out.hasLabOrder = true;
+  } else if (/\b(no|don.?t|do not|need)\b[^.?!]{0,30}\b(lab )?(order|req|requisition)\b/.test(t)) {
+    out.hasLabOrder = false;
+  }
+
+  return out;
+}
+
 function parseActionsAndEscalation(rawText: string): {
   reply: string;
   actions: Array<{ label: string; url: string }>;
@@ -660,6 +724,50 @@ Deno.serve(async (req) => {
       } catch (e) { console.warn('[chatbot] contact capture failed:', e); }
     }
 
+    // ── READ QUALIFICATION SIGNALS FROM THE MESSAGE ──────────────
+    // Runs every turn. Only fills columns that are still null, so the first
+    // thing a visitor says wins and a later stray number cannot overwrite a
+    // confirmed zip. qualified_at is stamped once the three things the
+    // prompt asks for are known, whether they were typed or carded.
+    try {
+      const sig = readVisitorSignals(userMessage);
+      if (sig.zip || sig.email || sig.phone || sig.timing || sig.hasLabOrder !== undefined) {
+        const { data: cur } = await supabase
+          .from('chatbot_conversations')
+          .select('captured_zip, captured_email, captured_phone, timing, has_lab_order, qualified_at, captured_contact_at')
+          .eq('id', conversationId)
+          .maybeSingle();
+
+        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (sig.zip && !cur?.captured_zip) patch.captured_zip = sig.zip;
+        if (sig.email && !cur?.captured_email) patch.captured_email = sig.email;
+        if (sig.phone && !cur?.captured_phone) patch.captured_phone = sig.phone;
+        if (sig.timing && !cur?.timing) patch.timing = sig.timing;
+        if (sig.hasLabOrder !== undefined && cur?.has_lab_order === null) patch.has_lab_order = sig.hasLabOrder;
+
+        // Contact volunteered in conversation counts as contact captured --
+        // this column only ever tracked the card before, which is why it
+        // read zero across every conversation on record.
+        if ((patch.captured_email || patch.captured_phone) && !cur?.captured_contact_at) {
+          patch.captured_contact_at = new Date().toISOString();
+        }
+
+        const zipKnown = patch.captured_zip || cur?.captured_zip;
+        const timingKnown = patch.timing || cur?.timing;
+        const orderKnown = patch.has_lab_order !== undefined || cur?.has_lab_order !== null;
+        if (zipKnown && timingKnown && orderKnown && !cur?.qualified_at) {
+          patch.qualified_at = new Date().toISOString();
+        }
+
+        if (Object.keys(patch).length > 1) {
+          await supabase.from('chatbot_conversations').update(patch).eq('id', conversationId);
+        }
+      }
+    } catch (e) {
+      // Analytics must never cost the visitor a reply.
+      console.warn('[chatbot] signal capture failed:', e);
+    }
+
     // ── BUILD LIVE CONTEXT + CALL CLAUDE ─────────────────────────
     const liveContext = await buildLiveContext(supabase);
     const claudeMessages = [...history, { role: 'user', content: userMessage }];
@@ -701,12 +809,18 @@ Deno.serve(async (req) => {
     const escalate = parsed.escalate || !!kwReason;
     const escalationReason = parsed.escalationReason || kwReason;
 
+    // Trace any booking button back to this conversation.
+    const taggedActions = parsed.actions.map(a => ({
+      ...a,
+      url: tagBookingUrl(a.url, conversationId),
+    }));
+
     // ── LOG ASSISTANT MESSAGE + UPDATE COUNTERS ──────────────────
     await supabase.from('chatbot_messages').insert({
       conversation_id: conversationId,
       role: 'assistant',
       content: parsed.reply,
-      suggested_actions: parsed.actions,
+      suggested_actions: taggedActions,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
       escalation_triggered: escalate,
@@ -744,7 +858,7 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       conversationId,
       reply: parsed.reply,
-      suggestedActions: parsed.actions,
+      suggestedActions: taggedActions,
       escalated: escalate,
       guardrailTriggered,
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

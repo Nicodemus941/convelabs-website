@@ -1,5 +1,6 @@
 import { supabase, getAuthToken } from '@/integrations/supabase/client';
 import { attributionForBooking } from '@/lib/attribution';
+import { chatConversationId } from '@/lib/chatAttribution';
 
 export interface AppointmentCheckoutParams {
   serviceType: string;
@@ -102,6 +103,9 @@ export async function createAppointmentCheckoutSession(
     // sessionStorage so every Stripe checkout + downstream appointment row
     // is stamped with the acquisition channel. Drives CAC-per-channel report.
     const attribution = attributionForBooking();
+    // Which Nicobot conversation sent them here, if any. Rides inside
+    // attribution_json server-side so it costs no Stripe metadata key.
+    const chatCid = chatConversationId();
 
     // Cloudflare Turnstile token — the CheckoutStep widget writes it here on
     // solve (single-use). Sent to the edge fn's bot gate; cleared after the
@@ -164,6 +168,7 @@ export async function createAppointmentCheckoutSession(
           ...params,
           userId,
           attribution,
+          chatCid,
           captchaToken,
         }),
         signal: controller.signal,

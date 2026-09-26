@@ -3,12 +3,22 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AppRoutes from './AppRoutes.tsx';
 import { initPostHog } from './lib/posthog';
+import { captureAttribution } from './lib/attribution';
+import { captureChatConversationId } from './lib/chatAttribution';
 import { initNativeApp } from './native/initNativeApp';
 import './index.css';
 
 // Initialize PostHog as early as possible so page-view events fire on first
 // render. No-op if VITE_POSTHOG_KEY isn't set (dev builds without the key).
 initPostHog();
+
+// Attribution capture. captureAttribution has existed since the Part H work
+// but was never called from anywhere, so cv_attribution_session was never
+// written and every booking reached Stripe with an empty attribution_json --
+// the UTM/referrer half of CAC-per-channel has been blank the whole time.
+// captureChatConversationId does the same job for Nicobot's ?cid= links.
+captureAttribution();
+captureChatConversationId();
 
 // Create a client
 const queryClient = new QueryClient({

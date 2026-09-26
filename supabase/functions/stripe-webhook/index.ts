@@ -2328,6 +2328,38 @@ async function handleAppointmentPayment(session: any) {
       console.warn(`[insurance-persist] non-fatal error: ${insErr?.message || insErr}`);
     }
 
+    // ─── NICOBOT ATTRIBUTION: the conversation that produced this
+    // booking. chatbot_conversations.booked_at had no writer at all, so the
+    // chat funnel read zero regardless of how well the chat performed, and
+    // the admin Chatbot tab's "qualified" filter could never match a row.
+    // Stamped here rather than when the patient reaches checkout, so an
+    // abandoned cart is never counted as a booking.
+    //
+    // booked_at only -- deliberately NOT status. status is the lifecycle
+    // field (active/closed/escalated) and a conversation that escalated to
+    // Nico and THEN booked must not lose its escalated state to a tidier
+    // looking label.
+    //
+    // Never allowed to fail the webhook: a missed analytics stamp is a
+    // reporting gap; a throw here would cost an appointment.
+    try {
+      let chatCid = '';
+      if (metadata.attribution_json) {
+        try { chatCid = JSON.parse(metadata.attribution_json)?.cid || ''; } catch { /* not fatal */ }
+      }
+      if (chatCid) {
+        const { error: cidErr } = await supabaseClient
+          .from('chatbot_conversations')
+          .update({ booked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+          .eq('id', chatCid)
+          .is('booked_at', null);  // first booking from a conversation wins
+        if (cidErr) console.warn('[stripe-webhook] chat booked_at failed:', cidErr.message);
+        else console.log(`[stripe-webhook] chat conversation ${chatCid} booked`);
+      }
+    } catch (e) {
+      console.warn('[stripe-webhook] chat attribution threw:', e);
+    }
+
     // ─── PREFILL TOKEN: mark consumed + auto-attach lab order to the
     // new appointment so the phleb card shows the provider's PDF without
     // admin touching anything. The prefill token carries the lab_order_path
