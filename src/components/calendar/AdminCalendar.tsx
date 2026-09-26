@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import { blockedDays } from '@/lib/blockedDays';
+import { gridRange, regularSlots, toBusinessHours } from '@/lib/officeHours';
+import { useOfficeHours } from '@/hooks/useOfficeHours';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
@@ -30,6 +32,15 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const AdminCalendar: React.FC = () => {
+  // One editable source for the shaded window, the grid span and the time
+  // pickers below -- see Settings > Office Hours. Falls back to the hours that
+  // were hardcoded here, so nothing moves until someone changes them.
+  const { hours: officeHours } = useOfficeHours();
+  const { slotMinTime, slotMaxTime } = gridRange(officeHours);
+  // regularSlots, not allSlots: createRecurring bills a flat
+  // prices[serviceType] with no after-hours surcharge, so offering a
+  // surcharged start here would under-bill every occurrence in the series.
+  const officeTimeOptions = regularSlots(officeHours);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
@@ -767,16 +778,12 @@ const AdminCalendar: React.FC = () => {
               moreLinkText={(n) => `+${n} more`}
               nowIndicator={true}
               eventDisplay="block"
-              slotMinTime="06:00:00"
-              slotMaxTime="21:00:00"
+              slotMinTime={slotMinTime}
+              slotMaxTime={slotMaxTime}
               slotDuration="00:30:00"
               allDaySlot={false}
               weekends={true}
-              businessHours={{
-                daysOfWeek: [1, 2, 3, 4, 5, 6],
-                startTime: '06:00',
-                endTime: '18:00',
-              }}
+              businessHours={toBusinessHours(officeHours)}
               eventDidMount={(info) => {
                 const appt = info.event.extendedProps.appointment;
                 if (appt && !info.event.extendedProps.isBlock) {
@@ -1104,7 +1111,7 @@ const AdminCalendar: React.FC = () => {
                 <Select value={recurringForm.time} onValueChange={v => setRecurringForm(p => ({ ...p, time: v }))}>
                   <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                   <SelectContent>
-                    {['6:00 AM','7:00 AM','8:00 AM','9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM'].map(t =>
+                    {officeTimeOptions.map(t =>
                       <SelectItem key={t} value={t}>{t}</SelectItem>
                     )}
                   </SelectContent>

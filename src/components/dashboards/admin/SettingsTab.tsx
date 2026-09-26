@@ -12,9 +12,18 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, Save, Check } from 'lucide-react';
+import { Loader2, Save, Check, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import {
+  DAY_NAMES,
+  DEFAULT_OFFICE_HOURS,
+  OFFICE_HOURS_KEY,
+  normalizeOfficeHours,
+  slotsForDay,
+  type DayHours,
+  type OfficeHours,
+} from '@/lib/officeHours';
 
 interface PlatformSettings {
   companyName: string;
@@ -41,11 +50,14 @@ const DEFAULT_PLATFORM: PlatformSettings = {
 };
 
 const SettingsTab: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'general' | 'notifications' | 'integrations'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'hours' | 'notifications' | 'integrations'>('general');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [platform, setPlatform] = useState<PlatformSettings>(DEFAULT_PLATFORM);
+  const [officeHours, setOfficeHours] = useState<OfficeHours>(DEFAULT_OFFICE_HOURS);
+  const [savingHours, setSavingHours] = useState(false);
+  const [hoursSavedAt, setHoursSavedAt] = useState<number | null>(null);
   const [notifications, setNotifications] = useState({
     emailAppointmentConfirmation: true,
     emailAppointmentReminder: true,
@@ -63,7 +75,7 @@ const SettingsTab: React.FC = () => {
         const { data, error } = await supabase
           .from('system_settings' as any)
           .select('key, value')
-          .in('key', ['platform', 'notifications']);
+          .in('key', ['platform', 'notifications', OFFICE_HOURS_KEY]);
         if (cancelled) return;
         if (error) {
           console.error('[settings] load failed:', error);
@@ -74,6 +86,8 @@ const SettingsTab: React.FC = () => {
               setPlatform({ ...DEFAULT_PLATFORM, ...(row.value as PlatformSettings) });
             } else if (row.key === 'notifications' && row.value) {
               setNotifications({ ...notifications, ...(row.value as any) });
+            } else if (row.key === OFFICE_HOURS_KEY && row.value) {
+              setOfficeHours(normalizeOfficeHours(row.value));
             }
           }
         }
@@ -119,6 +133,41 @@ const SettingsTab: React.FC = () => {
     }
   }
 
+  function setDay(index: number, patch: Partial<DayHours>) {
+    setOfficeHours(h => ({
+      ...h,
+      days: h.days.map((d, i) => (i === index ? { ...d, ...patch } : d)),
+    }));
+  }
+
+  async function saveOfficeHours() {
+    if (savingHours) return;
+    setSavingHours(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('system_settings' as any)
+        .upsert({
+          key: OFFICE_HOURS_KEY,
+          value: officeHours as any,
+          updated_at: new Date().toISOString(),
+          updated_by: user?.id || null,
+        }, { onConflict: 'key' });
+      if (error) {
+        console.error('[settings] office hours save failed:', error);
+        toast.error(`Save failed - ${error.code || 'error'}: ${error.message}`, { duration: 8000 });
+        return;
+      }
+      setHoursSavedAt(Date.now());
+      toast.success('Office hours saved');
+    } catch (e: any) {
+      console.error('[settings] office hours save crashed:', e);
+      toast.error(e?.message || 'Save crashed');
+    } finally {
+      setSavingHours(false);
+    }
+  }
+
   async function saveNotifications(updated: typeof notifications) {
     setNotifications(updated);
     try {
@@ -136,6 +185,9 @@ const SettingsTab: React.FC = () => {
       toast.error(e?.message || 'Save failed');
     }
   }
+
+  const firstOpenDay = officeHours.days.findIndex(d => !d.closed);
+  const openStartTimes = firstOpenDay === -1 ? 0 : slotsForDay(officeHours, firstOpenDay).length;
 
   if (loading) {
     return (
@@ -159,6 +211,7 @@ const SettingsTab: React.FC = () => {
           {/* Mobile: horizontal-scroll tabs */}
           <TabsList className="mb-6 w-full overflow-x-auto flex-nowrap whitespace-nowrap -mx-1 px-1 justify-start">
             <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="hours">Office Hours</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="integrations">Integrations</TabsTrigger>
           </TabsList>
@@ -255,6 +308,111 @@ const SettingsTab: React.FC = () => {
                 </button>
               </div>
             </form>
+          </TabsContent>
+
+          <TabsContent value="hours">
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500 mb-4 flex items-start gap-2">
+                <Clock className="h-4 w-4 flex-shrink-0 mt-0.5 text-gray-400" />
+                <span>
+                  One set of hours, used everywhere: the shaded window on the admin calendar, and the
+                  times offered when staff or patients book and reschedule. Closing time is when the
+                  last visit ends, so it is never offered as a start time.
+                </span>
+              </p>
+
+              {officeHours.days.map((day, i) => {
+                const noTimes = !day.closed && slotsForDay(officeHours, i).length === 0;
+                return (
+                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 border-b last:border-0">
+                    <div className="w-full sm:w-40 flex items-center gap-3">
+                      <Switch
+                        checked={!day.closed}
+                        onCheckedChange={isOpen => setDay(i, { closed: !isOpen })}
+                      />
+                      <span className={`text-sm font-medium ${day.closed ? 'text-gray-400' : ''}`}>
+                        {DAY_NAMES[i]}
+                      </span>
+                    </div>
+
+                    {day.closed ? (
+                      <span className="text-xs text-gray-400">Closed</span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="time"
+                          value={day.open}
+                          onChange={e => setDay(i, { open: e.target.value })}
+                          className="border rounded-lg px-3 py-2 text-sm min-h-[44px]"
+                          aria-label={`${DAY_NAMES[i]} opening time`}
+                        />
+                        <span className="text-xs text-gray-500">to</span>
+                        <input
+                          type="time"
+                          value={day.close}
+                          onChange={e => setDay(i, { close: e.target.value })}
+                          className="border rounded-lg px-3 py-2 text-sm min-h-[44px]"
+                          aria-label={`${DAY_NAMES[i]} closing time`}
+                        />
+                      </div>
+                    )}
+
+                    {noTimes && (
+                      <span className="text-xs text-amber-700 w-full sm:w-auto">
+                        Closing is not after opening, so no times will be offered on {DAY_NAMES[i]}.
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="pt-5">
+                <label className="block text-sm font-medium mb-1.5">Appointment times every</label>
+                <select
+                  value={officeHours.slotMinutes}
+                  onChange={e => setOfficeHours(h => ({ ...h, slotMinutes: Number(e.target.value) }))}
+                  className="border rounded-lg px-3 py-2 text-sm min-h-[44px] w-full sm:w-56"
+                >
+                  <option value={15}>15 minutes</option>
+                  <option value={20}>20 minutes</option>
+                  <option value={30}>30 minutes</option>
+                  <option value={60}>1 hour</option>
+                </select>
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  An open day gives each patient a choice of {openStartTimes} start times at this spacing.
+                </p>
+              </div>
+
+              <div className="pt-5">
+                <label className="block text-sm font-medium mb-1.5">After-hours surcharge starts at</label>
+                <input
+                  type="time"
+                  value={officeHours.afterHoursFrom}
+                  onChange={e => setOfficeHours(h => ({ ...h, afterHoursFrom: e.target.value || h.afterHoursFrom }))}
+                  className="border rounded-lg px-3 py-2 text-sm min-h-[44px] w-full sm:w-56"
+                />
+                <p className="text-[11px] text-gray-500 mt-1.5">
+                  Draws starting at or after this time carry the after-hours fee. Screens that cannot
+                  add that fee, such as the recurring-series builder, stop offering times here.
+                </p>
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-5">
+                {hoursSavedAt && Date.now() - hoursSavedAt < 4000 && (
+                  <span className="text-xs text-emerald-700 inline-flex items-center justify-center gap-1.5">
+                    <Check className="h-3.5 w-3.5" /> Saved
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={saveOfficeHours}
+                  disabled={savingHours}
+                  className="w-full sm:w-auto bg-conve-red hover:bg-[#991B1B] disabled:bg-gray-300 text-white font-semibold rounded-lg px-6 py-3 min-h-[48px] transition flex items-center justify-center gap-2"
+                >
+                  {savingHours ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</> : <><Save className="h-4 w-4" /> Save office hours</>}
+                </button>
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="notifications">
