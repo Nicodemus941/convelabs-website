@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
+import { blockedDays } from '@/lib/blockedDays';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
@@ -481,22 +482,34 @@ const AdminCalendar: React.FC = () => {
     const title = `🚫 BLOCKED${reasonLine}${timeLine}`;
 
     if (isPartial) {
-      // Timed band — appears in the time grid only over the blocked hours.
-      // No allDay strip on the date header.
-      const startDt = `${block.start_date}T${start24}`;
-      const endDt = `${block.end_date || block.start_date}T${end24}`;
-      return [{
-        id: `block-${block.id}`,
+      // ONE BAND PER DAY. A time window on a multi-day block means "these
+      // hours, on each of those days" — not one unbroken stretch from the
+      // first morning to the last.
+      //
+      // Built as a single event it ran start_date T07:00 → end_date T08:45,
+      // which FullCalendar draws as a continuous band covering every hour in
+      // between: a Mon–Fri 7:00–8:45 block painted the whole working week
+      // solid red, and the recurring "transport mom" blocks did it every week.
+      // (The 5/19 fix above separated timed from all-day, but both branches
+      // still assumed a block lived on one date.)
+      //
+      // Dates are walked at NOON LOCAL for the same reason the appointment
+      // list does it: parsing 'YYYY-MM-DD' alone lands on UTC midnight, which
+      // is the previous day for a US-East user.
+      const days = blockedDays(block.start_date, block.end_date);
+
+      return days.map(day => ({
+        id: `block-${block.id}-${day}`,
         title,
-        start: startDt,
-        end: endDt,
+        start: `${day}T${start24}`,
+        end: `${day}T${end24}`,
         allDay: false,
         backgroundColor: '#fecaca',
         borderColor: '#ef4444',
         textColor: '#7f1d1d',
         classNames: ['fc-blocked-date'],
         extendedProps: { isBlock: true, reason: block.reason, partial: true, start_time: block.start_time, end_time: block.end_time },
-      }];
+      }));
     }
 
     // Full-day block — covers the whole date as a background event + a
