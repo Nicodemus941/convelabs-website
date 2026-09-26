@@ -158,172 +158,179 @@ const PatientDashboard = () => {
   const isNewPatient = stats.completed === 0 && stats.upcoming === 0;
 
   return (
-    <div className="max-w-5xl mx-auto px-3 sm:px-4 md:px-6 pb-24 md:pb-8">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 md:px-6 pb-24 md:pb-8">
 
       {/* P5 — Member savings trophy. Only renders for active members with
-          at least one paid visit; silent for non-members + first-time members.
-          Placed above the hero action so loyalty lands before the next CTA. */}
+          at least one paid visit; silent for non-members + first-time members. */}
       <MemberSavingsBanner />
 
-      {/* ===== HERO ACTION CARD — The #1 thing the patient should do ===== */}
+      {/* ===== THE ANSWER THEY OPENED THIS FOR =====
+          One ink card, four states. Gradients were doing the emotional work
+          before; the type does it now, so the state reads from the words and
+          the one accent dot rather than from a colour wash. */}
       {isOverdue && !hasUpcoming ? (
-        // OVERDUE: Urgent rebooking
-        <div className="bg-gradient-to-r from-red-600 to-[#B91C1C] text-white rounded-2xl p-5 sm:p-6 mb-6 shadow-lg">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <AlertTriangle className="h-5 w-5" />
-                <span className="text-sm font-medium opacity-90">Health Reminder</span>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold">It's been {stats.daysSince} days since your last blood work</h2>
-              <p className="text-sm opacity-80 mt-1">Most doctors recommend testing every 90 days. Stay ahead of your health.</p>
-            </div>
-            <Button size="lg" className="bg-white text-[#B91C1C] hover:bg-gray-100 font-bold rounded-xl shadow-md flex-shrink-0" asChild>
-              <Link to="/book-now">Book Now <ArrowRight className="ml-2 h-5 w-5" /></Link>
-            </Button>
+        // OVERDUE — their own rhythm, not an arbitrary threshold.
+        <section className="bg-[#1A1416] text-[#FBF9F6] rounded-2xl p-6 sm:p-9 mb-5">
+          <p className="flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#C9BFB4] mb-4">
+            <span className="h-[7px] w-[7px] rounded-full bg-[#E8705F]" /> Time for your next draw
+          </p>
+          <h2 className="font-playfair text-3xl sm:text-5xl font-semibold tracking-tight leading-[1.04]">
+            {stats.daysSince} days since your last draw
+          </h2>
+          <p className="text-base sm:text-xl text-[#E4DCD2] mt-3">
+            {stats.avgFrequency > 0
+              ? `You usually go about ${stats.avgFrequency} days.`
+              : 'Most doctors recommend testing every 90 days.'}
+          </p>
+          <div className="flex flex-wrap gap-3 mt-7">
+            <Link to="/book-now" className="bg-[#FBF9F6] text-[#1A1416] text-[15px] font-semibold px-6 py-3.5 rounded-full hover:bg-white">
+              Book a draw
+            </Link>
+            <button type="button" onClick={() => setMembershipModalOpen(true)}
+              className="border border-[#4A423E] text-[#FBF9F6] text-[15px] font-semibold px-6 py-3.5 rounded-full hover:bg-white/10">
+              {stats.totalSpent > 0 ? `Save $${Math.round(stats.totalSpent * 0.13)} a year` : 'Compare plans'}
+            </button>
           </div>
-        </div>
+        </section>
       ) : hasUpcoming ? (
-        // UPCOMING — approved web design: crimson gradient hero + prep chips.
-        // (Readiness stays dynamic per the Valli/Ritenour trust fix 2026-05-17:
-        // once the lab order is uploaded the chip confirms it, else it nudges.)
-        <div className="relative overflow-hidden text-white rounded-2xl p-5 sm:p-7 mb-6 shadow-lg"
-          style={{ background: 'linear-gradient(135deg, #D23B2E 0%, #B91C1C 45%, #7F1010 100%)' }}>
-          <div className="absolute -right-14 -top-16 w-56 h-56 rounded-full bg-white/[0.07] pointer-events-none" />
-          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/70 mb-2">Your Next Visit</p>
-              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight flex items-baseline gap-3 flex-wrap">
+        // UPCOMING — the date is the headline, prep is secondary.
+        // Readiness stays dynamic per the Valli/Ritenour trust fix 2026-05-17:
+        // once the lab order is uploaded the chip confirms it, else it nudges.
+        <section className="bg-[#1A1416] text-[#FBF9F6] rounded-2xl p-6 sm:p-9 mb-5">
+          <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-7">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#C9BFB4] mb-4">
+                <span className="h-[7px] w-[7px] rounded-full bg-[#E8705F]" /> Your next draw
+              </p>
+              <h2 className="font-playfair text-3xl sm:text-5xl font-semibold tracking-tight leading-[1.04]">
                 {stats.nextDate}
-                <span className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-200">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" style={{ boxShadow: '0 0 0 4px rgba(52,211,153,.25)' }} />
-                  Confirmed
-                </span>
               </h2>
-              {stats.nextTime && <p className="text-lg text-white/85 mt-1">{stats.nextTime}</p>}
-              {/* Prep chips — status grammar: white = confirmed, amber = still needed */}
-              <div className="flex flex-wrap gap-2 mt-4">
+              {stats.nextTime && (
+                <p className="text-base sm:text-xl text-[#E4DCD2] mt-3">{stats.nextTime} · at your address</p>
+              )}
+
+              {/* Prep chips — status grammar: bone = confirmed, amber = still needed */}
+              <div className="flex flex-wrap gap-2 mt-6">
                 {(stats as any).nextHasLabOrder ? (
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-white/95 text-[#7F1010] rounded-full px-3 py-1.5">
-                    ✓ Lab order on file
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-[#FBF9F6] text-[#1A1416] rounded-full px-3 py-1.5">
+                    <Check className="h-3 w-3" /> Lab order on file
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-[#FFE9C7] text-[#8A5406] rounded-full px-3 py-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-[#FFE9C7] text-[#7A4A05] rounded-full px-3 py-1.5">
                     Lab order needed
                   </span>
                 )}
-                <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-white/95 text-[#7F1010] rounded-full px-3 py-1.5">
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wide bg-[#FBF9F6] text-[#1A1416] rounded-full px-3 py-1.5">
                   Bring insurance card
                 </span>
               </div>
-              <p className="text-xs text-white/75 mt-3">
+
+              <p className="text-[13px] text-[#C9BFB4] mt-4 max-w-md leading-relaxed">
                 Your lab (Quest, LabCorp, AdventHealth) bills your insurance directly — not us.
               </p>
-              <span className="inline-flex items-center gap-2 mt-3 text-xs font-semibold rounded-lg border border-white/30 bg-white/10 px-3 py-1.5">
-                <Shield className="h-3.5 w-3.5" /> On-time, or this visit is on us.
+              <span className="inline-flex items-center gap-2 mt-3 text-[13px] font-semibold rounded-full border border-[#4A423E] px-4 py-2">
+                <Shield className="h-3.5 w-3.5" /> On time, or this visit is on us.
               </span>
             </div>
-            <div className="flex gap-2 flex-shrink-0">
+
+            <div className="flex flex-wrap gap-3 lg:flex-col lg:w-56 lg:flex-shrink-0">
               {(stats as any).nextToken && (
-                <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 rounded-xl" asChild>
-                  <Link to={`/appt/${(stats as any).nextToken}/confirm`}>Reschedule</Link>
-                </Button>
+                <Link to={`/appt/${(stats as any).nextToken}/confirm`}
+                  className="text-center bg-[#FBF9F6] text-[#1A1416] text-[15px] font-semibold px-6 py-3.5 rounded-full hover:bg-white">
+                  Reschedule
+                </Link>
               )}
-              <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 rounded-xl" asChild>
-                <Link to="/profile">My Profile</Link>
-              </Button>
-              <Button className="bg-white text-[#B91C1C] hover:bg-red-50 font-semibold rounded-xl" asChild>
-                <Link to="/book-now">Book Another</Link>
-              </Button>
+              <Link to="/book-now"
+                className="text-center border border-[#4A423E] text-[#FBF9F6] text-[15px] font-semibold px-6 py-3.5 rounded-full hover:bg-white/10">
+                Book another
+              </Link>
+              <Link to="/profile"
+                className="text-center text-[#C9BFB4] text-[15px] font-medium px-6 py-2 hover:text-[#FBF9F6]">
+                My profile
+              </Link>
             </div>
           </div>
-        </div>
+        </section>
       ) : isNewPatient ? (
-        // NEW PATIENT: Welcome + first booking
-        <div className="bg-gradient-to-r from-[#B91C1C] to-[#991B1B] text-white rounded-2xl p-5 sm:p-6 mb-6 shadow-lg">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold">Welcome to ConveLabs, {user?.firstName || 'there'}!</h2>
-              <p className="text-sm opacity-90 mt-1">Book your first visit — a licensed phlebotomist at your door in 60 minutes.</p>
-              <p className="text-xs opacity-70 mt-2">🛡️ On-time guarantee — or your visit is free.</p>
-            </div>
-            <Button size="lg" className="bg-white text-[#B91C1C] hover:bg-gray-100 font-bold rounded-xl shadow-md flex-shrink-0" asChild>
-              <Link to="/book-now">Book Your First Visit <ArrowRight className="ml-2 h-5 w-5" /></Link>
-            </Button>
+        // NEW PATIENT — one thing to do.
+        <section className="bg-[#1A1416] text-[#FBF9F6] rounded-2xl p-6 sm:p-9 mb-5">
+          <p className="flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#C9BFB4] mb-4">
+            <span className="h-[7px] w-[7px] rounded-full bg-[#E8705F]" /> Welcome
+          </p>
+          <h2 className="font-playfair text-3xl sm:text-5xl font-semibold tracking-tight leading-[1.04]">
+            Let&rsquo;s get your first draw booked, {user?.firstName || 'there'}
+          </h2>
+          <p className="text-base sm:text-xl text-[#E4DCD2] mt-3">
+            A licensed phlebotomist at your door, in about an hour.
+          </p>
+          <div className="flex flex-wrap items-center gap-3 mt-7">
+            <Link to="/book-now" className="bg-[#FBF9F6] text-[#1A1416] text-[15px] font-semibold px-6 py-3.5 rounded-full hover:bg-white">
+              Book your first visit
+            </Link>
+            <span className="inline-flex items-center gap-2 text-[13px] font-semibold rounded-full border border-[#4A423E] px-4 py-2">
+              <Shield className="h-3.5 w-3.5" /> On time, or it&rsquo;s free.
+            </span>
           </div>
-        </div>
+        </section>
       ) : (
-        // DEFAULT: Healthy patient
-        <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-2xl p-5 sm:p-6 mb-6 shadow-lg">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <Activity className="h-5 w-5" />
-                <span className="text-sm font-medium opacity-90">You're on track</span>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold">Last tested {stats.daysSince} days ago</h2>
-              {stats.avgFrequency > 0 && <p className="text-sm opacity-80 mt-1">You test every ~{stats.avgFrequency} days on average. Keep it up!</p>}
-            </div>
-            <Button size="lg" className="bg-white text-emerald-700 hover:bg-gray-100 font-bold rounded-xl shadow-md flex-shrink-0" asChild>
-              <Link to="/book-now">Schedule Next Visit <ArrowRight className="ml-2 h-5 w-5" /></Link>
-            </Button>
+        // ON TRACK — quiet by design. This state is not an emergency.
+        <section className="bg-[#1A1416] text-[#FBF9F6] rounded-2xl p-6 sm:p-9 mb-5">
+          <p className="flex items-center gap-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#C9BFB4] mb-4">
+            <span className="h-[7px] w-[7px] rounded-full bg-[#9BBFA8]" /> You&rsquo;re on track
+          </p>
+          <h2 className="font-playfair text-3xl sm:text-5xl font-semibold tracking-tight leading-[1.04]">
+            Last drawn {stats.daysSince} days ago
+          </h2>
+          {stats.avgFrequency > 0 && (
+            <p className="text-base sm:text-xl text-[#E4DCD2] mt-3">
+              You test about every {stats.avgFrequency} days. Nothing needed today.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3 mt-7">
+            <Link to="/book-now" className="bg-[#FBF9F6] text-[#1A1416] text-[15px] font-semibold px-6 py-3.5 rounded-full hover:bg-white">
+              Schedule the next one
+            </Link>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* ===== TWO BUTTONS: Primary + Secondary ===== */}
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <Button className="h-14 bg-[#B91C1C] hover:bg-[#991B1B] text-white rounded-xl font-semibold text-sm shadow-md" asChild>
-          <Link to="/book-now"><Calendar className="h-5 w-5 mr-2" /> Book Appointment</Link>
-        </Button>
-        <Button variant="outline" className="h-14 rounded-xl font-semibold text-sm border-2" onClick={() => setMembershipModalOpen(true)}>
-          <Crown className="h-5 w-5 mr-2 text-amber-500" /> {stats.totalSpent > 0 ? `Save $${Math.round(stats.totalSpent * 0.13)}` : 'Upgrade & Save'}
-        </Button>
-      </div>
-
-      {/* ===== WELLNESS STAT BAND — approved web design (summary before detail) ===== */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 sm:p-4">
-          <p className="text-[9.5px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">Total visits</p>
-          <p className="text-xl sm:text-2xl font-extrabold tracking-tight tabular-nums text-[#1A1416] mt-1">{stats.completed}</p>
+      {/* ===== WHERE THEY STAND — summary before detail ===== */}
+      <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-5">
+        <div className="bg-white rounded-2xl border border-[#E7E1D9] p-4 sm:p-6">
+          <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B625C]">Draws completed</p>
+          <p className="font-playfair text-2xl sm:text-4xl font-semibold tabular-nums text-[#1A1416] mt-2 leading-none">{stats.completed}</p>
         </div>
-        <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 sm:p-4">
-          <p className="text-[9.5px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">Last tested</p>
-          <p className={`text-xl sm:text-2xl font-extrabold tracking-tight tabular-nums mt-1 ${stats.daysSince > 90 ? 'text-[#B91C1C]' : 'text-emerald-600'}`}>
+        <div className="bg-white rounded-2xl border border-[#E7E1D9] p-4 sm:p-6">
+          <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B625C]">Since last draw</p>
+          <p className={`font-playfair text-2xl sm:text-4xl font-semibold tabular-nums mt-2 leading-none ${stats.daysSince > 90 ? 'text-[#8F1515]' : 'text-[#1A1416]'}`}>
             {stats.daysSince > 0 ? `${stats.daysSince}d` : stats.completed > 0 ? 'Recent' : '—'}
           </p>
+          {stats.daysSince > 90 && stats.avgFrequency > 0 && (
+            <p className="text-[12px] font-semibold text-[#8F1515] mt-1.5">Longer than your usual {stats.avgFrequency}</p>
+          )}
         </div>
-        <div className="bg-white rounded-xl border border-[#EFE3E1] shadow-sm p-3 sm:p-4">
-          <p className="text-[9.5px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">Total invested</p>
-          <p className="text-xl sm:text-2xl font-extrabold tracking-tight tabular-nums text-[#1A1416] mt-1">${stats.totalSpent}</p>
+        <div className="bg-white rounded-2xl border border-[#E7E1D9] p-4 sm:p-6">
+          <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B625C]">Total invested</p>
+          <p className="font-playfair text-2xl sm:text-4xl font-semibold tabular-nums text-[#1A1416] mt-2 leading-none">${stats.totalSpent}</p>
         </div>
       </div>
 
       {/* ===== MEMBER BENEFITS — auto-hides for non-members ===== */}
       <PatientBenefitsCard />
 
-      {/* ===== REFERRAL CARD — Above the fold ===== */}
-      <div className="mb-6">
-        <ReferralCard />
-      </div>
-
-      {/* ===== MY RECURRING PLANS (only renders if patient has any) ===== */}
-      <div className="mb-6">
-        <MyRecurringPlans />
-      </div>
-
       {/* ===== MAIN CONTENT ===== */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+      <div className="grid lg:grid-cols-3 gap-5 mt-5">
+        <div className="lg:col-span-2 space-y-5">
 
-          {/* Upcoming */}
-          <Card className="shadow-sm border-[#EFE3E1]">
-            <CardHeader className="pb-3">
+          {/* Visits — upcoming and past under one roof, because a patient
+              thinks in "my visits", not in two separate lists. */}
+          <Card className="border-[#E7E1D9] rounded-2xl shadow-none">
+            <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-bold">Upcoming Appointments</CardTitle>
-                <Button variant="ghost" size="sm" className="text-xs text-[#B91C1C]" asChild>
-                  <Link to="/book-now">Book New <ChevronRight className="ml-0.5 h-3 w-3" /></Link>
-                </Button>
+                <CardTitle className="font-playfair text-xl font-semibold">Upcoming</CardTitle>
+                <Link to="/book-now" className="text-[13px] font-semibold text-[#8F1515] hover:text-[#6B0F0F] inline-flex items-center">
+                  Book new <ChevronRight className="ml-0.5 h-3.5 w-3.5" />
+                </Link>
               </div>
             </CardHeader>
             <CardContent>
@@ -331,13 +338,12 @@ const PatientDashboard = () => {
             </CardContent>
           </Card>
 
-          {/* Past */}
-          <Card className="shadow-sm border-[#EFE3E1]">
-            <CardHeader className="pb-3">
+          <Card className="border-[#E7E1D9] rounded-2xl shadow-none">
+            <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-bold">Past Visits</CardTitle>
+                <CardTitle className="font-playfair text-xl font-semibold">Past visits</CardTitle>
                 {stats.pastVisits > 0 && (
-                  <span className="text-xs text-muted-foreground">{stats.pastVisits} total</span>
+                  <span className="text-[13px] text-[#6B625C]">{stats.pastVisits} total</span>
                 )}
               </div>
             </CardHeader>
@@ -345,122 +351,116 @@ const PatientDashboard = () => {
               <AppointmentHistory />
             </CardContent>
           </Card>
+
+          {/* Recurring plans — only renders if the patient has any */}
+          <MyRecurringPlans />
+
+          {/* Referral — ours, not theirs, so it sits below their own history */}
+          <ReferralCard />
         </div>
 
         {/* ===== SIDEBAR (desktop) ===== */}
         <div className="hidden lg:block space-y-5">
-          {/* Profile */}
-          <Card className="shadow-sm border-[#EFE3E1]">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3 mb-3">
-                {/* Approved design: crimson-gradient initials avatar */}
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D23B2E] to-[#7F1010] text-white flex items-center justify-center font-bold text-xs shadow-sm">
+          <Card className="border-[#E7E1D9] rounded-2xl shadow-none">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-full bg-[#F3EEE7] border border-[#DDD5CB] text-[#1A1416] flex items-center justify-center font-bold text-sm">
                   {`${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || <User className="h-5 w-5" />}
                 </div>
-                <div>
-                  <p className="font-semibold text-sm">{user?.firstName} {user?.lastName}</p>
-                  <p className="text-xs text-muted-foreground">{user?.email}</p>
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm truncate">{user?.firstName} {user?.lastName}</p>
+                  <p className="text-xs text-[#6B625C] truncate">{user?.email}</p>
                 </div>
               </div>
-              <Button variant="outline" size="sm" className="w-full" asChild>
-                <Link to="/profile">Edit Profile <ChevronRight className="ml-1 h-3 w-3" /></Link>
-              </Button>
+              <Link to="/profile" className="flex items-center justify-center gap-1 w-full border border-[#DDD5CB] rounded-full py-2.5 text-[14px] font-semibold hover:bg-[#F3EEE7]">
+                Edit profile <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
             </CardContent>
           </Card>
 
-          {/* Health Summary */}
-          <Card className="shadow-sm border-[#EFE3E1]">
-            <CardContent className="p-4 space-y-3">
-              <p className="font-semibold text-sm flex items-center gap-1.5"><Activity className="h-4 w-4 text-[#B91C1C]" /> Health Summary</p>
-              <div className="space-y-2 text-sm">
+          {/* Plan — one line about what they already have, not a wall of tiers */}
+          <Card className="border-[#E2DACF] bg-[#F3EEE7] rounded-2xl shadow-none">
+            <CardContent className="p-5">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B625C]">Your plan</p>
+              <p className="text-[15px] leading-relaxed text-[#403834] mt-2">
+                {stats.totalSpent > 0
+                  ? `You have spent $${stats.totalSpent} with us. A membership would have saved about $${Math.round(stats.totalSpent * 0.13)} of that.`
+                  : 'Members pay less per draw, get weekend slots and priority scheduling.'}
+              </p>
+              <button type="button" onClick={() => setMembershipModalOpen(true)}
+                className="mt-4 text-[14px] font-semibold text-[#8F1515] hover:text-[#6B0F0F] inline-flex items-center gap-1">
+                Compare plans <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </CardContent>
+          </Card>
+
+          <Card className="border-[#E7E1D9] rounded-2xl shadow-none">
+            <CardContent className="p-5 space-y-3">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B625C]">Health summary</p>
+              <div className="space-y-2.5 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total visits</span>
-                  <span className="font-medium">{stats.completed}</span>
+                  <span className="text-[#6B625C]">Draws completed</span>
+                  <span className="font-semibold tabular-nums">{stats.completed}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Last tested</span>
-                  <span className={`font-medium ${stats.daysSince > 90 ? 'text-red-600' : 'text-green-600'}`}>
+                  <span className="text-[#6B625C]">Since last draw</span>
+                  <span className={`font-semibold tabular-nums ${stats.daysSince > 90 ? 'text-[#8F1515]' : 'text-[#1A1416]'}`}>
                     {stats.daysSince > 0 ? `${stats.daysSince}d ago` : stats.completed > 0 ? 'Recent' : 'Never'}
                   </span>
                 </div>
                 {stats.avgFrequency > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Avg. frequency</span>
-                    <span className="font-medium">Every {stats.avgFrequency}d</span>
+                    <span className="text-[#6B625C]">Your rhythm</span>
+                    <span className="font-semibold tabular-nums">Every {stats.avgFrequency}d</span>
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Total invested</span>
-                  <span className="font-medium">${stats.totalSpent}</span>
+                  <span className="text-[#6B625C]">Total invested</span>
+                  <span className="font-semibold tabular-nums">${stats.totalSpent}</span>
                 </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Notifications */}
-          <Card className="shadow-sm border-[#EFE3E1]">
-            <CardContent className="p-4">
-              <p className="font-semibold text-sm mb-2 flex items-center gap-1.5"><Bell className="h-4 w-4" /> Reminders</p>
-              <div className="flex gap-1.5">
+          <Card className="border-[#E7E1D9] rounded-2xl shadow-none">
+            <CardContent className="p-5">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#6B625C] mb-3">How we remind you</p>
+              <div className="flex gap-2">
                 {(['sms', 'email', 'both'] as const).map(method => (
-                  <Button key={method} size="sm" variant={notifMethod === method ? 'default' : 'outline'}
-                    className={`flex-1 text-xs ${notifMethod === method ? 'bg-[#B91C1C] hover:bg-[#991B1B]' : ''}`}
-                    onClick={() => handleNotifChange(method)} disabled={notifSaving}>
+                  <button key={method} type="button" onClick={() => handleNotifChange(method)} disabled={notifSaving}
+                    className={`flex-1 rounded-full py-2.5 text-[13px] font-semibold border transition-colors disabled:opacity-60 ${
+                      notifMethod === method
+                        ? 'bg-[#1A1416] text-[#FBF9F6] border-[#1A1416]'
+                        : 'border-[#DDD5CB] text-[#1A1416] hover:bg-[#F3EEE7]'
+                    }`}>
                     {method === 'sms' ? 'SMS' : method === 'email' ? 'Email' : 'Both'}
-                  </Button>
+                  </button>
                 ))}
               </div>
             </CardContent>
           </Card>
 
-          {/* Actions */}
-          <Card className="shadow-sm border-[#EFE3E1]">
-            <CardContent className="p-4 space-y-1.5">
-              <Button variant="ghost" size="sm" className="w-full justify-between text-sm h-9" asChild>
-                <Link to="/profile"><span className="flex items-center gap-2"><User className="h-4 w-4" /> My Profile</span><ChevronRight className="h-4 w-4" /></Link>
-              </Button>
-              <Button variant="ghost" size="sm" className="w-full justify-between text-sm h-9" asChild>
-                <a href="tel:9415279169"><span className="flex items-center gap-2"><Phone className="h-4 w-4" /> Call ConveLabs</span><ChevronRight className="h-4 w-4" /></a>
-              </Button>
-              <Button variant="ghost" size="sm" className="w-full justify-between text-sm h-9 text-red-500 hover:text-red-600 hover:bg-red-50"
-                onClick={async () => { try { await logout(); } catch { window.location.href = '/login'; } }}>
-                <span className="flex items-center gap-2"><LogOut className="h-4 w-4" /> Sign Out</span><ChevronRight className="h-4 w-4" />
-              </Button>
+          <Card className="border-[#E7E1D9] rounded-2xl shadow-none">
+            <CardContent className="p-3 space-y-0.5">
+              <Link to="/profile" className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm hover:bg-[#F3EEE7]">
+                <span className="flex items-center gap-2.5"><User className="h-4 w-4" /> My profile</span>
+                <ChevronRight className="h-4 w-4 text-[#6B625C]" />
+              </Link>
+              <a href="tel:9415279169" className="flex items-center justify-between rounded-xl px-3 py-2.5 text-sm hover:bg-[#F3EEE7]">
+                <span className="flex items-center gap-2.5"><Phone className="h-4 w-4" /> Call ConveLabs</span>
+                <ChevronRight className="h-4 w-4 text-[#6B625C]" />
+              </a>
+              <button type="button"
+                onClick={async () => { try { await logout(); } catch { window.location.href = '/login'; } }}
+                className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-sm text-[#8F1515] hover:bg-[#FBF0F0]">
+                <span className="flex items-center gap-2.5"><LogOut className="h-4 w-4" /> Sign out</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* ===== MOBILE: Notification + Sign Out (below content) ===== */}
-      <div className="lg:hidden space-y-4 mt-6">
-        <Card className="shadow-sm border-[#EFE3E1]">
-          <CardContent className="p-4">
-            <p className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Bell className="h-4 w-4" /> Reminders</p>
-            <div className="flex gap-2">
-              {(['sms', 'email', 'both'] as const).map(method => (
-                <Button key={method} size="sm" variant={notifMethod === method ? 'default' : 'outline'}
-                  className={`flex-1 text-xs ${notifMethod === method ? 'bg-[#B91C1C] hover:bg-[#991B1B]' : ''}`}
-                  onClick={() => handleNotifChange(method)} disabled={notifSaving}>
-                  {method === 'sms' ? 'SMS' : method === 'email' ? 'Email' : 'Both'}
-                </Button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        <div className="flex gap-3">
-          <Button variant="outline" size="sm" className="flex-1 h-11" asChild>
-            <Link to="/profile"><User className="h-4 w-4 mr-1" /> Profile</Link>
-          </Button>
-          <Button variant="outline" size="sm" className="flex-1 h-11" asChild>
-            <a href="tel:9415279169"><Phone className="h-4 w-4 mr-1" /> Call Us</a>
-          </Button>
-          <Button variant="outline" size="sm" className="flex-1 h-11 border-red-200 text-red-600"
-            onClick={async () => { try { await logout(); } catch { window.location.href = '/login'; } }}>
-            <LogOut className="h-4 w-4 mr-1" /> Sign Out
-          </Button>
-        </div>
-      </div>
 
       {/* ===== MEMBERSHIP MODAL ===== */}
       <Dialog open={membershipModalOpen} onOpenChange={setMembershipModalOpen}>
