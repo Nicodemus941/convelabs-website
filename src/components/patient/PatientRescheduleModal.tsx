@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { regularSlots } from '@/lib/officeHours';
+import { useOfficeHours } from '@/hooks/useOfficeHours';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,12 +25,6 @@ interface PatientRescheduleModalProps {
   onRescheduled: () => void;
 }
 
-const TIME_SLOTS = [
-  '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-  '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-  '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM',
-  '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM',
-];
 
 // US holidays + blocked date check (simplified)
 function isHoliday(date: Date): boolean {
@@ -43,6 +39,12 @@ function isHoliday(date: Date): boolean {
 const PatientRescheduleModal: React.FC<PatientRescheduleModalProps> = ({
   appointment, open, onClose, onRescheduled,
 }) => {
+  // regularSlots, not allSlots: this modal has no after-hours section and no
+  // way to add the surcharge, so offering an evening slot here would move a
+  // patient into the surcharged window at the regular price.
+  const { hours: officeHours } = useOfficeHours();
+  const timeSlots = regularSlots(officeHours);
+
   const [newDate, setNewDate] = useState('');
   const [newTime, setNewTime] = useState('');
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
@@ -253,7 +255,7 @@ const PatientRescheduleModal: React.FC<PatientRescheduleModalProps> = ({
                 <p className="text-xs text-muted-foreground py-2">Checking availability...</p>
               ) : (
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
-                  {TIME_SLOTS.map(slot => {
+                  {timeSlots.map(slot => {
                     const isBooked = bookedSlots.has(slot);
                     const isSelected = newTime === slot;
                     return (

@@ -1,6 +1,7 @@
 import {
   DEFAULT_OFFICE_HOURS,
   allSlots,
+  afterHoursSlots,
   gridRange,
   isAfterHours,
   regularSlots,
@@ -15,6 +16,13 @@ describe('normalizeOfficeHours', () => {
     expect(normalizeOfficeHours(null)).toEqual(DEFAULT_OFFICE_HOURS);
     expect(normalizeOfficeHours(undefined)).toEqual(DEFAULT_OFFICE_HOURS);
     expect(normalizeOfficeHours({})).toEqual(DEFAULT_OFFICE_HOURS);
+  });
+
+  it('runs a day through to the end of the surcharged evening', () => {
+    // close is the end of the BOOKABLE day, not the end of regular hours --
+    // otherwise the after-hours slots the reschedule modals show would have
+    // nowhere to come from.
+    expect(DEFAULT_OFFICE_HOURS.days[1]).toEqual({ open: '06:00', close: '20:30', closed: false });
   });
 
   it('keeps a saved day and repairs its neighbours', () => {
@@ -46,9 +54,11 @@ describe('normalizeOfficeHours', () => {
 describe('toBusinessHours', () => {
   // This is what the calendar shaded before any of this existed. If it changes,
   // a deploy moves the shading on a live calendar without anyone asking.
-  it('reproduces the calendar shading that was hardcoded', () => {
+  // Shading marks the unsurcharged window. The day runs to 20:30 so evening
+  // slots exist, but shading to there would call 8 PM an ordinary hour.
+  it('shades regular hours, not the surcharged evening', () => {
     expect(toBusinessHours(DEFAULT_OFFICE_HOURS)).toEqual([
-      { daysOfWeek: [1, 2, 3, 4, 5, 6], startTime: '06:00', endTime: '18:00' },
+      { daysOfWeek: [1, 2, 3, 4, 5, 6], startTime: '06:00', endTime: '17:30' },
     ]);
   });
 
@@ -61,11 +71,11 @@ describe('toBusinessHours', () => {
         { open: '06:00', close: '18:00', closed: false },
         { open: '06:00', close: '18:00', closed: false },
         { open: '06:00', close: '18:00', closed: false },
-        { open: '08:00', close: '12:00', closed: false }, // short Saturday
+        { open: '08:00', close: '12:00', closed: false }, // short Saturday, ends before the surcharge
       ],
     });
     expect(toBusinessHours(hours)).toEqual([
-      { daysOfWeek: [1, 2, 3, 4, 5], startTime: '06:00', endTime: '18:00' },
+      { daysOfWeek: [1, 2, 3, 4, 5], startTime: '06:00', endTime: '17:30' },
       { daysOfWeek: [6], startTime: '08:00', endTime: '12:00' },
     ]);
   });
@@ -92,10 +102,10 @@ describe('slotsForDay', () => {
   it('runs from opening to the last start before closing', () => {
     const monday = slotsForDay(DEFAULT_OFFICE_HOURS, 1);
     expect(monday[0]).toBe('6:00 AM');
-    expect(monday[monday.length - 1]).toBe('5:30 PM');
-    // A closing time is when the last visit ends, so 6:00 PM is not offered.
-    expect(monday).not.toContain('6:00 PM');
-    expect(monday).toHaveLength(24);
+    expect(monday[monday.length - 1]).toBe('8:00 PM');
+    // A closing time is when the last visit ends, so 8:30 PM is not offered.
+    expect(monday).not.toContain('8:30 PM');
+    expect(monday).toHaveLength(29);
   });
 
   it('offers nothing on a closed day', () => {
@@ -104,9 +114,9 @@ describe('slotsForDay', () => {
 
   it('honours the step size', () => {
     const hourly = normalizeOfficeHours({ ...DEFAULT_OFFICE_HOURS, slotMinutes: 60 });
-    expect(slotsForDay(hourly, 1)).toHaveLength(12);
     expect(slotsForDay(hourly, 1)).toContain('5:00 PM');
     expect(slotsForDay(hourly, 1)).not.toContain('5:30 PM');
+    expect(slotsForDay(hourly, 1)).toHaveLength(15);
   });
 
   // Someone will type a close earlier than the open. Offering no times that day
@@ -207,10 +217,39 @@ describe('the after-hours boundary', () => {
 
   it('moves with the boundary', () => {
     const later = normalizeOfficeHours({ ...DEFAULT_OFFICE_HOURS, afterHoursFrom: '19:00' });
-    // Regular slots can never exceed the day's closing time either.
-    expect(regularSlots(later)).toEqual(allSlots(later));
+    expect(regularSlots(later)).toContain('6:30 PM');
+    expect(regularSlots(later)).not.toContain('7:00 PM');
+    expect(afterHoursSlots(later)).toEqual(['7:00 PM', '7:30 PM', '8:00 PM']);
     const earlier = normalizeOfficeHours({ ...DEFAULT_OFFICE_HOURS, afterHoursFrom: '12:00' });
     expect(regularSlots(earlier)).not.toContain('12:00 PM');
     expect(regularSlots(earlier)).toContain('11:30 AM');
+  });
+});
+
+describe('afterHoursSlots', () => {
+  // These two lists are what RescheduleAppointmentModal had hardcoded. They
+  // must come back out of the model byte-for-byte, or this stops being a
+  // de-duplication and starts being a change to what staff can book.
+  it('reproduces the two lists the reschedule modal had hardcoded', () => {
+    expect(regularSlots(DEFAULT_OFFICE_HOURS)).toEqual([
+      '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
+      '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
+      '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM',
+      '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM',
+    ]);
+    expect(afterHoursSlots(DEFAULT_OFFICE_HOURS)).toEqual([
+      '5:30 PM', '6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM',
+    ]);
+  });
+
+  it('partitions the day with nothing lost or double-counted', () => {
+    const all = allSlots(DEFAULT_OFFICE_HOURS);
+    expect([...regularSlots(DEFAULT_OFFICE_HOURS), ...afterHoursSlots(DEFAULT_OFFICE_HOURS)]).toEqual(all);
+  });
+
+  it('is empty when the day ends before the surcharge starts', () => {
+    const short = normalizeOfficeHours({ days: Array(7).fill({ open: '09:00', close: '15:00', closed: false }) });
+    expect(afterHoursSlots(short)).toEqual([]);
+    expect(regularSlots(short)).toEqual(allSlots(short));
   });
 });

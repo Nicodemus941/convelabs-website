@@ -39,11 +39,11 @@ export const OFFICE_HOURS_KEY = 'office_hours';
 
 export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-const OPEN_DAY: DayHours = { open: '06:00', close: '18:00', closed: false };
+const OPEN_DAY: DayHours = { open: '06:00', close: '20:30', closed: false };
 
 export const DEFAULT_OFFICE_HOURS: OfficeHours = {
   days: [
-    { open: '06:00', close: '18:00', closed: true }, // Sunday — closed today
+    { open: '06:00', close: '20:30', closed: true }, // Sunday — closed today
     { ...OPEN_DAY },
     { ...OPEN_DAY },
     { ...OPEN_DAY },
@@ -80,10 +80,16 @@ function isTime(v: unknown): boolean {
   return typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 }
 
-/** The shape FullCalendar wants for its shaded business hours. */
+/**
+ * The shape FullCalendar wants for its shaded business hours.
+ *
+ * Shades the REGULAR window only. A day runs to close (20:30 by default) so
+ * the surcharged evening slots exist, but shading to there would tell staff
+ * 8 PM is an ordinary working hour. The shaded band is the unsurcharged part.
+ */
 export function toBusinessHours(hours: OfficeHours) {
   const open = hours.days
-    .map((d, i) => ({ d, i }))
+    .map((d, i) => ({ d: { ...d, close: d.close < hours.afterHoursFrom ? d.close : hours.afterHoursFrom }, i }))
     .filter(({ d }) => !d.closed);
   if (open.length === 0) return [];
   // FullCalendar takes one entry per distinct window, so days sharing a
@@ -158,6 +164,17 @@ export function isAfterHours(hours: OfficeHours, display: string): boolean {
  */
 export function regularSlots(hours: OfficeHours): string[] {
   return allSlots(hours).filter((t) => !isAfterHours(hours, t));
+}
+
+/**
+ * Open times that carry the surcharge.
+ *
+ * The reschedule modals render these separately, in amber, under an
+ * "After Hours (+$50)" heading -- so they need the surcharged set on its own,
+ * not merged into the regular grid.
+ */
+export function afterHoursSlots(hours: OfficeHours): string[] {
+  return allSlots(hours).filter((t) => isAfterHours(hours, t));
 }
 
 /** Every time the business is ever open, for pickers with no date chosen yet. */

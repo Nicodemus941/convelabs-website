@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { afterHoursSlots, regularSlots } from '@/lib/officeHours';
+import { useOfficeHours } from '@/hooks/useOfficeHours';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,14 +34,6 @@ interface RescheduleAppointmentModalProps {
   onRescheduled: () => void;
 }
 
-const TIME_SLOTS = [
-  '6:00 AM', '6:30 AM', '7:00 AM', '7:30 AM', '8:00 AM', '8:30 AM',
-  '9:00 AM', '9:30 AM', '10:00 AM', '10:30 AM', '11:00 AM', '11:30 AM',
-  '12:00 PM', '12:30 PM', '1:00 PM', '1:30 PM', '2:00 PM', '2:30 PM',
-  '3:00 PM', '3:30 PM', '4:00 PM', '4:30 PM', '5:00 PM',
-];
-
-const AFTER_HOURS_SLOTS = ['5:30 PM', '6:00 PM', '6:30 PM', '7:00 PM', '7:30 PM', '8:00 PM'];
 
 /**
  * GRANDFATHERING — NEW PRICING POLICY EFFECTIVE DATE
@@ -78,6 +72,13 @@ function maxDateET(): string {
 const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
   appointment, open, onClose, onRescheduled,
 }) => {
+  // Was two hardcoded arrays here. Settings > Office Hours owns them now; the
+  // defaults reproduce those arrays exactly, so this list does not move until
+  // someone edits the hours.
+  const { hours: officeHours } = useOfficeHours();
+  const timeSlots = regularSlots(officeHours);
+  const afterHoursOptions = afterHoursSlots(officeHours);
+
   const appt = appointment;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [newDate, setNewDate] = useState('');
@@ -380,7 +381,7 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
               )}
             </div>
             <div className="grid grid-cols-3 gap-1.5 mt-1.5">
-              {TIME_SLOTS.map(t => {
+              {timeSlots.map(t => {
                 const unavailable = isSlotUnavailable(t);
                 const selected = newTime === t;
                 return (
@@ -407,7 +408,7 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
               After Hours{isGrandfathered ? '' : ' (+$50)'}
             </p>
             <div className="grid grid-cols-3 gap-1.5 mt-1.5">
-              {AFTER_HOURS_SLOTS.map(t => {
+              {afterHoursOptions.map(t => {
                 const unavailable = isSlotUnavailable(t);
                 const selected = newTime === t;
                 return (
