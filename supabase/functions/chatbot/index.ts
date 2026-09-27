@@ -597,6 +597,40 @@ Deno.serve(async (req) => {
         const ip = req.headers.get('CF-Connecting-IP') || clientIp || undefined;
         const ok = await verifyTurnstile(TURNSTILE_SECRET, (body as any)?.captchaToken, ip);
         if (!ok) {
+          // A rejection here creates nothing: no conversation, no message, no
+          // counter, no log line. So a gate that starts turning real people
+          // away is invisible -- the table simply looks quiet, which is
+          // exactly what a slow week looks like.
+          //
+          // It has looked like a slow week since this gate went live on
+          // 2026-07-20. Conversations ran 4-7 a week in the six weeks before
+          // and have run 1-2 a week every week since, and there is no record
+          // either way, because nothing was ever written down.
+          //
+          // had_token is the whole diagnosis. No token means the widget never
+          // produced one -- a blocked script, a failed load, or a bot that
+          // never ran it. A token that was produced and then refused means
+          // Turnstile is rejecting somebody who is really there.
+          try {
+            await supabase.from('error_logs').insert({
+              error_type: 'turnstile_rejected',
+              component: 'chatbot',
+              action: 'security_gate',
+              error_message: (body as any)?.captchaToken
+                ? 'Turnstile token was sent and refused'
+                : 'no Turnstile token was sent',
+              payload: {
+                had_token: Boolean((body as any)?.captchaToken),
+                lead_path: leadPath,
+                // Coarse only. Enough to tell one noisy client from many real
+                // ones; never an address, and never a person.
+                user_agent: (req.headers.get('user-agent') || '').slice(0, 180) || null,
+                origin: req.headers.get('origin') || null,
+              },
+            } as any);
+          } catch {
+            // Never let recording a refusal change what the visitor is told.
+          }
           return new Response(JSON.stringify({
             conversationId: conversationId || null,
             reply: "Quick security check didn't clear — please refresh the page and try again, or text Nico at (941) 527-9169.",
@@ -832,7 +866,11 @@ Deno.serve(async (req) => {
       .update({
         total_input_tokens: totalInputTokens + inputTokens,
         total_output_tokens: totalOutputTokens + outputTokens,
-        message_count: messageCount + 2, // user + assistant
+        // message_count is not set here any more. Both message inserts
+        // above fire the chatbot_messages_count trigger, which is now the
+        // only thing that writes it -- voice-concierge writes the same
+        // messages and never maintained this, so the column only ever
+        // counted half the conversations.
         escalated_at: escalate ? new Date().toISOString() : undefined,
         escalation_reason: escalate ? escalationReason : undefined,
         status: escalate ? 'escalated' : 'active',
