@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { CalendarClock, Loader2, AlertTriangle, DollarSign, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { timeBlockAppliesOn } from '@/lib/timeBlocks';
 
 /**
  * ADMIN / OWNER RESCHEDULE MODAL
@@ -124,11 +125,9 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
       try {
         const [{ data: blocks }, { data: appts }, { data: holds }] = await Promise.all([
           supabase.from('time_blocks')
-            .select('start_date, end_date, reason, block_type')
-            .lte('start_date', newDate)
-            .gte('end_date', newDate)
-            .eq('block_type', 'office_closure')
-            .limit(1),
+            .select('start_date, end_date, reason, block_type, recurring, recurring_day')
+            .or(`recurring.is.true,and(start_date.lte.${newDate},end_date.gte.${newDate})`)
+            .eq('block_type', 'office_closure'),
           supabase.from('appointments')
             .select('id, appointment_time')
             .gte('appointment_date', newDate)
@@ -142,8 +141,11 @@ const RescheduleAppointmentModal: React.FC<RescheduleAppointmentModalProps> = ({
             .gt('expires_at', new Date().toISOString()),
         ]);
         if (cancelled) return;
-        if (blocks && blocks.length > 0) {
-          setDateBlocked({ blocked: true, reason: blocks[0].reason || 'office closure' });
+        // Recurring rows come back whatever their stored range says, so narrow
+        // to the ones that actually land on this date before calling it closed.
+        const applies = ((blocks as any[]) || []).filter(b => timeBlockAppliesOn(b, newDate));
+        if (applies.length > 0) {
+          setDateBlocked({ blocked: true, reason: applies[0].reason || 'office closure' });
         } else {
           setDateBlocked({ blocked: false });
         }

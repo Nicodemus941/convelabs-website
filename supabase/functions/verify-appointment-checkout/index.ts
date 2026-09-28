@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { timeBlockAppliesOn, timeBlockDateFilter } from '../_shared/timeBlocks.ts';
 
 /**
  * VERIFY APPOINTMENT CHECKOUT — Post-Stripe-redirect fallback + notification hub.
@@ -59,13 +60,14 @@ async function isDateBlocked(dateOnly: string): Promise<{ blocked: boolean; reas
   try {
     const { data } = await supabaseClient
       .from('time_blocks')
-      .select('start_date, end_date, reason, block_type')
-      .lte('start_date', dateOnly)
-      .gte('end_date', dateOnly)
-      .eq('block_type', 'office_closure')
-      .limit(1);
-    if (data && data.length > 0) {
-      return { blocked: true, reason: data[0].reason || 'office closure' };
+      .select('start_date, end_date, reason, block_type, recurring, recurring_day')
+      .or(timeBlockDateFilter(dateOnly))
+      .eq('block_type', 'office_closure');
+    // Narrow recurring rows to the ones landing on this date before calling
+    // the day closed.
+    const applies = (data || []).filter((b: any) => timeBlockAppliesOn(b, dateOnly));
+    if (applies.length > 0) {
+      return { blocked: true, reason: applies[0].reason || 'office closure' };
     }
   } catch (e) {
     console.warn('blocked-date check failed:', e);

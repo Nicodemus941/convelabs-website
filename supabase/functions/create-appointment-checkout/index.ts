@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { isSlotStillAvailable, getAvailableSlotsForDate, normalizeSlotTime } from '../_shared/availability.ts';
+import { timeBlockAppliesOn, timeBlockDateFilter } from '../_shared/timeBlocks.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -542,12 +543,14 @@ Deno.serve(async (req) => {
     // API calls can bypass that — so we check here before any money moves.
     // Note: `dateOnly` was already computed above for the audit log.
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-      const { data: blocks } = await supabaseClient
+      const { data: allBlocks } = await supabaseClient
         .from('time_blocks')
-        .select('start_date, end_date, start_time, end_time, reason, block_type')
-        .lte('start_date', dateOnly)
-        .gte('end_date', dateOnly)
+        .select('start_date, end_date, start_time, end_time, reason, block_type, recurring, recurring_day')
+        .or(timeBlockDateFilter(dateOnly))
         .eq('block_type', 'office_closure');
+      // Recurring rows come back whatever their stored range says; keep only
+      // the ones that actually land on this date.
+      const blocks = (allBlocks || []).filter((b: any) => timeBlockAppliesOn(b, dateOnly));
 
       // A block with NO start/end time closes the WHOLE day. A block WITH a
       // time window closes ONLY that window (e.g. "8:00–8:50 AM"). Previously

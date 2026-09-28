@@ -14,6 +14,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { checkHoliday } from './holidays';
+import { timeBlockAppliesOn } from './timeBlocks';
 
 export interface ProposedSlot {
   dateIso: string;       // YYYY-MM-DD
@@ -64,8 +65,10 @@ export async function detectSeriesConflicts(slots: ProposedSlot[]): Promise<Conf
       .eq('released', false)
       .gt('expires_at', new Date().toISOString()),
     supabase.from('time_blocks' as any)
-      .select('start_date, end_date, reason, block_type')
-      .or(`and(start_date.lte.${latest},end_date.gte.${earliest})`)
+      .select('start_date, end_date, reason, block_type, recurring, recurring_day')
+      // Recurring rows sit outside the requested window, so the range clause
+      // alone never returned them.
+      .or(`recurring.is.true,and(start_date.lte.${latest},end_date.gte.${earliest})`)
       .eq('block_type', 'office_closure'),
   ]);
 
@@ -85,6 +88,21 @@ export async function detectSeriesConflicts(slots: ProposedSlot[]): Promise<Conf
   const blockedDates = new Set<string>();
   const blockReasons: Record<string, string> = {};
   for (const b of (blocksRes.data as any[]) || []) {
+    // A recurring block's stored range is one past day; walking it would mark
+    // nothing in this window. Test every date in the window instead.
+    if (b.recurring) {
+      const cur = new Date(String(earliest) + 'T12:00:00');
+      const stop = new Date(String(latest) + 'T12:00:00');
+      while (cur <= stop) {
+        const iso = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`;
+        if (timeBlockAppliesOn(b, iso)) {
+          blockedDates.add(iso);
+          if (b.reason) blockReasons[iso] = b.reason;
+        }
+        cur.setDate(cur.getDate() + 1);
+      }
+      continue;
+    }
     const start = new Date(String(b.start_date) + 'T12:00:00');
     const end = new Date(String(b.end_date) + 'T12:00:00');
     const cursor = new Date(start);
