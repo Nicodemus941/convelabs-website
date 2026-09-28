@@ -140,26 +140,30 @@ serve(async (req) => {
     const { action, data } = await req.json();
 
     if (action === 'analyze_visitor') {
-      const analysis = await analyzeVisitorWithClaude(data);
-      
-      // Store visitor analysis in database
-      const { error: insertError } = await supabase
-        .from('visitor_analyses')
-        .insert({
-          session_id: data.sessionId,
-          user_id: data.userId,
-          visitor_data: data,
-          analysis_result: analysis,
-          created_at: new Date().toISOString()
-        });
-
-      if (insertError) {
-        console.error('Error storing visitor analysis:', insertError);
-      }
-
+      // RETIRED 2026-09-28.
+      //
+      // This called claude-3-5-sonnet-20241022, which has been retired, so
+      // every request 404'd. The catch in analyzeVisitorWithClaude returned a
+      // hardcoded default analysis and the handler wrapped it in success:true,
+      // so the failure was invisible and the caller stored the fallback as
+      // though it were a result.
+      //
+      // 27,408 rows were written in the last 30 days. All 27,408 were
+      // byte-identical -- one distinct analysis_result across the whole month.
+      // 398,570 rows all-time, and nothing in the codebase has ever read the
+      // table. The only consumer was a `profile` prop on the exit-intent
+      // popup, whose copy is hardcoded anyway.
+      //
+      // Short-circuited rather than deleted: cached frontend bundles keep
+      // calling this endpoint for days after a deploy and need a well-formed
+      // reply. It now costs one JSON response -- no model call, no row.
+      //
+      // If visitor personalisation comes back, build it on conversion data
+      // from the pixel, not on a guess re-derived on every pageview.
       return new Response(JSON.stringify({
         success: true,
-        analysis
+        retired: true,
+        analysis: null,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
