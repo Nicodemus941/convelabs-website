@@ -1,10 +1,16 @@
+import { convertHeicToJpeg } from './heicConvert';
+
 /**
  * Resize an image File so its base64-encoded payload fits under Anthropic's
  * 5 MB Vision-API limit. Phleb photos taken on modern phones are routinely
  * 5–12 MB at full resolution; OCR doesn't need that detail.
  *
+ * Also converts HEIC/HEIF to JPEG first — see src/lib/heicConvert.ts for why
+ * that has to happen on the way in rather than at read time.
+ *
  * Strategy:
- *   - Skip if not an image (PDFs, etc.) or file is already under 4.5 MB
+ *   - Convert HEIC → JPEG (always, regardless of size)
+ *   - Skip the resize if not an image (PDFs, etc.) or already under 3.5 MB
  *   - Otherwise: render to a canvas at most 1600px on the long edge, encode
  *     as JPEG quality 0.85. This typically lands a 12 MP photo at 600KB-1.2MB
  *     while preserving every legible character on a printed lab order.
@@ -22,12 +28,16 @@ export async function resizeImageForUpload(file: File, opts?: { maxBytes?: numbe
   const maxLongEdge = opts?.maxLongEdge ?? 1600;
   const quality = opts?.quality ?? 0.85;
 
+  // HEIC first, and BEFORE the size gate below. A HEIC under the threshold
+  // still has to be converted: the problem with HEIC was never its size, it
+  // was that neither Claude Vision nor the phleb dashboard's viewer can read
+  // it at all. Conversion yields a JPEG, which then falls through to the
+  // normal resize path if it is still too large.
+  const heic = await convertHeicToJpeg(file);
+  file = heic.file;
+
   if (!file.type.startsWith('image/')) return file;
   if (file.size <= maxBytes) return file;
-  // HEIC: browsers can't easily decode it via canvas; let it pass through
-  // and the OCR side will surface a useful error. Patient phlebs should
-  // be using JPG/PNG anyway.
-  if (file.type === 'image/heic' || file.type === 'image/heif') return file;
 
   try {
     const dataUrl = await new Promise<string>((resolve, reject) => {

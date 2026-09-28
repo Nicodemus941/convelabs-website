@@ -8,6 +8,7 @@ import {
   Phone, Calendar, Loader2, AlertCircle, User, Lock, Upload, FileText
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 import { z } from 'zod';
 import { analytics } from '@/utils/analytics';
 import {
@@ -290,11 +291,14 @@ const InlineBookingFlow: React.FC<InlineBookingFlowProps> = ({ initialZip, initi
     if (labOrderFile) {
       setLabOrderUploading(true);
       try {
-        const fileExt = labOrderFile.name.split('.').pop();
+        // iPhones upload HEIC, which nothing downstream can read -- OCR
+        // skips it and the phleb viewer can't preview it.
+        const { file: readyLabOrder } = await convertHeicToJpeg(labOrderFile);
+        const fileExt = readyLabOrder.name.split('.').pop();
         const filePath = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
         const { error: uploadError } = await supabase.storage
           .from('lab-orders')
-          .upload(filePath, labOrderFile);
+          .upload(filePath, readyLabOrder);
         if (uploadError) throw uploadError;
         setPatient(prev => ({ ...prev, labOrderPath: filePath }));
       } catch (err: any) {

@@ -510,8 +510,14 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
 
       // 2. Upload (resized) to the private bucket — kept as proof of delivery
       const file = await resizeImageForUpload(rawFile);
+      // resizeImageForUpload now converts HEIC to real JPEG bytes, so the
+      // extension here always matches the content. This used to rewrite a
+      // `.heic` name to `.jpg` WITHOUT converting, which stored HEIC data
+      // under a JPEG name — unreadable everywhere, and invisible to the
+      // viewer's `/\.heic$/i` check, so it rendered as a broken image
+      // instead of at least offering the download fallback.
       const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
-      const path = `appointments/${row.appointmentId}/${Date.now()}-label.${ext === 'heic' ? 'jpg' : ext}`;
+      const path = `appointments/${row.appointmentId}/${Date.now()}-label.${ext}`;
       const { error: upErr } = await supabase.storage.from('specimen-labels').upload(path, file, {
         contentType: file.type || 'image/jpeg', upsert: false,
       });

@@ -13,6 +13,7 @@ import LabOrderPrepModal from './LabOrderPrepModal';
 import ServiceAutoSwitchModal from './ServiceAutoSwitchModal';
 import { analyzePrepRequirements, type PrepAnalysis } from '@/lib/phlebHelpers';
 import { isPrepaidLabValue } from '@/lib/clientBillLabs';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 
 interface LabOrderUploadStepProps {
   onNext: () => void;
@@ -105,7 +106,14 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     const previouslyUploaded: string[] = (getValues('labOrder.uploadedPaths' as any) || []) as any;
     const newPaths: string[] = [];
     const failedFiles: File[] = [];
-    for (const file of acceptedFiles) {
+    for (const rawFile of acceptedFiles) {
+      // HEIC -> JPEG before anything else. iPhones default to HEIC, and a
+      // stored HEIC is unreadable end to end: ocr-lab-order skips it
+      // ('heic_unsupported') so the document is never read, and the phleb
+      // viewer can only offer a download link that desktop Chrome can't
+      // open. Convert on the way in and the rest of the pipeline just works.
+      const { file } = await convertHeicToJpeg(rawFile);
+
       // Sanitize the original filename — commas/spaces in a storage key are
       // fragile (need URL-encoding on every read) and, because
       // lab_order_file_path is a newline-delimited list, a comma in the name
@@ -117,7 +125,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       if (!error) {
         newPaths.push(fileName);
       } else {
-        failedFiles.push(file);
+        failedFiles.push(rawFile);
         console.error('[lab-order upload failed]', file.name, error);
         // Surface a real toast so the patient knows the file didn't land.
         // Use the storage error message when available so the cause is
@@ -279,7 +287,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   // save the path to form state, run OCR off the stored file.
   const onDropInsurance = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0 || !onInsuranceFileSelected) return;
-    const file = acceptedFiles[0];
+    const { file } = await convertHeicToJpeg(acceptedFiles[0]);
     onInsuranceFileSelected(file);
     setValue('labOrder.hasInsuranceFile', true);
 

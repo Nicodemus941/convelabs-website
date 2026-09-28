@@ -2,6 +2,7 @@ import React, { useCallback, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 import { toast } from 'sonner';
 import { AlertCircle, CheckCircle2, FileText, Loader2, UploadCloud, X } from 'lucide-react';
 
@@ -73,7 +74,7 @@ const AttachLabOrderToRequestModal: React.FC<Props> = ({ open, onClose, request,
       setPhase('error');
       return;
     }
-    setFile(nextFile);
+    convertHeicToJpeg(nextFile).then(({ file: ready }) => setFile(ready));
     setPhase('idle');
     setErrMsg(null);
   }, []);
