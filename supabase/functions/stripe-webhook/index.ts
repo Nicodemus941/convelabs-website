@@ -4,6 +4,7 @@ import { verifyRecipientEmail, verifyRecipientPhone } from "../_shared/verify-re
 import { commitReschedule } from "../_shared/reschedule.ts";
 import { isSlotStillAvailable } from "../_shared/availability.ts";
 import { resolveMembershipPlan, upsertUserMembership, userIdFromEmail } from "../_shared/membership.ts";
+import { sendMetaPurchase } from "../_shared/meta-capi.ts";
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -2213,6 +2214,35 @@ async function handleAppointmentPayment(session: any) {
     }
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
+
+    // ─── META CONVERSIONS API ────────────────────────────────────
+    // Tell the ad platform a booking happened, from the one place that knows
+    // it for certain. The browser pixel fires the same Purchase on /welcome,
+    // but loses a large share of events to iOS, ad blockers and closed tabs --
+    // and an optimiser that sees half the conversions optimises for half the
+    // business.
+    //
+    // event_id must match the browser's exactly or Meta counts the booking
+    // twice. Both sides derive it from the Stripe checkout session, which is
+    // unique per purchase and known to both.
+    //
+    // Awaited deliberately: this runs inside the webhook Stripe is already
+    // waiting on, the call is one HTTP round trip with its own try/catch, and
+    // it cannot throw. Fire-and-forget in an edge function risks the isolate
+    // being torn down mid-request, which silently drops conversions.
+    try {
+      await sendMetaPurchase({
+        eventId: `ckt_${checkoutSessionId}`,
+        amountCents: (servicePrice || 0) + (tipAmount || 0),
+        email: metadata.patient_email || null,
+        phone: resolvedPhone,
+        fbp: metadata.fbp || null,
+        fbc: metadata.fbc || null,
+        contentName: metadata.service_name || 'Blood Draw',
+      });
+    } catch (capiErr) {
+      console.warn('[meta-capi] non-fatal:', capiErr);
+    }
 
     // ─── RESCHEDULE CARRY-OVER ───────────────────────────────────
     // When the new booking came from the dashboard's Reschedule flow,
