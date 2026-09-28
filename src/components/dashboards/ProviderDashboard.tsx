@@ -56,7 +56,15 @@ import { FileHeart, Send, Copy, BellRing, FileSignature } from 'lucide-react';
 
 interface DashboardData {
   org: any;
-  liveOps: { todayCount: number; todayInProgress: number; todayCompleted: number; specimensInTransit: number; needsAttention: number };
+  liveOps: {
+    todayCount: number; todayInProgress: number; todayCompleted: number;
+    specimensInTransit: number; needsAttention: number;
+    /** Rows behind the count. Older deploys of the edge fn omit it. */
+    needsAttentionItems?: Array<{
+      id: string; patient_label: string | null; appointment_date: string | null;
+      appointment_time: string | null; status: string | null; missing: string[];
+    }>;
+  };
   thisMonth: { mtdVisits: number; mtdSpend: number; avgTurnaroundHrs: number | null; predictedEomVisits: number };
   upcoming: any[];
   patients: any[];
@@ -97,6 +105,7 @@ const ProviderDashboard: React.FC = () => {
     window.history.replaceState({}, '', url);
   };
   const [showLabRequest, setShowLabRequest] = useState(false);
+  const [showNeedsAttention, setShowNeedsAttention] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
   // Sprint 1 (2026-05-13): per-row "Upload lab order" modal for the
   // Upcoming list. Lets the org attach an order to an already-booked
@@ -532,7 +541,14 @@ const ProviderDashboard: React.FC = () => {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <LiveOpCard label="Today" value={liveOps.todayCount} detail={`${liveOps.todayInProgress} in progress · ${liveOps.todayCompleted} done`} icon={<Clock className="h-5 w-5 text-blue-600" />} />
             <LiveOpCard label="Specimens in transit" value={liveOps.specimensInTransit} detail="Awaiting results" icon={<TrendingUp className="h-5 w-5 text-amber-600" />} />
-            <LiveOpCard label="Needs attention" value={liveOps.needsAttention} detail="Missing lab order, destination, or address" icon={<AlertCircle className="h-5 w-5 text-red-600" />} urgent={liveOps.needsAttention > 0} />
+            <LiveOpCard
+              label="Needs attention"
+              value={liveOps.needsAttention}
+              detail="Missing lab order, destination, or address"
+              icon={<AlertCircle className="h-5 w-5 text-red-600" />}
+              urgent={liveOps.needsAttention > 0}
+              onClick={liveOps.needsAttention > 0 ? () => setShowNeedsAttention(true) : undefined}
+            />
             <LiveOpCard label="Total patients" value={patients.length} detail={`${team.length} team ${team.length === 1 ? 'member' : 'members'}`} icon={<Users className="h-5 w-5 text-emerald-600" />} />
           </div>
         </div>
@@ -679,9 +695,63 @@ const ProviderDashboard: React.FC = () => {
         {tab === 'patients' && (
           <>
         {/* LINKED PATIENTS + BULK RE-REQUEST */}
-        <LinkedPatientsSection orgId={org.id} onRequestCreated={loadData} labRequests={data.labRequests || []} />
+        <LinkedPatientsSection
+          orgId={org.id}
+          onRequestCreated={loadData}
+          labRequests={data.labRequests || []}
+          fallbackPatients={patients}
+        />
           </>
         )}
+
+        {/* NEEDS-ATTENTION DRILL-DOWN
+            The count card used to be a dead number: a provider could see that
+            five visits were wrong and had no way to find out which. */}
+        <Dialog open={showNeedsAttention} onOpenChange={setShowNeedsAttention}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-base">
+                <AlertCircle className="h-4 w-4 text-[#B91C1C]" />
+                Needs attention · {liveOps.needsAttention}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="max-h-[60vh] overflow-auto -mx-1 px-1">
+              {(liveOps.needsAttentionItems || []).length === 0 ? (
+                // Count > 0 with no rows means the deployed edge function
+                // predates needsAttentionItems. Say so plainly instead of
+                // showing an empty box that reads like a bug.
+                <p className="text-sm text-gray-600 py-4">
+                  Details aren't available yet for these {liveOps.needsAttention} visits. They're listed under
+                  {' '}<button className="text-[#B91C1C] underline" onClick={() => { setShowNeedsAttention(false); setTab('today'); }}>upcoming visits</button>.
+                </p>
+              ) : (
+                <ul className="divide-y">
+                  {(liveOps.needsAttentionItems || []).map(item => (
+                    <li key={item.id} className="py-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{item.patient_label || 'Patient'}</p>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          {item.appointment_date ? new Date(item.appointment_date).toLocaleDateString() : 'Date TBD'}
+                          {item.appointment_time ? ` · ${item.appointment_time}` : ''}
+                        </p>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {item.missing.map(m => (
+                            <span key={m} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[#B91C1C]/10 text-[#B91C1C]">
+                              {m} missing
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setShowNeedsAttention(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {tab === 'orders' && (
           <>
@@ -1394,8 +1464,19 @@ const LabRequestsSection: React.FC<{
 
 // Approved web design: warm hairline KPI cards, microlabels, tabular figures;
 // urgent state uses the crimson "needs you" grammar.
-const LiveOpCard: React.FC<{ label: string; value: number; detail: string; icon: React.ReactNode; urgent?: boolean }> = ({ label, value, detail, icon, urgent }) => (
-  <Card className={`shadow-sm ${urgent ? 'border-[#B91C1C]/40 bg-[#B91C1C]/5' : 'border-[#EFE3E1]'}`}>
+const LiveOpCard: React.FC<{ label: string; value: number; detail: string; icon: React.ReactNode; urgent?: boolean; onClick?: () => void }> = ({ label, value, detail, icon, urgent, onClick }) => (
+  <Card
+    className={`shadow-sm ${urgent ? 'border-[#B91C1C]/40 bg-[#B91C1C]/5' : 'border-[#EFE3E1]'} ${onClick ? 'cursor-pointer transition hover:shadow-md hover:border-[#B91C1C]/60 focus-within:ring-2 focus-within:ring-[#B91C1C]/30' : ''}`}
+    {...(onClick ? {
+      role: 'button' as const,
+      tabIndex: 0,
+      onClick,
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); }
+      },
+      'aria-label': `${label}: ${value}. Show details`,
+    } : {})}
+  >
     <CardContent className="p-4">
       <div className="flex items-center justify-between mb-2">
         <p className="text-[10px] text-[#8B7C7E] uppercase tracking-[0.09em] font-extrabold">{label}</p>
@@ -1403,6 +1484,9 @@ const LiveOpCard: React.FC<{ label: string; value: number; detail: string; icon:
       </div>
       <p className={`text-2xl font-extrabold tracking-tight tabular-nums ${urgent ? 'text-[#B91C1C]' : 'text-[#1A1416]'}`}>{value}</p>
       <p className="text-[11px] text-[#8B7C7E] mt-1">{detail}</p>
+      {onClick && value > 0 && (
+        <p className="text-[11px] font-semibold text-[#B91C1C] mt-1.5">See which ones →</p>
+      )}
     </CardContent>
   </Card>
 );
