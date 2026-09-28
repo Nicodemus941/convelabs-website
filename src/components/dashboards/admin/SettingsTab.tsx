@@ -12,9 +12,10 @@ import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
-import { Loader2, Save, Check, Clock } from 'lucide-react';
+import { Loader2, Save, Check, Clock, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import BlackoutsPanel from './BlackoutsPanel';
 import {
   DAY_NAMES,
   DEFAULT_OFFICE_HOURS,
@@ -50,7 +51,7 @@ const DEFAULT_PLATFORM: PlatformSettings = {
 };
 
 const SettingsTab: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'general' | 'hours' | 'notifications' | 'integrations'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'hours' | 'blackouts' | 'notifications' | 'integrations'>('general');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -212,6 +213,7 @@ const SettingsTab: React.FC = () => {
           <TabsList className="mb-6 w-full overflow-x-auto flex-nowrap whitespace-nowrap -mx-1 px-1 justify-start">
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="hours">Office Hours</TabsTrigger>
+            <TabsTrigger value="blackouts">Blackouts &amp; Breaks</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
             <TabsTrigger value="integrations">Integrations</TabsTrigger>
           </TabsList>
@@ -395,6 +397,20 @@ const SettingsTab: React.FC = () => {
                   Draws starting at or after this time carry the after-hours fee. Screens that cannot
                   add that fee, such as the recurring-series builder, stop offering times here.
                 </p>
+                {(() => {
+                  // A threshold at or after the last closing time can never be
+                  // reached, so the surcharge silently never applies. Live
+                  // config hit exactly this: closing 13:30, threshold 17:30.
+                  const lastClose = officeHours.days.filter(d => !d.closed).map(d => d.close).sort().pop();
+                  if (!lastClose || officeHours.afterHoursFrom < lastClose) return null;
+                  return (
+                    <p className="text-[11px] text-amber-700 mt-2 flex items-start gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+                      You close at {lastClose}, so nothing can start at or after {officeHours.afterHoursFrom} —
+                      the after-hours fee never applies. Set it earlier than {lastClose} to use it.
+                    </p>
+                  );
+                })()}
               </div>
 
               <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 pt-5">
@@ -413,6 +429,18 @@ const SettingsTab: React.FC = () => {
                 </button>
               </div>
             </div>
+          </TabsContent>
+
+          <TabsContent value="blackouts">
+            {/* latestClose lets the panel point out a window that sits entirely
+                after closing and therefore removes no bookable time. */}
+            <BlackoutsPanel
+              latestClose={officeHours.days
+                .filter(d => !d.closed)
+                .map(d => d.close)
+                .sort()
+                .pop() || null}
+            />
           </TabsContent>
 
           <TabsContent value="notifications">
