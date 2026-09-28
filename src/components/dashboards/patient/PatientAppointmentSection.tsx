@@ -19,13 +19,35 @@ const PatientAppointmentSection = () => {
     
     try {
       setIsLoading(true);
+
+      // appointments.patient_id points at the patient's CHART
+      // (tenant_patients.id), not at their login. Matching it against user.id
+      // returned only the minority of rows that happen to carry an auth id --
+      // which is why a patient could book a visit, get the confirmation, and
+      // then see an empty dashboard.
+      //
+      // current_user_chart_ids() is SECURITY DEFINER because tenant_patients
+      // has RLS of its own. If it is not deployed yet the catch leaves ids as
+      // [user.id], which is exactly the old behaviour -- so this is safe to
+      // ship ahead of the migration and starts working when that lands.
+      const ids: string[] = [user.id];
+      try {
+        const { data: chartIds } = await supabase.rpc('current_user_chart_ids' as any);
+        for (const row of (chartIds as any[]) || []) {
+          const id = typeof row === 'string' ? row : row?.current_user_chart_ids ?? row?.id;
+          if (id && !ids.includes(id)) ids.push(id);
+        }
+      } catch {
+        /* pre-migration, or the function is unavailable -- fall back to the login id */
+      }
+
       const { data, error } = await supabase
         .from('appointments')
         .select(`
           *,
           phlebotomist:staff_profiles(first_name, last_name)
         `)
-        .eq('patient_id', user.id)
+        .in('patient_id', ids)
         .order('appointment_date', { ascending: false })
         .order('appointment_time', { ascending: true });
 

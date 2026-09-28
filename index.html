@@ -70,7 +70,17 @@
     }
     </script>
 
-    <!-- Meta Pixel Code -->
+    <!-- Meta Pixel Code
+         392491662503235 is "Convelabs Site", the dataset the convelabs
+         business portfolio owns and the one connected to the ConveLabs ad
+         account. It replaced 23978246401837515, which fired on every page of
+         this site for months and belonged to no portfolio we control -- so
+         the ad account could not read it, no audience could be built from it,
+         and no campaign could ever optimise against it. Events went somewhere
+         unreachable while the owned dataset sat reading "no events received".
+         If this id changes again, change it in MetaPixel.tsx and META_PIXEL_ID
+         (Conversions API) at the same time, or the browser and server halves
+         will report to two different pixels. -->
     <script>
     !function(f,b,e,v,n,t,s)
     {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
@@ -80,7 +90,7 @@
     t.src=v;s=b.getElementsByTagName(e)[0];
     s.parentNode.insertBefore(t,s)}(window, document,'script',
     'https://connect.facebook.net/en_US/fbevents.js');
-    fbq('init', '23978246401837515');
+    fbq('init', '392491662503235');
     fbq('track', 'PageView');
     </script>
     <!-- End Meta Pixel Code -->
@@ -125,7 +135,7 @@
   <body>
     <!-- Meta Pixel Code - Noscript fallback -->
     <noscript><img height="1" width="1" style="display:none"
-    src="https://www.facebook.com/tr?id=23978246401837515&ev=PageView&noscript=1"
+    src="https://www.facebook.com/tr?id=392491662503235&ev=PageView&noscript=1"
     /></noscript>
     
     <div id="root"></div>

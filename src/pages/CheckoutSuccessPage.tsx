@@ -29,7 +29,46 @@ interface ConfirmResponse {
   customer_email: string | null;
   customer_name: string | null;
   amount_display: string;
+  /** Cents, straight from Stripe. The pixel reports value, not a label. */
+  amount_cents: number | null;
   details: Record<string, unknown>;
+}
+
+/**
+ * Report the purchase to the Meta pixel, exactly once per checkout session.
+ *
+ * Meta cannot optimise toward bookings it never sees, and until now nothing on
+ * this site fired a conversion event at all -- the ad account was buying the
+ * cheapest clicks because clicks were the only outcome it was shown.
+ *
+ * eventID is the dedup key. The stripe-webhook reports the same Purchase
+ * server-side under this identical id; Meta keeps whichever lands first and
+ * discards the other. If the ids ever drift apart every booking counts twice
+ * and the optimiser is trained on a number that is double the truth.
+ *
+ * sessionStorage guards the refresh: this page is a receipt, people reload it,
+ * and each reload would otherwise be another Purchase.
+ */
+function reportPurchaseToMeta(sessionId: string, amountCents: number | null, contentName: string) {
+  try {
+    const key = `cl_purchase_sent_${sessionId}`;
+    if (sessionStorage.getItem(key)) return;
+    const fbq = (window as unknown as { fbq?: (...args: unknown[]) => void }).fbq;
+    if (typeof fbq !== 'function') return;
+    fbq(
+      'track',
+      'Purchase',
+      {
+        value: amountCents != null ? Number((amountCents / 100).toFixed(2)) : 0,
+        currency: 'USD',
+        content_name: contentName,
+      },
+      { eventID: `ckt_${sessionId}` },
+    );
+    sessionStorage.setItem(key, '1');
+  } catch {
+    /* A pixel must never be able to break a receipt. */
+  }
 }
 
 const TIER_META: Record<string, { label: string; color: string; benefits: string[]; icon: LucideIcon }> = {
@@ -96,10 +135,20 @@ const CheckoutSuccessPage: React.FC = () => {
             : typeof verifyData.amount_total === 'number'
               ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(verifyData.amount_total / 100)
               : 'Your payment',
+          amount_cents: typeof verifyData.amount_total === 'number' ? verifyData.amount_total : null,
           details: verifyData.details || {},
         };
 
         setData(normalized);
+
+        if (normalized.paid) {
+          reportPurchaseToMeta(
+            sessionId,
+            normalized.amount_cents,
+            normalized.kind === 'membership' ? 'Membership' : 'Appointment',
+          );
+        }
+
         // For appointment / lab-request bookings, prompt for referring-provider
         // capture ~2 seconds after success renders — patient is warm + just paid.
         if ((normalized.kind === 'appointment' || normalized.kind === 'lab_request') && normalized.paid && normalized.details?.patient_name) {
