@@ -50,7 +50,11 @@ export const VisitorOptimizationProvider = ({ children }: VisitorOptimizationPro
 
     // Analyze visitor after 30 seconds of activity
     const timer = setTimeout(() => {
-      optimization.analyzeVisitor(pageViews, []);
+      // Visitor analysis retired 2026-09-28 -- see
+      // supabase/functions/analyze-visitor-behavior/index.ts. It spent a
+      // month returning one hardcoded answer to every visitor while
+      // reporting success, and nothing ever read what it stored.
+      // optimization.analyzeVisitor(pageViews, []);
       
       // Track page visit for follow-up automation (simplified)
       console.log('Page visit tracked:', window.location.pathname);
