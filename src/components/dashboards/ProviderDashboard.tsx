@@ -945,6 +945,11 @@ const ProviderDashboard: React.FC = () => {
         open={showPricing}
         onOpenChange={setShowPricing}
         organizationName={org.name}
+        // Without these the modal showed a partner the public rate card and
+        // nothing about the rate they actually negotiated.
+        orgInvoicePriceCents={org.org_invoice_price_cents ?? null}
+        lockedPriceCents={org.locked_price_cents ?? null}
+        defaultBilledTo={org.default_billed_to as 'org' | 'patient' | null}
         onSchedule={() => setShowLabRequest(true)}
       />
 
