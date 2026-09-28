@@ -183,6 +183,57 @@ export const VISIT_DURATIONS: Record<string, number> = {
   'specialty-kit-genova': 80,
 };
 
+// ─── Catalog-hydrated scheduling (duration + buffer) ──────────────────
+// Populated by useServiceCatalog on load, same pattern as DB_TIER_PRICING.
+// Note VISIT_DURATIONS above lists NO partner-* codes, so every partner
+// service resolved to DEFAULT_APPOINTMENT_DURATION (60) regardless of what
+// it actually takes. A therapeutic draw booked under a partner code was
+// therefore blocked for 60 minutes with no buffer instead of 75 + 30.
+const DB_VISIT_DURATIONS: Record<string, number> = {};
+const DB_SERVICE_BUFFERS: Record<string, number> = {};
+
+/** Hydrate duration + buffer from the live catalog. Safe to call repeatedly. */
+export function hydrateDbServiceScheduling(
+  entries: Array<{ service_code?: string | null; duration_minutes?: number | null; buffer_minutes?: number | null }>,
+): void {
+  for (const e of entries || []) {
+    const code = e?.service_code;
+    if (!code) continue;
+    if (typeof e.duration_minutes === 'number' && e.duration_minutes > 0) {
+      DB_VISIT_DURATIONS[code] = e.duration_minutes;
+    }
+    if (typeof e.buffer_minutes === 'number' && e.buffer_minutes >= 0) {
+      DB_SERVICE_BUFFERS[code] = e.buffer_minutes;
+    }
+  }
+}
+
+/**
+ * Minutes to block for a service.
+ *
+ * Deliberate precedence: the hardcoded map wins for codes it knows, and the
+ * catalog only fills gaps. Inverting this is the end state, but it can't
+ * happen while catalog rows disagree with what production actually runs —
+ * `in-office` carries duration_minutes = 30 in the catalog against 60 in
+ * every live map, so a catalog-first switch today would halve every office
+ * block and start double-booking the office. Fix that row, then flip the
+ * order here and delete the map.
+ */
+export function getVisitDuration(serviceCode: string | null | undefined): number {
+  const code = String(serviceCode || '').toLowerCase();
+  return VISIT_DURATIONS[code] ?? DB_VISIT_DURATIONS[code] ?? DEFAULT_APPOINTMENT_DURATION;
+}
+
+/**
+ * Per-service buffer from the catalog, or undefined when it has no opinion.
+ *
+ * Undefined is meaningful: it tells getBufferMinutes() to fall back to
+ * HEAVY_SERVICE_TYPES rather than treat the service as needing no padding.
+ */
+export function getServiceBufferMinutes(serviceCode: string | null | undefined): number | undefined {
+  return DB_SERVICE_BUFFERS[String(serviceCode || '').toLowerCase()];
+}
+
 /**
  * Whether a visit incurs the Extended Service Area (travel) fee.
  *

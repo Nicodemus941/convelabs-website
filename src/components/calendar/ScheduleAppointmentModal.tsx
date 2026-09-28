@@ -13,6 +13,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
+import { getVisitDuration, getServiceBufferMinutes } from '@/services/pricing/pricingService';
 import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea, calculateTotal, isSeniorAge, ageFromDob } from '@/services/pricing/pricingService';
 import { useServiceCatalog } from '@/hooks/useServiceCatalog';
 
@@ -302,11 +303,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // duration (mirrors server VISIT_DURATIONS in availability.ts). Pre-fix
         // was hardcoded 60, so admin could book a 75-min therapeutic at 10:30
         // even though it'd run into an 11:30 existing appt.
-        const VISIT_DURATIONS: Record<string, number> = {
-          'mobile': 60, 'in-office': 60, 'senior': 60,
-          'therapeutic': 75, 'specialty-kit': 75, 'specialty-kit-genova': 80,
-        };
-        const NEW_APPT_FOOTPRINT_MIN = VISIT_DURATIONS[String(serviceType || '').toLowerCase()] || 60;
+        const NEW_APPT_FOOTPRINT_MIN = getVisitDuration(serviceType);
 
         const parseTimeStr = (t: string): number => {
           // Handles both "09:00:00" (24h) and "9:00 AM" (12h)
@@ -339,6 +336,7 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
           const duration = (row.duration_minutes && row.duration_minutes > 0) ? row.duration_minutes : DEFAULT_DURATION_MIN;
           const buffer = getBufferMinutes({
             service_type: row.service_type,
+            serviceBufferMinutes: getServiceBufferMinutes(row.service_type),
             address: row.address,
             family_group_id: row.family_group_id,
           });

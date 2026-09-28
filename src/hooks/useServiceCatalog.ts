@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { hydrateDbServicePricing } from '@/services/pricing/pricingService';
+import { hydrateDbServicePricing, hydrateDbServiceScheduling } from '@/services/pricing/pricingService';
 
 export interface DynamicServiceEntry {
   /** Stable slug — booking flow + server pricing key on this. */
@@ -31,6 +31,15 @@ export interface DynamicServiceEntry {
   tier_pricing: Record<string, number>;
   /** Visit duration in minutes — feeds the slot grid + duration-aware blocking. */
   duration_minutes: number;
+  /**
+   * Travel/prep buffer in minutes appended to duration when blocking slots.
+   *
+   * `undefined` means the catalog had nothing to say (row predates the
+   * buffer_minutes column, or this is a legacy hardcoded entry) — callers
+   * must then fall back to HEAVY_SERVICE_TYPES in src/lib/bookingBuffer.ts
+   * rather than assume 0, or heavy services lose their padding.
+   */
+  buffer_minutes?: number;
   /** When true, booking flow shows the lab-order upload step. */
   requires_lab_order: boolean;
   /** UUID of the underlying services_enhanced row. */
@@ -80,6 +89,9 @@ export function useServiceCatalog(): UseServiceCatalogResult {
       // Mirror DB prices into the client pricing cache so the checkout summary
       // and previews match what the server charges for admin-created services.
       hydrateDbServicePricing(data || []);
+      // Duration + buffer travel with price -- a service whose length the
+      // scheduler doesn't know gets blocked for the default 60 minutes.
+      hydrateDbServiceScheduling((data || []) as any);
       setRows(data || []);
       setError(null);
     } catch (err: any) {
@@ -106,6 +118,7 @@ export function useServiceCatalog(): UseServiceCatalogResult {
         ? r.tier_pricing
         : { none: r.base_price_cents || 0 },
       duration_minutes: r.duration_minutes || 30,
+      buffer_minutes: typeof r.buffer_minutes === 'number' ? r.buffer_minutes : undefined,
       requires_lab_order: !!r.requires_lab_order,
       category: r.category,
       service_type: r.service_type || undefined,
@@ -132,6 +145,7 @@ export async function fetchServiceCatalogOnce(): Promise<DynamicServiceEntry[]> 
     return [];
   }
   hydrateDbServicePricing(data || []);
+  hydrateDbServiceScheduling((data || []) as any);
   return (data || [])
     .filter((r: any) => r?.service_code)
     .map((r: any) => ({
@@ -143,6 +157,7 @@ export async function fetchServiceCatalogOnce(): Promise<DynamicServiceEntry[]> 
         ? r.tier_pricing
         : { none: r.base_price_cents || 0 },
       duration_minutes: r.duration_minutes || 30,
+      buffer_minutes: typeof r.buffer_minutes === 'number' ? r.buffer_minutes : undefined,
       requires_lab_order: !!r.requires_lab_order,
       category: r.category,
       service_type: r.service_type || undefined,

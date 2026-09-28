@@ -1,6 +1,12 @@
 /**
  * Travel/prep buffer rules for slot blocking.
  *
+ * The per-service buffer now comes from `services_enhanced.buffer_minutes`
+ * when the caller passes it as `serviceBufferMinutes` — the catalog is the
+ * source of truth, as it already is for pricing. HEAVY_SERVICE_TYPES below
+ * is the fallback for callers without the catalog loaded, and encodes the
+ * same owner-confirmed values so behavior is identical either way.
+ *
  * Owner-confirmed 2026-04-27:
  *   • Default mobile / in-office / standard partner — 0 buffer.
  *   • +30 min — specialty-kit, specialty-kit-genova, therapeutic, partner-aristotle-education
@@ -54,6 +60,22 @@ interface BufferContext {
    * When provided, takes precedence over the city/address heuristic.
    */
   isExtendedArea?: boolean;
+  /**
+   * Service buffer in minutes from `services_enhanced.buffer_minutes`.
+   *
+   * Takes precedence over HEAVY_SERVICE_TYPES when supplied, which makes the
+   * catalog the source of truth the way it already is for pricing. The set
+   * below only covers the five codes someone remembered to add to it, so a
+   * service absent from it silently booked with no buffer at all — that is
+   * how a 75-minute therapeutic draw got scheduled in a 60-minute slot with
+   * no travel padding.
+   *
+   * Pass 0 to mean "genuinely no buffer". Leave undefined (not null) to fall
+   * back to the hardcoded set, so callers that don't have the catalog loaded
+   * — and any code path running before the buffer_minutes migration lands —
+   * keep today's exact behavior.
+   */
+  serviceBufferMinutes?: number;
 }
 
 function detectCityFromAddress(addr: string | null | undefined): string | null {
@@ -108,8 +130,12 @@ function addressLooksExtended(addr: string | null | undefined): boolean {
 export function getBufferMinutes(ctx: BufferContext): number {
   let buffer = 0;
 
+  // Catalog value wins when the caller has one; otherwise fall back to the
+  // hardcoded set so behavior is unchanged for callers that don't pass it.
   const serviceType = (ctx.service_type || '').toLowerCase();
-  if (HEAVY_SERVICE_TYPES.has(serviceType)) {
+  if (typeof ctx.serviceBufferMinutes === 'number' && Number.isFinite(ctx.serviceBufferMinutes)) {
+    buffer += Math.max(0, ctx.serviceBufferMinutes);
+  } else if (HEAVY_SERVICE_TYPES.has(serviceType)) {
     buffer += BUFFER_HEAVY_SERVICE;
   }
 
