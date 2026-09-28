@@ -79,9 +79,41 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   onSchedule?: () => void;
   organizationName?: string | null;
+  /**
+   * The practice's CONTRACTED rate. Everything below this line is the public
+   * rate card, which is not what a partner practice pays -- so a partner
+   * opening "Services and pricing" to check their own cost was shown retail
+   * numbers that were never theirs, and their negotiated rate appeared
+   * nowhere in this modal.
+   *
+   * Two columns because partners are priced two different ways, and which one
+   * is set depends on who gets billed:
+   *   org_invoice_price_cents -- the practice is invoiced (Elite Medical
+   *     Concierge $72.25, Aristotle $185). locked_price_cents is 0 for these.
+   *   locked_price_cents -- the patient pays a rate the practice negotiated
+   *     (ND Wellness $85, The Restoration Place $125). org_invoice is NULL.
+   * Reading only one of them leaves half the partners seeing nothing.
+   */
+  orgInvoicePriceCents?: number | null;
+  lockedPriceCents?: number | null;
+  defaultBilledTo?: 'org' | 'patient' | null;
 }
 
-const ServicesPricingModal: React.FC<Props> = ({ open, onOpenChange, onSchedule, organizationName }) => {
+const ServicesPricingModal: React.FC<Props> = ({
+  open, onOpenChange, onSchedule, organizationName,
+  orgInvoicePriceCents, lockedPriceCents, defaultBilledTo,
+}) => {
+  // Prefer the column that matches who is actually billed, then fall back to
+  // whichever is set. A 0 is not a rate -- partners billed by invoice carry
+  // locked_price_cents = 0, and showing "$0.00 per draw" would be worse than
+  // showing nothing.
+  const orgCents = orgInvoicePriceCents && orgInvoicePriceCents > 0 ? orgInvoicePriceCents : null;
+  const patientCents = lockedPriceCents && lockedPriceCents > 0 ? lockedPriceCents : null;
+  const billsOrg = defaultBilledTo === 'org';
+  const contractedCents = (billsOrg ? orgCents : patientCents) ?? orgCents ?? patientCents;
+  const contractedBillsOrg = contractedCents != null && contractedCents === orgCents;
+  const contractedRate = contractedCents != null ? (contractedCents / 100).toFixed(2) : null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl w-[95vw] max-h-[92vh] overflow-y-auto p-0">
@@ -112,6 +144,33 @@ const ServicesPricingModal: React.FC<Props> = ({ open, onOpenChange, onSchedule,
             <Badge className="bg-white/15 text-white border-white/20 text-[11px] hover:bg-white/15">Quest + Labcorp delivery</Badge>
           </div>
         </div>
+
+        {/* THE PRACTICE'S OWN RATE — first thing on screen.
+            A partner opening this modal is asking "what do WE pay?", and the
+            rate card below answers a different question. */}
+        {contractedRate && (
+          <div className="px-6 sm:px-8 pt-5">
+            <div className="rounded-xl border-2 border-[#B91C1C]/25 bg-[#B91C1C]/[0.04] p-4 sm:p-5">
+              <p className="text-[10px] font-extrabold uppercase tracking-[0.09em] text-[#8B7C7E]">
+                Your contracted rate
+              </p>
+              <div className="flex items-baseline gap-2 mt-1 flex-wrap">
+                <span className="text-3xl font-extrabold tracking-tight text-[#B91C1C] tabular-nums">${contractedRate}</span>
+                <span className="text-sm text-gray-600">per draw</span>
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white border border-[#B91C1C]/20 text-[#B91C1C]">
+                  {contractedBillsOrg ? 'Billed to your practice' : 'Patient pays this rate'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-600 mt-2 leading-relaxed">
+                {organizationName ? <><span className="font-semibold">{organizationName}</span>'s</> : 'Your'} agreed
+                rate{contractedBillsOrg
+                  ? ' — invoiced to the practice, and your patients see no charge.'
+                  : ' — what your patients are charged at checkout.'}
+                {' '}The rate card below is the public pricing, shown for comparison.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* SCARCITY STRIP — Founding 50 VIP seats. Live count from DB. */}
         <div className="px-6 sm:px-8 pt-4">
