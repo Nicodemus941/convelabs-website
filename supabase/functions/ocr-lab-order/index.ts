@@ -207,6 +207,17 @@ function bytesToBase64(bytes: Uint8Array): string {
 }
 
 interface OcrExtraction {
+  /**
+   * What the uploaded image actually IS.
+   *
+   * Everything below assumed a lab order, because the prompt opened by
+   * asserting one. Handed an insurance card, Claude would dutifully fill in
+   * the insurance block, return panels: [], and the result was filed as a
+   * lab order with no tests on it -- indistinguishable from a lab order the
+   * model simply couldn't read. A patient who photographs the wrong card is
+   * making an easy mistake; the pipeline should catch it, not inherit it.
+   */
+  documentType?: 'lab_order' | 'insurance_card' | 'other' | null;
   text: string;
   panels: string[];
   insurance: {
@@ -314,9 +325,15 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
         {
           type: 'text',
           text: [
-            'This is a medical lab order / test requisition.',
+            'This image was uploaded by a patient who was asked for a medical lab order / test requisition. It is USUALLY one, but not always -- patients sometimes photograph the wrong document.',
             '',
-            'Extract FIVE things:',
+            'FIRST, classify what the image actually is (documentType):',
+            '   - "lab_order": a lab order, test requisition, or e-script listing tests to be drawn.',
+            '   - "insurance_card": a health-insurance member card. Tells: a payer logo (Aetna, BCBS, Cigna, UnitedHealthcare, Humana, Medicare), the words "Member ID" / "Group" / "RxBIN" / "RxPCN" / "Copay" / "Subscriber", a plan name, member-services phone numbers, and -- decisively -- NO ordered tests or panels anywhere.',
+            '   - "other": anything else (a drivers licence, a selfie, a blank page, an unrelated document).',
+            'Judge this from what is ON the image, not from what it was supposed to be. A card with a payer logo and no tests is an insurance_card even though it was uploaded as a lab order.',
+            '',
+            'Then extract FIVE things:',
             '1. A plain-text transcription of ALL ordered tests, panels, CPT codes, and special instructions (especially fasting requirements).',
             '2. A structured list of the panels/tests ordered. Normalize names to their common abbreviation when obvious (e.g. "Comprehensive Metabolic Panel" → "CMP").',
             '3. The patient\'s insurance information IF present on the form. Look for boxes/sections labeled "Insurance", "Carrier", "Member ID", "Group #", "Subscriber ID", "Policy #". Return the carrier name (e.g. "Aetna", "BCBS Florida", "United Healthcare", "Medicare", "Self-Pay"), the member/subscriber ID, and the group number. If the form says "Self-Pay" or "Cash", return provider="Self-Pay" with empty IDs. If no insurance section is present, return null.',
@@ -342,10 +359,11 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
             '   - gtt: does this order include a glucose tolerance test (GTT/OGTT, glucola, 1/2/3-hour glucose)? "yes" / "no" / "unclear".',
             '',
             'Reply ONLY with valid JSON in this exact shape, no prose:',
-            '{"text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}, "billType": "client_bill", "labCompany": "Access Medical Labs", "prep": {"fasting": "yes", "urine": "no", "gtt": "no"}}',
+            '{"documentType": "lab_order", "text": "<full transcription>", "panels": ["CMP", "Lipid Panel"], "insurance": {"provider": "Aetna", "memberId": "W123456789", "groupNumber": "12345"}, "practice": {"practiceName": "Functional Wellness PLLC", "orderingPhysician": "Anna Martinez MD", "addressStreet": "123 Main St", "addressCity": "Orlando", "addressState": "FL", "addressZip": "32801", "officePhone": "(407) 555-1234", "email": "info@functionalwellness.com", "npi": "1234567890"}, "patient": {"fullName": "John Smith", "dateOfBirth": "1969-07-12", "phone": "(407) 555-9876", "sex": "M"}, "billType": "client_bill", "labCompany": "Access Medical Labs", "prep": {"fasting": "yes", "urine": "no", "gtt": "no"}}',
             '',
+            'If documentType is "insurance_card", still fill in "insurance" from the card (provider, memberId, groupNumber) and set "panels": [] -- a card has no ordered tests.',
             'If no insurance is on the form, set "insurance": null. If no practice block is visible, set "practice": null. If patient demographics are absent (rare), set "patient": null. If billing is not indicated, set "billType": null. If the destination lab is not shown, set "labCompany": null.',
-            'If the image is unreadable, reply: {"text": "", "panels": [], "insurance": null, "practice": null, "patient": null, "billType": null, "labCompany": null, "prep": null}',
+            'If the image is unreadable, reply: {"documentType": null, "text": "", "panels": [], "insurance": null, "practice": null, "patient": null, "billType": null, "labCompany": null, "prep": null}',
           ].join('\n'),
         },
       ],
@@ -381,6 +399,12 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
     if (!match) return { text: content, panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null, prep: null };
     try {
       const parsed = JSON.parse(match[0]);
+      // Only trust the three values we defined; anything else is treated as
+      // "unknown" so a hallucinated label can never route a real lab order
+      // away from the normal path.
+      const rawDocType = typeof parsed.documentType === 'string' ? parsed.documentType.trim().toLowerCase() : '';
+      const documentType: OcrExtraction['documentType'] =
+        rawDocType === 'lab_order' || rawDocType === 'insurance_card' || rawDocType === 'other' ? rawDocType : null;
       const text = String(parsed.text || '').substring(0, 8000);
       const panels = Array.isArray(parsed.panels) ? parsed.panels.slice(0, 40).map((p: any) => String(p).substring(0, 80)) : [];
       // Insurance is optional — only return a non-null block if Claude found a real carrier
@@ -451,7 +475,7 @@ async function runClaudeVisionOcr(base64: string, mediaType: string): Promise<Oc
         };
         if (!prep.fasting && !prep.urine && !prep.gtt) prep = null;
       }
-      return { text, panels, insurance, practice, patient, billType, labCompany, prep };
+      return { documentType, text, panels, insurance, practice, patient, billType, labCompany, prep };
     } catch {
       return { text: content.substring(0, 8000), panels: [], insurance: null, practice: null, patient: null, billType: null, labCompany: null, prep: null };
     }
@@ -604,6 +628,42 @@ Deno.serve(async (req) => {
       }), {
         status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // ─── WRONG-DOCUMENT ROUTING ───────────────────────────────────────
+    // A patient photographing their insurance card instead of the lab order
+    // is a common, understandable mistake -- the booking flow asks for both.
+    // Before this check the card was stored AS the lab order: insurance got
+    // extracted, panels came back empty, and the row was marked complete, so
+    // it looked exactly like a lab order Claude couldn't read. The phleb then
+    // arrived with no idea what to draw.
+    //
+    // Two guards, because misrouting a real lab order is worse than missing a
+    // misfiled card: Claude must say 'insurance_card' AND the form must carry
+    // no ordered tests. A requisition that happens to reprint the patient's
+    // card still has panels, so it stays on the normal path.
+    if (result.documentType === 'insurance_card' && result.panels.length === 0) {
+      const hint = 'This looks like an insurance card, not a lab order.';
+      if (labOrderRowId) {
+        // 'failed' rather than 'complete': the UI must stop waiting for panels
+        // that are never coming, and an admin scanning the queue should see
+        // something needing attention rather than a silently empty order.
+        await supabase.from('appointment_lab_orders').update({
+          ocr_status: 'failed',
+          ocr_error: hint + ' Saved as the insurance card; the lab order is still needed.',
+          ocr_completed_at: new Date().toISOString(),
+        }).eq('id', labOrderRowId);
+      }
+      // The insurance details are handed back so the caller can file them
+      // where they belong instead of discarding a document the patient did
+      // take the trouble to send.
+      return new Response(JSON.stringify({
+        ok: false,
+        documentType: 'insurance_card',
+        misfiled: true,
+        insurance: result.insurance,
+        hint,
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     // ─── PREP DETERMINATION (fasting / urine / GTT) ───────────────────

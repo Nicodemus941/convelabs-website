@@ -163,6 +163,46 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
         console.warn('[ocr] edge fn error (non-blocking):', error);
         return;
       }
+      // ── Wrong document: this is the insurance card ────────────────
+      // The booking flow asks for a lab order AND an insurance card, so
+      // photographing the wrong one is an easy mistake. Before this, the card
+      // was stored as the lab order and the phleb arrived with nothing to
+      // draw from. File it where it belongs, put the lab-order slot back to
+      // empty so the flow still asks, and say so plainly.
+      if ((data as any)?.documentType === 'insurance_card') {
+        const labPath = newPaths[0];
+        try {
+          const { data: blob } = await supabase.storage.from('lab-orders').download(labPath);
+          if (blob) {
+            const ext = (labPath.split('.').pop() || 'jpg').toLowerCase();
+            const insName = `booking_ins_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            const { error: insErr } = await supabase.storage
+              .from('insurance-cards')
+              .upload(insName, blob, { contentType: blob.type || 'image/jpeg', upsert: false });
+            if (!insErr) {
+              setValue('insurance.uploadedPath' as any, insName);
+              setValue('labOrder.hasInsuranceFile', true);
+              // Only drop the misfiled copy once the new one is safely stored.
+              await supabase.storage.from('lab-orders').remove([labPath]);
+            }
+          }
+        } catch (moveErr) {
+          // Keep the file where it is rather than lose it -- an admin can
+          // still see it on the appointment.
+          console.warn('[ocr] could not re-file insurance card:', moveErr);
+        }
+
+        const remaining = allPaths.filter(pth => pth !== labPath);
+        setValue('labOrder.uploadedPaths' as any, remaining);
+        if (remaining.length === 0) setValue('labOrder.hasFile', false);
+        onFilesSelected(selectedFiles);
+
+        toast.error(
+          "That looks like your insurance card, not a lab order — we've saved it as your insurance card. Please upload the lab order from your doctor.",
+          { duration: 9000 },
+        );
+        return;
+      }
       if (!data?.ok) {
         console.warn('[ocr] returned not-ok:', data);
         return;
