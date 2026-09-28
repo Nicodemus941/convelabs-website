@@ -357,7 +357,13 @@ export function usePhlebotomistAppointments() {
           // missing or placeholder (back inside the tpData-required guard).
           if (tpData) {
             const apptAddr = (appt.address || '').trim().toLowerCase();
-            if (!apptAddr || apptAddr === 'tbd' || apptAddr === 'address pending') {
+            // A bare state is the same as no address. The booking form defaults
+            // state to 'FL', so a booking that skipped the Location step lands
+            // here as the literal string "FL" -- not empty, not 'TBD', so this
+            // sync skipped it and the card rendered "FL" where a street should
+            // be. Two of those were on the 2026-09-28 board.
+            const isBareState = /^[a-z]{2}$/.test(apptAddr);
+            if (!apptAddr || apptAddr === 'tbd' || apptAddr === 'address pending' || isBareState) {
               if (tpData.address) {
                 const fullAddr = [tpData.address, tpData.city, tpData.state, tpData.zipcode].filter(Boolean).join(', ');
                 appt.address = fullAddr;

@@ -1972,8 +1972,10 @@ async function handleAppointmentPayment(session: any) {
     const userId = metadata.user_id || null;
 
     // Build address string (include apt/unit if present)
+    const bookedStreet = String(metadata.address || '').trim();
     let fullAddress = [metadata.address, metadata.city, metadata.state, metadata.zip_code].filter(Boolean).join(', ');
     if (metadata.apt_unit) fullAddress = `${metadata.apt_unit}, ${fullAddress}`;
+    let resolvedZip = String(metadata.zip_code || '').trim();
 
     // Find patient_id — try user_id from metadata first, then find-or-create a
     // chart record by email. Previously this only LOOKED UP by email, so a
@@ -2023,6 +2025,64 @@ async function handleAppointmentPayment(session: any) {
       }
     }
 
+    // ADDRESS FALLBACK: the Location step is skipped outright for in-office
+    // visits and can be left blank on others, so metadata arrives with no
+    // street, city or zip. The booking form still defaults state to 'FL', so
+    // the join above collapsed to the single string "FL" -- and that is what
+    // the phlebotomist's card rendered and what the Navigate button handed to
+    // maps.
+    //
+    // Found 2026-09-27: a 10:00 senior draw (mobile -- someone had to drive to
+    // it) and a 12:00 in-office draw were both on the next morning's board
+    // showing "FL", while the real addresses sat on the patients' charts the
+    // whole time. It had been happening on every online booking this practice
+    // made since June.
+    //
+    // A lone state is worse than an empty field: it reads as data, so nothing
+    // downstream treats it as missing. Take the address on file; if there is
+    // none, write 'TBD', which the phleb dashboard already knows to re-resolve.
+    if (!bookedStreet) {
+      let backfilled = false;
+      try {
+        let chart: any = null;
+        if (patientId) {
+          const { data } = await supabaseClient
+            .from('tenant_patients')
+            .select('address, city, state, zipcode')
+            .eq('id', patientId)
+            .maybeSingle();
+          chart = data;
+        }
+        // patientId is the auth user id whenever the booker was signed in, and
+        // that is not a tenant_patients id -- which is exactly why the practice
+        // above never matched. Fall back to the chart's email.
+        if (!chart?.address && metadata.patient_email) {
+          const { data } = await supabaseClient
+            .from('tenant_patients')
+            .select('address, city, state, zipcode')
+            .ilike('email', String(metadata.patient_email).trim())
+            .maybeSingle();
+          chart = data;
+        }
+        if (chart?.address && String(chart.address).trim()) {
+          const onFile = [chart.address, chart.city, chart.state, chart.zipcode]
+            .map((p: any) => (p ? String(p).trim() : ''))
+            .filter(Boolean)
+            .join(', ');
+          fullAddress = metadata.apt_unit ? `${metadata.apt_unit}, ${onFile}` : onFile;
+          if (!resolvedZip && chart.zipcode) resolvedZip = String(chart.zipcode).trim();
+          backfilled = true;
+          console.log('[webhook] address backfilled from patient chart (booking carried no street)');
+        }
+      } catch (addrErr) {
+        console.warn('[webhook] chart address fallback failed (non-fatal):', addrErr);
+      }
+      if (!backfilled) {
+        console.warn('[webhook] no street on booking and none on file -- writing TBD');
+        fullAddress = 'TBD';
+      }
+    }
+
     // SLOT VALIDATION: Check if this time slot is already booked
     if (appointmentDate && appointmentTime) {
       const { count } = await supabaseClient
@@ -2059,7 +2119,7 @@ async function handleAppointmentPayment(session: any) {
           ? metadata.family_member_id
           : null,
         address: fullAddress,
-        zipcode: metadata.zip_code || '',
+        zipcode: resolvedZip,
         service_type: metadata.service_type || 'mobile',
         service_name: metadata.service_name || 'Blood Draw',
         gate_code: metadata.gate_code || null,
@@ -2598,7 +2658,7 @@ async function handleAppointmentPayment(session: any) {
             patient_email: c.email || null,
             patient_phone: c.phone || null,
             address: fullAddress,
-            zipcode: metadata.zip_code || '',
+            zipcode: resolvedZip,
             service_type: metadata.service_type || 'mobile',
             service_name: metadata.service_name || 'Blood Draw',
             // Per-patient fasting flag (the Amy/Robert case)
