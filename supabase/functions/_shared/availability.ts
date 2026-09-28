@@ -17,6 +17,7 @@
 //   - phleb capacity — single-phleb assumption for now
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { timeBlockAppliesOn, timeBlockDateFilter } from './timeBlocks.ts';
 
 export interface TimeWindowRule {
   dayOfWeek: number[]; // 0 = Sun, 6 = Sat
@@ -310,9 +311,11 @@ export async function getAvailableSlotsForDate(
       .neq('status', 'cancelled'),
     supabase
       .from('time_blocks' as any)
-      .select('start_date, end_date, start_time, end_time')
-      .lte('start_date', dateIso)
-      .gte('end_date', dateIso),
+      // Recurring rows are fetched wholesale and narrowed by
+      // timeBlockAppliesOn: their stored range sits in the past, so the plain
+      // date-range filter excluded them before any weekday logic could run.
+      .select('start_date, end_date, start_time, end_time, recurring, recurring_day')
+      .or(timeBlockDateFilter(dateIso)),
   ]);
 
   // BIDIRECTIONAL DURATION-AWARE BLOCKING.

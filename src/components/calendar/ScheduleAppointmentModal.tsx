@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
 import { getVisitDuration, getServiceBufferMinutes } from '@/services/pricing/pricingService';
+import { timeBlockAppliesOn } from '@/lib/timeBlocks';
 import { getServicePrice, getServiceById, EXTENDED_AREA_CITIES, isExtendedArea, calculateTotal, isSeniorAge, ageFromDob } from '@/services/pricing/pricingService';
 import { useServiceCatalog } from '@/hooks/useServiceCatalog';
 
@@ -288,9 +289,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
             .gt('expires_at', nowIso),
           (supabase as any)
             .from('time_blocks')
-            .select('start_time, end_time')
-            .lte('start_date', date)
-            .gte('end_date', date),
+            .select('start_date, end_date, start_time, end_time, recurring, recurring_day')
+            .or(`recurring.is.true,and(start_date.lte.${date},end_date.gte.${date})`),
         ]);
         const data = apptResp.data;
         if (cancelled) return;
@@ -375,6 +375,8 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // (matches AdminCalendar's partial-day rendering).
         for (const b of (blockResp?.data || []) as any[]) {
           if (!b.start_time || !b.end_time) continue;
+          // Recurring rows arrive regardless of their stored range.
+          if (!timeBlockAppliesOn(b, date)) continue;
           const sMin = parseTimeStr(String(b.start_time));
           const eMin = parseTimeStr(String(b.end_time));
           if (sMin < 0 || eMin < 0) continue;

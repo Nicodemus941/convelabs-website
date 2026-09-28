@@ -33,6 +33,7 @@ import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
 import { getVisitDuration, getServiceBufferMinutes } from '@/services/pricing/pricingService';
+import { timeBlockAppliesOn, type TimeBlockRow } from '@/lib/timeBlocks';
 
 // US Government holidays - ConveLabs is closed on these dates
 function getBlockedHolidays(year: number): Date[] {
@@ -97,10 +98,15 @@ function isHoliday(date: Date): boolean {
   );
 }
 
-// Check if a date falls within any admin-created time block
-function isBlockedByAdmin(date: Date, blockedRanges: { start: string; end: string }[]): boolean {
+// Check if a date falls within any admin-created time block.
+//
+// Takes whole rows rather than {start,end} pairs so a recurring weekly block
+// can be evaluated by weekday. The old shape discarded `recurring` before this
+// function ever saw it, which is why a weekly closure greyed out exactly one
+// date and silently did nothing on every following week.
+function isBlockedByAdmin(date: Date, blocks: TimeBlockRow[]): boolean {
   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  return blockedRanges.some(r => dateStr >= r.start && dateStr <= r.end);
+  return blocks.some(b => timeBlockAppliesOn(b, dateStr));
 }
 
 interface DateTimeSelectionStepProps {
@@ -218,7 +224,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const [bookedSlots, setBookedSlots] = useState<Set<string>>(new Set());
   const [loadingSlots, setLoadingSlots] = useState(false);
 
-  const [blockedDates, setBlockedDates] = useState<{ start: string; end: string }[]>([]);
+  const [blockedDates, setBlockedDates] = useState<TimeBlockRow[]>([]);
   const [showAfterHours, setShowAfterHours] = useState(false);
   // Phleb on-duty state — when ANY phleb has duty_through > now, after-hours
   // slots open up AND the same-day 3pm cutoff is relaxed. The PWA OnDutyToggle
@@ -264,12 +270,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   // blocks (e.g. "block 6am 5/4") leave the date selectable and only
   // gray out the specific slot in the time grid below.
   useEffect(() => {
-    supabase.from('time_blocks' as any).select('start_date, end_date, start_time, end_time').then(({ data }) => {
-      if (data) {
-        const fullDayOnly = (data as any[]).filter((d: any) => !d.start_time || !d.end_time);
-        setBlockedDates(fullDayOnly.map((d: any) => ({ start: d.start_date, end: d.end_date })));
-      }
-    });
+    supabase.from('time_blocks' as any)
+      .select('start_date, end_date, start_time, end_time, recurring, recurring_day')
+      .then(({ data }) => {
+        if (data) {
+          // Keep the whole row -- mapping to {start,end} here is what threw
+          // `recurring` away before the date picker could honor it.
+          const fullDayOnly = (data as any[]).filter((d: any) => !d.start_time || !d.end_time);
+          setBlockedDates(fullDayOnly as TimeBlockRow[]);
+        }
+      });
   }, []);
 
   // Convert hour:min to a slot key like "9:15 AM".
@@ -432,11 +442,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         try {
           const { data: tBlocks } = await supabase
             .from('time_blocks' as any)
-            .select('start_date, end_date, start_time, end_time')
-            .lte('start_date', dateStr)
-            .gte('end_date', dateStr);
+            .select('start_date, end_date, start_time, end_time, recurring, recurring_day')
+            .or(`recurring.is.true,and(start_date.lte.${dateStr},end_date.gte.${dateStr})`);
           for (const b of (tBlocks || []) as any[]) {
             if (!b.start_time || !b.end_time) continue;
+            // Recurring rows arrive regardless of their stored range.
+            if (!timeBlockAppliesOn(b, dateStr)) continue;
             const parseTimeStr = (s: string) => {
               const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(s).trim());
               if (!m) return null;
