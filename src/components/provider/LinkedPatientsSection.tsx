@@ -83,9 +83,28 @@ interface Props {
   orgId: string;
   onRequestCreated?: () => void;
   labRequests?: any[];
+  /**
+   * Appointment-derived patients from provider-dashboard-data.
+   *
+   * The list below comes from get_org_linked_patients, which resolves the org
+   * from auth.jwt() and only from the 'organization_id' claim. It returns
+   * nothing for a user whose metadata uses the legacy 'org_id' key, and
+   * nothing for a user whose organization_id was set after their last
+   * sign-in, because their token predates the claim. Either way a practice
+   * with visits was shown "Build your patient roster" while the Total
+   * patients card on the same screen counted them correctly.
+   *
+   * The edge function reads the live user record and accepts both key shapes,
+   * so its list is merged in here. Belt and braces on purpose: one source
+   * failing must not empty the screen.
+   */
+  fallbackPatients?: Array<{
+    name: string; email?: string | null; phone?: string | null;
+    last_visit?: string | null; last_service?: string | null; visit_count?: number;
+  }>;
 }
 
-const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated, labRequests = [] }) => {
+const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated, labRequests = [], fallbackPatients = [] }) => {
   const [patients, setPatients] = useState<LinkedPatient[]>([]);
   const [enrollments, setEnrollments] = useState<Map<string, EnrollmentRow>>(new Map());
   const [orgTier, setOrgTier] = useState<string | null>(null);
@@ -134,7 +153,30 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated, labRe
           .maybeSingle(),
       ]);
       if (linkedErr) throw linkedErr;
-      setPatients((linked as LinkedPatient[]) || []);
+
+      // Merge, never replace. Keyed on trimmed lowercase name to match the
+      // RPC's own GROUP BY, so a patient present in both sources appears once
+      // and the RPC's richer row (DOB, chart id, lab-order path) wins.
+      const rpcRows = (linked as LinkedPatient[]) || [];
+      const seen = new Set(rpcRows.map(r => String(r.patient_name || '').trim().toLowerCase()));
+      const merged: LinkedPatient[] = [...rpcRows];
+      for (const fp of fallbackPatients) {
+        const key = String(fp.name || '').trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push({
+          patient_name: fp.name,
+          patient_email: fp.email ?? null,
+          patient_phone: fp.phone ?? null,
+          visit_count: fp.visit_count ?? 0,
+          last_visit_date: fp.last_visit ?? null,
+          last_service: fp.last_service ?? null,
+          last_lab_order_file_path: null,
+          pending_request_count: 0,
+        } as LinkedPatient);
+      }
+      merged.sort((a, b) => String(b.last_visit_date || '').localeCompare(String(a.last_visit_date || '')));
+      setPatients(merged);
       const m = new Map<string, EnrollmentRow>();
       for (const e of (enroll || []) as any[]) m.set(e.patient_name.toLowerCase(), e as EnrollmentRow);
       setEnrollments(m);
@@ -199,7 +241,10 @@ const LinkedPatientsSection: React.FC<Props> = ({ orgId, onRequestCreated, labRe
     }
   };
 
-  useEffect(() => { load(); }, [orgId]);
+  // fallbackPatients arrives with the dashboard payload, often a tick after
+  // first render. Without it in the deps the merge would run once against an
+  // empty array and the tab would stay empty -- the exact bug being fixed.
+  useEffect(() => { load(); }, [orgId, fallbackPatients.length]);
 
   const latestRequestByPatient = useMemo(() => {
     const priority = (status: string | null | undefined) => {

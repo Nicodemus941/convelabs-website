@@ -98,7 +98,7 @@ Deno.serve(async (req) => {
         .not('collection_at', 'is', null)
         .is('result_received_at', null),
       admin.from('appointments')
-        .select('id, lab_order_file_path, lab_destination, address, patient_name, patient_email', { count: 'exact', head: false })
+        .select('id, lab_order_file_path, lab_destination, address, patient_name, patient_email, patient_name_masked, org_reference_id, appointment_date, appointment_time, status', { count: 'exact', head: false })
         .eq('organization_id', orgId)
         .gte('appointment_date', todayStart)
         .neq('status', 'cancelled')
@@ -124,11 +124,34 @@ Deno.serve(async (req) => {
 
     const specimensInTransit = transitResp.count || 0;
 
-    // Needs attention: missing lab order, lab destination, or address
+    // Needs attention: missing lab order, lab destination, or address.
+    //
+    // The rows were already being fetched and then discarded for a bare count,
+    // which left the provider staring at a number with no way to learn which
+    // visits it referred to. Return the offending rows and say what each one
+    // is missing. The count is derived from the same array below so the badge
+    // and the list can never disagree.
     const needsAttnRows = needsAttnResp.data || [];
-    const needsAttention = needsAttnRows.filter(a =>
-      !a.lab_order_file_path || !a.lab_destination || !a.address
-    ).length;
+    const needsAttentionItems = needsAttnRows
+      .map((a: any) => {
+        const missing: string[] = [];
+        if (!a.lab_order_file_path) missing.push('Lab order');
+        if (!a.lab_destination) missing.push('Lab destination');
+        if (!a.address) missing.push('Address');
+        return { a, missing };
+      })
+      .filter(x => x.missing.length > 0)
+      .map(({ a, missing }) => ({
+        id: a.id,
+        // Same masking rule the rest of this payload uses -- an org that masks
+        // patient names must not have them leak through this list.
+        patient_label: a.patient_name_masked ? (a.org_reference_id || 'Confidential') : a.patient_name,
+        appointment_date: a.appointment_date,
+        appointment_time: a.appointment_time,
+        status: a.status,
+        missing,
+      }));
+    const needsAttention = needsAttentionItems.length;
 
     // This month
     const mtdRows = mtdResp.data || [];
@@ -150,26 +173,77 @@ Deno.serve(async (req) => {
     const predictedEomVisits = dayOfMonth > 0 ? Math.round((mtdVisits / dayOfMonth) * daysInMonth) : mtdVisits;
 
     // ── PATIENTS (distinct from this org's appointments) ─────────────────
-    const { data: patientsRows } = await admin
-      .from('appointments')
-      .select('patient_name, patient_email, patient_phone, org_reference_id, patient_name_masked, appointment_date, id')
-      .eq('organization_id', orgId)
-      .order('appointment_date', { ascending: false })
-      .limit(200);
-    const patientMap = new Map<string, any>();
-    for (const r of patientsRows || []) {
-      const key = r.patient_email || r.patient_name || r.id;
-      if (!patientMap.has(key)) {
-        patientMap.set(key, {
-          name: r.patient_name_masked ? (r.org_reference_id || 'Confidential') : r.patient_name,
-          email: r.patient_email,
-          phone: r.patient_phone,
-          last_visit: r.appointment_date,
-          masked: r.patient_name_masked,
-        });
-      }
+    //
+    // This is the authoritative patient list for the dashboard, and the
+    // Patients tab now falls back to it.
+    //
+    // The tab's own source, the get_org_linked_patients RPC, resolves the org
+    // from auth.jwt() -- and ONLY from the 'organization_id' claim. Two ways
+    // that comes back empty for a practice that plainly has patients:
+    // a user whose metadata carries the legacy 'org_id' key instead, and a
+    // user whose organization_id was added after their last sign-in, whose
+    // token therefore predates the claim. This function has neither problem:
+    // it reads the live user record and accepts both key shapes. So when the
+    // RPC returns nothing, this list is what the tab shows.
+    //
+    // Scope matches the RPC: appointments owned by the org OR linked through
+    // the appointment_organizations junction. Dropping the junction here would
+    // hide co-billed visits the RPC counts.
+    const [{ data: ownedRows }, { data: junctionRows }] = await Promise.all([
+      admin.from('appointments')
+        .select('patient_name, patient_email, patient_phone, org_reference_id, patient_name_masked, appointment_date, service_name, service_type, status, id')
+        .eq('organization_id', orgId)
+        .neq('status', 'cancelled')
+        .order('appointment_date', { ascending: false })
+        .limit(5000),
+      admin.from('appointment_organizations')
+        .select('appointment_id')
+        .eq('organization_id', orgId)
+        .limit(5000),
+    ]);
+
+    // Pull in junction-linked appointments this org doesn't directly own.
+    const ownedIds = new Set((ownedRows || []).map((r: any) => r.id));
+    const extraIds = (junctionRows || [])
+      .map((r: any) => r.appointment_id)
+      .filter((id: string) => id && !ownedIds.has(id));
+    let extraRows: any[] = [];
+    if (extraIds.length > 0) {
+      const { data } = await admin.from('appointments')
+        .select('patient_name, patient_email, patient_phone, org_reference_id, patient_name_masked, appointment_date, service_name, service_type, status, id')
+        .in('id', extraIds.slice(0, 1000))
+        .neq('status', 'cancelled');
+      extraRows = data || [];
     }
-    const patients = Array.from(patientMap.values()).slice(0, 50);
+
+    // Dedupe on name, matching the RPC's GROUP BY, so the two sources can't
+    // disagree about how many patients a practice has. Email is not the key:
+    // household members routinely share one address, and keying on it
+    // collapsed a family into a single patient.
+    const patientMap = new Map<string, any>();
+    for (const r of [...(ownedRows || []), ...extraRows]) {
+      if (!r.patient_name) continue;
+      const key = String(r.patient_name).trim().toLowerCase();
+      const existing = patientMap.get(key);
+      if (existing) {
+        existing.visit_count += 1;
+        if (r.appointment_date > existing.last_visit) existing.last_visit = r.appointment_date;
+        continue;
+      }
+      patientMap.set(key, {
+        name: r.patient_name_masked ? (r.org_reference_id || 'Confidential') : r.patient_name,
+        email: r.patient_email,
+        phone: r.patient_phone,
+        last_visit: r.appointment_date,
+        last_service: r.service_name || r.service_type || null,
+        visit_count: 1,
+        masked: r.patient_name_masked,
+      });
+    }
+    // No slice. A practice asking to see its patients means all of them --
+    // the old cap of 50 silently hid the rest with nothing on screen to say so.
+    const patients = Array.from(patientMap.values())
+      .sort((a, b) => String(b.last_visit || '').localeCompare(String(a.last_visit || '')));
 
     // ── INVOICES (appointments with invoice data or completed visits) ────
     const { data: invoiceRows } = await admin
@@ -295,6 +369,7 @@ Deno.serve(async (req) => {
         todayCompleted,
         specimensInTransit,
         needsAttention,
+        needsAttentionItems,
       },
       thisMonth: {
         mtdVisits,

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Upload, FileText, X, Loader2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 import { supabase } from '@/integrations/supabase/client';
 
 /**
@@ -66,7 +67,9 @@ const LabOrderTokenUpload: React.FC<Props> = ({ viewToken, alreadyUploaded, onUp
       toast.error('File must be under 10 MB.');
       return;
     }
-    setFile(f);
+    // HEIC -> JPEG on selection so the patient sees the file that will
+    // actually be stored, and so OCR can read it.
+    convertHeicToJpeg(f).then(({ file: ready }) => setFile(ready));
   };
 
   const submit = async () => {

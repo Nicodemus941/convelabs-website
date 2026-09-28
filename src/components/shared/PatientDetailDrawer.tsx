@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 import { supabase } from '@/integrations/supabase/client';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 import { toast } from 'sonner';
 import {
   CheckCircle2, Package, Calendar, Clock, Phone, Mail,
@@ -287,9 +288,10 @@ const PatientDetailDrawer: React.FC<Props> = ({
     }
     setCardUploading(true);
     try {
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const { file: ready } = await convertHeicToJpeg(file);
+      const ext = (ready.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
       const path = `${profile.id}/${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('insurance-cards').upload(path, file, { upsert: false });
+      const { error: upErr } = await supabase.storage.from('insurance-cards').upload(path, ready, { upsert: false });
       if (upErr) throw upErr;
       const { error: saveErr } = await (supabase.from('tenant_patients') as any)
         .update({ insurance_card_path: path })

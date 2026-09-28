@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 import { toast } from 'sonner';
 import { Loader2, UploadCloud, FileText, CheckCircle2, AlertCircle, X, Sparkles } from 'lucide-react';
 
@@ -92,7 +93,7 @@ const OrgAttachLabOrderModal: React.FC<Props> = ({ open, onClose, appointment, o
     const f = files[0];
     const err = validate(f);
     if (err) { setErrMsg(err); setPhase('error'); return; }
-    setFile(f);
+    convertHeicToJpeg(f).then(({ file: ready }) => setFile(ready));
     setPhase('idle');
     setErrMsg(null);
   }, []);

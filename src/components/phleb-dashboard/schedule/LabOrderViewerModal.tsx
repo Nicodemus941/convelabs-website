@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, ExternalLink, Download, FileText, AlertTriangle } from 'lucide-react';
 import { supabase, publicStorageUrl } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 
 /**
  * LAB ORDER VIEWER — in-modal PDF/image viewer for phleb dashboard.
@@ -12,7 +13,9 @@ import { toast } from '@/components/ui/sonner';
  * a new browser tab kicks them out of the PWA and loses context. This modal
  * loads the file inline so they can reference it WHILE filling tubes.
  *
- * Supports PDF, JPG/PNG (images render with <img>), HEIC (fallback to download).
+ * Supports PDF, JPG/PNG (images render with <img>), and HEIC — which is
+ * decoded to JPEG in the browser so legacy iPhone uploads render inline
+ * instead of offering a download that desktop Chrome can't open.
  */
 
 interface Props {
@@ -37,6 +40,9 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Decoded JPEG for a HEIC source; null until conversion finishes.
+  const [heicJpegUrl, setHeicJpegUrl] = useState<string | null>(null);
+  const [heicFailed, setHeicFailed] = useState(false);
 
   useEffect(() => {
     if (!open || !filePath) return;
@@ -95,6 +101,36 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
 
   const display = fileName || (filePath ? filePath.split('/').pop() : 'Lab Order');
 
+  // Decode HEIC in the browser. Uploads are converted on the way in now, but
+  // files stored before that change are still HEIC and would otherwise be
+  // stuck behind a download link that Windows can't open. Declared after
+  // `isHeic` on purpose -- the dependency array is evaluated during render,
+  // so referencing it above its declaration is a TDZ error.
+  useEffect(() => {
+    if (!signedUrl || !isHeic) { setHeicJpegUrl(null); setHeicFailed(false); return; }
+    let cancelled = false;
+    let created: string | null = null;
+    (async () => {
+      try {
+        const resp = await fetch(signedUrl);
+        const blob = await resp.blob();
+        const { file, didConvert } = await convertHeicToJpeg(
+          new File([blob], display || 'lab-order.heic', { type: 'image/heic' }),
+        );
+        if (cancelled) return;
+        if (didConvert) {
+          created = URL.createObjectURL(file);
+          setHeicJpegUrl(created);
+        } else {
+          setHeicFailed(true);
+        }
+      } catch {
+        if (!cancelled) setHeicFailed(true);
+      }
+    })();
+    return () => { cancelled = true; if (created) URL.revokeObjectURL(created); };
+  }, [signedUrl, isHeic, display]);
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-3xl w-[95vw] h-[90vh] p-0 flex flex-col">
@@ -140,10 +176,19 @@ const LabOrderViewerModal: React.FC<Props> = ({ open, onClose, filePath, fileNam
                   </iframe>
                 </object>
               )}
-              {isHeic && (
+              {isHeic && heicJpegUrl && (
+                <img src={heicJpegUrl} alt={display} className="w-full h-auto" />
+              )}
+              {isHeic && !heicJpegUrl && !heicFailed && (
+                <div className="p-8 text-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-[#B91C1C] mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">Converting iPhone photo…</p>
+                </div>
+              )}
+              {isHeic && heicFailed && (
                 <div className="p-8 text-center">
                   <p className="text-sm text-gray-700 mb-3">
-                    HEIC images can't preview inline on all devices. Tap below to open it.
+                    This HEIC image couldn't be decoded in the browser. Tap below to open it.
                   </p>
                   <Button asChild className="bg-[#B91C1C] hover:bg-[#991B1B] text-white">
                     <a href={signedUrl} target="_blank" rel="noopener noreferrer">

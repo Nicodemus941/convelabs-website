@@ -13,6 +13,7 @@ import LabOrderPrepModal from './LabOrderPrepModal';
 import ServiceAutoSwitchModal from './ServiceAutoSwitchModal';
 import { analyzePrepRequirements, type PrepAnalysis } from '@/lib/phlebHelpers';
 import { isPrepaidLabValue } from '@/lib/clientBillLabs';
+import { convertHeicToJpeg } from '@/lib/heicConvert';
 
 interface LabOrderUploadStepProps {
   onNext: () => void;
@@ -105,7 +106,14 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     const previouslyUploaded: string[] = (getValues('labOrder.uploadedPaths' as any) || []) as any;
     const newPaths: string[] = [];
     const failedFiles: File[] = [];
-    for (const file of acceptedFiles) {
+    for (const rawFile of acceptedFiles) {
+      // HEIC -> JPEG before anything else. iPhones default to HEIC, and a
+      // stored HEIC is unreadable end to end: ocr-lab-order skips it
+      // ('heic_unsupported') so the document is never read, and the phleb
+      // viewer can only offer a download link that desktop Chrome can't
+      // open. Convert on the way in and the rest of the pipeline just works.
+      const { file } = await convertHeicToJpeg(rawFile);
+
       // Sanitize the original filename — commas/spaces in a storage key are
       // fragile (need URL-encoding on every read) and, because
       // lab_order_file_path is a newline-delimited list, a comma in the name
@@ -117,7 +125,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       if (!error) {
         newPaths.push(fileName);
       } else {
-        failedFiles.push(file);
+        failedFiles.push(rawFile);
         console.error('[lab-order upload failed]', file.name, error);
         // Surface a real toast so the patient knows the file didn't land.
         // Use the storage error message when available so the cause is
@@ -153,6 +161,46 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
       });
       if (error) {
         console.warn('[ocr] edge fn error (non-blocking):', error);
+        return;
+      }
+      // ── Wrong document: this is the insurance card ────────────────
+      // The booking flow asks for a lab order AND an insurance card, so
+      // photographing the wrong one is an easy mistake. Before this, the card
+      // was stored as the lab order and the phleb arrived with nothing to
+      // draw from. File it where it belongs, put the lab-order slot back to
+      // empty so the flow still asks, and say so plainly.
+      if ((data as any)?.documentType === 'insurance_card') {
+        const labPath = newPaths[0];
+        try {
+          const { data: blob } = await supabase.storage.from('lab-orders').download(labPath);
+          if (blob) {
+            const ext = (labPath.split('.').pop() || 'jpg').toLowerCase();
+            const insName = `booking_ins_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            const { error: insErr } = await supabase.storage
+              .from('insurance-cards')
+              .upload(insName, blob, { contentType: blob.type || 'image/jpeg', upsert: false });
+            if (!insErr) {
+              setValue('insurance.uploadedPath' as any, insName);
+              setValue('labOrder.hasInsuranceFile', true);
+              // Only drop the misfiled copy once the new one is safely stored.
+              await supabase.storage.from('lab-orders').remove([labPath]);
+            }
+          }
+        } catch (moveErr) {
+          // Keep the file where it is rather than lose it -- an admin can
+          // still see it on the appointment.
+          console.warn('[ocr] could not re-file insurance card:', moveErr);
+        }
+
+        const remaining = allPaths.filter(pth => pth !== labPath);
+        setValue('labOrder.uploadedPaths' as any, remaining);
+        if (remaining.length === 0) setValue('labOrder.hasFile', false);
+        onFilesSelected(selectedFiles);
+
+        toast.error(
+          "That looks like your insurance card, not a lab order — we've saved it as your insurance card. Please upload the lab order from your doctor.",
+          { duration: 9000 },
+        );
         return;
       }
       if (!data?.ok) {
@@ -279,7 +327,7 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
   // save the path to form state, run OCR off the stored file.
   const onDropInsurance = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0 || !onInsuranceFileSelected) return;
-    const file = acceptedFiles[0];
+    const { file } = await convertHeicToJpeg(acceptedFiles[0]);
     onInsuranceFileSelected(file);
     setValue('labOrder.hasInsuranceFile', true);
 
