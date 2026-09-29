@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import AdminSidebar from './AdminSidebar';
 import { Menu, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
+import { AdminBadgeProvider } from './useAdminBadges';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -10,8 +12,10 @@ interface AdminLayoutProps {
 
 const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { user } = useAuth();
 
   return (
+    <AdminBadgeProvider userId={user?.id}>
     <div className="flex min-h-screen bg-background">
       {/* Mobile top bar */}
       <div className="fixed top-0 left-0 right-0 z-50 md:hidden bg-gray-950 text-white flex items-center justify-between px-4 min-h-[56px]" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
@@ -54,6 +58,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </div>
       </main>
     </div>
+    </AdminBadgeProvider>
   );
 };
 

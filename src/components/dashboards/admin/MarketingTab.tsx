@@ -3,7 +3,6 @@ import React from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MarketingCampaignForm } from "@/components/admin/marketing";
 import CampaignAnalyticsDashboard from "@/components/admin/marketing/CampaignAnalyticsDashboard";
-import AdminTabsLayout from "./AdminTabsLayout";
 import { useNavigate } from "react-router-dom";
 
 const MarketingTab = () => {
@@ -15,7 +14,11 @@ const MarketingTab = () => {
   };
 
   return (
-    <AdminTabsLayout title="Marketing Campaigns">
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Growth</h1>
+        <p className="text-sm text-muted-foreground">Campaigns and their performance.</p>
+      </div>
       <Tabs defaultValue="create" className="space-y-6">
         <TabsList className="w-full max-w-md">
           <TabsTrigger value="create">Create Campaign</TabsTrigger>
@@ -30,7 +33,7 @@ const MarketingTab = () => {
           <CampaignAnalyticsDashboard />
         </TabsContent>
       </Tabs>
-    </AdminTabsLayout>
+    </div>
   );
 };
 

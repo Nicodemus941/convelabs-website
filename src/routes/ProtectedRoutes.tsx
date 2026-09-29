@@ -29,6 +29,10 @@ export const routes = [
   <Route key="dashboard" path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
   <Route key="dashboard-role" path="/dashboard/:role" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
   <Route key="dashboard-role-admin-tab" path="/dashboard/:role/:adminTab" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
+  // Third level: /dashboard/<role>/<section>/<view>, e.g. /inbox/sms. Ranked
+  // below the static provider-patient-record path below, which React Router
+  // prefers because two of its three segments are literals.
+  <Route key="dashboard-role-admin-view" path="/dashboard/:role/:adminTab/:adminView" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />,
   <Route key="provider-patient-record" path="/dashboard/provider/patients/:patientId" element={<ProtectedRoute><ProviderPatientRecord /></ProtectedRoute>} />,
   <Route key="my-appointments" path="/my-appointments" element={<ProtectedRoute><Appointments /></ProtectedRoute>} />,
   <Route key="tenant-onboarding" path="/tenant/onboarding" element={<ProtectedRoute><TenantOnboarding /></ProtectedRoute>} />,
