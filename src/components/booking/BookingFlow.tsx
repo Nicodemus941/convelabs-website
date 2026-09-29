@@ -34,6 +34,8 @@ interface BookingFlowProps {
   onCancel?: () => void;
 }
 
+import { trackFunnelViewContent, trackFunnelLead, trackFunnelInitiateCheckout } from '@/lib/funnelPixel';
+
 enum BookingStep {
   VisitType = 0,
   ServiceAndDate = 1,
@@ -136,6 +138,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
 
   // Animation direction
   const prevStepRef = useRef(0);
+
+
   const direction = currentStep > prevStepRef.current ? 1 : -1;
 
   const methods = useForm<BookingFormValues>({
@@ -185,6 +189,32 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       termsAccepted: false,
     },
   });
+
+  // ── AD CONVERSION SIGNAL ──────────────────────────────────────────
+  // Meta needs a conversion event to optimise a Leads campaign against.
+  // Before this, /book-now sent PageView and nothing else, so the ads could
+  // only ever be bought on Traffic. Each event fires at most once per booking
+  // attempt (see funnelPixel.ts), so stepping back and forth is not counted
+  // as extra leads.
+  useEffect(() => {
+    const vt = methods.getValues('serviceDetails.visitType') || undefined;
+
+    if (currentStep >= BookingStep.ServiceAndDate) {
+      trackFunnelViewContent(vt);
+    }
+
+    // A lead is a person we can actually contact. Only count it once we hold
+    // an email or a phone number — not on arrival at the form.
+    if (currentStep > BookingStep.PatientInfo) {
+      const email = methods.getValues('patientDetails.email');
+      const phone = methods.getValues('patientDetails.phone');
+      if (email || phone) trackFunnelLead({ visitType: vt });
+    }
+
+    if (currentStep >= BookingStep.Checkout) {
+      trackFunnelInitiateCheckout({ visitType: vt });
+    }
+  }, [currentStep, methods]);
 
   useEffect(() => {
     let mounted = true;
