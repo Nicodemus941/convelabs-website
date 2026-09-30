@@ -78,3 +78,27 @@ export function trackFunnelInitiateCheckout(params: { value?: number; visitType?
     ...(params.value ? { value: params.value, currency: 'USD' } : {}),
   });
 }
+
+/**
+ * A practice asking to partner — a fundamentally different conversion from a
+ * patient booking a visit, and worth far more.
+ *
+ * Fires the standard `Lead` event (so a Leads campaign can bid on it) tagged
+ * with `content_category: 'Partner Practice'`. That tag is what separates the
+ * two funnels in Meta: build one Custom Conversion on Lead where
+ * content_category = Partner Practice for the B2B campaign, and another on
+ * Lead where content_category = Mobile Phlebotomy for the consumer campaign.
+ * Without the split, a B2B campaign optimises toward whichever lead is
+ * cheapest — which is always the consumer one.
+ *
+ * No `value` is sent: what a partner account is worth is a real number the
+ * business knows and I do not, and guessing it would teach Meta the wrong
+ * thing. Add it here once that figure is decided.
+ */
+export function trackPartnerEnquiry(params: { practiceType?: string; monthlyVolume?: string } = {}): void {
+  trackFunnelEvent('Lead', {
+    content_category: 'Partner Practice',
+    content_name: params.practiceType || 'practice',
+    ...(params.monthlyVolume ? { monthly_volume: params.monthlyVolume } : {}),
+  });
+}

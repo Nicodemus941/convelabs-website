@@ -15,6 +15,8 @@ export type AdminBadgeCounts = {
   /** Aggregate shown on the Inbox nav item. */
   inbox: number;
   actionItems: number;
+  /** New provider-partnership inquiries awaiting a first response. */
+  partnerInquiries: number;
   tasks: number;
   sms: number;
   chat: number;
@@ -25,6 +27,7 @@ export type AdminBadgeCounts = {
 export function useAdminBadges(userId: string | undefined): AdminBadgeCounts {
   const location = useLocation();
   const [actionItems, setActionItems] = useState(0);
+  const [partnerInquiries, setPartnerInquiries] = useState(0);
   const [tasks, setTasks] = useState(0);
   const [sms, setSms] = useState(0);
   const [chat, setChat] = useState(0);
@@ -85,6 +88,33 @@ export function useAdminBadges(userId: string | undefined): AdminBadgeCounts {
       .channel('admin-inbox-badge')
       .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'pending_insurance_changes' }, () => recount())
       .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'organizations' }, () => recount())
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(ch); };
+  }, [userId]);
+
+  // ── PARTNER INQUIRIES ─────────────────────────────────────────────
+  // A practice asking to partner is the highest-value lead the business gets.
+  // These were only visible inside Partners > Organizations > Outreach, and
+  // only fetched once that sub-tab was opened, so one could sit untouched for
+  // days with nothing anywhere indicating it had arrived.
+  useEffect(() => {
+    if (!userId) return;
+    let mounted = true;
+    const recount = async () => {
+      try {
+        // Cast the builder: this table is not in the generated types, so the
+        // column name on .eq() does not typecheck without it.
+        const { count } = await (supabase
+          .from('provider_partnership_inquiries' as any)
+          .select('id', { count: 'exact', head: true }) as any)
+          .eq('status', 'new');
+        if (mounted) setPartnerInquiries(count || 0);
+      } catch { /* silent */ }
+    };
+    recount();
+    const ch = supabase
+      .channel('admin-partner-inquiry-badge')
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'provider_partnership_inquiries' }, () => recount())
       .subscribe();
     return () => { mounted = false; supabase.removeChannel(ch); };
   }, [userId]);
@@ -178,8 +208,9 @@ export function useAdminBadges(userId: string | undefined): AdminBadgeCounts {
   }, [location.pathname]);
 
   return {
-    inbox: actionItems + tasks + sms + chat,
-    actionItems,
+    inbox: actionItems + partnerInquiries + tasks + sms + chat,
+    actionItems: actionItems + partnerInquiries,
+    partnerInquiries,
     tasks,
     sms,
     chat,
@@ -189,7 +220,7 @@ export function useAdminBadges(userId: string | undefined): AdminBadgeCounts {
 }
 
 const ZERO: AdminBadgeCounts = {
-  inbox: 0, actionItems: 0, tasks: 0, sms: 0, chat: 0, labOrders: 0, release: 0,
+  inbox: 0, actionItems: 0, partnerInquiries: 0, tasks: 0, sms: 0, chat: 0, labOrders: 0, release: 0,
 };
 
 const AdminBadgeContext = createContext<AdminBadgeCounts>(ZERO);

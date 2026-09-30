@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { trackPartnerEnquiry } from '@/lib/funnelPixel';
 
 /**
  * PartnerWithUs — lightweight intake for providers who want to become a
@@ -159,6 +160,16 @@ const PartnerWithUs: React.FC = () => {
       if (error || (data as any)?.error) {
         throw new Error((data as any)?.error || error?.message || 'Submission failed');
       }
+
+      // Tell Meta a practice converted. Four real inquiries came through this
+      // form in the 90 days to 2026-09-17 and the pixel reported none of them,
+      // which is part of why the partner ads could only be bought on Traffic.
+      // Fired here rather than on /thanks so a direct visit to the thank-you
+      // page cannot manufacture a conversion.
+      trackPartnerEnquiry({
+        practiceType: form.practiceType || undefined,
+        monthlyVolume: form.monthlyVolume || undefined,
+      });
 
       toast.success("Got it — check your email.");
       navigate('/partner-with-us/thanks');
