@@ -1,89 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
-import { useNavigate } from 'react-router-dom';
+import { LogOut } from 'lucide-react';
 import {
-  LayoutDashboard, Calendar, Users, Briefcase, Package,
-  FileText, Settings, Mail, Webhook,
-  CalendarDays, MessageSquare, MessageCircle, LogOut, Receipt, FlaskConical, ClipboardList, Building2, Wrench, Sparkles, TrendingUp,
-  Crown, GraduationCap, Inbox, Bell, Wallet,
-} from 'lucide-react';
-import { getUnreadReleaseCount } from '@/data/releaseNotes';
+  ADMIN_SECTIONS, isSectionVisible, checkPlatformOwner,
+  type AdminSection, type BadgeKind,
+} from './adminNav';
+import { useAdminBadgeCounts, type AdminBadgeCounts } from './useAdminBadges';
 
-// `ownerOnly` gates surfaces that show whole-business financials / valuation
-// data the platform owner sees but their super_admin staff (e.g. Naquala)
-// should not. The platform owner is identified by email (canonical source
-// of truth: business_metrics.platform_owner_email — see public.is_platform_owner()).
-type SidebarItem = {
-  name: string;
-  icon: any;
-  path: string;
-  roles?: string[];
-  badge?: boolean;       // green pulse for inbound SMS
-  taskBadge?: boolean;   // numeric red badge driven by my_open_task_count
-  inboxBadge?: boolean;  // numeric badge for OCR-pipeline items needing human touch
-  labOrderBadge?: boolean; // numeric badge: unviewed provider-uploaded orders
-  releaseBadge?: boolean;  // numeric badge: unread release notes
-  chatBadge?: boolean;     // numeric red badge: landing-page chats needing a reply (escalated/unread)
-  ownerOnly?: boolean;
+/**
+ * ADMIN SIDEBAR — 9 operational sections plus Owner and System.
+ *
+ * Was 27 flat items across 4 sections, which put owner-only financials
+ * (Hormozi, Frank, Expenses, Upgrades) in four of the first six slots and
+ * split one day's work across four separate queues. The list now comes from
+ * adminNav.ts, the same file the router reads, so nav and routes cannot drift.
+ */
+
+const GROUPS: Array<{ key: AdminSection['group']; label: string }> = [
+  { key: 'WORK', label: 'THE DAY' },
+  { key: 'BUSINESS', label: 'THE BUSINESS' },
+];
+
+const badgeValue = (kind: BadgeKind | undefined, counts: AdminBadgeCounts): number => {
+  if (!kind) return 0;
+  if (kind === 'inbox') return counts.inbox;
+  if (kind === 'labOrders') return counts.labOrders;
+  if (kind === 'release') return counts.release;
+  return 0;
 };
-type SidebarSection = { label: string; items: SidebarItem[] };
 
-const PLATFORM_OWNER_EMAIL = 'nicodemmebaptiste@convelabs.com';
-
-function getSidebarSections(basePath: string): SidebarSection[] {
-  return [
-    {
-      label: 'MAIN',
-      items: [
-        { name: 'What\'s New', icon: Sparkles, path: `${basePath}/new-updates`, releaseBadge: true },
-        { name: 'Dashboard', icon: LayoutDashboard, path: basePath },
-        { name: 'Hormozi Dashboard', icon: TrendingUp, path: `${basePath}/hormozi`, ownerOnly: true },
-        { name: 'Frank (CFO)', icon: Briefcase, path: `${basePath}/frank`, ownerOnly: true },
-        { name: 'Expenses', icon: Wallet, path: `${basePath}/expenses`, ownerOnly: true },
-        { name: 'Upgrades & ROI', icon: Crown, path: `${basePath}/upgrades`, ownerOnly: true },
-        { name: 'Calendar', icon: Calendar, path: `${basePath}/calendar` },
-        { name: 'Appointments', icon: CalendarDays, path: `${basePath}/appointments` },
-        { name: 'Patients', icon: Users, path: `${basePath}/patients` },
-        { name: 'Lab Orders', icon: FlaskConical, path: `${basePath}/lab-orders`, labOrderBadge: true },
-      ],
-    },
-    {
-      label: 'MANAGEMENT',
-      items: [
-        { name: 'Staff', icon: Briefcase, path: `${basePath}/staff` },
-        { name: 'Services', icon: Package, path: `${basePath}/services` },
-        { name: 'SMS Messages', icon: MessageSquare, path: `${basePath}/sms`, badge: true },
-        { name: 'Chat Inbox', icon: MessageCircle, path: `${basePath}/chatbot`, roles: ['super_admin', 'office_manager'], chatBadge: true },
-        { name: 'Invoices', icon: Receipt, path: `${basePath}/invoices` },
-        { name: 'Organizations', icon: Building2, path: `${basePath}/organizations` },
-        { name: 'Specimens', icon: FlaskConical, path: `${basePath}/specimens` },
-        { name: 'Notes & Tasks', icon: ClipboardList, path: `${basePath}/notes`, taskBadge: true },
-        { name: 'Action Items', icon: Inbox, path: `${basePath}/inbox`, inboxBadge: true },
-        { name: 'Operations', icon: Wrench, path: `${basePath}/operations` },
-        { name: 'AI Assistant', icon: Sparkles, path: `${basePath}/ai-assistant` },
-        { name: 'Training', icon: GraduationCap, path: `${basePath}/training` },
-        { name: 'Scripts & Playbooks', icon: FileText, path: `${basePath}/scripts` },
-      ],
-    },
-    {
-      label: 'MARKETING',
-      items: [
-        { name: 'Campaigns', icon: Mail, path: `${basePath}/marketing` },
-        { name: 'Provider Acquisition', icon: Users, path: `${basePath}/provider-acquisition`, roles: ['super_admin'] },
-      ],
-    },
-    {
-      label: 'SYSTEM',
-      items: [
-        { name: 'Documentation', icon: FileText, path: `${basePath}/documentation`, roles: ['super_admin'] },
-        { name: 'Webhooks', icon: Webhook, path: `${basePath}/webhooks`, roles: ['super_admin'] },
-        { name: 'Settings', icon: Settings, path: `${basePath}/settings`, roles: ['super_admin'] },
-      ],
-    },
-  ];
-}
+const badgeTone = (kind: BadgeKind | undefined): string => {
+  if (kind === 'inbox') return 'bg-red-500 text-white shadow-[0_0_6px_2px_rgba(239,68,68,0.45)]';
+  if (kind === 'labOrders') return 'bg-emerald-500 text-white shadow-[0_0_6px_2px_rgba(16,185,129,0.45)]';
+  return 'bg-purple-500 text-white';
+};
 
 interface AdminSidebarProps {
   onNavClick?: () => void;
@@ -93,200 +44,23 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const userRole = user?.role || 'patient';
-  const userEmail = (user?.email || '').toLowerCase();
-  const isPlatformOwner = userEmail === PLATFORM_OWNER_EMAIL.toLowerCase();
+  const isPlatformOwner = checkPlatformOwner(user?.email);
   const basePath = `/dashboard/${userRole}`;
-  const SIDEBAR_SECTIONS = getSidebarSections(basePath);
-  const [hasNewMessages, setHasNewMessages] = useState(false);
-  const [myOpenTaskCount, setMyOpenTaskCount] = useState<number>(0);
-  const [inboxCount, setInboxCount] = useState<number>(0);
-  const [labOrderCount, setLabOrderCount] = useState<number>(0);
-  const [chatUnreadCount, setChatUnreadCount] = useState<number>(0);
-  const [releaseUnreadCount, setReleaseUnreadCount] = useState<number>(() => getUnreadReleaseCount());
-  // Re-poll the localStorage-derived unread count whenever the URL changes
-  // (so visiting the page + marking-read clears the badge instantly).
-  useEffect(() => {
-    setReleaseUnreadCount(getUnreadReleaseCount());
-  }, [location.pathname]);
+  const counts = useAdminBadgeCounts();
 
-  // ── OPEN TASKS BADGE ──────────────────────────────────────────────
-  // Drives the numeric "Notes & Tasks (N)" pill in the sidebar so
-  // admin sees pending work even when she's on a different tab.
-  // Initial fetch via the get_my_open_task_count() RPC + a realtime
-  // subscription on activity_log so the number stays live without polling.
-  useEffect(() => {
-    if (!user?.id) return;
-    let mounted = true;
-
-    const refreshCount = async () => {
-      try {
-        const { data, error } = await supabase.rpc('get_my_open_task_count' as any);
-        if (!error && mounted) {
-          setMyOpenTaskCount(typeof data === 'number' ? data : Number(data) || 0);
-        }
-      } catch { /* silent */ }
-    };
-
-    refreshCount();
-
-    // ANY change to activity_log can affect the count for this user
-    // (assignment to me, status flip away from open/in_progress, etc.).
-    // Cheaper to re-run the RPC than to compute the delta client-side.
-    const channel = supabase
-      .channel('admin-task-badge')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'activity_log' },
-        () => { refreshCount(); }
-      )
-      .subscribe();
-
-    return () => { mounted = false; supabase.removeChannel(channel); };
-  }, [user?.id]);
-
-  // ── INBOX BADGE ───────────────────────────────────────────────────
-  // Counts pending insurance changes (open) + auto-discovered orgs
-  // missing manager_email or contact_email. Realtime subscription
-  // re-counts on any change to either source table.
-  useEffect(() => {
-    if (!user?.id) return;
-    let mounted = true;
-    const recount = async () => {
-      try {
-        // BUG FIX 2026-05-21: badge was counting 24 ghost rows (merged orgs,
-        // welcomed orgs, unreachable_no_email orgs) that the InboxTab itself
-        // filters out — so the badge inflated and never matched what you
-        // saw when you opened the tab. Mirror the InboxTab refresh query
-        // EXACTLY so the number on the badge equals the rows you'll see.
-        const [{ count: insC }, { count: orgC }] = await Promise.all([
-          supabase.from('pending_insurance_changes' as any)
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'open'),
-          supabase.from('organizations')
-            .select('id', { count: 'exact', head: true })
-            .eq('discovered_from_lab_order', true as any)
-            .eq('is_active', true)
-            .or('outreach_status.is.null,outreach_status.in.(pending,untouched,contacted)')
-            .or('manager_email.is.null,contact_email.is.null'),
-        ]);
-        if (mounted) setInboxCount((insC || 0) + (orgC || 0));
-      } catch { /* silent */ }
-    };
-    recount();
-    const ch = supabase
-      .channel('admin-inbox-badge')
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'pending_insurance_changes' }, () => recount())
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'organizations' }, () => recount())
-      .subscribe();
-    return () => { mounted = false; supabase.removeChannel(ch); };
-  }, [user?.id]);
-
-  // ── LAB ORDERS BADGE ──────────────────────────────────────────────
-  // Counts unviewed provider-uploaded lab orders (admin_viewed_at IS NULL
-  // AND status='pending_schedule'). Realtime: any INSERT/UPDATE on
-  // patient_lab_requests bumps the recount, so the badge ticks the moment
-  // a provider hits "submit" in their portal.
-  useEffect(() => {
-    if (!user?.id) return;
-    let mounted = true;
-    const recount = async () => {
-      try {
-        const { count } = await supabase
-          .from('patient_lab_requests' as any)
-          .select('id', { count: 'exact', head: true })
-          .is('admin_viewed_at', null)
-          .eq('status', 'pending_schedule');
-        if (mounted) setLabOrderCount(count || 0);
-      } catch { /* silent */ }
-    };
-    recount();
-    const ch = supabase
-      .channel('admin-lab-order-badge')
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'patient_lab_requests' }, () => recount())
-      .subscribe();
-    return () => { mounted = false; supabase.removeChannel(ch); };
-  }, [user?.id]);
-
-  // ── CHAT INBOX BADGE ──────────────────────────────────────────────
-  // Counts landing-page chat conversations that need a human: staff_unread
-  // (set when a chat escalates to Nico AND on every visitor reply during
-  // human handoff). Realtime: any change to chatbot_conversations re-counts,
-  // so the moment a chat escalates the red badge appears above the tab — the
-  // live "notification icon" the owner asked for. Opening a conversation in
-  // ChatbotTab clears staff_unread, which decrements this live.
-  useEffect(() => {
-    if (!user?.id) return;
-    let mounted = true;
-    const recount = async () => {
-      try {
-        const { count } = await supabase
-          .from('chatbot_conversations' as any)
-          .select('id', { count: 'exact', head: true })
-          .eq('staff_unread', true);
-        if (mounted) setChatUnreadCount(count || 0);
-      } catch { /* silent */ }
-    };
-    recount();
-    const ch = supabase
-      .channel('admin-chat-inbox-badge')
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'chatbot_conversations' }, () => recount())
-      .subscribe();
-    return () => { mounted = false; supabase.removeChannel(ch); };
-  }, [user?.id]);
-
-  // Subscribe to NEW INBOUND SMS messages for the notification bell.
-  // Outbound messages also land in sms_messages now (two-way threading)
-  // so the filter to direction='inbound' is critical — otherwise the
-  // bell would ring on every outbound send the admin themselves did.
-  useEffect(() => {
-    // Initial bell state: any inbound in the last 24h that's newer than
-    // the admin's last visit to /sms (tracked in localStorage).
-    (async () => {
-      try {
-        const lastSeen = localStorage.getItem('convelabs_sms_tab_last_seen');
-        const since = lastSeen ? new Date(lastSeen).toISOString() : new Date(Date.now() - 86400_000).toISOString();
-        const { count } = await supabase
-          .from('sms_messages' as any)
-          .select('id', { count: 'exact', head: true })
-          .eq('direction', 'inbound')
-          .gt('created_at', since);
-        if ((count || 0) > 0 && !location.pathname.includes('/sms')) {
-          setHasNewMessages(true);
-        }
-      } catch { /* silent */ }
-    })();
-
-    const channel = supabase
-      .channel('admin-sms-indicator')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'sms_messages', filter: 'direction=eq.inbound' },
-        () => {
-          if (!location.pathname.includes('/sms')) {
-            setHasNewMessages(true);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [location.pathname]);
-
-  // Clear indicator when navigating to SMS page + stamp last-seen
-  useEffect(() => {
-    if (location.pathname.includes('/sms')) {
-      setHasNewMessages(false);
-      try { localStorage.setItem('convelabs_sms_tab_last_seen', new Date().toISOString()); }
-      catch { /* localStorage may be unavailable */ }
+  // `today` is the dashboard root, so it matches both /dashboard/<role> and
+  // /dashboard/<role>/today. Every other section matches its own prefix so a
+  // sub-view keeps its parent highlighted.
+  const isActive = (sectionId: string) => {
+    const path = location.pathname.replace(/\/$/, '');
+    if (sectionId === 'today') {
+      return path === basePath || path === `${basePath}/today`;
     }
-  }, [location.pathname]);
-
-  const isActive = (path: string) => {
-    if (path === basePath) {
-      return location.pathname === path || location.pathname === basePath;
-    }
-    return location.pathname === path;
+    return path === `${basePath}/${sectionId}` || path.startsWith(`${basePath}/${sectionId}/`);
   };
+
+  const pathFor = (sectionId: string) =>
+    sectionId === 'today' ? basePath : `${basePath}/${sectionId}`;
 
   return (
     <aside className="w-64 md:w-60 bg-gray-950 text-white h-full min-h-[100dvh] flex flex-col pt-14 md:pt-0">
@@ -300,108 +74,53 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({ onNavClick }) => {
 
       {/* Navigation */}
       <nav className="flex-1 py-4 overflow-y-auto">
-        {SIDEBAR_SECTIONS.map((section) => {
-          const visibleItems = section.items.filter(item => {
-            if (item.ownerOnly && !isPlatformOwner) return false;
-            if (item.roles && !item.roles.includes(userRole)) return false;
-            return true;
-          });
-          if (visibleItems.length === 0) return null;
+        {GROUPS.map(group => {
+          const items = ADMIN_SECTIONS.filter(
+            s => s.group === group.key && isSectionVisible(s, userRole, isPlatformOwner)
+          );
+          if (items.length === 0) return null;
           return (
-          <div key={section.label} className="mb-5">
-            <p className="px-5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-              {section.label}
-            </p>
-            <div className="space-y-0.5">
-              {visibleItems.map((item) => {
-                const Icon = item.icon;
-                const active = isActive(item.path);
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    onClick={onNavClick}
-                    className={`flex items-center gap-3 px-5 py-2.5 text-sm transition-colors ${
-                      active
-                        ? 'bg-conve-red/20 text-white border-r-2 border-conve-red font-medium'
-                        : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
-                    }`}
-                  >
-                    <div className="relative">
-                      <Icon className={`h-4 w-4 ${active ? 'text-conve-red' : ''}`} />
-                      {item.badge && hasNewMessages && !active && (
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-green-400 rounded-full animate-pulse shadow-[0_0_6px_2px_rgba(74,222,128,0.6)]" />
-                      )}
-                      {item.taskBadge && myOpenTaskCount > 0 && !active && (
-                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                      )}
-                      {item.inboxBadge && inboxCount > 0 && !active && (
-                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-                      )}
-                      {item.labOrderBadge && labOrderCount > 0 && !active && (
-                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                      )}
-                      {item.chatBadge && chatUnreadCount > 0 && !active && (
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_6px_2px_rgba(239,68,68,0.6)]" />
-                      )}
-                      {item.releaseBadge && releaseUnreadCount > 0 && !active && (
-                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-purple-500 rounded-full animate-pulse" />
-                      )}
-                    </div>
-                    {item.name}
-                    {item.badge && hasNewMessages && !active && (
-                      <span className="ml-auto w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-[0_0_4px_1px_rgba(74,222,128,0.5)]" />
-                    )}
-                    {item.taskBadge && myOpenTaskCount > 0 && (
-                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
+            <div key={group.key} className="mb-5">
+              <p className="px-5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                {group.label}
+              </p>
+              <div className="space-y-0.5">
+                {items.map(section => {
+                  const Icon = section.icon;
+                  const active = isActive(section.id);
+                  const count = badgeValue(section.badge, counts);
+                  return (
+                    <Link
+                      key={section.id}
+                      to={pathFor(section.id)}
+                      onClick={onNavClick}
+                      className={`flex items-center gap-3 px-5 py-2.5 text-sm transition-colors ${
                         active
-                          ? 'bg-white text-conve-red'
-                          : 'bg-red-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(239,68,68,0.45)]'
-                      }`}>
-                        {myOpenTaskCount > 99 ? '99+' : myOpenTaskCount}
-                      </span>
-                    )}
-                    {item.inboxBadge && inboxCount > 0 && (
-                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
-                        active
-                          ? 'bg-white text-amber-700'
-                          : 'bg-amber-500 text-white shadow-[0_0_6px_2px_rgba(245,158,11,0.45)]'
-                      }`}>
-                        {inboxCount > 99 ? '99+' : inboxCount}
-                      </span>
-                    )}
-                    {item.labOrderBadge && labOrderCount > 0 && (
-                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
-                        active
-                          ? 'bg-white text-emerald-700'
-                          : 'bg-emerald-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(16,185,129,0.5)]'
-                      }`}>
-                        {labOrderCount > 99 ? '99+' : labOrderCount}
-                      </span>
-                    )}
-                    {item.chatBadge && chatUnreadCount > 0 && (
-                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
-                        active
-                          ? 'bg-white text-conve-red'
-                          : 'bg-red-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(239,68,68,0.5)]'
-                      }`}>
-                        {chatUnreadCount > 99 ? '99+' : chatUnreadCount}
-                      </span>
-                    )}
-                    {item.releaseBadge && releaseUnreadCount > 0 && (
-                      <span className={`ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
-                        active
-                          ? 'bg-white text-purple-700'
-                          : 'bg-purple-500 text-white animate-pulse shadow-[0_0_6px_2px_rgba(168,85,247,0.5)]'
-                      }`}>
-                        {releaseUnreadCount > 99 ? '99+' : releaseUnreadCount}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
+                          ? 'bg-conve-red/20 text-white border-r-2 border-conve-red font-medium'
+                          : 'text-gray-400 hover:text-white hover:bg-gray-800/50'
+                      }`}
+                    >
+                      <div className="relative">
+                        <Icon className={`h-4 w-4 ${active ? 'text-conve-red' : ''}`} />
+                        {count > 0 && !active && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                        )}
+                      </div>
+                      <span className="flex-1">{section.label}</span>
+                      {count > 0 && (
+                        <span
+                          className={`inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full ${
+                            active ? 'bg-white text-conve-red' : badgeTone(section.badge)
+                          }`}
+                        >
+                          {count > 99 ? '99+' : count}
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </div>
             </div>
-          </div>
           );
         })}
       </nav>

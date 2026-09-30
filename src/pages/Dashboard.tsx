@@ -8,6 +8,12 @@ import RoleProtectedRoute from "@/components/auth/RoleProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { lazyWithRetry } from "@/lib/lazyWithRetry";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
+import AdminSectionShell from "@/components/dashboards/admin/AdminSectionShell";
+import { useAdminBadges } from "@/components/dashboards/admin/useAdminBadges";
+import {
+  LEGACY_TAB_REDIRECTS, findSection, defaultViewId, isViewVisible,
+  isSectionVisible, checkPlatformOwner,
+} from "@/components/dashboards/admin/adminNav";
 
 // Role dashboards + admin tabs are LAZY-loaded so each role only downloads its
 // OWN code. Eagerly importing all of them bundled the entire admin suite
@@ -20,11 +26,9 @@ const SuperAdminDashboard = lazyWithRetry(() => import("@/components/dashboards/
 const PatientDashboard = lazyWithRetry(() => import("@/components/dashboards/PatientDashboard"), 'PatientDashboard');
 const PhlebotomistDashboard = lazyWithRetry(() => import("@/components/dashboards/PhlebotomistDashboard"), 'PhlebotomistDashboard');
 const OfficeManagerDashboard = lazyWithRetry(() => import("@/components/dashboards/OfficeManagerDashboard"), 'OfficeManagerDashboard');
-const ConciergeDoctorDashboard = lazyWithRetry(() => import("@/components/dashboards/ConciergeDoctorDashboard"), 'ConciergeDoctorDashboard');
 const ProviderDashboard = lazyWithRetry(() => import("@/components/dashboards/ProviderDashboard"), 'ProviderDashboard');
 
 const UserManagementTab = lazyWithRetry(() => import("@/components/dashboards/admin/UserManagementTab"), 'UserManagementTab');
-const InventoryTab = lazyWithRetry(() => import("@/components/dashboards/admin/InventoryTab"), 'InventoryTab');
 const AdminServicesTab = lazyWithRetry(() => import("@/components/admin/AdminServicesTab"), 'AdminServicesTab');
 const EnhancedAppointmentsTab = lazyWithRetry(() => import("@/components/dashboards/admin/enhanced/EnhancedAppointmentsTab"), 'EnhancedAppointmentsTab');
 const DocumentationTab = lazyWithRetry(() => import("@/components/dashboards/admin/DocumentationTab"), 'DocumentationTab');
@@ -47,11 +51,50 @@ const AIOpsAssistant = lazyWithRetry(() => import("@/components/dashboards/admin
 const FrankCFO = lazyWithRetry(() => import("@/components/dashboards/admin/FrankCFO"), 'FrankCFO');
 const ExpensesManager = lazyWithRetry(() => import("@/components/dashboards/admin/ExpensesManager"), 'ExpensesManager');
 const HormoziDashboard = lazyWithRetry(() => import("@/components/dashboards/admin/hormozi/HormoziDashboard"), 'HormoziDashboard');
+const OwnerOverview = lazyWithRetry(() => import("@/components/dashboards/admin/owner/OwnerOverview"), 'OwnerOverview');
 const UpgradesTab = lazyWithRetry(() => import("@/components/dashboards/admin/UpgradesTab"), 'UpgradesTab');
 const TrainingTab = lazyWithRetry(() => import("@/components/dashboards/admin/TrainingTab"), 'TrainingTab');
 const ChatbotTab = lazyWithRetry(() => import("@/components/dashboards/admin/ChatbotTab"), 'ChatbotTab');
 const ProviderAcquisitionTab = lazyWithRetry(() => import("@/components/dashboards/admin/ProviderAcquisitionTab"), 'ProviderAcquisitionTab');
 const ScriptsTab = lazyWithRetry(() => import("@/components/dashboards/admin/ScriptsTab"), 'ScriptsTab');
+
+/**
+ * "<section>/<view>" -> screen. Keys must match adminNav.ts exactly; a section
+ * with no views is keyed by its id alone. Anything in adminNav.ts with no entry
+ * here renders nothing, which is why the nav config and this table are read
+ * side by side in one place instead of being maintained apart.
+ */
+const SECTION_SCREENS: Record<string, React.ComponentType<any>> = {
+  "schedule/calendar": AdminCalendar,
+  "schedule/appointments": EnhancedAppointmentsTab,
+  "inbox/action-items": InboxTab,
+  "inbox/tasks": NotesTab,
+  "inbox/sms": SMSMessagingTab,
+  "inbox/chat": ChatbotTab,
+  "patients": PatientProfileTab,
+  "lab/orders": LabOrdersTab,
+  "lab/specimens": SpecimenTrackingTab,
+  "partners/organizations": OrganizationsTab,
+  "partners/acquisition": ProviderAcquisitionTab,
+  "billing/invoices": InvoicesTab,
+  "billing/services": AdminServicesTab,
+  "billing/expenses": ExpensesManager,
+  "growth": MarketingTab,
+  "team/staff": StaffManagementTab,
+  "team/users": UserManagementTab,
+  "owner/overview": OwnerOverview,
+  "owner/hormozi": HormoziDashboard,
+  "owner/frank": FrankCFO,
+  "owner/upgrades": UpgradesTab,
+  "system/settings": SettingsTab,
+  "system/operations": OperationsPanel,
+  "system/ai-assistant": AIOpsAssistant,
+  "system/training": TrainingTab,
+  "system/scripts": ScriptsTab,
+  "system/whats-new": NewUpdatesTab,
+  "system/documentation": DocumentationTab,
+  "system/webhooks": WebhookEventMonitor,
+};
 
 // Suspense fallback while a lazy dashboard/tab chunk loads.
 const DashLoader = () => (
@@ -89,6 +132,7 @@ const Dashboard = () => {
   const pathParts = actualPath?.split('/').filter(Boolean) || [];
   const role = pathParts[0];
   const adminTab = pathParts[1];
+  const adminView = pathParts[2];
 
   // Redirect to role-specific dashboard. Deterministic role derivation:
   //   1. If user.role is already set, use it
@@ -174,62 +218,62 @@ const Dashboard = () => {
     );
   }
 
-  // Check if this is an admin tab route (super_admin OR internal office_manager)
+  // ── ADMIN SECTION ROUTER ──────────────────────────────────────────
+  // URLs are /dashboard/<role>/<section>[/<view>]. Both the section list and
+  // the visibility rules come from adminNav.ts, the same file the sidebar
+  // reads, so a tab can no longer be routed without being reachable (which is
+  // what happened to `users`) or reachable without being real (`inventory`).
   if ((userRole === "super_admin" || userRole === "office_manager") && adminTab) {
-    // Owner-only tabs — visible to the platform owner alone, hidden from
-    // operational super_admins (e.g. Naquala). UI sidebar already filters
-    // these out via ownerOnly flag; this is the URL-typing guard.
-    const OWNER_ONLY_TABS = new Set(["hormozi", "upgrades", "frank", "expenses"]);
-    const PLATFORM_OWNER_EMAIL = "nicodemmebaptiste@convelabs.com";
-    const isPlatformOwner = (user.email || "").toLowerCase() === PLATFORM_OWNER_EMAIL.toLowerCase();
-    if (OWNER_ONLY_TABS.has(adminTab) && !isPlatformOwner) {
-      return <Navigate to={`/dashboard/${userRole}`} replace />;
+    const isPlatformOwner = checkPlatformOwner(user.email);
+    const roleBase = `/dashboard/${userRole}`;
+
+    // Bookmarks, emailed links and the in-app <Link>s written before the
+    // consolidation still use the old flat paths. Forward them instead of
+    // dumping the user on the dashboard root.
+    const legacy = LEGACY_TAB_REDIRECTS[adminTab];
+    if (legacy !== undefined) {
+      return <Navigate to={legacy ? `${roleBase}/${legacy}` : roleBase} replace />;
     }
+
+    const section = findSection(adminTab);
+
+    // `today` is the dashboard root — one canonical URL, not two.
+    if (!section || section.id === "today") {
+      return <Navigate to={roleBase} replace />;
+    }
+    // URL-typing guard for owner-only surfaces (whole-business financials).
+    if (!isSectionVisible(section, userRole, isPlatformOwner)) {
+      return <Navigate to={roleBase} replace />;
+    }
+
+    // A section with sub-tabs always resolves to a named view, so every screen
+    // has a shareable URL and the sub-tab bar always has something selected.
+    let resolvedView = adminView;
+    if (section.views.length > 0) {
+      const named = section.views.find(v => v.id === adminView);
+      if (!named || !isViewVisible(named, userRole, isPlatformOwner)) {
+        const fallback = defaultViewId(section, isPlatformOwner);
+        if (!fallback) return <Navigate to={roleBase} replace />;
+        return <Navigate to={`${roleBase}/${section.id}/${fallback}`} replace />;
+      }
+      resolvedView = named.id;
+    }
+
+    const Screen = SECTION_SCREENS[resolvedView ? `${section.id}/${resolvedView}` : section.id];
+    if (!Screen) return <Navigate to={roleBase} replace />;
+
     return (
       <RoleProtectedRoute allowedRoles={["super_admin", "office_manager"]}>
         <AdminLayout>
-          <S>
-          {adminTab === "users" && <UserManagementTab />}
-          {adminTab === "staff" && <StaffManagementTab />}
-          {adminTab === "services" && <AdminServicesTab />}
-          {adminTab === "inventory" && <InventoryTab />}
-          {adminTab === "appointments" && <EnhancedAppointmentsTab />}
-          {adminTab === "documentation" && <DocumentationTab />}
-          {adminTab === "settings" && <SettingsTab />}
-          {adminTab === "marketing" && <MarketingTab />}
-          {adminTab === "webhooks" && <WebhookEventMonitor />}
-          {adminTab === "calendar" && <AdminCalendar />}
-          {adminTab === "sms" && <SMSMessagingTab />}
-          {adminTab === "invoices" && <InvoicesTab />}
-          {adminTab === "specimens" && <SpecimenTrackingTab />}
-          {adminTab === "notes" && <NotesTab />}
-          {adminTab === "inbox" && <InboxTab />}
-          {adminTab === "patients" && <PatientProfileTab />}
-          {adminTab === "lab-orders" && (
-            <React.Suspense fallback={<div className="p-8 text-center text-sm text-gray-500">Loading lab orders…</div>}>
-              <LabOrdersTab />
-            </React.Suspense>
-          )}
-          {adminTab === "new-updates" && (
-            <React.Suspense fallback={<div className="p-8 text-center text-sm text-gray-500">Loading what's new…</div>}>
-              <NewUpdatesTab />
-            </React.Suspense>
-          )}
-          {adminTab === "organizations" && <OrganizationsTab />}
-          {adminTab === "operations" && <OperationsPanel />}
-          {adminTab === "ai-assistant" && <AIOpsAssistant />}
-          {adminTab === "hormozi" && <HormoziDashboard />}
-          {adminTab === "frank" && <FrankCFO />}
-          {adminTab === "expenses" && <ExpensesManager />}
-          {adminTab === "upgrades" && <UpgradesTab />}
-          {adminTab === "training" && <TrainingTab />}
-          {adminTab === "chatbot" && <ChatbotTab />}
-          {adminTab === "provider-acquisition" && <ProviderAcquisitionTab />}
-          {adminTab === "scripts" && <ScriptsTab />}
-          {!["users", "staff", "services", "inventory", "appointments", "documentation", "settings", "marketing", "webhooks", "calendar", "sms", "invoices", "specimens", "notes", "inbox", "patients", "lab-orders", "new-updates", "organizations", "operations", "ai-assistant", "hormozi", "frank", "expenses", "upgrades", "training", "chatbot", "provider-acquisition", "scripts"].includes(adminTab) && (
-            <Navigate to={`/dashboard/${userRole}`} replace />
-          )}
-          </S>
+          <AdminSectionShell
+            section={section}
+            activeViewId={resolvedView}
+            basePath={roleBase}
+            role={userRole}
+            isPlatformOwner={isPlatformOwner}
+          >
+            <S><Screen /></S>
+          </AdminSectionShell>
         </AdminLayout>
       </RoleProtectedRoute>
     );
@@ -275,10 +319,16 @@ const Dashboard = () => {
             <PatientDashboard />
           </RoleProtectedRoute>
         );
+      // concierge_doctor used to get its own dashboard. Every one of its
+      // twelve components made zero database calls — PatientList shipped eight
+      // invented patients with invented lab results — while SignupForm and
+      // ConciergeDoctorSignup could put a real person into the role. Deleted
+      // 2026-09-28. Concierge doctors are providers in this system, so they now
+      // get the real provider portal, which reads their actual organization.
       case "concierge_doctor":
         return (
-          <RoleProtectedRoute allowedRoles={["super_admin", "concierge_doctor"]}>
-            <ConciergeDoctorDashboard />
+          <RoleProtectedRoute allowedRoles={["super_admin", "concierge_doctor", "provider"]}>
+            <ProviderDashboard />
           </RoleProtectedRoute>
         );
       case "provider":
