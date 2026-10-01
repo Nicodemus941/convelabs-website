@@ -142,7 +142,7 @@ const PARTNER_PRICING: Record<string, number> = {
   'partner-aristotle-education': 185,
 };
 
-const SURCHARGES = {
+export const SURCHARGES = {
   sameDay: { label: 'Same-Day / STAT Appointment', amount: 100 },
   weekend: { label: 'Weekend Service', amount: 75 },
   extendedHours: { label: 'Extended Hours', amount: 50 },

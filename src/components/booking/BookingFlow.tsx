@@ -151,15 +151,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // — a dead first impression for anyone browsing in the evening, which
       // is when a lot of people book. Roll to tomorrow instead.
       // (Mirrors SAME_DAY_CUTOFF_HOUR in DateTimeSelectionStep.)
+      //
+      // And not today either (2026-10-01): today carries the $100 same-day
+      // fee, so the first price every daytime visitor saw was $250 for a
+      // "$150" visit, before they had chosen anything. Open on the next
+      // weekday, which has no fee at all; today and weekends are one tap
+      // away and now say what they cost.
       date: (() => {
-        const now = new Date();
-        const SAME_DAY_CUTOFF_HOUR = 15; // 3 PM
-        if (now.getHours() >= SAME_DAY_CUTOFF_HOUR) {
-          const tomorrow = new Date(now);
-          tomorrow.setDate(tomorrow.getDate() + 1);
-          return tomorrow;
-        }
-        return now;
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+        return d;
       })(),
       time: '',
       patientDetails: {

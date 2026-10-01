@@ -56,16 +56,41 @@ async function sendSMS(phone: string, message: string): Promise<boolean> {
   }
 }
 
-async function isDateBlocked(dateOnly: string): Promise<{ blocked: boolean; reason?: string }> {
+/** "6:30 AM" / "06:30" / "06:30:00" -> minutes after midnight, or null. */
+function minutesOfDay(raw: string | null | undefined): number | null {
+  const s = String(raw || '').trim();
+  const ampm = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(s);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10) % 12;
+    if (ampm[3].toUpperCase() === 'PM') h += 12;
+    return h * 60 + parseInt(ampm[2], 10);
+  }
+  const mil = /^(\d{1,2}):(\d{2})/.exec(s);
+  return mil ? parseInt(mil[1], 10) * 60 + parseInt(mil[2], 10) : null;
+}
+
+async function isDateBlocked(dateOnly: string, appointmentTime?: string | null): Promise<{ blocked: boolean; reason?: string }> {
   try {
     const { data } = await supabaseClient
       .from('time_blocks')
-      .select('start_date, end_date, reason, block_type, recurring, recurring_day')
+      .select('start_date, end_date, start_time, end_time, reason, block_type, recurring, recurring_day')
       .or(timeBlockDateFilter(dateOnly))
       .eq('block_type', 'office_closure');
-    // Narrow recurring rows to the ones landing on this date before calling
-    // the day closed.
-    const applies = (data || []).filter((b: any) => timeBlockAppliesOn(b, dateOnly));
+    // Narrow recurring rows to the ones landing on this date, then honour
+    // time windows: a 6:30-8:30 AM block does not close the day. Until
+    // 2026-10-01 any windowed block counted as a full-day closure here, so a
+    // 10 AM booking on a date with a morning block was flagged "DATE WAS
+    // BLOCKED" and texted to the owner as urgent. Matches the window logic
+    // in create-appointment-checkout and availability.ts.
+    const apptMin = minutesOfDay(appointmentTime);
+    const applies = (data || [])
+      .filter((b: any) => timeBlockAppliesOn(b, dateOnly))
+      .filter((b: any) => {
+        if (!b.start_time || !b.end_time) return true; // whole-day closure
+        const s = minutesOfDay(b.start_time), e = minutesOfDay(b.end_time);
+        if (s === null || e === null || apptMin === null) return false;
+        return apptMin >= s && apptMin < e;
+      });
     if (applies.length > 0) {
       return { blocked: true, reason: applies[0].reason || 'office closure' };
     }
@@ -160,7 +185,7 @@ Deno.serve(async (req) => {
       let blockedFlag = false;
       let blockedReason: string | undefined;
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-        const check = await isDateBlocked(dateOnly);
+        const check = await isDateBlocked(dateOnly, metadata.appointment_time || null);
         blockedFlag = check.blocked;
         blockedReason = check.reason;
       }

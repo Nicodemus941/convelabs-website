@@ -33,7 +33,13 @@ export interface TimeWindowRule {
 // time_window_rules and lab destination cutoff further restrict per-date.
 // Hormozi simplification 2026-04-25: business hours are now Mon–Sun 6 AM – 6 PM
 // for everyone. Last bookable slot start = 5:30 PM, ending at 6 PM.
-const DEFAULT_GRID_START = 6;  // 6:00 AM
+// The grid is built from 5 AM, then trimmed to each weekday's opening time
+// from the office hours in Settings (system_settings 'office_hours', the same
+// row the patient date picker reads). Before 2026-10-01 this was a fixed 6 AM:
+// 5 AM office hours could be saved but the server refused every 5 AM booking
+// at checkout. FALLBACK_OPEN_MIN applies when no office hours are saved.
+const DEFAULT_GRID_START = 5;  // 5:00 AM floor
+const FALLBACK_OPEN_MIN = 6 * 60; // 6:00 AM
 const DEFAULT_GRID_END = 18;   // up to (but not including) 6:00 PM (last slot 5:30 PM)
 
 // Minimum lead time for same-day bookings — phleb mobilization buffer.
@@ -278,6 +284,30 @@ const VISIT_DURATIONS: Record<string, number> = {
   'specialty-kit-genova': 80,
 };
 
+/**
+ * Minutes after midnight when the office opens on this date's weekday, from
+ * the saved office hours. Never throws: anything missing or malformed falls
+ * back to 6:00 AM, the long-standing default.
+ */
+async function officeOpenMinutes(supabase: SupabaseClient, dateIso: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'office_hours')
+      .maybeSingle();
+    const days = (data as any)?.value?.days;
+    const dow = new Date(dateIso + 'T12:00:00').getDay();
+    const open = Array.isArray(days) ? String(days[dow]?.open || '') : '';
+    const m = /^(\d{1,2}):(\d{2})$/.exec(open);
+    if (!m) return FALLBACK_OPEN_MIN;
+    const min = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+    return min >= DEFAULT_GRID_START * 60 && min < 24 * 60 ? min : FALLBACK_OPEN_MIN;
+  } catch {
+    return FALLBACK_OPEN_MIN;
+  }
+}
+
 export async function getAvailableSlotsForDate(
   supabase: SupabaseClient,
   orgId: string,
@@ -291,7 +321,11 @@ export async function getAvailableSlotsForDate(
   // accepts specimens 24/7 so patient-side hours can run wide.
   const isAdvent = isAdventHealthDestination(labDestination);
   const gridEnd = isAdvent ? ADVENT_HEALTH_GRID_END : DEFAULT_GRID_END;
-  const localGrid = baseGrid(gridEnd);
+  const openMin = await officeOpenMinutes(supabase, dateIso);
+  const localGrid = baseGrid(gridEnd).filter((t) => {
+    const { h, m } = parseTime(t);
+    return h * 60 + m >= openMin;
+  });
   const allowed = isAdvent ? localGrid : slotsAllowedForDate(dateIso, timeWindowRules);
   if (allowed.length === 0) {
     // Day entirely out of window — return the grid all disabled with reason
@@ -438,7 +472,12 @@ export async function getAvailableSlotsForDate(
   // Split blocks into day-wide vs time-windowed. A row with start_time +
   // end_time set blocks ONLY that window of the day (e.g. "block 6am
   // 5/4 just for me"). A row with no times blocks the entire day.
-  const allBlocks = (blockResp.data || []) as any[];
+  // Narrowed to the blocks that actually apply on this date. Recurring rows
+  // are fetched wholesale (timeBlockDateFilter), and until 2026-10-01 they
+  // were never filtered back down: a Monday-only recurring block applied on
+  // every day, weekends and past its end date included. Only showed up once
+  // the first recurring blocks existed (6:15-7:45 AM Mon-Fri).
+  const allBlocks = ((blockResp.data || []) as any[]).filter((b) => timeBlockAppliesOn(b, dateIso));
   const fullyBlocked = allBlocks.some(b => !b.start_time || !b.end_time);
   const windowBlocks = allBlocks.filter(b => b.start_time && b.end_time);
   const slotInsideWindowBlock = (t: string): boolean => {

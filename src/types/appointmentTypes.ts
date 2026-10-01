@@ -181,6 +181,8 @@ export const bookingFormSchema = z.object({
   labOrder: z.object({
     skipped: z.boolean().optional(),
     doctorFaxNumber: z.string().optional(),
+    /** "Have my doctor fax it" — the office we contact for the order. */
+    doctorOffice: z.string().optional(),
     hasFile: z.boolean().optional(),
     labDestination: z.string().optional(),
     hasInsuranceFile: z.boolean().optional(),
