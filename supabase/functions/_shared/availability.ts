@@ -472,7 +472,12 @@ export async function getAvailableSlotsForDate(
   // Split blocks into day-wide vs time-windowed. A row with start_time +
   // end_time set blocks ONLY that window of the day (e.g. "block 6am
   // 5/4 just for me"). A row with no times blocks the entire day.
-  const allBlocks = (blockResp.data || []) as any[];
+  // Narrowed to the blocks that actually apply on this date. Recurring rows
+  // are fetched wholesale (timeBlockDateFilter), and until 2026-10-01 they
+  // were never filtered back down: a Monday-only recurring block applied on
+  // every day, weekends and past its end date included. Only showed up once
+  // the first recurring blocks existed (6:15-7:45 AM Mon-Fri).
+  const allBlocks = ((blockResp.data || []) as any[]).filter((b) => timeBlockAppliesOn(b, dateIso));
   const fullyBlocked = allBlocks.some(b => !b.start_time || !b.end_time);
   const windowBlocks = allBlocks.filter(b => b.start_time && b.end_time);
   const slotInsideWindowBlock = (t: string): boolean => {
