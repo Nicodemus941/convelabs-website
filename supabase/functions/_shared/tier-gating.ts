@@ -19,10 +19,16 @@ const TIER_WINDOWS: Record<Tier, {
   // availability.ts via isAdventHealthDestination).
   // The 5 PM-prior unlock cron opens 1:30-2:30 to all tiers if no VIP has
   // booked tomorrow.
-  none:           { weekday: { start: 6, end: 13.5 }, saturday: { start: 6, end: 13.5 }, sunday: true },
-  regular_member: { weekday: { start: 6, end: 13.5 }, saturday: { start: 6, end: 13.5 }, sunday: true },
-  vip:            { weekday: { start: 6, end: 14.5 }, saturday: { start: 6, end: 14.5 }, sunday: true },
-  concierge:      { weekday: { start: 6, end: 14.5 }, saturday: { start: 6, end: 14.5 }, sunday: true },
+  //
+  // Start is 5, not 6 (2026-10-01): these windows must never be what hides
+  // an early slot. The office hours in Settings bound the grid
+  // (availability.ts officeOpenMinutes); with a fixed 6 here, 5 AM office
+  // hours made every 5 AM slot read "Concierge only". Mirrors
+  // src/lib/bookingWindows.ts, which made the same change.
+  none:           { weekday: { start: 5, end: 13.5 }, saturday: { start: 5, end: 13.5 }, sunday: true },
+  regular_member: { weekday: { start: 5, end: 13.5 }, saturday: { start: 5, end: 13.5 }, sunday: true },
+  vip:            { weekday: { start: 5, end: 14.5 }, saturday: { start: 5, end: 14.5 }, sunday: true },
+  concierge:      { weekday: { start: 5, end: 14.5 }, saturday: { start: 5, end: 14.5 }, sunday: true },
 };
 
 const TIER_ORDER: Tier[] = ['none', 'regular_member', 'vip', 'concierge'];
