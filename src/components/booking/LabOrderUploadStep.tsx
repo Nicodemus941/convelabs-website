@@ -79,6 +79,8 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
     getValues('labOrder.skipped') ? 'skip' : 'upload'
   );
   const [faxNumber, setFaxNumber] = useState(getValues('labOrder.doctorFaxNumber') || '');
+  const [doctorOffice, setDoctorOffice] = useState((getValues as any)('labOrder.doctorOffice') || '');
+  const faxDigits = faxNumber.replace(/[^0-9]/g, '').replace(/^1(?=[0-9]{10}$)/, '');
 
   // Lab order dropzone — supports multiple files. On drop we:
   //   1. Add file to local state for UI preview
@@ -462,12 +464,20 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
 
   const handleNext = () => {
     if (mode === 'fax') {
-      setValue('labOrder.doctorFaxNumber', faxNumber);
+      setValue('labOrder.doctorFaxNumber', faxDigits);
+      setValue('labOrder.doctorOffice' as any, doctorOffice.trim());
     }
     onNext();
   };
 
-  const hasLabOrder = selectedFiles.length > 0 || (mode === 'fax' && faxNumber.length >= 10) || mode === 'skip';
+  // Fax mode needs the office we are going to contact. Until 2026-10-01 this
+  // required a fax number that no field could set (the input was removed
+  // with the old "get from doctor" option), so "Have my doctor fax it
+  // instead" left Continue disabled for good.
+  const hasLabOrder =
+    selectedFiles.length > 0 ||
+    (mode === 'fax' && doctorOffice.trim().length >= 2 && faxDigits.length === 10) ||
+    mode === 'skip';
   const hasInsurance = !effectiveInsuranceRequired || selectedInsuranceFile !== null || hasInsuranceOnFile;
   const hasLabDest = !needsLabDestination || (labDestination && labDestination.length > 0);
   const canProceed = hasLabOrder && hasInsurance && hasLabDest;
@@ -532,6 +542,47 @@ const LabOrderUploadStep: React.FC<LabOrderUploadStepProps> = ({
                 </div>
               ))}
               <p className="text-xs text-muted-foreground">You can add more files by dropping or clicking above.</p>
+            </div>
+          )}
+
+          {mode === 'fax' && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-blue-900">We'll get it from your doctor</p>
+                <p className="text-xs text-blue-700 mt-0.5">
+                  Tell us which office to contact. You can also ask them to fax it straight to
+                  <strong> (941) 251-8467</strong>.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <label htmlFor="doctor-office" className="text-xs font-medium text-blue-900">Doctor or practice name</label>
+                  <Input
+                    id="doctor-office"
+                    value={doctorOffice}
+                    onChange={(e) => setDoctorOffice(e.target.value)}
+                    placeholder="e.g. Dr. Patel, Lake Nona Family Medicine"
+                    autoComplete="off"
+                    className="bg-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="doctor-fax" className="text-xs font-medium text-blue-900">Office phone or fax</label>
+                  <Input
+                    id="doctor-fax"
+                    type="tel"
+                    inputMode="tel"
+                    value={faxNumber}
+                    onChange={(e) => setFaxNumber(e.target.value)}
+                    placeholder="(407) 555-0123"
+                    className="bg-white"
+                    aria-invalid={faxNumber.length > 0 && faxDigits.length !== 10}
+                  />
+                  {faxNumber.length > 0 && faxDigits.length !== 10 && (
+                    <p className="text-[11px] text-red-600">Enter a 10-digit number.</p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

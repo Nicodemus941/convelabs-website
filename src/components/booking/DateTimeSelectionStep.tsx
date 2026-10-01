@@ -32,7 +32,7 @@ import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
-import { getVisitDuration, getServiceBufferMinutes } from '@/services/pricing/pricingService';
+import { getVisitDuration, getServiceBufferMinutes, SURCHARGES } from '@/services/pricing/pricingService';
 import { timeBlockAppliesOn, type TimeBlockRow } from '@/lib/timeBlocks';
 
 // US Government holidays - ConveLabs is closed on these dates
@@ -340,12 +340,13 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const activeHolds = new Set((holds || []).map((h: any) => h.appointment_time));
         setHeldSlots(activeHolds);
 
-        if ((!data || data.length === 0) && activeHolds.size === 0) {
-          console.log('No appointments or holds found — all slots available');
-          setBookedSlots(new Set());
-          setLoadingSlots(false);
-          return;
-        }
+        // No early return on an empty day. There used to be one here ("no
+        // appointments or holds — all slots available"), and it skipped the
+        // admin time-block step below, so on any day nobody had booked yet a
+        // blocked window rendered as open: the patient picked it and the
+        // server refused it at checkout. Seen live on 2026-10-01 with the
+        // 6:30-8:30 AM block on an empty Saturday. Everything below is safe
+        // with no appointments (data?.forEach).
 
         const { count: staffCount } = await supabase
           .from('staff_profiles')
@@ -847,6 +848,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                   <FormDescription>
                     Available up to 2 months in advance
                   </FormDescription>
+                  {/* The weekend fee, said where the weekend is chosen. It
+                      used to appear only as a bigger number in the step bar,
+                      which read as an overcharge ($225 for a "$150" visit). */}
+                  {isWeekend && patientTier !== 'vip' && patientTier !== 'concierge' && (
+                    <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" role="note">
+                      <strong>{selectedDate ? format(selectedDate, 'EEEE') : 'Weekend'} visits include a ${SURCHARGES.weekend.amount} weekend fee.</strong>{' '}
+                      Weekdays have no extra fee.
+                    </p>
+                  )}
                   <FormMessage />
                 </FormItem>
               )}
@@ -888,17 +898,20 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     };
                     const p = priceMap[visitType];
                     if (!p) return null;
-                    const save = p.base - p.vip;
-                    if (save < 10) return null;
+                    const perVisit = p.base - p.vip;
+                    // VIP waives the weekend fee (isWeekendWaived), so on a
+                    // weekend the real saving today is bigger than the price gap.
+                    const save = perVisit + (isWeekend ? SURCHARGES.weekend.amount : 0);
+                    if (perVisit < 10) return null;
                     return (
                       <div className="bg-gradient-to-r from-amber-50 to-amber-100 border border-amber-300 rounded-lg p-3 mb-2 flex items-start gap-2.5">
                         <Crown className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
                         <div className="flex-1 min-w-0">
                           <p className="text-xs sm:text-sm font-semibold text-amber-900">
-                            Members pay <span className="tabular-nums">${p.vip}</span>. You'd save <span className="tabular-nums">${save}</span> today + every future visit.
+                            Members pay <span className="tabular-nums">${p.vip}</span>{isWeekend ? ' with no weekend fee' : ''}. You'd save <span className="tabular-nums">${save}</span> today{isWeekend ? '' : ' + every future visit'}.
                           </p>
                           <p className="text-[11px] text-amber-700 mt-0.5">
-                            VIP membership $199/yr — recoups itself in <span className="tabular-nums">{Math.ceil(199 / save)}</span> visit{Math.ceil(199 / save) === 1 ? '' : 's'}.
+                            VIP membership $199/yr — recoups itself in <span className="tabular-nums">{Math.ceil(199 / perVisit)}</span> visit{Math.ceil(199 / perVisit) === 1 ? '' : 's'}.
                           </p>
                         </div>
                       </div>

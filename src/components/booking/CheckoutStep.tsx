@@ -411,6 +411,14 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
     // Store referral + add-on + bundle info in form context for the checkout session
     const noteParts = [getValues('serviceDetails.additionalNotes')];
+    // "Have my doctor fax it": the office to contact for the lab order.
+    const faxOffice = String((getValues as any)('labOrder.doctorOffice') || '').trim();
+    const faxNum = String(getValues('labOrder.doctorFaxNumber') || '').replace(/[^0-9]/g, '');
+    if (faxOffice && faxNum.length === 10 && !getValues('labOrder.hasFile')) {
+      const pretty = `(${faxNum.slice(0, 3)}) ${faxNum.slice(3, 6)}-${faxNum.slice(6)}`;
+      const line = `LAB ORDER TO REQUEST: ${faxOffice} · ${pretty}`;
+      if (!noteParts.some((p) => String(p || '').includes('LAB ORDER TO REQUEST:'))) noteParts.push(line);
+    }
     if (referralApplied && referralCode) {
       noteParts.push(`Referral: ${referralCode} (-$${referralDiscount})`);
     }

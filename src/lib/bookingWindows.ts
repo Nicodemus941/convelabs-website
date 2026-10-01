@@ -41,17 +41,24 @@ export interface BookingWindow {
 // TIER RULES
 // ─────────────────────────────────────────────────────────────
 
-// Non-member / Regular: 6 AM – 1:30 PM Mon-Sun
+// The earliest start is NOT decided here. These windows open at 05:00 so they
+// never veto an early slot; the office hours in Settings (system_settings
+// 'office_hours', read by the slot grid on both sides) decide whether 5 AM
+// is actually offered. Opening or closing early mornings is then a settings
+// change, not a deploy. Before 2026-10-01 both were 06:00, so 5 AM office
+// hours were saved but never showed up.
+//
+// Non-member / Regular: opening – 1:30 PM Mon-Sun
 const PUBLIC_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
   dayOfWeek: d,
-  fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
-  nonFastingRanges: [{ start: '06:00', end: '13:30', label: '6 AM – 1:30 PM' }],
+  fastingRanges: [{ start: '05:00', end: '09:00', label: 'Morning fasting (until 9 AM)' }],
+  nonFastingRanges: [{ start: '05:00', end: '13:30', label: 'Until 1:30 PM' }],
 }));
 // VIP / Concierge: extra hour 1:30–2:30 PM (the VIP after-hours)
 const VIP_HOURS: BookingWindow[] = [0, 1, 2, 3, 4, 5, 6].map(d => ({
   dayOfWeek: d,
-  fastingRanges: [{ start: '06:00', end: '09:00', label: 'Morning fasting (6–9 AM)' }],
-  nonFastingRanges: [{ start: '06:00', end: '14:30', label: '6 AM – 2:30 PM (VIP after-hours)' }],
+  fastingRanges: [{ start: '05:00', end: '09:00', label: 'Morning fasting (until 9 AM)' }],
+  nonFastingRanges: [{ start: '05:00', end: '14:30', label: 'Until 2:30 PM (VIP after-hours)' }],
 }));
 const NON_MEMBER = PUBLIC_HOURS;
 const REGULAR = PUBLIC_HOURS;
