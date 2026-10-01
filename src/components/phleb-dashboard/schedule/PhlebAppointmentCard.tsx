@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
+import RecordingConsentSection, { RecordingConsentChip } from './RecordingConsentSection';
 import { PhlebAppointment, AppointmentStatus } from '@/hooks/usePhlebotomistAppointments';
 import OnTheWayDialog from './OnTheWayDialog';
 import PatientEditModal from './PatientEditModal';
@@ -527,6 +528,9 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
+                    {/* Promotional recording: only shown when the patient said yes,
+                        so the phleb sees it before they walk in. */}
+                    <RecordingConsentChip preference={(appointment as any).recording_preference} />
                     {/* Hormozi: show what THIS visit pays the phleb. Real
                         amount via compute_phleb_take_cents — same RPC
                         Stripe Connect uses to split the charge. Tips
@@ -703,6 +707,16 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   </div>
                 </div>
               )}
+
+              {/* Allow recording for promotional use — answer from checkout */}
+              <RecordingConsentSection
+                appointmentId={appointment.id}
+                preference={(appointment as any).recording_preference}
+                scope={(appointment as any).recording_scope}
+                hasSignedRelease={!!(appointment as any).recording_consent_id}
+                patientName={appointment.patient_name || null}
+                hasCompanions={companionNames.length > 0}
+              />
 
               {/* Date & Address */}
               <div className="px-4 py-3 border-b bg-[#FBF8F7]">

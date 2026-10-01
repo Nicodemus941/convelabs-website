@@ -837,6 +837,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         // stamped on the appointment row via stripe-webhook for funnel
         // reporting (sent → opened → booked).
         prefillTokenId: (data as any).prefillTokenId || null,
+        // Promotional recording answer from the checkout modal; the server
+        // stamps this Stripe session on it so the webhook can attach it.
+        recordingConsentId: (data as any).recordingConsentId || null,
       } as any);
 
       if (result.error) {

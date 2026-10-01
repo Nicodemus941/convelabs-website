@@ -5,6 +5,7 @@ import { commitReschedule } from "../_shared/reschedule.ts";
 import { isSlotStillAvailable } from "../_shared/availability.ts";
 import { resolveMembershipPlan, upsertUserMembership, userIdFromEmail } from "../_shared/membership.ts";
 import { sendMetaPurchase } from "../_shared/meta-capi.ts";
+import { linkRecordingConsent } from '../_shared/recording-consent.ts';
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -2540,6 +2541,19 @@ async function handleAppointmentPayment(session: any) {
     } catch (e: any) {
       console.warn('[pricing-breakdown] mirror failed (non-blocking):', e?.message);
     }
+
+    // ─── RECORDING CONSENT onto appointment row ──────────────────────
+    // The checkout modal's answer was saved before payment and stamped
+    // with this session id. Attach it, copy the answer onto the row the
+    // phleb card reads, and email the patient their signed copy.
+    await linkRecordingConsent(supabaseClient, {
+      sessionId: (session as any)?.id,
+      appointmentId: appointment.id,
+      patientDob: metadata.patient_dob || null,
+      appointmentDate: String(appointmentDate || ''),
+      rescheduleFromId: String(metadata.reschedule_from_id || '').trim() || null,
+      origin: 'stripe-webhook',
+    });
 
     // ─── COMPANION APPOINTMENT ROWS (couples / households) ───────────
     // When the patient added "additional patients at same address" during

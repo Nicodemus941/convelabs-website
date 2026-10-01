@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { linkRecordingConsent } from '../_shared/recording-consent.ts';
 import { timeBlockAppliesOn, timeBlockDateFilter } from '../_shared/timeBlocks.ts';
 
 /**
@@ -265,6 +266,16 @@ Deno.serve(async (req) => {
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      // ── Recording consent: same linking the webhook does (idempotent) ──
+      await linkRecordingConsent(supabaseClient, {
+        sessionId: session_id,
+        appointmentId: newAppt.id,
+        patientDob: metadata.patient_dob || null,
+        appointmentDate: String(metadata.appointment_date || normalizedDate || ''),
+        rescheduleFromId: String(metadata.reschedule_from_id || '').trim() || null,
+        origin: 'verify-appointment-checkout',
+      });
 
       // ── Trigger OCR on the uploaded lab order (fire-and-forget) ──
       // Phleb card uses the extracted text for fasting banners + panel chips.
