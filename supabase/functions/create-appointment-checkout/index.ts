@@ -167,6 +167,11 @@ Deno.serve(async (req) => {
       // appointment row via the webhook so we can report sent→booked
       // conversion. Stored in metadata, picked up at webhook time.
       prefillTokenId = null,
+      // Promotional-recording answer from the checkout modal (accept or
+      // decline). Saved before payment by submit-recording-consent; the
+      // Stripe session is stamped on that row below, NOT in metadata --
+      // metadata is already at Stripe's 50-key cap.
+      recordingConsentId = null,
       // New first-class attachment fields (replaces notes-stuffing pattern)
       labOrderFilePaths = [],
       insuranceCardPath = null,
@@ -1577,6 +1582,22 @@ Deno.serve(async (req) => {
     // it back when the session completes and writes onto the appointment
     // row's pricing_breakdown column. Lets future drift alerts be triaged
     // in one query (vs reverse-engineering Mary Rienzi 3-person case).
+    // Recording consent: tie the patient's answer to this Stripe session so
+    // the webhook (or verify fallback) can attach it to the appointment.
+    // Only an unlinked row can be re-pointed -- a retried checkout gets a
+    // new session, and the answer follows it.
+    if (recordingConsentId && /^[0-9a-f-]{36}$/i.test(String(recordingConsentId))) {
+      try {
+        const { error: rcErr } = await supabaseClient.from('recording_consents')
+          .update({ stripe_session_id: session.id } as any)
+          .eq('id', String(recordingConsentId))
+          .is('appointment_id', null);
+        if (rcErr) console.warn('[recording-consent] stamp failed (non-blocking):', rcErr.message);
+      } catch (e: any) {
+        console.warn('[recording-consent] stamp failed (non-blocking):', e?.message);
+      }
+    }
+
     if (pricingBreakdown && typeof pricingBreakdown === 'object') {
       try {
         const enriched = {

@@ -21,6 +21,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 import { Turnstile } from '@/components/security/Turnstile';
+import RecordingConsentModal, { type RecordingChoice } from './RecordingConsentModal';
+import { Camera } from 'lucide-react';
 
 // Cloudflare Turnstile — bot gate on the checkout edge fn (card-testing
 // defense). Inert (widget never renders, no token written) until the site
@@ -103,6 +105,43 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   }, [checkoutError]);
   const [termsFlashing, setTermsFlashing] = useState(false);
   const [showMismatchDialog, setShowMismatchDialog] = useState(false);
+
+  // ── Promotional recording consent ─────────────────────────────────
+  // Asked once, shortly after the patient reaches checkout. The answer lives
+  // in the form (recordingChoice / recordingConsentId) so going Back and
+  // returning doesn't ask again; BookingFlow forwards the consent id to
+  // create-appointment-checkout. Never offered when the DOB says minor.
+  const patientDob = watch('patientDetails.dateOfBirth' as any) as string | undefined;
+  const visitDate = watch('date') as Date | string | undefined;
+  const recordingIneligible = React.useMemo(() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(patientDob || ''));
+    if (!m) return false;
+    const on = visitDate ? new Date(visitDate) : new Date();
+    if (Number.isNaN(on.getTime())) return false;
+    let age = on.getFullYear() - Number(m[1]);
+    if (on.getMonth() + 1 < Number(m[2]) || (on.getMonth() + 1 === Number(m[2]) && on.getDate() < Number(m[3]))) age -= 1;
+    return age < 18;
+  }, [patientDob, visitDate]);
+  const [recordingChoice, setRecordingChoice] = useState<RecordingChoice | null>(
+    () => ((getValues as any)('recordingChoice') as RecordingChoice | undefined) ?? null,
+  );
+  const [recordingModalOpen, setRecordingModalOpen] = useState(false);
+  React.useEffect(() => {
+    if (recordingIneligible) {
+      methods.setValue('recordingConsentId' as any, null);
+      return;
+    }
+    if (recordingChoice) return;
+    const t = window.setTimeout(() => setRecordingModalOpen(true), 700);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordingIneligible]);
+  const onRecordingDone = (choice: RecordingChoice) => {
+    setRecordingChoice(choice);
+    methods.setValue('recordingChoice' as any, choice);
+    methods.setValue('recordingConsentId' as any, choice.consentId ?? null);
+    setRecordingModalOpen(false);
+  };
   const [referralCode, setReferralCode] = useState('');
   const [referralDiscount, setReferralDiscount] = useState(0);
   const [referralApplied, setReferralApplied] = useState(false);
@@ -959,6 +998,28 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </div>
         )}
 
+        {!recordingIneligible && recordingChoice && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <Camera className="h-4 w-4" /> Promotional recording
+            </span>
+            <span className="flex items-center gap-2">
+              <span className={recordingChoice.decision === 'accepted' ? 'font-medium text-emerald-700' : 'font-medium'}>
+                {recordingChoice.decision === 'accepted'
+                  ? (recordingChoice.scope === 'face_and_testimonial' ? 'Yes · face & testimonial' : 'Yes · arm & hands only')
+                  : 'No'}
+              </span>
+              <button
+                type="button"
+                className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => setRecordingModalOpen(true)}
+              >
+                Change
+              </button>
+            </span>
+          </div>
+        )}
+
         <Separator />
 
         {/* Add-on line items */}
@@ -1137,6 +1198,17 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
           </Button>
         </div>
         {/* HIPAA mismatch warning dialog */}
+        {!recordingIneligible && (
+          <RecordingConsentModal
+            open={recordingModalOpen}
+            patientName={`${watch('patientDetails.firstName') || ''} ${watch('patientDetails.lastName') || ''}`.trim()}
+            patientEmail={String(watch('patientDetails.email') || '')}
+            patientDob={patientDob || null}
+            appointmentDate={visitDate || null}
+            onDone={onRecordingDone}
+          />
+        )}
+
         <AlertDialog open={showMismatchDialog} onOpenChange={setShowMismatchDialog}>
           <AlertDialogContent>
             <AlertDialogHeader>

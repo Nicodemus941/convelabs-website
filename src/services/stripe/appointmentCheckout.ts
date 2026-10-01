@@ -49,6 +49,8 @@ export interface AppointmentCheckoutParams {
    *  reconstruct expected total + reject price-tampering. Only set when
    *  serviceType is `specialty-kit*`. */
   specialtyKitBundle?: { patients: Array<{ kits: number }>; isGenova?: boolean } | null;
+  /** Promotional-recording answer saved at checkout (accept or decline). */
+  recordingConsentId?: string | null;
   /** Patient goodwill/referral credits to redeem at this checkout. Server
    *  re-verifies they belong to the booking email + are unredeemed, then
    *  subtracts from the amount and stamps them redeemed atomically. */
