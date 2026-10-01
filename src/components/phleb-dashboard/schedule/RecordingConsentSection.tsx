@@ -118,7 +118,7 @@ const RecordingConsentSection: React.FC<Props> = ({
             Allow recording for promotional use
           </p>
           <span
-            className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-sm font-extrabold ${
+            className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-sm font-extrabold ${
               yes ? 'bg-emerald-600 text-white' : localPref === 'not_asked' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-white'
             }`}
             data-testid="recording-answer"

@@ -265,13 +265,17 @@ const RecordingConsentModal: React.FC<Props> = ({
 
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">Signature</Label>
-              <SignaturePad ref={sigRef} height={140} onChange={(empty) => setSigEmpty(empty)} />
+              <SignaturePad ref={sigRef} height={140} placeholder="Sign here with your finger or mouse" onChange={(empty) => setSigEmpty(empty)} />
             </div>
 
-            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
-              <Checkbox checked={attested} onCheckedChange={(v) => setAttested(v === true)} className="mt-0.5" />
-              <span>I am the patient being seen at this appointment, I am 18 or older, and I have read and agree to this authorization.</span>
-            </label>
+            {/* Not a wrapping <label>: a Radix checkbox inside one toggles twice
+                per tap (button click + label click) and appears not to work. */}
+            <div className="flex items-start gap-2.5 text-sm">
+              <Checkbox id="rc-attest" checked={attested} onCheckedChange={(v) => setAttested(v === true)} className="mt-0.5" />
+              <Label htmlFor="rc-attest" className="cursor-pointer text-sm font-normal leading-snug">
+                I am the patient being seen at this appointment, I am 18 or older, and I have read and agree to this authorization.
+              </Label>
+            </div>
             <p className="text-xs text-muted-foreground">
               Booking for someone else? Only the patient can agree, so please choose No thanks.
             </p>

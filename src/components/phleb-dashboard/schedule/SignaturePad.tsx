@@ -15,6 +15,8 @@ import { Eraser, Pen } from 'lucide-react';
 interface Props {
   onChange?: (empty: boolean) => void;
   height?: number;
+  /** Shown in the empty pad. Defaults to the specimen hand-off wording. */
+  placeholder?: string;
 }
 
 export interface SignaturePadHandle {
@@ -23,7 +25,7 @@ export interface SignaturePadHandle {
   toBlob: () => Promise<Blob | null>;
 }
 
-const SignaturePad = React.forwardRef<SignaturePadHandle, Props>(({ onChange, height = 180 }, ref) => {
+const SignaturePad = React.forwardRef<SignaturePadHandle, Props>(({ onChange, height = 180, placeholder = 'Lab clerk signs here' }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
   const lastPt = useRef<{ x: number; y: number } | null>(null);
@@ -125,7 +127,7 @@ const SignaturePad = React.forwardRef<SignaturePadHandle, Props>(({ onChange, he
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <span className="text-gray-400 text-xs flex items-center gap-1.5">
               <Pen className="h-3.5 w-3.5" />
-              Lab clerk signs here
+              {placeholder}
             </span>
           </div>
         )}
