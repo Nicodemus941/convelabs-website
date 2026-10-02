@@ -26,6 +26,9 @@ hidden behind empty-state UIs).
 | `update-user-password` | public (password reset completion — token-gated) |
 | `dev-test-lab-sms` | dev-only — protected by a shared secret in body |
 | `dev-twilio-recent` | dev-only — protected by a shared secret in body |
+| `booking-draft-upsert` | /book-now saves the in-progress booking draft — guests, no auth |
+| `booking-draft-resolve` | Patient opens `/book/resume/:token` — token is the auth |
+| `process-abandoned-bookings` | pg_cron via `net.http_post` — no JWT (no-ops until `system_settings.abandoned_recovery_enabled` is true) |
 
 ## Correct deploy command
 
