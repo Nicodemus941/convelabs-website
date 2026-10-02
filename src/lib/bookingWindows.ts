@@ -266,7 +266,10 @@ export function premiumFeeCents(opts: {
 }): number {
   if (opts.sameDayFeeApplies || opts.afterHoursFeeApplies) return 0;
   const rule = evaluateSlot({ tier: opts.tier, dateIso: opts.dateIso, time: opts.time, isFasting: false, now: opts.now });
-  if (!rule.bookable) return 0;
+  // Keyed on the window, not on `bookable`: callers that bypass the access
+  // rules (AdventHealth destination) still price the slot the same way, and a
+  // held weekend slot is rejected by the caller before any fee matters.
+  if (!rule.premiumEligible) return 0;
   return rule.feeCents;
 }
 

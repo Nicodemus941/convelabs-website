@@ -634,6 +634,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const breakdown = calculateTotal(visitType, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
+        premiumHours: data.serviceDetails.premiumHours,
         extendedArea: isExtendedArea(locationCity, locationZip),
         ...(specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
       }, tipAmount, isSpecialtyKit ? 0 : additionalPatientCount, memberTier, isFoundingMember);
@@ -713,8 +714,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // checkout validates the code and subtracts it server-side; sending a
       // pre-discounted amount AND the code gave the patient $50 off instead
       // of $25. `referralDiscount` is kept for the itemized cart record.
+      // The premium-hours fee is shown here but CHARGED by the server: create-
+      // appointment-checkout recomputes it from (date, time, verified tier)
+      // and adds its own "Premium hours" Stripe line item. Sending it inside
+      // `amount` too would bill it twice, so it comes back out here.
       const finalSubtotal = Math.max(
-        breakdown.subtotal + bundleExtra + safeFamilyMemberExtra,
+        breakdown.subtotal - (breakdown.premiumFee || 0) + bundleExtra + safeFamilyMemberExtra,
         0
       );
 
@@ -771,9 +776,13 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         bundle_extra: bundleExtra,
         bundle_count: bundleCount,
         subtotal: breakdown.subtotal,
-        // Expected charge after the server applies the referral discount.
-        final_subtotal: Math.max(0, finalSubtotal - referralDiscount),
-        total: parseFloat((Math.max(0, finalSubtotal - referralDiscount) + tipAmount).toFixed(2)),
+        // Premium-hours fee the client displayed; the server's own figure is
+        // stamped alongside as server_premium_fee_cents when the session is made.
+        premium_fee: breakdown.premiumFee || 0,
+        // Expected charge after the server applies the referral discount
+        // (premium fee included again — the server adds it as a line item).
+        final_subtotal: Math.max(0, finalSubtotal - referralDiscount + (breakdown.premiumFee || 0)),
+        total: parseFloat((Math.max(0, finalSubtotal - referralDiscount + (breakdown.premiumFee || 0)) + tipAmount).toFixed(2)),
         location_city: locationCity,
         location_extended_area: isExtendedArea(locationCity, locationZip),
         captured_at: new Date().toISOString(),

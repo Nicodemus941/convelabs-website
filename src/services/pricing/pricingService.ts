@@ -11,6 +11,13 @@ export interface SurchargeOptions {
   sameDay?: boolean;
   weekend?: boolean;
   extendedHours?: boolean;
+  /**
+   * Slot is in a premium-hours window (weekday 5–7 AM / 1–3 PM, or a weekend
+   * slot released to everyone inside 24 h). +$10 for non-members only, and
+   * never stacked on top of the same-day fee or the after-hours surcharge —
+   * see src/lib/bookingWindows.ts.
+   */
+  premiumHours?: boolean;
   extendedArea?: boolean;
   isGenovaKit?: boolean;
   additionalGenovaKits?: number;
@@ -46,6 +53,12 @@ export interface PriceBreakdown {
   subtotal: number;
   tip: number;
   total: number;
+  /**
+   * Premium-hours fee (dollars) included in `subtotal`. The server computes
+   * and charges this itself as its own Stripe line item, so BookingFlow
+   * subtracts it from the `amount` it sends to create-appointment-checkout.
+   */
+  premiumFee: number;
   /**
    * Specialty-kit bundle "save vs unbundled" amount, in dollars. Only set
    * when calculateSpecialtyKitBundle() ran. Surface this as a chip
@@ -147,7 +160,17 @@ export const SURCHARGES = {
   weekend: { label: 'Weekend Service', amount: 75 },
   extendedHours: { label: 'Extended Hours', amount: 50 },
   extendedArea: { label: 'Extended Service Area', amount: 75 },
+  // Must equal PREMIUM_FEE_CENTS / 100 in src/lib/bookingWindows.ts (the
+  // server charges from its own copy of that constant).
+  premiumHours: { label: 'Premium hours', amount: 10 },
 };
+
+export const PREMIUM_HOURS_LABEL = SURCHARGES.premiumHours.label;
+
+function isPremiumHoursWaived(tier: MembershipTier): boolean {
+  // Every paid member skips the premium fee — Regular, VIP and Concierge.
+  return tier === 'member' || tier === 'vip' || tier === 'concierge';
+}
 
 // Additional patient pricing by tier
 function getAdditionalPatientPrice(visitType: string, tier: MembershipTier = 'none'): number {
@@ -376,6 +399,11 @@ export function calculateSurcharges(
   if (options.sameDay && !isSameDayWaived(tier, isFoundingMember)) items.push(SURCHARGES.sameDay);
   if (options.weekend && !isWeekendWaived(tier)) items.push(SURCHARGES.weekend);
   if (options.extendedHours) items.push(SURCHARGES.extendedHours);
+  // Timing fees never stack: same-day ($100) > after-hours ($50) > premium
+  // hours ($10). Only when neither of the first two made it onto the visit
+  // does the premium fee apply — and only to non-members.
+  const hasOtherTimingFee = items.some(i => i === SURCHARGES.sameDay || i === SURCHARGES.extendedHours);
+  if (options.premiumHours && !hasOtherTimingFee && !isPremiumHoursWaived(tier)) items.push(SURCHARGES.premiumHours);
   if (options.extendedArea) items.push(SURCHARGES.extendedArea);
 
   if (options.additionalGenovaKits && options.additionalGenovaKits > 0) {
@@ -477,7 +505,13 @@ export function calculateTotal(
     subtotal,
     tip: tipAmount,
     total: parseFloat((subtotal + tipAmount).toFixed(2)),
+    premiumFee: premiumFeeIn(surcharges),
   };
+}
+
+/** Dollars of premium-hours fee present in a surcharge list (0 when absent). */
+export function premiumFeeIn(surcharges: { label: string; amount: number }[]): number {
+  return surcharges.find(s => s.label === PREMIUM_HOURS_LABEL)?.amount || 0;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -599,12 +633,14 @@ export function calculateSpecialtyKitBundle(
   }
 
   // Other (non-specialty-kit) surcharges still apply: same-day, weekend, etc.
+  // Tier passed through so member waivers (weekend, premium hours) hold on
+  // bundle checkouts too.
   const stdSurcharges = calculateSurcharges({
     ...options,
     additionalGenovaKits: 0,
     additionalSpecialtyKits: 0,
     specialtyKitBundle: undefined,
-  });
+  }, tier);
   for (const s of stdSurcharges) {
     surcharges.push(s);
     bundleTotal += s.amount;
@@ -628,6 +664,7 @@ export function calculateSpecialtyKitBundle(
     subtotal,
     tip: tipAmount,
     total: parseFloat((subtotal + tipAmount).toFixed(2)),
+    premiumFee: premiumFeeIn(surcharges),
     bundleSavings: showSavings ? savings : undefined,
     bundleLabel: showSavings ? bundleLabel(bundle, savings) : undefined,
   };

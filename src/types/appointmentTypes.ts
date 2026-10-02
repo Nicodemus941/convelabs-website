@@ -53,6 +53,10 @@ export interface BookingFormValues {
     sameDay: boolean;
     weekend: boolean;
     fasting?: boolean;
+    /** Selected slot sits in a premium-hours window (fee for non-members only). */
+    premiumHours?: boolean;
+    /** Selected slot sits in the surcharged after-hours set. */
+    extendedHours?: boolean;
     duration?: number;
   };
   locationDetails: {
@@ -122,6 +126,8 @@ export const bookingFormSchema = z.object({
     sameDay: z.boolean().optional(),
     weekend: z.boolean().optional(),
     fasting: z.boolean().optional(),
+    premiumHours: z.boolean().optional(),
+    extendedHours: z.boolean().optional(),
     duration: z.number().optional()
   }),
   locationDetails: z.object({

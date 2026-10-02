@@ -48,8 +48,8 @@ const MOBILE_SENIOR_SERVICES = ['routine-blood-draw', 'fasting-blood-draw', 'sta
 
 // All services for other visit types
 const ALL_SERVICES: Service[] = [
-  { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. 9 AM – 1:30 PM, Mon–Sat. AdventHealth deliveries extend to 6 PM.' },
-  { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. 6–9 AM Mon–Fri for non-members; members unlock wider windows. We verify against your uploaded lab order — if fasting isn\'t required, booking will be rejected.' },
+  { id: 'routine-blood-draw', name: 'Routine Blood Draw', duration: 60, credits: 1, description: 'Standard blood collection. 5 AM – 3 PM Mon–Fri (5 – 7 AM and 1 – 3 PM are premium hours, free for members). AdventHealth deliveries extend to 6 PM.' },
+  { id: 'fasting-blood-draw', name: 'Fasting Blood Draw', duration: 60, credits: 1, description: 'Requires 8-12 hours of fasting. Any start before noon (5 AM – noon Mon–Fri; 6 – 11 AM weekends). Members skip the early-morning premium fee. We verify against your uploaded lab order — if fasting isn\'t required, booking will be rejected.' },
   { id: 'stat-blood-draw', name: 'STAT / Same-Day', duration: 60, credits: 1, description: 'Next available slot. +$100 surcharge.' },
   { id: 'therapeutic-phlebotomy', name: 'Therapeutic Phlebotomy', duration: 75, credits: 1, description: 'Blood removal per doctor order. 1hr 15min.' },
   { id: 'glucose-tolerance', name: 'Glucose Tolerance Test (GTT)', duration: 120, credits: 1, description: 'Measures how your body processes sugar.' },
