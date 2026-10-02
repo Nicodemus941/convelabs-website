@@ -3,6 +3,7 @@ import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 import { brandedEmailWrapper } from '../_shared/branded-email.ts';
 import { shouldSendNow, logDeferral } from '../_shared/quiet-hours.ts';
 import { resolvePatientPayLink } from '../_shared/pay-link.ts';
+import { sendInvoiceSms, buildInvoiceSmsBody } from '../_shared/invoice-sms.ts';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
 /**
@@ -564,6 +565,29 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── PATIENT INVOICE SMS — "/pay link" text alongside the email ──────
+    // Patients mostly open the pay page from a text. Never for org-billed.
+    // Guarded inside the helper: NOTIFICATIONS_SUSPENDED, no valid phone,
+    // HIPAA recipient guard, quiet hours (queued to notification_deferrals
+    // and drained by process-invoice-reminders after 8am ET — never dropped,
+    // never sent at night). Logged to sms_notifications (invoice_sent).
+    let smsResult: { status: string; reason?: string } = { status: 'skipped', reason: billedToOrg ? 'org_billed' : 'no_link' };
+    if (!billedToOrg && patientPayKind !== 'none') {
+      try {
+        const sms = await sendInvoiceSms(supabase, {
+          appointment_id: appointmentId,
+          phone: invoiceToPhone,
+          patient_name: invoiceToName,
+          body: buildInvoiceSmsBody(String(invoiceToName || ''), emailTotalDollars, patientPayUrl),
+        });
+        smsResult = { status: sms.status, reason: sms.reason };
+        console.log(`[send-invoice] SMS ${sms.status}${sms.reason ? ` (${sms.reason})` : ''} for appointment ${appointmentId}`);
+      } catch (smsErr) {
+        smsResult = { status: 'failed', reason: String((smsErr as Error)?.message || smsErr) };
+        console.warn('[send-invoice] SMS failed (non-blocking):', smsErr);
+      }
+    }
+
     console.log(`Invoice ${invoice.id} → ${billedToOrg ? `ORG ${org!.name}` : 'patient'} (${invoiceToEmail}) for appointment ${appointmentId}`);
 
     return new Response(
@@ -573,6 +597,7 @@ Deno.serve(async (req) => {
         invoiceUrl: finalizedInvoice.hosted_invoice_url,
         patientPayUrl: billedToOrg ? null : patientPayUrl,
         patientPayKind: billedToOrg ? null : patientPayKind,
+        sms: smsResult,
         billedTo: billedToOrg ? 'org' : 'patient',
         recipient: invoiceToEmail,
         phlebTakeCents: totalTakeCents,

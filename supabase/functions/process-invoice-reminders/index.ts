@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
 import { resolvePatientPayLink, revokePayTokens } from '../_shared/pay-link.ts';
+import { drainDeferredInvoiceSms, invoiceSmsSentRecently } from '../_shared/invoice-sms.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -120,6 +121,17 @@ Deno.serve(async (req) => {
     let finalWarnings = 0;
     let cancellations = 0;
     let skippedRelaxed = 0;
+
+    // ── PHASE 0: drain invoice texts queued during quiet hours ─────
+    // send-appointment-invoice queues its "/pay link" SMS when the invoice
+    // goes out between 9pm and 8am ET (notification_deferrals, channel=sms).
+    // We're past the quiet-hours gate above, so send them now — after
+    // re-checking each appointment is still unpaid and not already texted.
+    let deferredInvoiceSms = { sent: 0, skipped: 0, failed: 0 };
+    try {
+      deferredInvoiceSms = await drainDeferredInvoiceSms(supabase);
+      if (deferredInvoiceSms.sent || deferredInvoiceSms.failed) console.log('[invoice-reminders] deferred invoice SMS drained:', deferredInvoiceSms);
+    } catch (e) { console.warn('[invoice-reminders] deferred invoice SMS drain failed (non-blocking):', (e as any)?.message); }
 
     // ── ORG-BILLED GUARDRAIL (added 2026-05-30) ───────────────────
     // Partner orgs that bill the ORGANIZATION (not the patient) must NEVER
@@ -379,6 +391,10 @@ Deno.serve(async (req) => {
       const phoneCheck1 = await verifyRecipientPhone(appt.id, phone, name);
       if (!phoneCheck1.safe) {
         console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck1.reason}`);
+      } else if (await invoiceSmsSentRecently(supabase, appt.id, 20)) {
+        // The invoice itself was texted (with the same /pay link) within the
+        // last ~20h — one text a day. Email reminder still went out above.
+        console.log(`[REMINDER] skipping SMS for ${name} — invoice SMS already sent today`);
       } else {
         await sendSMS(phone,
           `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay securely on our site (tip optional): ${payLink} — Looking forward to your visit!`
@@ -639,6 +655,7 @@ Deno.serve(async (req) => {
         cancellations,
         skippedRelaxed,
         skippedConsolidated,
+        deferredInvoiceSms,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
