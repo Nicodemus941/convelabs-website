@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { isSlotStillAvailable, getAvailableSlotsForDate, normalizeSlotTime } from '../_shared/availability.ts';
-import { timeBlockAppliesOn, timeBlockDateFilter } from '../_shared/timeBlocks.ts';
+import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow, visitMinutesForBlocks } from '../_shared/timeBlocks.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -582,7 +582,9 @@ Deno.serve(async (req) => {
         const e = blkToMin(b.end_time);
         if (s === null || e === null) return true;   // full-day closure
         if (apptBlkMin === null) return false;       // no parseable time → don't full-day-block a windowed row
-        return apptBlkMin >= s && apptBlkMin < e;    // start-in-window (mirrors slot grid)
+        // Overlap, not start-in-window: the visit must not run into the block
+        // (mirrors the slot grid in availability.ts).
+        return visitOverlapsWindow(apptBlkMin, visitMinutesForBlocks(serviceType), s, e);
       });
 
       if (blockingRow) {
