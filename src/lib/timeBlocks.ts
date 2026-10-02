@@ -78,3 +78,37 @@ export function timeBlockDateFilter(dateIso: string): string {
   const d = String(dateIso).slice(0, 10);
   return `recurring.is.true,and(start_date.lte.${d},end_date.gte.${d})`;
 }
+
+/**
+ * Minutes a visit of this service type occupies. Mirrors VISIT_DURATIONS in
+ * availability.ts and src/services/pricing/pricingService.ts; unknown types
+ * fall back to the standard 60-minute visit.
+ */
+const BLOCK_VISIT_MINUTES: Record<string, number> = {
+  'mobile': 60,
+  'in-office': 60,
+  'senior': 60,
+  'therapeutic': 75,
+  'specialty-kit': 75,
+  'specialty-kit-genova': 80,
+};
+export function visitMinutesForBlocks(serviceType?: string | null): number {
+  return BLOCK_VISIT_MINUTES[String(serviceType || '').toLowerCase()] || 60;
+}
+
+/**
+ * Does a visit starting at `startMin` (minutes after midnight) and lasting
+ * `durationMin` collide with a time-windowed block [blockStart, blockEnd)?
+ *
+ * Until 2026-10-02 every check only asked whether the visit STARTED inside
+ * the window, so a 6:00 AM 60-minute visit sailed past a 6:15-7:45 block it
+ * runs straight into. Overlap, not start-in-window, is the rule.
+ */
+export function visitOverlapsWindow(
+  startMin: number,
+  durationMin: number,
+  blockStartMin: number,
+  blockEndMin: number,
+): boolean {
+  return startMin < blockEndMin && startMin + Math.max(durationMin, 1) > blockStartMin;
+}
