@@ -29,6 +29,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { getTrustedRole, getTrustedOrgId } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -65,8 +66,8 @@ Deno.serve(async (req) => {
     const user = userResp?.user;
     if (!user) return json({ ok: false, error: 'invalid_session', message: 'Your session expired — please sign in again.' }, 401);
 
-    const role = String(user.user_metadata?.role || '').toLowerCase();
-    const callerOrgId = user.user_metadata?.org_id || user.user_metadata?.organization_id || null;
+    const role = getTrustedRole(user);
+    const callerOrgId = getTrustedOrgId(user);
     if (!['provider', 'office_manager'].includes(role) || !callerOrgId) {
       return json({ ok: false, error: 'not_a_provider', message: 'This action is only available to provider accounts.' }, 403);
     }

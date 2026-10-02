@@ -20,6 +20,7 @@
  */
 
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+import { getTrustedRole } from '../_shared/authz.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 const corsHeaders = {
@@ -151,7 +152,7 @@ Deno.serve(async (req) => {
 
     if (adminRequestedStaffId) {
       // Admin override path
-      const role = (user.user_metadata?.role || user.app_metadata?.role || '').toString();
+      const role = getTrustedRole(user);
       if (role !== 'super_admin' && role !== 'office_manager' && role !== 'admin') {
         return new Response(JSON.stringify({ error: 'admin_only' }), {
           status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }

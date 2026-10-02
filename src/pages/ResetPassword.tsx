@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
+import { getRoutingRole } from '@/lib/authRole';
 
 /**
  * RESET PASSWORD — single-path, bulletproof recovery flow.
@@ -209,8 +210,8 @@ const ResetPassword = () => {
             window.location.href = '/login?reset=success';
             return;
           }
-          const role = signed?.session?.user?.user_metadata?.role
-            || signed?.user?.user_metadata?.role;
+          const role = getRoutingRole(signed?.session?.user)
+            || getRoutingRole(signed?.user);
           if (role === 'provider') {
             window.location.href = '/dashboard/provider';
             return;

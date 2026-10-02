@@ -10,6 +10,7 @@ import { lazyWithRetry } from "@/lib/lazyWithRetry";
 import AdminLayout from "@/components/dashboards/admin/AdminLayout";
 import AdminSectionShell from "@/components/dashboards/admin/AdminSectionShell";
 import { useAdminBadges } from "@/components/dashboards/admin/useAdminBadges";
+import { getRoutingOrgId } from '@/lib/authRole';
 import {
   LEGACY_TAB_REDIRECTS, findSection, defaultViewId, isViewVisible,
   isSectionVisible, checkPlatformOwner,
@@ -122,7 +123,8 @@ const Dashboard = () => {
     if (!user) { setRawMeta(null); return; }
     let cancel = false;
     supabase.auth.getUser().then(({ data }) => {
-      if (!cancel) setRawMeta((data?.user?.user_metadata as any) || {});
+      // Partner-org scope comes from app_metadata (service-role only).
+      if (!cancel) setRawMeta({ ...((data?.user?.user_metadata as any) || {}), partnerOrgId: getRoutingOrgId(data?.user) });
     }).catch(() => { if (!cancel) setRawMeta({}); });
     return () => { cancel = true; };
   }, [user]);
@@ -160,10 +162,8 @@ const Dashboard = () => {
           .eq('is_active', true)
           .maybeSingle();
         if (org) {
-          // Stamp the role on the auth user so future logins skip this branch
-          try {
-            await supabase.auth.updateUser({ data: { role: 'provider' } });
-          } catch { /* non-blocking */ }
+          // Roles are assigned server-side (app_metadata) by the org
+          // invite/claim edge functions; the client can no longer stamp one.
           navigate('/dashboard/provider', { replace: true });
           return;
         }
@@ -207,7 +207,7 @@ const Dashboard = () => {
       </div>
     );
   }
-  const partnerOrgId = rawMeta.organization_id || rawMeta.org_id || null;
+  const partnerOrgId = rawMeta.partnerOrgId || null;
   const isPartnerOrgStaff = !!partnerOrgId && (userRole === "office_manager" || userRole === "provider");
 
   if (isPartnerOrgStaff) {

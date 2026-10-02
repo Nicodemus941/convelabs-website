@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/components/ui/use-toast";
+import { getTrustedRole } from '@/lib/authRole';
 
 export const useSuperAdminAuth = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -31,17 +32,11 @@ export const useSuperAdminAuth = () => {
       }
       
       if (data.user) {
-        // STAMP the role only the FIRST time. Writing it on every login
-        // reissues a token, which fires a cascade of auth events; combined
-        // with multi-device refresh-token rotation that storms /token into a
-        // 429 and locks the account out (2026-07-14 desktop lockout). Skip
-        // when the role is already correct — which it is after login #1.
-        if (data.user.user_metadata?.role !== 'super_admin') {
-          try {
-            await supabase.auth.updateUser({ data: { role: 'super_admin' } });
-          } catch (updateErr) {
-            console.warn("Could not stamp super_admin role (non-blocking):", updateErr);
-          }
+        // The client no longer stamps a role: super_admin lives in
+        // app_metadata, which only the service role can write. A client-side
+        // updateUser({ data: { role } }) was the privilege-escalation vector.
+        if (getTrustedRole(data.user) !== 'super_admin') {
+          console.warn('Signed in via super-admin form but account has no trusted super_admin role');
         }
         toast({ title: "Login successful", description: "Welcome back, Super Admin" });
         // Navigation is owned solely by the Login page effect (see Login.tsx).

@@ -9,6 +9,7 @@
 // Response: { success: true, request_id, access_token, patient_url }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId } from '../_shared/authz.ts';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
@@ -185,7 +186,7 @@ Deno.serve(async (req) => {
     // Without this, legitimate clinic staff submissions returned 403
     // silently and the patient never received SMS/email (2026-05-27).
     const allowedRoles = new Set(['provider', 'office_manager', 'clinical_coordinator', 'org_admin']);
-    if (!user || !allowedRoles.has(String(user.user_metadata?.role || ''))) {
+    if (!user || !allowedRoles.has(getTrustedRole(user))) {
       return new Response(JSON.stringify({ error: 'Not a provider or clinic staff' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -266,7 +267,7 @@ Deno.serve(async (req) => {
     // 'office_manager' / 'clinical_coordinator'). Both keys are present
     // in production data — the original strict check on `org_id` alone
     // 403'd every clinic-staff submission.
-    const userOrgId = user.user_metadata?.org_id || user.user_metadata?.organization_id;
+    const userOrgId = getTrustedOrgId(user);
     if (userOrgId !== organization_id) {
       return new Response(JSON.stringify({ error: 'Cannot create lab request for another org' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }

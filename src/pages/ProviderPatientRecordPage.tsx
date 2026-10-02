@@ -4,6 +4,7 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
+import { getRoutingOrgId } from '@/lib/authRole';
 
 /**
  * /dashboard/provider/patients/:patientId — one patient, as a real page.
@@ -29,7 +30,7 @@ const ProviderPatientRecordPage: React.FC = () => {
     let cancelled = false;
     (async () => {
       const { data: auth } = await supabase.auth.getUser();
-      const orgId = (auth?.user?.user_metadata as Record<string, unknown> | undefined)?.organization_id as string | undefined;
+      const orgId = getRoutingOrgId(auth?.user) ?? undefined;
       if (!orgId || !patientId) {
         if (!cancelled) setState({ kind: 'denied' });
         return;

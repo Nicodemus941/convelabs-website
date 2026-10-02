@@ -18,6 +18,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId, roleAppMetadata } from '../_shared/authz.ts';
 import { sendInviteEmail } from '../_shared/invite-email.ts';
 
 const corsHeaders = {
@@ -48,7 +49,7 @@ Deno.serve(async (req) => {
 
     // ─── AUTH GATE ────────────────────────────────────────────────
     // Resolve caller from the Authorization header. If they aren't
-    // platform staff, require their JWT user_metadata.organization_id
+    // platform staff, require their app_metadata.organization_id
     // to match the requested one (org self-serve). Cross-org invites
     // by org-staff are rejected with 403.
     {
@@ -66,8 +67,8 @@ Deno.serve(async (req) => {
           status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
-      const callerRole = String(caller.user_metadata?.role || '').toLowerCase();
-      const callerOrg = caller.user_metadata?.organization_id || null;
+      const callerRole = getTrustedRole(caller);
+      const callerOrg = getTrustedOrgId(caller);
       const isPlatform = ['super_admin','admin','owner'].includes(callerRole);
       const isOrgSelfServe =
         ['office_manager','provider'].includes(callerRole) &&
@@ -113,6 +114,19 @@ Deno.serve(async (req) => {
     let actionLink: string | null = (linkData as any)?.properties?.action_link || null;
     let userId: string | null = (linkData as any)?.user?.id || null;
     let mode: 'invite' | 'recovery' = 'invite';
+
+    // Authorization lives in app_metadata (service-role only). The invite
+    // `data` above only lands in user_metadata, which is display-only.
+    if (!linkErr && userId) {
+      const { error: amErr } = await supabase.auth.admin.updateUserById(userId, {
+        app_metadata: roleAppMetadata('office_manager', organizationId),
+      });
+      if (amErr) {
+        return new Response(JSON.stringify({ error: `role assignment failed: ${amErr.message}` }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
 
     // If user already exists, fall back to recovery link
     if (linkErr && String(linkErr.message || '').toLowerCase().includes('already')) {

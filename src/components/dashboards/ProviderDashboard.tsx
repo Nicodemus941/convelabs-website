@@ -33,6 +33,7 @@ import { Activity, Paperclip } from 'lucide-react';
 // dev ("Identifier 'Download' has already been declared") and took the whole
 // provider dashboard down locally.
 import { FileHeart, Send, Copy, BellRing, FileSignature } from 'lucide-react';
+import { getRoutingRole, getRoutingOrgId } from '@/lib/authRole';
 
 /**
  * PROVIDER PORTAL DASHBOARD — Phase 1
@@ -131,9 +132,10 @@ const ProviderDashboard: React.FC = () => {
         || data?.user?.email?.split('@')[0]
         || 'there';
       setStaffName(fn);
+      const trustedRole = getRoutingRole(data?.user);
       const roleLbl = m.role_label
-        || (m.role === 'office_manager' ? 'Office Manager'
-          : m.role === 'provider' ? 'Provider'
+        || (trustedRole === 'office_manager' ? 'Office Manager'
+          : trustedRole === 'provider' ? 'Provider'
           : null);
       setStaffRoleLabel(roleLbl);
     }).catch(() => { /* keep defaults */ });
@@ -186,10 +188,12 @@ const ProviderDashboard: React.FC = () => {
       try {
         const { data: { user: supaUser } } = await supabase.auth.getUser();
         const meta = supaUser?.user_metadata || {};
-        if (!['provider','office_manager'].includes(String(meta.role || ''))) return;
+        // Role/org from app_metadata (service-role only); user_metadata is
+        // only used below for display/onboarding flags.
+        if (!['provider','office_manager'].includes(String(getRoutingRole(supaUser) || ''))) return;
 
         const isInvitedStaff =
-          !!(meta.organization_id || meta.org_id) &&
+          !!getRoutingOrgId(supaUser) &&
           !!(meta.full_name || (meta.firstName && meta.lastName));
 
         if (isInvitedStaff) {
@@ -259,7 +263,7 @@ const ProviderDashboard: React.FC = () => {
     try {
       // Force-refresh the session so we always use the freshest JWT. This
       // matters right after verifyOtp / password reset, where the locally
-      // cached token may lag a moment before user_metadata.role is present.
+      // cached token may lag a moment before app_metadata.role is present.
       let token: string | undefined;
       try {
         const { data: refreshed } = await supabase.auth.refreshSession();

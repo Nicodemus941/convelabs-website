@@ -4,6 +4,7 @@
 // for billing state; the webhook (syncOrgSubscription) mirrors status back, but
 // we also stamp provider_plans directly for an instant portal update.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { getTrustedOrgId } from '../_shared/authz.ts';
 import { stripe } from '../_shared/stripe.ts';
 import { computeQuote, type RateTier } from '../_shared/provider-pricing.ts';
 
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
       .eq('id', planId).maybeSingle();
     if (!plan) return json({ error: 'plan_not_found' }, 404);
 
-    const callerOrg = (user.app_metadata?.organization_id as string) || (user.user_metadata?.org_id as string) || null;
+    const callerOrg = getTrustedOrgId(user);
     if (!callerOrg || callerOrg !== plan.organization_id) {
       return json({ error: 'not_authorized_for_plan' }, 403);
     }

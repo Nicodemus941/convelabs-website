@@ -5,6 +5,7 @@
 //   activate: creates org + invites provider + returns referred patients
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { roleAppMetadata } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -128,10 +129,14 @@ Deno.serve(async (req) => {
     // we just saved, or an email recovery link). Previously a failed invite
     // 500'd the whole activation, orphaning the org and stranding the provider.
     try {
-      const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
+      const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(
         practice_email.toLowerCase(),
         { data: { role: 'provider', org_id: orgId, full_name: provider_name || practice_name }, redirectTo: `${PUBLIC_SITE_URL}/dashboard/provider` }
       );
+      if (!inviteErr && invited?.user?.id) {
+        // Authorization scope lives in service-role-only app_metadata.
+        await admin.auth.admin.updateUserById(invited.user.id, { app_metadata: roleAppMetadata('provider', orgId) });
+      }
       if (inviteErr && !/already registered|already been/i.test(inviteErr.message || '')) {
         console.warn('[claim-provider-portal] invite non-fatal:', inviteErr.message || JSON.stringify(inviteErr));
       }

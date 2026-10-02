@@ -25,6 +25,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -50,7 +51,7 @@ Deno.serve(async (req) => {
       if (!token) return new Response(JSON.stringify({ error: 'auth_required' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       const { data: { user } } = await admin.auth.getUser(token);
       if (!user) return new Response(JSON.stringify({ error: 'invalid_token' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      const role = (user.user_metadata?.role || user.app_metadata?.role || '').toString();
+      const role = getTrustedRole(user);
       if (!['super_admin', 'admin', 'office_manager'].includes(role)) {
         return new Response(JSON.stringify({ error: 'admin_only' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }

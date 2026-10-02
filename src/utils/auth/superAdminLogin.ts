@@ -24,20 +24,10 @@ export const useSuperAdminLogin = () => {
       throw new Error(`Super admin login failed: ${error.message}`);
     }
     
-    // If login successful, update user metadata to ensure super_admin role
+    // Roles are NOT stamped client-side any more (app_metadata is
+    // service-role only; the old updateUser({ data: { role } }) was the
+    // privilege-escalation vector).
     if (data.user) {
-      console.log("Super admin login successful, updating role");
-      
-      const { error: updateError } = await supabase.auth.updateUser({
-        data: { role: 'super_admin' }
-      });
-      
-      if (updateError) {
-        console.warn("Failed to update user role:", updateError);
-      } else {
-        console.log("Successfully updated super admin role");
-      }
-      
       toast({
         title: "Login successful",
         description: "Welcome back super admin",

@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
+import { getTrustedRole } from '../_shared/authz.ts';
 import Stripe from "https://esm.sh/stripe@14.21.0";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.0";
 
@@ -62,7 +63,7 @@ serve(async (req) => {
     }
 
     // Check if user has admin role
-    const userRole = userData.user.user_metadata?.role;
+    const userRole = getTrustedRole(userData.user);
     const allowedRoles = ["super_admin", "admin", "office_manager", "billing"];
     if (!allowedRoles.includes(userRole)) {
       return new Response(JSON.stringify({ error: "Insufficient permissions" }), {
