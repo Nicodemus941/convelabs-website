@@ -62,7 +62,7 @@ export interface HormoziKPIs {
     avg_ltv: number;
   }>;
 
-  // CAC (channels — pulled from appointments.referral_source + booking_source)
+  // CAC (channels — pulled from appointments.utm_source + booking_source)
   channels: Array<{
     channel: string;
     patients: number;
@@ -236,7 +236,11 @@ export const useHormoziData = () => {
       // ── RETENTION ─────────────────────────────────────────────────
       const { data: allCompletedRaw } = await supabase
         .from('appointments')
-        .select('patient_email, appointment_date, total_amount, created_at, referral_source, booking_source')
+        // 2026-10-02: `referral_source` does not exist on appointments. PostgREST
+        // rejected the whole select, so this came back null and every retention,
+        // cohort and channel number on the Growth model page rendered as 0.
+        // utm_source is the real attribution column.
+        .select('patient_email, appointment_date, total_amount, created_at, utm_source, booking_source')
         .eq('status', 'completed')
         .not('patient_email', 'is', null);
       const allCompleted = (allCompletedRaw as any[] | null) || [];
@@ -262,7 +266,7 @@ export const useHormoziData = () => {
         if (a.appointment_date && a.appointment_date < cur.first_seen) {
           cur.first_seen = a.appointment_date;
         }
-        const ch = a.referral_source || a.booking_source || 'direct';
+        const ch = a.utm_source || a.booking_source || 'direct';
         if (ch) cur.channels.add(String(ch));
         patientMap.set(email, cur);
       }

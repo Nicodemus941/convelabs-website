@@ -43,6 +43,11 @@ import {
   type MemberTier, type PatientRow, apptDay, fmtDay, fullName, openMessageThread, serviceLabel,
   stashAdminPrefill, tierBadgeClass, todayKey, toPrefilledPatient,
 } from './patientDirectory';
+import {
+  ConfirmDialog, InlineError, ModalTitle, QuietHoursNotice, ReviewList, ReviewRow, patientContextLine,
+} from './chartModalKit';
+import { Textarea } from '@/components/ui/textarea';
+import { Trash2, Link as LinkIcon } from 'lucide-react';
 
 // Untyped table access — several columns used here (patient_notes, billed_to,
 // invoice_status, …) aren't in the generated Database type.
@@ -54,6 +59,8 @@ interface Props {
   isProtected: boolean;
   /** super_admin only — office managers never see the delete control. */
   canDelete: boolean;
+  /** super_admin only — refunds move money. Defaults to `canDelete`. */
+  canRefund?: boolean;
   onBack: () => void;
   /** Edit saved — parent swaps the row in the directory and in `patient`. */
   onPatientSaved: (updated: PatientRow) => void;
@@ -81,7 +88,7 @@ const EMPTY_INVOICE = {
 };
 
 const PatientChart: React.FC<Props> = ({
-  patient: p, memberTier, isProtected, canDelete, onBack, onPatientSaved, onPatientDeleted, onOpenPatient, refreshDirectory,
+  patient: p, memberTier, isProtected, canDelete, canRefund = canDelete, onBack, onPatientSaved, onPatientDeleted, onOpenPatient, refreshDirectory,
 }) => {
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<any[]>([]);
@@ -104,7 +111,22 @@ const PatientChart: React.FC<Props> = ({
 
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState(EMPTY_INVOICE);
+  const [invoiceStep, setInvoiceStep] = useState<'form' | 'review'>('form');
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [sendingInvoice, setSendingInvoice] = useState(false);
+
+  // Review/confirm steps for anything that messages the patient or moves
+  // money — nothing fires from a bare click.
+  const [pendingReminder, setPendingReminder] = useState<any>(null);
+  const [pendingPayLink, setPendingPayLink] = useState<any>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [messageOpen, setMessageOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // Open Stripe invoices still addressed to the OLD email after an email change.
+  const [reissuePrompt, setReissuePrompt] = useState<{ list: any[]; oldEmail: string; newEmail: string; newName: string } | null>(null);
 
   // Orgs for the invoice modal's "bill a partner practice" picker.
   useEffect(() => {
@@ -214,12 +236,17 @@ const PatientChart: React.FC<Props> = ({
   };
 
   const message = () => {
-    if (!openMessageThread(p.phone, p.email)) toast.error('No phone or email on file');
+    if (!p.phone && !p.email) { toast.error('No phone or email on file'); return; }
+    setMessageOpen(true);
   };
 
-  const sendInvoiceReminder = async (appointment: any) => {
-    const who = appointment.patient_name || fullName(p);
-    if (!window.confirm(`Send a friendly invoice reminder to ${who}? Email + SMS will go out.`)) return;
+  // Step 1: open the review. Step 2 (confirmed) actually invokes the function.
+  const sendInvoiceReminder = (appointment: any) => { setActionError(null); setPendingReminder(appointment); };
+  const confirmInvoiceReminder = async () => {
+    const appointment = pendingReminder;
+    if (!appointment) return;
+    setActionBusy(true);
+    setActionError(null);
     try {
       const { data, error } = await supabase.functions.invoke('send-manual-invoice-reminder', {
         body: { appointment_id: appointment.id, email: true, sms: true },
@@ -229,24 +256,35 @@ const PatientChart: React.FC<Props> = ({
       const okBits: string[] = [];
       if (results.email?.ok) okBits.push('email');
       if (results.sms?.ok) okBits.push('SMS');
-      if (okBits.length === 0) { toast.error(`Reminder failed — ${results.email?.error || results.sms?.error || 'unknown'}`); return; }
+      if (okBits.length === 0) { setActionError(`Reminder failed — ${results.email?.error || results.sms?.error || 'unknown'}`); return; }
       toast.success(`Reminder sent via ${okBits.join(' + ')}`);
+      setPendingReminder(null);
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to send reminder');
+      setActionError(e?.message || 'Failed to send reminder');
+    } finally {
+      setActionBusy(false);
     }
   };
 
-  const sendAppointmentPayLink = async (appointmentId: string) => {
+  const sendAppointmentPayLink = (appointment: any) => { setActionError(null); setPendingPayLink(appointment); };
+  const confirmPayLink = async () => {
+    const appointment = pendingPayLink;
+    if (!appointment) return;
+    setActionBusy(true);
+    setActionError(null);
     try {
-      const { data, error } = await supabase.functions.invoke('generate-appointment-pay-token', { body: { appointment_id: appointmentId } });
+      const { data, error } = await supabase.functions.invoke('generate-appointment-pay-token', { body: { appointment_id: appointment.id } });
       if (error) throw error;
       const url = (data as any)?.url;
       if (!url) throw new Error('No link returned');
       try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
       if ((data as any)?.emailed) toast.success('Pay link emailed to patient (and copied to clipboard)');
       else toast.success('Pay link copied — paste it to the patient', { description: url, duration: 15000 });
+      setPendingPayLink(null);
     } catch (e: any) {
-      toast.error(e?.message || 'Failed to create pay link');
+      setActionError(e?.message || 'Failed to create pay link');
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -259,33 +297,54 @@ const PatientChart: React.FC<Props> = ({
   };
 
   const deletePatient = async () => {
-    const reason = window.prompt(
-      `Delete patient "${fullName(p)}"?\n\n` +
-      `Patients with appointment history are SOFT-deleted (hidden but audit-preserved for HIPAA).\n` +
-      `Patients with no history are removed permanently.\n\n` +
-      `Enter a short reason (min 3 chars):`,
-    );
-    if (!reason || reason.trim().length < 3) return;
+    const reason = deleteReason.trim();
+    if (reason.length < 3) { setDeleteError('Enter a short reason (at least 3 characters).'); return; }
     setDeleting(true);
+    setDeleteError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
       const role = (sess?.session?.user?.user_metadata as any)?.role || (sess?.session?.user?.app_metadata as any)?.role || 'unknown';
-      const { data, error } = await db.rpc('delete_patient', { p_patient_id: p.id, p_reason: reason.trim(), p_hard_delete: true });
+      const { data, error } = await db.rpc('delete_patient', { p_patient_id: p.id, p_reason: reason, p_hard_delete: true });
       if (error) {
-        const details = `code=${error.code || 'n/a'} · ${error.message || 'no message'}${error.hint ? ' · hint: ' + error.hint : ''} · role=${role}`;
-        toast.error(`Delete failed: ${details}`, { duration: 12000 });
+        setDeleteError(`Delete failed: code=${error.code || 'n/a'} · ${error.message || 'no message'}${error.hint ? ' · hint: ' + error.hint : ''} · role=${role}`);
         return;
       }
       if (data?.action === 'hard_delete') toast.success('Patient permanently deleted (no history)');
       else toast.success(`Patient soft-deleted${data?.note ? ` · ${data.note}` : ''}`);
+      setDeleteOpen(false);
       setEditModalOpen(false);
       onPatientDeleted();
     } catch (err: any) {
       console.error('[delete-patient] threw', err?.code || err?.message || err);
-      toast.error(`Delete crashed: ${err?.message || String(err)}`, { duration: 12000 });
+      setDeleteError(`Delete crashed: ${err?.message || String(err)}`);
     } finally {
       setDeleting(false);
     }
+  };
+
+  const runReissue = async () => {
+    const prompt = reissuePrompt;
+    if (!prompt) return;
+    setActionBusy(true);
+    setActionError(null);
+    let success = 0, failed = 0;
+    for (const inv of prompt.list) {
+      try {
+        const { error: rxErr } = await supabase.functions.invoke('reissue-stripe-invoice', {
+          body: {
+            appointmentId: inv.id,
+            newPatientEmail: prompt.newEmail,
+            newPatientName: prompt.newName,
+            reason: `Patient email corrected from ${prompt.oldEmail} to ${prompt.newEmail}`,
+          },
+        });
+        if (rxErr) { failed++; console.warn('[reissue-on-email-change] failed for', inv.id); } else success++;
+      } catch { failed++; console.warn('[reissue-on-email-change] threw for', inv.id); }
+    }
+    setActionBusy(false);
+    if (success > 0) toast.success(`${success} invoice${success === 1 ? '' : 's'} reissued to ${prompt.newEmail}`);
+    if (failed > 0) { setActionError(`${failed} reissue${failed === 1 ? '' : 's'} failed — check the Invoices tab.`); return; }
+    setReissuePrompt(null);
   };
 
   const savePatient = async () => {
@@ -351,8 +410,8 @@ const PatientChart: React.FC<Props> = ({
       }
       toast.success('Patient info updated');
 
-      // Email change → offer to void + reissue open Stripe invoices, which
-      // were addressed to the OLD email at booking time.
+      // Email change → offer (in a review dialog, after the modal closes) to
+      // void + reissue open Stripe invoices still addressed to the OLD email.
       const emailChanged = editForm.email && p.email && editForm.email.trim().toLowerCase() !== p.email.trim().toLowerCase();
       if (emailChanged) {
         try {
@@ -362,29 +421,8 @@ const PatientChart: React.FC<Props> = ({
             .in('invoice_status', ['sent', 'reminded', 'final_warning', 'pending_send']);
           const list = (openInvoices as any[]) || [];
           if (list.length > 0) {
-            const summary = list.slice(0, 5).map((a: any, i: number) => `  ${i + 1}. ${a.appointment_date?.substring(0, 10) || '?'} · $${a.total_amount} · ${a.invoice_status}`).join('\n');
-            const more = list.length > 5 ? `\n  …and ${list.length - 5} more` : '';
-            const ok = window.confirm(
-              `${list.length} open invoice${list.length === 1 ? '' : 's'} ${list.length === 1 ? 'is' : 'are'} still on the old email (${p.email}).\n\n${summary}${more}\n\nVoid and reissue ${list.length === 1 ? 'it' : 'them all'} to ${editForm.email}?\n\n(Click Cancel to leave the existing invoices on the old email.)`,
-            );
-            if (ok) {
-              let success = 0, failed = 0;
-              for (const inv of list) {
-                try {
-                  const { error: rxErr } = await supabase.functions.invoke('reissue-stripe-invoice', {
-                    body: {
-                      appointmentId: inv.id,
-                      newPatientEmail: editForm.email,
-                      newPatientName: `${editForm.firstName} ${editForm.lastName}`.trim(),
-                      reason: `Patient email corrected from ${p.email} to ${editForm.email}`,
-                    },
-                  });
-                  if (rxErr) { failed++; console.warn('[reissue-on-email-change] failed for', inv.id); } else success++;
-                } catch { failed++; console.warn('[reissue-on-email-change] threw for', inv.id); }
-              }
-              if (success > 0) toast.success(`${success} invoice${success === 1 ? '' : 's'} reissued to ${editForm.email}`);
-              if (failed > 0) toast.error(`${failed} reissue${failed === 1 ? '' : 's'} failed — check Invoices tab`, { duration: 8000 });
-            }
+            setActionError(null);
+            setReissuePrompt({ list, oldEmail: p.email!, newEmail: editForm.email.trim(), newName: `${editForm.firstName} ${editForm.lastName}`.trim() });
           }
         } catch (e: any) {
           console.warn('[reissue-on-email-change] lookup failed (non-blocking):', e?.code || e?.message);
@@ -412,9 +450,20 @@ const PatientChart: React.FC<Props> = ({
     }
   };
 
+  const invoiceRecipient = () => {
+    const selectedOrg = allOrgs.find(o => o.id === invoiceForm.orgId);
+    const email = invoiceForm.recipient === 'organization' ? (selectedOrg?.billing_email || selectedOrg?.contact_email || '') : (p.email || '');
+    const name = invoiceForm.recipient === 'organization' ? (selectedOrg?.name || 'Organization') : fullName(p);
+    return { email, name, org: selectedOrg };
+  };
+  const invoiceFormValid = !!invoiceForm.amount && parseFloat(invoiceForm.amount) > 0
+    && !(invoiceForm.recipient === 'patient' && !p.email)
+    && !(invoiceForm.recipient === 'organization' && !invoiceForm.orgId);
+
   const sendInvoice = async () => {
     if (sendingInvoice) return;
     setSendingInvoice(true);
+    setInvoiceError(null);
     try {
       const amount = parseFloat(invoiceForm.amount);
       const selectedOrg = allOrgs.find(o => o.id === invoiceForm.orgId);
@@ -469,7 +518,7 @@ const PatientChart: React.FC<Props> = ({
       setInvoiceModalOpen(false);
       reloadAll();
     } catch (err: any) {
-      toast.error(err?.message || 'Failed');
+      setInvoiceError(err?.message || 'Failed to send the invoice');
     } finally {
       setSendingInvoice(false);
     }
@@ -553,7 +602,7 @@ const PatientChart: React.FC<Props> = ({
               <Zap className="h-3.5 w-3.5" aria-hidden="true" /> Send booking link
             </Button>
           )}
-          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9" onClick={() => { setInvoiceForm(EMPTY_INVOICE); setInvoiceModalOpen(true); }}>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9" onClick={() => { setInvoiceForm(EMPTY_INVOICE); setInvoiceStep('form'); setInvoiceError(null); setInvoiceModalOpen(true); }}>
             <Receipt className="h-3.5 w-3.5" aria-hidden="true" /> Invoice
           </Button>
           {(p.phone || p.email) && (
@@ -680,7 +729,7 @@ const PatientChart: React.FC<Props> = ({
                   <LaneHeader id="lane-upcoming" title="Upcoming" count={groups.upcoming.length} tone="blue" />
                   <div className="space-y-2">
                     {groups.upcoming.map(a => (
-                      <LiveVisitCard key={a.id} a={a} p={p} onManage={() => setSelectedAppointment(a)} onMessage={() => openMessageThread(a.patient_phone || p.phone, a.patient_email || p.email)} onPayLink={() => sendAppointmentPayLink(a.id)} onReminder={() => sendInvoiceReminder(a)} onCopyAddress={() => copyVisitAddress(a)} />
+                      <LiveVisitCard key={a.id} a={a} p={p} onManage={() => setSelectedAppointment(a)} onMessage={() => openMessageThread(a.patient_phone || p.phone, a.patient_email || p.email)} onPayLink={() => sendAppointmentPayLink(a)} onReminder={() => sendInvoiceReminder(a)} onCopyAddress={() => copyVisitAddress(a)} />
                     ))}
                   </div>
                 </section>
@@ -690,7 +739,7 @@ const PatientChart: React.FC<Props> = ({
                   <LaneHeader id="lane-unresolved" title="Needs action · date passed, still open" count={groups.unresolved.length} tone="red" />
                   <div className="space-y-2">
                     {groups.unresolved.map(a => (
-                      <LiveVisitCard key={a.id} a={a} p={p} unresolved onManage={() => setSelectedAppointment(a)} onMessage={() => openMessageThread(a.patient_phone || p.phone, a.patient_email || p.email)} onPayLink={() => sendAppointmentPayLink(a.id)} onReminder={() => sendInvoiceReminder(a)} onCopyAddress={() => copyVisitAddress(a)} />
+                      <LiveVisitCard key={a.id} a={a} p={p} unresolved onManage={() => setSelectedAppointment(a)} onMessage={() => openMessageThread(a.patient_phone || p.phone, a.patient_email || p.email)} onPayLink={() => sendAppointmentPayLink(a)} onReminder={() => sendInvoiceReminder(a)} onCopyAddress={() => copyVisitAddress(a)} />
                     ))}
                   </div>
                 </section>
@@ -720,7 +769,7 @@ const PatientChart: React.FC<Props> = ({
                             <div className="flex items-center gap-2 flex-shrink-0">
                               <span className="text-sm font-medium tabular-nums">${amt}</span>
                               <Button size="sm" variant="outline" className="h-9 text-xs" onClick={() => setSelectedAppointment(a)}>Manage</Button>
-                              {ps === 'completed' && amt > 0 && (
+                              {canRefund && ps === 'completed' && amt > 0 && (
                                 <StaffRefundButton
                                   appointmentId={a.id}
                                   patientEmail={p.email || undefined}
@@ -737,7 +786,7 @@ const PatientChart: React.FC<Props> = ({
                                     <Button size="sm" variant="ghost" className="h-9 w-9 p-0" aria-label="Collect payment options"><MoreHorizontal className="h-4 w-4" aria-hidden="true" /></Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end" className="w-56">
-                                    <DropdownMenuItem onSelect={() => sendAppointmentPayLink(a.id)}><Send className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Send pay link</DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => sendAppointmentPayLink(a)}><Send className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Send pay link</DropdownMenuItem>
                                     <DropdownMenuItem onSelect={() => sendInvoiceReminder(a)}><Receipt className="mr-2 h-3.5 w-3.5" aria-hidden="true" /> Send invoice reminder</DropdownMenuItem>
                                   </DropdownMenuContent>
                                 </DropdownMenu>
@@ -855,6 +904,7 @@ const PatientChart: React.FC<Props> = ({
       <SendBookingLinkModal
         open={sendLinkModalOpen}
         onClose={() => setSendLinkModalOpen(false)}
+        onSent={reloadAll}
         patient={{ id: p.id, firstName: p.first_name || '', lastName: p.last_name || '', email: p.email, phone: p.phone }}
       />
 
@@ -868,7 +918,7 @@ const PatientChart: React.FC<Props> = ({
       {/* Edit patient */}
       <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
         <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="text-lg font-bold">Edit patient</DialogTitle></DialogHeader>
+          <ModalTitle icon={Edit3} title="Edit patient" context={patientContextLine(p)} />
           <div className="divide-y">
             <EditRow label="First name"><Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} className="h-9" /></EditRow>
             <EditRow label="Last name"><Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} className="h-9" /></EditRow>
@@ -920,8 +970,8 @@ const PatientChart: React.FC<Props> = ({
           )}
           <div className="flex justify-between items-center gap-3 pt-3 border-t">
             {canDelete ? (
-              <Button variant="outline" disabled={deleting} className="h-10 px-4 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800" onClick={deletePatient}>
-                {deleting ? <><Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" /> Deleting…</> : 'Delete patient'}
+              <Button variant="outline" disabled={deleting || savingPatient} className="h-10 px-4 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 gap-1.5" onClick={() => { setDeleteReason(''); setDeleteError(null); setDeleteOpen(true); }}>
+                <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete patient
               </Button>
             ) : <span />}
             <div className="flex gap-2">
@@ -935,9 +985,35 @@ const PatientChart: React.FC<Props> = ({
       </Dialog>
 
       {/* Generate invoice — attach to a visit or standalone; patient or org. */}
-      <Dialog open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen}>
-        <DialogContent className="max-w-md w-[95vw] sm:w-full">
-          <DialogHeader><DialogTitle>Generate invoice for {p.first_name}</DialogTitle></DialogHeader>
+      <Dialog open={invoiceModalOpen} onOpenChange={(v) => { if (!sendingInvoice) setInvoiceModalOpen(v); }}>
+        <DialogContent className="max-w-md w-[95vw] sm:w-full max-h-[92vh] overflow-y-auto">
+          <ModalTitle icon={Receipt} title={invoiceStep === 'review' ? 'Review invoice' : 'Generate invoice'} context={patientContextLine(p)} />
+          {invoiceStep === 'review' ? (() => {
+            const r = invoiceRecipient();
+            const amount = parseFloat(invoiceForm.amount || '0');
+            const attached = appointments.find(a => a.id === invoiceForm.attachAppointmentId);
+            return (
+              <div className="space-y-3">
+                <ReviewList>
+                  <ReviewRow label="Amount" tone="strong">${amount.toFixed(2)}</ReviewRow>
+                  <ReviewRow label="Bill to" tone="strong">{r.name}{invoiceForm.recipient === 'organization' ? ' (partner practice)' : ''}</ReviewRow>
+                  <ReviewRow label="Emailed to" tone={r.email ? 'default' : 'warn'}>{r.email || 'No email on file — cannot send'}</ReviewRow>
+                  <ReviewRow label="Service">{invoiceForm.description || 'ConveLabs Service'}</ReviewRow>
+                  <ReviewRow label="Visit">{attached ? `${fmtDay(apptDay(attached))} · ${serviceLabel(attached)} (existing visit updated)` : 'Standalone — a new invoice-only row is created'}</ReviewRow>
+                  {invoiceForm.memo && <ReviewRow label="Memo">{invoiceForm.memo}</ReviewRow>}
+                  <ReviewRow label="Due">7 days from now · reminders follow the invoice dunning schedule</ReviewRow>
+                </ReviewList>
+                <QuietHoursNotice channels="email" />
+                <InlineError message={invoiceError} />
+                <div className="flex items-center justify-between gap-2 pt-3 border-t">
+                  <Button variant="outline" className="h-10 sm:h-9" onClick={() => setInvoiceStep('form')} disabled={sendingInvoice}>← Back</Button>
+                  <Button className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" disabled={sendingInvoice || !r.email || !invoiceFormValid} onClick={sendInvoice}>
+                    {sendingInvoice ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Sending…</> : <><Send className="h-4 w-4" aria-hidden="true" /> Send invoice — ${amount.toFixed(2)}</>}
+                  </Button>
+                </div>
+              </div>
+            );
+          })() : (
           <div className="space-y-3">
             <div>
               <Label className="text-xs">Attach to appointment <span className="text-gray-400 font-normal">(optional — leave blank for standalone)</span></Label>
@@ -1011,16 +1087,154 @@ const PatientChart: React.FC<Props> = ({
               );
             })()}
 
-            <Button
-              className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11"
-              disabled={sendingInvoice || !invoiceForm.amount || (invoiceForm.recipient === 'patient' && !p.email) || (invoiceForm.recipient === 'organization' && !invoiceForm.orgId)}
-              onClick={sendInvoice}
-            >
-              {sendingInvoice ? <><Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden="true" /> Sending…</> : <>Send invoice — ${parseFloat(invoiceForm.amount || '0').toFixed(2)}</>}
-            </Button>
+            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+              <Button variant="outline" className="h-10 sm:h-9" onClick={() => setInvoiceModalOpen(false)}>Cancel</Button>
+              <Button className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white" disabled={!invoiceFormValid} onClick={() => { setInvoiceError(null); setInvoiceStep('review'); }}>
+                Review →
+              </Button>
+            </div>
           </div>
+          )}
         </DialogContent>
       </Dialog>
+
+      {/* Invoice reminder — review before SMS + email go out */}
+      <ConfirmDialog
+        open={!!pendingReminder}
+        onOpenChange={(v) => { if (!v) setPendingReminder(null); }}
+        icon={Receipt}
+        title="Send invoice reminder"
+        context={patientContextLine(p)}
+        confirmLabel={<><Send className="h-4 w-4" aria-hidden="true" /> Send reminder</>}
+        busy={actionBusy}
+        busyLabel="Sending…"
+        error={actionError}
+        onConfirm={confirmInvoiceReminder}
+        quietHours="SMS and email"
+      >
+        {pendingReminder && (
+          <ReviewList>
+            <ReviewRow label="Visit">{fmtDay(apptDay(pendingReminder))} · {serviceLabel(pendingReminder)}</ReviewRow>
+            <ReviewRow label="Amount due" tone="strong">${(Number(pendingReminder.total_amount) || 0).toFixed(2)}</ReviewRow>
+            <ReviewRow label="Goes to" tone={(pendingReminder.patient_phone || p.phone || pendingReminder.patient_email || p.email) ? 'default' : 'warn'}>
+              {[(pendingReminder.patient_phone || p.phone) && `text to ${pendingReminder.patient_phone || p.phone}`, (pendingReminder.patient_email || p.email) && `email to ${pendingReminder.patient_email || p.email}`].filter(Boolean).join(' and ') || 'No phone or email on file'}
+            </ReviewRow>
+            <ReviewRow label="Message">A friendly reminder with a secure pay link for this visit.</ReviewRow>
+          </ReviewList>
+        )}
+      </ConfirmDialog>
+
+      {/* Pay link — emails the patient when email is on file, always copies the link */}
+      <ConfirmDialog
+        open={!!pendingPayLink}
+        onOpenChange={(v) => { if (!v) setPendingPayLink(null); }}
+        icon={LinkIcon}
+        title="Send pay link"
+        context={patientContextLine(p)}
+        confirmLabel={<><Send className="h-4 w-4" aria-hidden="true" /> Create &amp; send link</>}
+        busy={actionBusy}
+        busyLabel="Creating…"
+        error={actionError}
+        onConfirm={confirmPayLink}
+        quietHours="email"
+      >
+        {pendingPayLink && (
+          <ReviewList>
+            <ReviewRow label="Visit">{fmtDay(apptDay(pendingPayLink))} · {serviceLabel(pendingPayLink)}</ReviewRow>
+            <ReviewRow label="Amount" tone="strong">${(Number(pendingPayLink.total_amount) || 0).toFixed(2)}</ReviewRow>
+            <ReviewRow label="Emailed to" tone={(pendingPayLink.patient_email || p.email) ? 'default' : 'warn'}>{pendingPayLink.patient_email || p.email || 'No email on file — the link is only copied to your clipboard'}</ReviewRow>
+            <ReviewRow label="Also">The link is copied to your clipboard so you can text it yourself.</ReviewRow>
+          </ReviewList>
+        )}
+      </ConfirmDialog>
+
+      {/* Message — opens the admin's own SMS / mail app; nothing is sent by the platform */}
+      <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
+        <DialogContent className="max-w-sm w-[95vw]">
+          <ModalTitle icon={MessageSquare} title="Message patient" context={patientContextLine(p)} />
+          <p className="text-xs text-gray-500">Opens your own phone or mail app with the patient's details — the platform does not send anything or log this.</p>
+          <div className="grid gap-2">
+            {p.phone && (
+              <Button variant="outline" className="h-11 justify-start gap-2" onClick={() => { openMessageThread(p.phone, null); setMessageOpen(false); }}>
+                <MessageSquare className="h-4 w-4 text-[#B91C1C]" aria-hidden="true" /> Text {p.phone}
+              </Button>
+            )}
+            {p.phone && (
+              <Button variant="outline" className="h-11 justify-start gap-2" asChild>
+                <a href={`tel:${p.phone}`} onClick={() => setMessageOpen(false)}><Phone className="h-4 w-4 text-[#B91C1C]" aria-hidden="true" /> Call {p.phone}</a>
+              </Button>
+            )}
+            {p.email && (
+              <Button variant="outline" className="h-11 justify-start gap-2" onClick={() => { openMessageThread(null, p.email); setMessageOpen(false); }}>
+                <Mail className="h-4 w-4 text-[#B91C1C]" aria-hidden="true" /> Email {p.email}
+              </Button>
+            )}
+            {(p.email || p.phone) && (
+              <Button variant="ghost" className="h-10 justify-start gap-2 text-gray-600" onClick={async () => { try { await navigator.clipboard.writeText([p.phone, p.email].filter(Boolean).join(' · ')); toast.success('Contact details copied'); } catch { toast.error('Could not copy'); } }}>
+                <Copy className="h-4 w-4" aria-hidden="true" /> Copy contact details
+              </Button>
+            )}
+          </div>
+          <QuietHoursNotice channels="whatever you choose" />
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete — reason required, super_admin only */}
+      <ConfirmDialog
+        open={deleteOpen}
+        onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}
+        icon={Trash2}
+        tone="danger"
+        title={`Delete ${fullName(p)}?`}
+        context={patientContextLine(p)}
+        confirmLabel="Delete patient"
+        busy={deleting}
+        busyLabel="Deleting…"
+        disabled={deleteReason.trim().length < 3}
+        error={deleteError}
+        onConfirm={deletePatient}
+      >
+        <ReviewList>
+          <ReviewRow label="With visits">Soft-deleted — hidden from the directory but kept for the HIPAA audit trail.</ReviewRow>
+          <ReviewRow label="No visits">Removed permanently. This cannot be undone.</ReviewRow>
+          <ReviewRow label="On file">{appointments.length} visit{appointments.length === 1 ? '' : 's'} · {specimens.length} specimen{specimens.length === 1 ? '' : 's'}</ReviewRow>
+        </ReviewList>
+        <div className="space-y-1.5">
+          <Label htmlFor="delete-reason" className="text-xs font-semibold">Reason <span className="font-normal text-gray-400">(required, logged)</span></Label>
+          <Textarea id="delete-reason" rows={2} value={deleteReason} onChange={e => setDeleteReason(e.target.value)} placeholder="e.g. duplicate record, created by mistake" disabled={deleting} />
+        </div>
+      </ConfirmDialog>
+
+      {/* Email changed → reissue open invoices to the new address */}
+      <ConfirmDialog
+        open={!!reissuePrompt}
+        onOpenChange={(v) => { if (!v) setReissuePrompt(null); }}
+        icon={Receipt}
+        title="Reissue open invoices to the new email?"
+        context={patientContextLine(p)}
+        confirmLabel={<><Send className="h-4 w-4" aria-hidden="true" /> Void &amp; reissue {reissuePrompt?.list.length === 1 ? 'it' : 'all'}</>}
+        cancelLabel="Leave on old email"
+        busy={actionBusy}
+        busyLabel="Reissuing…"
+        error={actionError}
+        onConfirm={runReissue}
+        quietHours="email"
+        size="md"
+      >
+        {reissuePrompt && (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-700">
+              {reissuePrompt.list.length} open invoice{reissuePrompt.list.length === 1 ? ' is' : 's are'} still addressed to <span className="font-mono text-xs">{reissuePrompt.oldEmail}</span>. Reissuing voids each one in Stripe and sends a fresh invoice to <span className="font-semibold">{reissuePrompt.newEmail}</span>.
+            </p>
+            <ReviewList>
+              {reissuePrompt.list.slice(0, 6).map((a: any) => (
+                <ReviewRow key={a.id} label={fmtDay(apptDay(a), 'MMM d, yyyy') || '?'}>${Number(a.total_amount || 0).toFixed(2)} · {String(a.invoice_status || '').replace(/_/g, ' ')}</ReviewRow>
+              ))}
+              {reissuePrompt.list.length > 6 && <ReviewRow label="…">and {reissuePrompt.list.length - 6} more</ReviewRow>}
+            </ReviewList>
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   );
 };
@@ -1109,7 +1323,18 @@ const LiveVisitCard: React.FC<{
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="outline" className="h-9 text-xs" onClick={onManage}>Manage</Button>
-          {!unresolved && <SendRescheduleLinkButton appointmentId={a.id} size="sm" variant="outline" className="h-9 text-xs" label="Send reschedule link" />}
+          {!unresolved && (
+            <SendRescheduleLinkButton
+              appointmentId={a.id}
+              size="sm"
+              variant="outline"
+              className="h-9 text-xs"
+              label="Send reschedule link"
+              confirmBeforeSend
+              patient={{ first_name: p.first_name, last_name: p.last_name, phone: a.patient_phone || p.phone, email: a.patient_email || p.email }}
+              visitLabel={`${fmtDay(apptDay(a))}${a.appointment_time ? ` · ${a.appointment_time}` : ''} · ${serviceLabel(a)}`}
+            />
+          )}
           {(a.patient_phone || p.phone || a.patient_email || p.email) && (
             <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5" onClick={onMessage}><MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /> Message</Button>
           )}

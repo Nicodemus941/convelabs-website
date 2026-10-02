@@ -1,0 +1,84 @@
+-- ============================================================================
+-- DRAFT — NOT APPLIED (the .DRAFT extension keeps the Supabase CLI from
+-- picking it up; rename to .sql only when approved)
+--
+-- Household links for the admin patient chart
+-- (src/components/admin/FamilyHouseholdCard.tsx).
+--
+-- Current model (verified read-only 2026-10-02): no household table.
+--   tenant_patients.household_id        uuid   — everyone sharing it is one household
+--   tenant_patients.household_relation  text   — 'Self' = primary, else Spouse/Child/…
+-- 9 households, 17 members; relations in use: Self, Spouse, Parent, Other.
+--
+-- What blocks the UI today:
+--   RLS policy tp_update_admin allows UPDATE on tenant_patients only for
+--   super_admin / admin / owner. tp_update_org lets office_manager / provider
+--   update patients inside THEIR organization only. So an office manager
+--   linking a direct-booked (organization_id IS NULL) patient gets 0 rows
+--   updated and no error. The card detects the 0-row result, shows the RLS
+--   message and renders read-only for non-admin roles. Nothing is worked
+--   around client-side.
+--
+-- This draft gives office managers a safe, audited way to manage links
+-- without widening the blanket UPDATE policy, plus a relation CHECK so the
+-- label vocabulary stays consistent across the admin card, the booking
+-- companion dialogs and the patient portal.
+-- ============================================================================
+
+-- 1. Vocabulary guard (nullable; existing values Self/Spouse/Parent/Other all pass)
+alter table public.tenant_patients
+  drop constraint if exists tenant_patients_household_relation_check;
+alter table public.tenant_patients
+  add constraint tenant_patients_household_relation_check
+  check (household_relation is null or household_relation in (
+    'Self','Spouse','Partner','Child','Parent','Sibling','Grandparent','Grandchild','Caregiver','Other'
+  )) not valid;   -- validate separately after checking live data
+
+-- 2. Fast member lookup (the card and SendBookingLinkModal both query by household_id)
+create index if not exists idx_tenant_patients_household
+  on public.tenant_patients (household_id)
+  where household_id is not null and deleted_at is null;
+
+-- 3. RPC: set / clear one patient's household link.
+--    security definer so office managers can manage links, with the role
+--    check done here instead of a broad UPDATE grant. Returns the row count
+--    so the client can never mistake "blocked" for "saved".
+create or replace function public.set_household_link(
+  p_patient_id uuid,
+  p_household_id uuid,          -- null = unlink
+  p_relation text               -- null when unlinking
+) returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_role text := lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'role', ''));
+  v_n integer;
+begin
+  if v_role not in ('super_admin','admin','owner','office_manager') then
+    raise exception 'not_allowed' using errcode = '42501';
+  end if;
+  if p_household_id is not null and p_relation is null then
+    raise exception 'relation_required';
+  end if;
+  update public.tenant_patients
+     set household_id = p_household_id,
+         household_relation = case when p_household_id is null then null else p_relation end,
+         updated_at = now()
+   where id = p_patient_id
+     and deleted_at is null;
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+revoke all on function public.set_household_link(uuid, uuid, text) from public;
+grant execute on function public.set_household_link(uuid, uuid, text) to authenticated;
+
+comment on function public.set_household_link is
+  'Admin/office-manager household link editor used by FamilyHouseholdCard. Returns rows updated (0 = not found).';
+
+-- 4. Follow-up for the UI once applied: in FamilyHouseholdCard.updateHousehold,
+--    call rpc('set_household_link', …) instead of the direct update and treat
+--    canEdit = role in (super_admin, admin, owner, office_manager).

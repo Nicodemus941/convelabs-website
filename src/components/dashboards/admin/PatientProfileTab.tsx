@@ -319,6 +319,7 @@ const PatientProfileTab: React.FC = () => {
         memberTier={tierFor(selectedPatient)}
         isProtected={!!s?.isProtected}
         canDelete={canDelete}
+        canRefund={canDelete}
         onBack={() => setSelectedPatient(null)}
         onPatientSaved={(updated) => {
           setSelectedPatient(updated);

@@ -18,12 +18,13 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Send, CheckCircle2, Copy, ExternalLink, Zap, Upload, FileText, Building2, X, ShieldCheck, Users, UserPlus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { InlineError, ModalTitle, QuietHoursNotice, ReviewList, ReviewRow } from '@/components/dashboards/admin/chartModalKit';
 
 interface PatientPrefill {
   id?: string | null;
@@ -94,6 +95,10 @@ const SendBookingLinkModal: React.FC<Props> = ({
   presetOrganizationId, presetOrganizationName, presetLabOrderPath, presetServiceType,
 }) => {
   const [busy, setBusy] = useState(false);
+  // Review step: the service the user picked, shown with exactly what will be
+  // sent and to whom before anything goes out.
+  const [reviewSvc, setReviewSvc] = useState<ServiceOption | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState<string>('');
   const [manualOrgName, setManualOrgName] = useState<string>('');
@@ -187,6 +192,9 @@ const SendBookingLinkModal: React.FC<Props> = ({
   // Re-runs whenever the modal opens for a different patient/order.
   useEffect(() => {
     if (!open) return;
+    // Fresh review state every open — never carry a previous patient's pick.
+    setReviewSvc(null);
+    setSendError(null);
     setSelectedHouseholdIds([]);
     setManualCompanions([]);
     if (presetOrganizationId) setSelectedOrgId(presetOrganizationId);
@@ -197,6 +205,8 @@ const SendBookingLinkModal: React.FC<Props> = ({
   const handleClose = () => {
     if (busy) return;
     setSentResult(null);
+    setReviewSvc(null);
+    setSendError(null);
     setSelectedOrgId('');
     setManualOrgName('');
     setSelectedHouseholdIds([]);
@@ -263,6 +273,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
   const handleSend = async (svc: ServiceOption) => {
     if (!patient) return;
     setBusy(true);
+    setSendError(null);
     try {
       const selectedLinkedMembers = householdMembers.filter((member) => selectedHouseholdIds.includes(member.id));
       const trimmedManualCompanions = manualCompanions
@@ -275,7 +286,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
         .filter((entry) => entry.firstName || entry.lastName || entry.dateOfBirth || entry.relationship);
       const incompleteManual = trimmedManualCompanions.find((entry) => !entry.firstName || !entry.lastName);
       if (incompleteManual) {
-        toast.error('Each added companion needs at least a first and last name before you send the link.');
+        setSendError('Each added companion needs at least a first and last name before you send the link.');
         return;
       }
       const labOrderPath = await uploadLabOrderIfNeeded();
@@ -318,13 +329,14 @@ const SendBookingLinkModal: React.FC<Props> = ({
       });
       if (error) throw error;
       if (data?.error === 'no_contact') {
-        toast.error('Patient has no phone or email — add one before sending.');
+        setSendError('Patient has no phone or email — add one before sending.');
         return;
       }
       if (!data?.ok) {
-        toast.error(data?.message || 'Couldn\'t send link');
+        setSendError(data?.message || 'Couldn\'t send link');
         return;
       }
+      setReviewSvc(null);
       setSentResult({
         url: data.url,
         sms: !!data.sms_sent,
@@ -344,7 +356,7 @@ const SendBookingLinkModal: React.FC<Props> = ({
       }
       onSent?.();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Send failed');
+      setSendError(e instanceof Error ? e.message : 'Send failed');
     } finally {
       setBusy(false);
     }
@@ -375,12 +387,11 @@ const SendBookingLinkModal: React.FC<Props> = ({
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent className="max-w-md w-[95vw] max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Zap className="h-5 w-5 text-[#B91C1C]" />
-            Send {patient?.firstName || 'patient'} a booking link
-          </DialogTitle>
-        </DialogHeader>
+        <ModalTitle
+          icon={Zap}
+          title={reviewSvc ? 'Review booking link' : `Send ${patient?.firstName || 'patient'} a booking link`}
+          context={[`${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(), patient?.phone, patient?.email].filter(Boolean).join(' · ') || undefined}
+        />
 
         {sentResult ? (
           <div className="space-y-4">
@@ -427,6 +438,34 @@ const SendBookingLinkModal: React.FC<Props> = ({
 
             <Button variant="outline" className="w-full" onClick={handleClose}>Done</Button>
           </div>
+        ) : reviewSvc ? (
+          <div className="space-y-4">
+            <ReviewList>
+              <ReviewRow label="Service" tone="strong">{reviewSvc.label} <span className="font-normal text-gray-500">· {reviewSvc.priceLabel}</span></ReviewRow>
+              <ReviewRow label="Goes to" tone={(patient?.phone || patient?.email) ? 'default' : 'warn'}>
+                {[patient?.phone && `text to ${patient.phone}`, patient?.email && `email to ${patient.email}`].filter(Boolean).join(' and ') || 'No phone or email on file — the send will fail'}
+              </ReviewRow>
+              <ReviewRow label="Provider">
+                {(orgs.find(o => o.id === selectedOrgId)?.name || manualOrgName.trim())
+                  ? <>{orgs.find(o => o.id === selectedOrgId)?.name || manualOrgName.trim()} <span className="block text-[11px] text-emerald-700 mt-0.5 flex items-center gap-1"><ShieldCheck className="h-3 w-3" aria-hidden="true" /> SMS names the office only — never the patient or tests</span></>
+                  : 'None — direct admin send'}
+              </ReviewRow>
+              <ReviewRow label="Lab order">{uploadedPath ? 'Attached — auto-links to the appointment after payment' : labOrderFile ? `${labOrderFile.name} (uploads when you send)` : 'None'}</ReviewRow>
+              <ReviewRow label="Companions">{householdSummary.length > 0 ? householdSummary.join(', ') : 'None'}</ReviewRow>
+              <ReviewRow label="Patient does" tone={prefillReady ? 'default' : 'warn'}>
+                {prefillReady ? 'Picks a date and time, uploads a lab order if needed, pays.' : `Still has to confirm ${prefillAudit.missingFields.join(', ')} before checkout.`}
+              </ReviewRow>
+              <ReviewRow label="Link">Tokenized /book-now link · expires in 7 days</ReviewRow>
+            </ReviewList>
+            <QuietHoursNotice channels="SMS and email" />
+            <InlineError message={sendError} />
+            <div className="flex items-center justify-between gap-2 pt-3 border-t">
+              <Button variant="outline" className="h-10 sm:h-9" onClick={() => { setReviewSvc(null); setSendError(null); }} disabled={busy}>← Back</Button>
+              <Button className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" onClick={() => handleSend(reviewSvc)} disabled={busy || labOrderUploading || (!patient?.phone && !patient?.email)}>
+                {busy ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Sending…</> : <><Send className="h-4 w-4" aria-hidden="true" /> Send now</>}
+              </Button>
+            </div>
+          </div>
         ) : (
           <div className="space-y-4">
             {(presetOrganizationName || presetLabOrderPath) ? (
@@ -446,13 +485,13 @@ const SendBookingLinkModal: React.FC<Props> = ({
                 )}
                 <p className="text-[10px] text-emerald-700 italic mt-1">
                   {presetServiceType
-                    ? `Just tap "${SERVICES.find(s => s.value === presetServiceType)?.label || 'the matching service'}" below to send.`
-                    : 'Pick the service to send.'}
+                    ? `Tap "${SERVICES.find(s => s.value === presetServiceType)?.label || 'the matching service'}" below, review, then send.`
+                    : 'Pick the service, review, then send.'}
                 </p>
               </div>
             ) : (
               <p className="text-xs text-gray-600">
-                Pick the provider's office (optional), attach the lab order (optional), then choose the service. We handle the rest.
+                Pick the provider's office (optional), attach the lab order (optional), then choose the service. You review exactly what goes out before it is sent.
               </p>
             )}
 
@@ -669,15 +708,11 @@ const SendBookingLinkModal: React.FC<Props> = ({
             )}
 
             {/* Step 3 — Service. Recommended service (if any) gets a glow ring. */}
-            <ServiceGroup title="Common" services={grouped.common} onPick={handleSend} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
-            <ServiceGroup title="Specialty" services={grouped.specialty} onPick={handleSend} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
-            <ServiceGroup title="Partner" services={grouped.partner} onPick={handleSend} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
+            <ServiceGroup title="Common" services={grouped.common} onPick={(s) => { setSendError(null); setReviewSvc(s); }} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
+            <ServiceGroup title="Specialty" services={grouped.specialty} onPick={(s) => { setSendError(null); setReviewSvc(s); }} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
+            <ServiceGroup title="Partner" services={grouped.partner} onPick={(s) => { setSendError(null); setReviewSvc(s); }} disabled={busy || labOrderUploading} recommendedValue={presetServiceType || null} />
 
-            {busy && (
-              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 py-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Sending…
-              </div>
-            )}
+            <InlineError message={sendError} />
 
             <div className="text-[10px] text-gray-400 border-t pt-2">
               Patient: {patient?.firstName} {patient?.lastName || ''}
@@ -719,7 +754,7 @@ const ServiceGroup: React.FC<{
             }`}
           >
             <span className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
-              {isRecommended && <span className="text-emerald-600 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 px-1.5 py-0.5 rounded">Tap to send</span>}
+              {isRecommended && <span className="text-emerald-600 text-[10px] font-bold uppercase tracking-wider bg-emerald-100 px-1.5 py-0.5 rounded">Recommended</span>}
               {s.label}
             </span>
             <span className="flex items-center gap-2 flex-shrink-0">
