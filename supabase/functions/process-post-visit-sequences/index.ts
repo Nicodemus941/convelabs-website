@@ -39,6 +39,25 @@ Deno.serve(async (req) => {
     const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER');
     const now = new Date().toISOString();
 
+    // Retire stale steps without sending. From 2026-06-17 to 2026-10-02 this
+    // job crashed on an undefined `admin` client every run: the 50 oldest due
+    // rows (disabled results_checkin steps) failed before being marked, so they
+    // blocked the queue and ~1,180 follow-ups piled up unsent. A review ask,
+    // upsell or "what to expect" message weeks after the visit is wrong, so
+    // anything more than STALE_DAYS past due is marked skipped, never sent.
+    // Doing it in one update up front also stops a backlog from sitting in
+    // front of fresh steps in the oldest-first queue below.
+    const STALE_DAYS = 3;
+    const staleCutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const { data: retired, error: staleErr } = await supabase
+      .from('post_visit_sequences')
+      .update({ status: 'skipped' })
+      .eq('status', 'pending')
+      .lt('scheduled_at', staleCutoff)
+      .select('id');
+    if (staleErr) console.error('[post-visit] stale sweep failed:', staleErr.message);
+    else if (retired?.length) console.log(`[post-visit] skipped ${retired.length} stale step(s) older than ${STALE_DAYS} days`);
+
     // Get pending sequences that are due
     const { data: pending, error } = await supabase
       .from('post_visit_sequences')
@@ -211,7 +230,7 @@ Deno.serve(async (req) => {
             if (!reviewUrl) {
               // No URL configured anywhere — skip rather than send a broken
               // ask. Mark this row 'skipped' so the cron doesn't retry.
-              await admin.from('post_visit_sequences').update({ status: 'skipped' }).eq('id', seq.id);
+              await supabase.from('post_visit_sequences').update({ status: 'skipped' }).eq('id', seq.id);
               break;
             }
             if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
@@ -244,7 +263,7 @@ Deno.serve(async (req) => {
             // want to be responsible for). Mark any leftover pending row
             // as 'skipped' and short-circuit. Step seeding already removed
             // from trigger-post-visit-sequence.
-            await admin.from('post_visit_sequences')
+            await supabase.from('post_visit_sequences')
               .update({ status: 'skipped' })
               .eq('id', seq.id);
             break;
