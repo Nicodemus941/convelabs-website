@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { DollarSign, Loader2, AlertTriangle, CheckCircle2, Undo2 } from 'lucide-react';
+import { ModalTitle, ReviewList, ReviewRow } from '@/components/dashboards/admin/chartModalKit';
 
 /**
  * StaffRefundButton — drop this into any appointment row / detail modal.
@@ -116,7 +117,7 @@ const StaffRefundButton: React.FC<Props> = ({
       </Button>
 
       <Dialog open={open} onOpenChange={(v) => { if (!v) { setOpen(false); resetForm(); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md w-[95vw]">
           {successRefundId ? (
             <div className="py-4 text-center space-y-3">
               <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
@@ -154,20 +155,19 @@ const StaffRefundButton: React.FC<Props> = ({
               </div>
             </div>
           ) : confirming ? (
-            <div className="py-3 space-y-3">
-              <DialogHeader>
-                <DialogTitle>Confirm refund</DialogTitle>
-              </DialogHeader>
+            <div className="space-y-3">
+              <ModalTitle icon={Undo2} tone="danger" title="Review refund" context={[patientName, patientEmail].filter(Boolean).join(' · ') || undefined} />
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
                 <p className="text-xs text-red-700 uppercase tracking-wider font-semibold">Refund amount</p>
-                <p className="text-4xl font-extrabold text-red-700 mt-1">${amountDollars}</p>
+                <p className="text-4xl font-extrabold text-red-700 mt-1 tabular-nums">${amountDollars}</p>
                 <p className="text-xs text-red-900 mt-1">to {patientName || patientEmail || 'customer'}</p>
               </div>
-              <div className="text-sm space-y-1">
-                <div className="flex justify-between"><span className="text-gray-500">Reason:</span><span className="font-medium">{REASONS.find(r => r.value === reason)?.label}</span></div>
-                {note && <div className="pt-1 border-t"><span className="text-[11px] text-gray-500">Internal note:</span><p className="text-xs italic">{note}</p></div>}
-              </div>
-              <p className="text-[11px] text-gray-600 text-center pt-1">Stripe will email the customer automatically. Money lands on card in 5–10 business days. Owner gets SMS.</p>
+              <ReviewList>
+                <ReviewRow label="Reason">{REASONS.find(r => r.value === reason)?.label}</ReviewRow>
+                {note && <ReviewRow label="Internal note"><span className="italic text-xs">{note}</span></ReviewRow>}
+                <ReviewRow label="Patient gets">Stripe's automatic refund email; money lands on their card in 5–10 business days.</ReviewRow>
+                <ReviewRow label="Owner gets">An SMS about this refund.</ReviewRow>
+              </ReviewList>
               <div className="flex justify-between gap-2 pt-2">
                 <Button variant="ghost" onClick={() => setConfirming(false)}>Back</Button>
                 <Button onClick={() => submit(false)} disabled={submitting} className="bg-red-600 hover:bg-red-700 text-white gap-1">
@@ -177,11 +177,7 @@ const StaffRefundButton: React.FC<Props> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-red-600" /> Refund for {patientName || patientEmail}
-                </DialogTitle>
-              </DialogHeader>
+              <ModalTitle icon={DollarSign} tone="danger" title="Refund" context={[patientName, patientEmail].filter(Boolean).join(' · ') || undefined} />
 
               <div>
                 <Label className="text-xs">Amount ($)</Label>
