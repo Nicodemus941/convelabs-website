@@ -2,8 +2,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useVisitorOptimization } from '@/hooks/useVisitorOptimization';
 import ExitIntentPopup from './ExitIntentPopup';
 import { WebhookProvider } from './WebhookProvider';
-
-import SmartExitIntentModal from '@/components/conversion/SmartExitIntentModal';
 import { useSimpleFollowUp } from '@/hooks/useSimpleFollowUp';
 
 interface VisitorOptimizationContextType {
@@ -33,8 +31,6 @@ interface VisitorOptimizationProviderProps {
 export const VisitorOptimizationProvider = ({ children }: VisitorOptimizationProviderProps) => {
   const optimization = useVisitorOptimization();
   const [showExitIntent, setShowExitIntent] = useState(false);
-  const [showSmartExitModal, setShowSmartExitModal] = useState(false);
-  const [hasShownExitIntent, setHasShownExitIntent] = useState(false);
   const followUpAutomation = useSimpleFollowUp();
 
   // Track page views and analyze visitor after some interaction
@@ -55,7 +51,7 @@ export const VisitorOptimizationProvider = ({ children }: VisitorOptimizationPro
       // month returning one hardcoded answer to every visitor while
       // reporting success, and nothing ever read what it stored.
       // optimization.analyzeVisitor(pageViews, []);
-      
+
       // Track page visit for follow-up automation (simplified)
       console.log('Page visit tracked:', window.location.pathname);
     }, 30000);
@@ -63,51 +59,15 @@ export const VisitorOptimizationProvider = ({ children }: VisitorOptimizationPro
     return () => clearTimeout(timer);
   }, [optimization]);
 
-  // Set up exit intent detection
-  useEffect(() => {
-    let exitIntentTimer: NodeJS.Timeout;
-
-    const handleMouseLeave = (e: MouseEvent) => {
-      if (
-        e.clientY <= 0 && 
-        !hasShownExitIntent && 
-        window.scrollY > 500 && // Only show if user has scrolled
-        !localStorage.getItem('convelabs_exit_intent_shown')
-      ) {
-        // Show smart exit modal instead of basic popup
-        setShowSmartExitModal(true);
-        setHasShownExitIntent(true);
-        localStorage.setItem('convelabs_exit_intent_shown', 'true');
-      }
-    };
-
-    const handleFocus = () => {
-      clearTimeout(exitIntentTimer);
-    };
-
-    // Disabled blur-based exit intent (too aggressive — only use mouse leave)
-    const handleBlur = () => {
-      // No-op: removed auto-popup on tab blur
-    };
-
-    document.addEventListener('mouseleave', handleMouseLeave);
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('blur', handleBlur);
-
-    return () => {
-      document.removeEventListener('mouseleave', handleMouseLeave);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('blur', handleBlur);
-      clearTimeout(exitIntentTimer);
-    };
-  }, [hasShownExitIntent]);
+  // Exit-intent modal retired 2026-10-02. SmartExitIntentModal was the only
+  // writer to `abandoned_bookings`, but it only mounted here (the home page,
+  // not /book-now), only fired on a desktop mouse-leave after a 500px scroll,
+  // once per browser — and promised a 10% code nothing ever sent. The table
+  // never got a row. Booking drafts are now captured on /book-now by
+  // src/hooks/useBookingDraft.ts, which is the single capture path.
 
   const handleCloseExitIntent = () => {
     setShowExitIntent(false);
-  };
-
-  const handleCloseSmartExitModal = () => {
-    setShowSmartExitModal(false);
   };
 
   const contextValue: VisitorOptimizationContextType = {
@@ -124,16 +84,11 @@ export const VisitorOptimizationProvider = ({ children }: VisitorOptimizationPro
     <VisitorOptimizationContext.Provider value={contextValue}>
       <WebhookProvider>
         {children}
-        
+
         <ExitIntentPopup
           isOpen={showExitIntent}
           onClose={handleCloseExitIntent}
           visitorProfile={optimization.analysis?.visitor_analysis?.profile}
-        />
-
-        <SmartExitIntentModal
-          isOpen={showSmartExitModal}
-          onClose={handleCloseSmartExitModal}
         />
       </WebhookProvider>
     </VisitorOptimizationContext.Provider>
