@@ -1,0 +1,108 @@
+-- ============================================================================
+-- DRAFT — NOT APPLIED (the .DRAFT extension keeps the Supabase CLI from picking it up;
+-- rename to .sql only when approved)
+--
+-- Backend support for the redesigned admin Patients screen
+-- (src/components/dashboards/admin/PatientProfileTab.tsx). The UI works
+-- WITHOUT this migration: today it loads every tenant_patients row plus a slim
+-- projection of every appointment and derives buckets client-side (759
+-- patients / ~520 appointments as of 2026-10-02 — fine). This file is the
+-- path forward once those numbers grow, plus two cheap indexes the chart's
+-- per-patient queries would already benefit from.
+--
+-- Review before applying. Rename to drop the DRAFT marker when approved.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Indexes the chart hits on every open (appointments / specimens by patient)
+--    appointments has NO plain index on patient_id today — only the partial
+--    unique (date, time, patient_id). specimen_deliveries already has one.
+-- ----------------------------------------------------------------------------
+create index if not exists idx_appointments_patient_date
+  on public.appointments (patient_id, appointment_date desc)
+  where patient_id is not null;
+
+-- Directory sort order (last name, first name) over live rows.
+create index if not exists idx_tenant_patients_live_name
+  on public.tenant_patients (last_name, first_name)
+  where deleted_at is null;
+
+-- ----------------------------------------------------------------------------
+-- 2. Server-side directory view — one row per live patient with the same
+--    bucket logic the UI computes today (patientDirectory.ts). Lets the
+--    directory stop downloading every appointment once volume grows, and
+--    gives SQL/reporting the same "needs action" definition as the screen.
+--
+--    Bucket priority (exclusive):
+--      balance_due      — unpaid past visit (status not cancelled/rescheduled,
+--                         payment_status not settled, date < today or done)
+--      unresolved_visit — live-status visit dated before today
+--      upcoming         — live-status visit dated today or later
+--      active           — has visits, none of the above
+--      never_booked     — no appointments
+-- ----------------------------------------------------------------------------
+create or replace view public.admin_patient_directory
+with (security_invoker = true) as
+with appt as (
+  select
+    a.patient_id,
+    count(*)                                                        as total_visits,
+    count(*) filter (where a.status in ('completed','specimen_delivered')) as completed_visits,
+    max(a.appointment_date) filter (where a.status in ('completed','specimen_delivered')) as last_visit_at,
+    min(a.appointment_date) filter (
+      where a.status in ('scheduled','confirmed','en_route','in_progress')
+        and (a.appointment_date at time zone 'America/New_York')::date >= (now() at time zone 'America/New_York')::date
+    ) as next_visit_at,
+    max(a.appointment_date) filter (
+      where a.status in ('scheduled','confirmed','en_route','in_progress')
+        and (a.appointment_date at time zone 'America/New_York')::date <  (now() at time zone 'America/New_York')::date
+    ) as unresolved_visit_at,
+    coalesce(sum(a.total_amount) filter (
+      where a.status not in ('cancelled','rescheduled')
+        and coalesce(a.payment_status,'') not in ('completed','paid','org_billed','not_required','voided','void')
+        and ( a.status in ('completed','specimen_delivered')
+           or (a.appointment_date at time zone 'America/New_York')::date < (now() at time zone 'America/New_York')::date )
+    ), 0) as balance_due,
+    bool_or(coalesce(a.is_vip,false)) as is_protected
+  from public.appointments a
+  where a.patient_id is not null
+  group by a.patient_id
+)
+select
+  p.id,
+  p.first_name, p.last_name, p.email, p.phone, p.date_of_birth,
+  p.address, p.city, p.state, p.zipcode,
+  p.user_id, p.organization_id, p.created_at,
+  coalesce(ap.total_visits, 0)      as total_visits,
+  coalesce(ap.completed_visits, 0)  as completed_visits,
+  ap.last_visit_at,
+  ap.next_visit_at,
+  ap.unresolved_visit_at,
+  coalesce(ap.balance_due, 0)       as balance_due,
+  coalesce(ap.is_protected, false)  as is_protected,
+  case
+    when coalesce(ap.total_visits,0) = 0   then 'never_booked'
+    when coalesce(ap.balance_due,0) > 0    then 'balance_due'
+    when ap.unresolved_visit_at is not null then 'unresolved_visit'
+    when ap.next_visit_at is not null       then 'upcoming'
+    else 'active'
+  end as bucket
+from public.tenant_patients p
+left join appt ap on ap.patient_id = p.id
+where p.deleted_at is null;
+
+comment on view public.admin_patient_directory is
+  'One row per live patient with the admin Patients screen bucket. security_invoker: callers see only what tenant_patients/appointments RLS already allows.';
+
+-- ----------------------------------------------------------------------------
+-- 3. Observed data gaps (no DDL — for the owner to decide)
+--    • activity_log.patient_id is NULL on all 42 rows, so the chart's
+--      "Activity" tab is always empty. Either backfill from appointment_id or
+--      have writers set patient_id.
+--    • 122 tenant_patients carry lab_reminder_deadline_at in the past from an
+--      org import (Jul–Aug 2026); 116 of them never visited. The UI shows this
+--      as an opt-in "Lab deadline passed" flag rather than a needs-action
+--      bucket because the data looks stale.
+--    • 26 appointments dated in the past are still scheduled/confirmed; the UI
+--      now surfaces them as "Unresolved visit" instead of "Upcoming".
+-- ----------------------------------------------------------------------------

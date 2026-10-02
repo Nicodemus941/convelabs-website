@@ -17,7 +17,7 @@
 //   - phleb capacity — single-phleb assumption for now
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
-import { timeBlockAppliesOn, timeBlockDateFilter } from './timeBlocks.ts';
+import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow } from './timeBlocks.ts';
 
 export interface TimeWindowRule {
   dayOfWeek: number[]; // 0 = Sun, 6 = Sat
@@ -489,8 +489,9 @@ export async function getAvailableSlotsForDate(
       const { h: eh, m: em } = parseTime(String(b.end_time));
       const sMin = sh * 60 + sm;
       const eMin = eh * 60 + em;
-      // start-inclusive, end-exclusive (matches our existing booking logic)
-      return tMin >= sMin && tMin < eMin;
+      // The visit must not RUN INTO the window, not merely start outside it:
+      // a 6:00 AM 60-min visit collides with a 6:15 block.
+      return visitOverlapsWindow(tMin, NEW_APPT_FOOTPRINT_MIN, sMin, eMin);
     });
   };
 

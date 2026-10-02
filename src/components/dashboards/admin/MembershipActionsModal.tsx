@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { InlineError, ModalTitle, QuietHoursNotice, ReviewList, ReviewRow } from './chartModalKit';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -52,6 +53,9 @@ const TIER_META: Record<Tier, { label: string; price: number; value: number; col
 const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, patientName, defaultTier = 'vip', currentTier = '', onSuccess }) => {
   const [tab, setTab] = useState<Tab>('offer');
   const [tier, setTier] = useState<Tier>(defaultTier);
+  // Review step before either send; errors surface inline, not only as toasts.
+  const [reviewing, setReviewing] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [personalNote, setPersonalNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // Bug fix 2026-05-25 (Nicolas Chaillan case): admin needs to be able to
@@ -81,7 +85,8 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
     if (!open) {
       // On close, reset to the prop default (so re-opening for a different
       // patient picks up THEIR upgrade target, not the last patient's).
-      setTab('offer'); setTier(defaultTier); setPersonalNote(''); setSuccess(null);
+      setTab('offer'); setTier(defaultTier); setPersonalNote(''); setSuccess(null); setReviewing(false); setSendError(null);
+      setDelegateExpanded(false); setDelegateName(''); setDelegateEmail(''); setDelegatePhone('');
     } else {
       // Refresh tier selection to match the prop in case the modal is being
       // reused across patients without unmounting.
@@ -100,6 +105,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
 
   const sendOffer = async () => {
     setSubmitting(true);
+    setSendError(null);
     try {
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
@@ -122,10 +128,10 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
         tier, personal_note: personalNote.trim() || null,
       });
       setSuccess({ kind: 'offer', seats_remaining: j.seats_remaining });
-      toast.success(`Offer sent to ${patientName.split(' ')[0]} 🎯`);
+      toast.success(`Offer sent to ${patientName.split(' ')[0]}`);
       onSuccess?.();
     } catch (e: any) {
-      toast.error(e?.message || 'Send failed');
+      setSendError(e?.message || 'Send failed');
     } finally {
       setSubmitting(false);
     }
@@ -136,16 +142,8 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
     // this is the "Suzanne pays for AJ" pattern. Delegate email receives the
     // Stripe invoice and the card of record. Patient stays clinical-comms only.
     const useDelegateBilling = delegateExpanded && delegateName.trim() && delegateEmail.trim();
-    const invoiceEmail = useDelegateBilling ? delegateEmail.trim() : effectiveEmail;
-    const invoiceName = useDelegateBilling ? delegateName.trim() : patientName;
-
-    if (!confirm(
-      useDelegateBilling
-        ? `Send ${delegateName.split(' ')[0]} a Stripe invoice for ${patientName}'s ${TIER_META[tier].label} ($${TIER_META[tier].price})?\n\nInvoice goes to: ${delegateEmail}\nMembership activates on: ${effectiveEmail}`
-        : `Send ${patientName} a Stripe invoice for ${TIER_META[tier].label} ($${TIER_META[tier].price})?\n\nInvoice email: ${effectiveEmail}`
-    )) return;
-
     setSubmitting(true);
+    setSendError(null);
     try {
       const { data: session } = await supabase.auth.getSession();
       const token = session?.session?.access_token;
@@ -190,7 +188,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
         : 'Invoice sent — patient will pay via Stripe');
       onSuccess?.();
     } catch (e: any) {
-      toast.error(e?.message || 'Registration failed');
+      setSendError(e?.message || 'Registration failed');
     } finally {
       setSubmitting(false);
     }
@@ -201,15 +199,12 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-[#B91C1C]" /> Membership for {firstName}
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            {patientName}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="max-w-lg w-[95vw] max-h-[92vh] overflow-y-auto">
+        <ModalTitle
+          icon={Sparkles}
+          title={reviewing ? (tab === 'offer' ? 'Review offer email' : 'Review membership invoice') : `Membership for ${firstName}`}
+          context={[patientName, patientEmail].filter(Boolean).join(' · ')}
+        />
 
         {success ? (
           <div className="py-6 text-center space-y-3">
@@ -222,7 +217,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
               </p>
               <p className="text-sm text-gray-600 mt-1">
                 {success.kind === 'offer'
-                  ? `${firstName} just got a Hormozi-stacked email with a one-click upgrade CTA.`
+                  ? `${firstName} received the ${TIER_META[tier].label} offer email with a one-click checkout link.`
                   : `${firstName} received a Stripe invoice for $${TIER_META[tier].price}. When they pay, their chart auto-updates and a welcome email fires.`}
               </p>
               {success.invoice_url && (
@@ -233,7 +228,41 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
             </div>
             <Button onClick={onClose} className="bg-[#B91C1C] hover:bg-[#991B1B] mt-2">Done</Button>
           </div>
-        ) : (
+        ) : reviewing ? (() => {
+          const useDelegateBilling = tab === 'register' && delegateExpanded && !!delegateName.trim() && !!delegateEmail.trim();
+          const delegateEmailOk = !useDelegateBilling || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(delegateEmail.trim());
+          return (
+            <div className="space-y-3">
+              <ReviewList>
+                <ReviewRow label="Patient" tone="strong">{patientName}</ReviewRow>
+                <ReviewRow label="Tier" tone="strong">{TIER_META[tier].label} · ${TIER_META[tier].price}/yr</ReviewRow>
+                {tab === 'offer' ? (
+                  <>
+                    <ReviewRow label="Sends">Offer email with a one-click Stripe checkout link{emailWasChanged ? ' (to an overridden address)' : ''}.</ReviewRow>
+                    <ReviewRow label="Goes to">{effectiveEmail}</ReviewRow>
+                    {personalNote.trim() && <ReviewRow label="Your note"><span className="italic">“{personalNote.trim()}”</span></ReviewRow>}
+                    <ReviewRow label="Charges">Nothing now — the patient pays only if they click through and check out.</ReviewRow>
+                  </>
+                ) : (
+                  <>
+                    <ReviewRow label="Sends">A Stripe invoice for ${TIER_META[tier].price}. Membership activates on {firstName}'s chart when it is paid.</ReviewRow>
+                    <ReviewRow label="Invoice to" tone={delegateEmailOk ? 'strong' : 'warn'}>{useDelegateBilling ? `${delegateName.trim()} · ${delegateEmail.trim()}` : effectiveEmail}</ReviewRow>
+                    {useDelegateBilling && <ReviewRow label="Patient gets">Clinical notifications only, at {effectiveEmail}. A delegate authorization is recorded{delegateCCConfirms ? ' and they are CC’d on confirmations' : ''}.</ReviewRow>}
+                    <ReviewRow label="Charges">Nothing until the invoice is paid.</ReviewRow>
+                  </>
+                )}
+              </ReviewList>
+              <QuietHoursNotice channels={tab === 'offer' ? 'email (and SMS when a phone is on file)' : 'email'} />
+              <InlineError message={sendError} />
+              <div className="flex items-center justify-between gap-2 pt-3 border-t">
+                <Button variant="outline" className="h-10 sm:h-9" onClick={() => { setReviewing(false); setSendError(null); }} disabled={submitting}>← Back</Button>
+                <Button onClick={tab === 'offer' ? sendOffer : registerWithInvoice} disabled={submitting || !emailLooksValid || !delegateEmailOk} className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5">
+                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> {tab === 'offer' ? 'Sending…' : 'Creating…'}</> : tab === 'offer' ? <><Send className="h-4 w-4" /> Send offer</> : <><DollarSign className="h-4 w-4" /> Send Stripe invoice</>}
+                </Button>
+              </div>
+            </div>
+          );
+        })() : (
           <>
             {/* Send-to email — editable per-invite (bug fix 2026-05-25).
                 Admin may need to send to a different address than what's on
@@ -371,6 +400,7 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
                         <div>
                           <Label className="text-xs">Billing email *</Label>
                           <Input type="email" value={delegateEmail} onChange={e => setDelegateEmail(e.target.value)} placeholder="assistant@company.com" />
+                          {delegateExpanded && (!!delegateName.trim() !== !!delegateEmail.trim()) && <p className="text-[10px] text-red-600 mt-0.5">Enter both the billing name and email, or leave both blank.</p>}
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
@@ -400,17 +430,16 @@ const MembershipActionsModal: React.FC<Props> = ({ open, onClose, patientEmail, 
               </>
             )}
 
-            <div className="flex items-center justify-between pt-2 border-t">
-              <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
-              {tab === 'offer' ? (
-                <Button onClick={sendOffer} disabled={submitting || !emailLooksValid} className="bg-[#B91C1C] hover:bg-[#991B1B] gap-1.5" title={!emailLooksValid ? 'Fix the email address first' : ''}>
-                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</> : <><Send className="h-4 w-4" /> Send {firstName}'s offer</>}
-                </Button>
-              ) : (
-                <Button onClick={registerWithInvoice} disabled={submitting || !emailLooksValid} className="bg-[#B91C1C] hover:bg-[#991B1B] gap-1.5" title={!emailLooksValid ? 'Fix the email address first' : ''}>
-                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</> : <><DollarSign className="h-4 w-4" /> Send Stripe invoice</>}
-                </Button>
-              )}
+            <div className="flex items-center justify-between pt-3 border-t">
+              <Button variant="outline" className="h-10 sm:h-9" onClick={onClose} disabled={submitting}>Cancel</Button>
+              <Button
+                onClick={() => { setSendError(null); setReviewing(true); }}
+                disabled={!emailLooksValid || (tab === 'register' && delegateExpanded && (!!delegateName.trim() !== !!delegateEmail.trim()))}
+                className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+                title={!emailLooksValid ? 'Fix the email address first' : ''}
+              >
+                Review →
+              </Button>
             </div>
           </>
         )}

@@ -1,1540 +1,568 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import MembershipActionsModal from './MembershipActionsModal';
-import StaffRefundButton from '@/components/admin/StaffRefundButton';
-import { Sparkles } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+/**
+ * PatientProfileTab — the admin patient directory + chart.
+ *
+ * Rendered for BOTH admin roles (super_admin + office_manager) via
+ * Dashboard.tsx SECTION_SCREENS["patients"]; one component, not one per
+ * role. The only role-gated control is "Delete patient" (super_admin).
+ *
+ * Source table: tenant_patients (deleted_at IS NULL — is_active is legacy).
+ * Every patient maps to exactly ONE bucket (patientDirectory.ts) so the stat
+ * tiles, the filter chips and the list always agree:
+ *
+ *   balance_due       → a past visit is still unpaid
+ *   unresolved_visit  → a live-status visit whose date already passed
+ *   upcoming          → has a visit booked today or later
+ *   active            → has visited before, nothing booked
+ *   never_booked      → no appointments at all
+ *
+ * Flags (member, protected, missing address, no contact, no DOB, lab
+ * deadline passed) are orthogonal — they decorate rows and power the
+ * secondary chips, never the bucket.
+ *
+ * Holds PHI: nothing is logged beyond ids/error codes, and no message is
+ * ever sent to a patient from this screen without an explicit confirm.
+ */
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { supabase } from '@/integrations/supabase/client';
-import { format } from 'date-fns';
-import {
-  User, Phone, Mail, Calendar, Clock, MapPin, Shield, FileText,
-  Search, ArrowLeft, Package, ClipboardList, DollarSign, Stethoscope,
-  ChevronRight, Edit3, CalendarPlus, Receipt, MessageSquare, MoreHorizontal, UserPlus, Loader2,
-  Copy, Send,
-  Crown,
-} from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { toast } from 'sonner';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
-import { useBookingModalSafe } from '@/contexts/BookingModalContext';
-import RecurringGapsCard from './RecurringGapsCard';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import {
+  Users, UserPlus, RefreshCw, Search, X, AlertTriangle, Crown, Shield, MoreHorizontal, Zap, CalendarPlus,
+  MessageSquare, Phone, Mail, Copy, ChevronRight, FileText, MapPin, Loader2,
+} from 'lucide-react';
 import ScheduleAppointmentModal from '@/components/calendar/ScheduleAppointmentModal';
 import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
-import PatientCommsTimeline from '@/components/admin/PatientCommsTimeline';
-import FamilyHouseholdCard from '@/components/admin/FamilyHouseholdCard';
-import AppointmentDetailModal from '@/components/calendar/AppointmentDetailModal';
-import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
-import { Zap } from 'lucide-react';
-import { getTrustedRole } from '@/lib/authRole';
+import PatientChart from './PatientChart';
+import {
+  BUCKET_META, FLAG_KEYS, FLAG_META, NEEDS_ACTION, PATIENT_FILTERS, PATIENT_TILE_KEYS, PATIENT_TILE_STYLE,
+  type ApptLite, type MemberTier, type PatientBucket, type PatientFilterKey, type PatientFlag, type PatientRow, type PatientStats,
+  apptDay, computeStats, daysFromToday, derivePatientBucket, digits, fmtDay, fullName, matchesSearch,
+  openMessageThread, stashAdminPrefill, tierBadgeClass, toPrefilledPatient,
+} from './patientDirectory';
+
+// Untyped table access — tenant_patients / user_memberships columns used
+// here aren't all in the generated Database type.
+const db = supabase as any;
 
 /**
- * Load EVERY non-deleted patient, paging past PostgREST's per-response row cap.
- *
- * 2026-07-14 bug: a single `.limit(1000)` was silently truncated to 500 rows by
- * the server cap, so with 710 active patients only the first 500 alphabetical
- * names loaded into memory. The list is filtered/searched client-side, so
- * late-alphabet patients (e.g. "Valli Ritenour", #683) simply vanished — the
- * "500 total" counter was the truncated array length, not the real count.
- *
- * Paging by the ACTUAL returned count (not a fixed step) makes this correct
- * regardless of what the server cap is, and stops when a page comes back empty.
+ * Load EVERY non-deleted patient, paging past PostgREST's per-response row
+ * cap. (2026-07-14: a single `.limit(1000)` was silently truncated to 500,
+ * so late-alphabet patients vanished from a client-side search.) Advances by
+ * the ACTUAL returned count and stops on an empty page — correct for any cap.
  */
-const fetchAllTenantPatients = async (): Promise<any[]> => {
-  const all: any[] = [];
+async function fetchAllPages<T>(page: (from: number, to: number) => PromiseLike<{ data: any; error: any }>): Promise<T[]> {
+  const all: T[] = [];
   let from = 0;
-  const REQUEST = 1000; // asks for up to 1000; the server hands back at most its cap
-  // Advance the window by the ACTUAL number of rows returned and stop only when
-  // a page comes back empty — correct for any server cap (500, 1000, …), with a
-  // hard iteration ceiling as a runaway backstop.
+  const REQUEST = 1000;
   for (let guard = 0; guard < 50; guard++) {
-    const { data, error } = await supabase
-      .from('tenant_patients')
-      .select('*')
-      .is('deleted_at', null)
-      .order('first_name', { ascending: true })
-      .range(from, from + REQUEST - 1);
-    if (error) { console.warn('[patients] page load failed:', error); break; }
-    const rows = data || [];
+    const { data, error } = await page(from, from + REQUEST - 1);
+    if (error) throw error;
+    const rows = (data || []) as T[];
     all.push(...rows);
-    if (rows.length === 0) break; // past the last row
+    if (rows.length === 0) break;
     from += rows.length;
   }
   return all;
-};
+}
 
+const fetchAllTenantPatients = () => fetchAllPages<PatientRow>((from, to) =>
+  db.from('tenant_patients')
+    .select('*')
+    .is('deleted_at', null)
+    .order('last_name', { ascending: true })
+    .order('first_name', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to));
+
+/** Every appointment with a patient — slim projection, paged the same way
+ *  (the 500-row cap bit the patient list once already). */
+const fetchAllPatientAppointments = () => fetchAllPages<ApptLite>((from, to) =>
+  db.from('appointments')
+    .select('id, patient_id, status, appointment_date, appointment_time, payment_status, total_amount, is_vip, service_type, service_name')
+    .not('patient_id', 'is', null)
+    .order('appointment_date', { ascending: false })
+    .order('id', { ascending: true })
+    .range(from, to));
+
+async function copyText(text: string, what: string) {
+  try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`); }
+  catch { toast.error(`Couldn't copy ${what.toLowerCase()}`); }
+}
+
+type SortKey = 'name' | 'recent' | 'last_visit';
+
+interface RowHandlers {
+  onOpen: (p: PatientRow) => void;
+  onSchedule: (p: PatientRow) => void;
+  onSendLink: (p: PatientRow) => void;
+}
+
+interface RowCtx {
+  statsOf: Map<string, PatientStats>;
+  bucketOf: Map<string, PatientBucket>;
+  tierOf: Map<string, MemberTier>;
+}
+
+const EMPTY_NEW = { firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' };
+
+// ──────────────────────────────────────────────────────────────────
+// Main component
+// ──────────────────────────────────────────────────────────────────
 const PatientProfileTab: React.FC = () => {
-  const bookingModal = useBookingModalSafe();
-  // Hormozi: clicking Schedule on a patient chart opens the in-app
-  // ScheduleAppointmentModal (admin context with override powers), NOT
-  // the public /book-now flow. The previous bookingModal.openModal was
-  // routing to /book-now — wrong context entirely.
-  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
-  const [sendLinkModalOpen, setSendLinkModalOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [patients, setPatients] = useState<any[]>([]);
-  const [selectedPatient, setSelectedPatient] = useState<any>(null);
-  const [referringProvider, setReferringProvider] = useState<any>(null);
-  const [appointments, setAppointments] = useState<any[]>([]);
-  const [specimens, setSpecimens] = useState<any[]>([]);
-  const [activities, setActivities] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [showMembershipModal, setShowMembershipModal] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
-  const [editForm, setEditForm] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: '', zipcode: '', gateCode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
-  const [savingPatient, setSavingPatient] = useState(false);
-  // Inline error surface for the Edit Patient modal. Toasts can be hidden
-  // behind the dialog overlay or scroll off-screen — the inline banner is
-  // the don't-miss-it path. (2026-05-05: owner reported "Save Changes
-  // refreshes but nothing saves" — toast was firing but invisible.)
-  const [editError, setEditError] = useState<string | null>(null);
-  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
-  const [invoiceForm, setInvoiceForm] = useState({
-    amount: '',
-    description: '',
-    memo: '',
-    // New: explicit payer routing — patient (default) or organization.
-    // Prevents the Hormozi "ambiguous money-destination button" revenue leak.
-    recipient: 'patient' as 'patient' | 'organization',
-    // New: attach invoice to an existing appointment instead of creating a
-    // phantom. Empty string = create standalone invoice (old behavior).
-    attachAppointmentId: '' as string,
-    // New: when recipient='organization', admin can pick which org to bill.
-    // Defaults to the attached appointment's org if one is chosen.
-    orgId: '' as string,
+  const { user } = useAuth();
+  // Deleting a patient record is an admin-only control.
+  const canDelete = user?.role === 'super_admin';
+
+  const [allPatients, setAllPatients] = useState<PatientRow[]>([]);
+  const [appts, setAppts] = useState<ApptLite[]>([]);
+  // user_id → tier. TRUE VIP = a real paid subscription; a VIP-named plan
+  // with no Stripe subscription is an operational "don't auto-cancel" hack
+  // (belongs on appointments.is_vip) and is never crowned.
+  const [tierOf, setTierOf] = useState<Map<string, MemberTier>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  const [filter, setFilter] = useState<PatientFilterKey>('all');
+  const [flags, setFlags] = useState<Set<PatientFlag>>(new Set());
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortKey>(() => {
+    try { return (localStorage.getItem('convelabs_patients_sort') as SortKey) || 'name'; } catch { return 'name'; }
   });
-  const [allOrgs, setAllOrgs] = useState<any[]>([]);
-  const [createPatientOpen, setCreatePatientOpen] = useState(false);
-  const [newPatient, setNewPatient] = useState({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
+  useEffect(() => { try { localStorage.setItem('convelabs_patients_sort', sort); } catch {} }, [sort]);
+
+  const [selectedPatient, setSelectedPatient] = useState<PatientRow | null>(null);
+
+  // Row-level quick actions (no need to open the chart first).
+  const [actionPatient, setActionPatient] = useState<PatientRow | null>(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [sendLinkOpen, setSendLinkOpen] = useState(false);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newPatient, setNewPatient] = useState(EMPTY_NEW);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState('');
 
-  const [allPatients, setAllPatients] = useState<any[]>([]);
-  const [patientsWithAppts, setPatientsWithAppts] = useState<Set<string>>(new Set());
-  // Patients with at least one is_vip appointment — protected from auto-cancel
-  // but NOT paying members. Shown as a distinct "Protected" chip, never a crown.
-  const [protectedIds, setProtectedIds] = useState<Set<string>>(new Set());
-  // Map of user_id -> membership tier label ('member', 'vip', 'concierge').
-  // Used to show the crown icon + tier next to member patients.
-  const [memberTiers, setMemberTiers] = useState<Map<string, string>>(new Map());
-  const [filter, setFilter] = useState<'all' | 'dormant' | 'incomplete' | 'members'>('all');
-
-  // Load orgs once so the invoice modal can let admin pick a billable org
-  useEffect(() => {
-    supabase.from('organizations').select('id, name, billing_email, contact_email, default_billed_to, org_invoice_price_cents, locked_price_cents')
-      .eq('is_active', true).order('name')
-      .then(({ data }) => setAllOrgs(data || []));
-  }, []);
-
-  // Load all patients + appointment activity + active memberships on mount
-  useEffect(() => {
-    const loadAll = async () => {
-      // BUG FIX 2026-05-05: was filtering by is_active=true AND deleted_at IS NULL.
-      // The is_active column is legacy — deleted_at is the canonical soft-delete
-      // signal. Filtering by is_active hid 2 live patients that admin couldn't
-      // find via search.
-      // BUG FIX 2026-07-14: fetchAllTenantPatients pages past the server row cap
-      // so all 710+ patients load (was truncated to 500 → late-alphabet names
-      // like "Valli Ritenour" vanished from search and the count read 500).
-      const [pts, { data: appts }, { data: mems }] = await Promise.all([
-        fetchAllTenantPatients(),
-        supabase.from('appointments').select('patient_id, is_vip').not('patient_id', 'is', null),
-        supabase.from('user_memberships' as any)
-          .select('user_id, status, stripe_subscription_id, membership_plans(name)')
-          .eq('status', 'active'),
-      ]);
-      const activeIds = new Set<string>();
-      // "Protected" = appointments.is_vip flag (the operational no-auto-cancel
-      // marker). Distinct from a paid membership — kept separate on purpose.
-      const protectedSet = new Set<string>();
-      for (const a of appts || []) {
-        if (a.patient_id) {
-          activeIds.add(a.patient_id);
-          if ((a as any).is_vip) protectedSet.add(a.patient_id);
-        }
-      }
-      const tiers = new Map<string, string>();
-      for (const m of (mems as any[]) || []) {
-        const planName = String(m?.membership_plans?.name || '').toLowerCase();
-        let tier: string | null = 'member';
-        if (planName.includes('concierge')) tier = 'concierge';
-        else if (planName.includes('vip')) {
-          // TRUE VIP = a real paid subscription. 2026-07-14: a VIP-named
-          // membership with NO Stripe subscription is an operational
-          // "don't auto-cancel" hack (belongs on appointments.is_vip), not a
-          // paying member — never crown it as VIP.
-          tier = m.stripe_subscription_id ? 'vip' : null;
-        }
-        if (tier && m.user_id) tiers.set(m.user_id, tier);
-      }
-      setAllPatients(pts || []);
-      setPatients(pts || []);
-      setPatientsWithAppts(activeIds);
-      setProtectedIds(protectedSet);
-      setMemberTiers(tiers);
-    };
-    loadAll();
-  }, []);
-
-  // Filter patients as user types + filter chip
-  useEffect(() => {
-    let list = allPatients;
-    if (filter === 'dormant') {
-      list = list.filter(p => !patientsWithAppts.has(p.id));
-    } else if (filter === 'incomplete') {
-      list = list.filter(p => !p.address || p.address.trim() === '');
-    } else if (filter === 'members') {
-      list = list.filter(p => p.user_id && memberTiers.has(p.user_id));
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(p =>
-        `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-        (p.email && p.email.toLowerCase().includes(q)) ||
-        (p.phone && p.phone.includes(q))
-      );
-    }
-    setPatients(list);
-  }, [searchQuery, allPatients, filter, patientsWithAppts, memberTiers]);
-
-  // Tier → badge color map (Crown icon next to member names)
-  const tierBadgeClass = (tier: string | undefined) => {
-    switch (tier) {
-      case 'concierge': return 'bg-gradient-to-r from-purple-600 to-pink-500 text-white';
-      case 'vip': return 'bg-gradient-to-r from-amber-500 to-yellow-400 text-white';
-      case 'member': return 'bg-emerald-100 text-emerald-700 border border-emerald-300';
-      default: return 'bg-gray-100 text-gray-600';
-    }
-  };
-
-  const loadPatientData = useCallback(async (patient: any) => {
-    setSelectedPatient(patient);
+  const refresh = useCallback(async () => {
     setLoading(true);
-
-    // PERMANENT-SPINNER FIX (Naquala 2026-05-07): every fetch below is now
-    // independently guarded. If any one query throws (RLS denial, network
-    // blip, stale JWT), the others still run and `setLoading(false)`
-    // ALWAYS fires in finally. Previously, a single throw left the chart
-    // spinning forever.
-    //
-    // Strategy: Promise.allSettled so one failure doesn't cancel the others.
-    try {
-      const results = await Promise.allSettled([
-        // 1) Referring provider (skip query entirely if no email)
-        patient.email
-          ? supabase
-              .from('patient_referring_providers')
-              .select('provider_name, practice_name, practice_city, status, matched_org_id, converted_at')
-              .ilike('patient_email', patient.email)
-              .order('discovered_at', { ascending: false })
-              .limit(1)
-          : Promise.resolve({ data: [] as any[], error: null }),
-        // 2) Appointments
-        supabase
-          .from('appointments')
-          .select('*')
-          .eq('patient_id', patient.id)
-          .order('appointment_date', { ascending: false }),
-        // 3) Specimens
-        supabase
-          .from('specimen_deliveries' as any)
-          .select('*')
-          .eq('patient_id', patient.id)
-          .order('delivered_at', { ascending: false }),
-        // 4) Activity log
-        supabase
-          .from('activity_log' as any)
-          .select('*')
-          .eq('patient_id', patient.id)
-          .order('created_at', { ascending: false }),
-      ]);
-
-      const [refsRes, apptsRes, specsRes, actsRes] = results as PromiseSettledResult<any>[];
-
-      // Referring provider
-      if (refsRes.status === 'fulfilled') {
-        const refs = (refsRes.value?.data as any[]) || [];
-        setReferringProvider(refs.length > 0 ? refs[0] : null);
-      } else {
-        console.warn('[patient-chart] referring-provider fetch failed:', refsRes.reason);
-        setReferringProvider(null);
-      }
-      // Appointments
-      if (apptsRes.status === 'fulfilled') {
-        setAppointments((apptsRes.value?.data as any[]) || []);
-      } else {
-        console.warn('[patient-chart] appointments fetch failed:', apptsRes.reason);
-        setAppointments([]);
-        toast.error("Couldn't load appointment history — refresh, or check your sign-in.");
-      }
-      // Specimens
-      if (specsRes.status === 'fulfilled') {
-        setSpecimens((specsRes.value?.data as any[]) || []);
-      } else {
-        console.warn('[patient-chart] specimens fetch failed:', specsRes.reason);
-        setSpecimens([]);
-      }
-      // Activity log
-      if (actsRes.status === 'fulfilled') {
-        setActivities((actsRes.value?.data as any[]) || []);
-      } else {
-        console.warn('[patient-chart] activity-log fetch failed:', actsRes.reason);
-        setActivities([]);
-      }
-    } catch (e) {
-      console.error('[patient-chart] unexpected load error:', e);
-      toast.error("Couldn't load this patient's chart. Try again or refresh.");
-    } finally {
-      setLoading(false);
+    setLastError(null);
+    const [pts, ap, mems] = await Promise.allSettled([
+      fetchAllTenantPatients(),
+      fetchAllPatientAppointments(),
+      db.from('user_memberships')
+        .select('user_id, status, stripe_subscription_id, membership_plans(name)')
+        .eq('status', 'active'),
+    ]);
+    if (pts.status === 'fulfilled') setAllPatients(pts.value);
+    else {
+      console.error('[patients] load failed:', pts.reason?.code || pts.reason?.message || pts.reason);
+      setLastError(pts.reason?.message || String(pts.reason));
     }
+    if (ap.status === 'fulfilled') setAppts(ap.value);
+    else console.warn('[patients] appointments load failed:', ap.reason?.code || ap.reason?.message);
+    if (mems.status === 'fulfilled' && !mems.value.error) {
+      const t = new Map<string, MemberTier>();
+      for (const m of (mems.value.data as any[]) || []) {
+        const planName = String(m?.membership_plans?.name || '').toLowerCase();
+        let tier: MemberTier | null = 'member';
+        if (planName.includes('concierge')) tier = 'concierge';
+        else if (planName.includes('vip')) tier = m.stripe_subscription_id ? 'vip' : null;
+        if (tier && m.user_id) t.set(m.user_id, tier);
+      }
+      setTierOf(t);
+    } else console.warn('[patients] memberships load failed:', mems.status === 'fulfilled' ? mems.value.error?.code : mems.reason?.code);
+    setLoading(false);
   }, []);
 
-  const STATUS_COLORS: Record<string, string> = {
-    scheduled: 'bg-blue-50 text-blue-700',
-    confirmed: 'bg-emerald-50 text-emerald-700',
-    en_route: 'bg-amber-50 text-amber-700',
-    in_progress: 'bg-purple-50 text-purple-700',
-    completed: 'bg-gray-50 text-gray-600',
-    cancelled: 'bg-red-50 text-red-700',
-    specimen_delivered: 'bg-indigo-50 text-indigo-700',
-  };
+  useEffect(() => { refresh(); }, [refresh]);
 
-  const openMessageThread = (phone?: string | null, email?: string | null) => {
-    if (phone) {
-      window.open(`sms:${phone}`, '_blank');
-      return;
-    }
-    if (email) {
-      window.open(`mailto:${email}`, '_blank');
-      return;
-    }
-    toast.error('No phone or email on file');
-  };
+  // ── Derived ───────────────────────────────────────────────────
+  const statsOf = useMemo(() => computeStats(appts), [appts]);
 
-  const sendInvoiceReminder = async (appointment: any) => {
-    const fallbackName = `${selectedPatient?.first_name || ''} ${selectedPatient?.last_name || ''}`.trim() || 'this patient';
-    if (!window.confirm(`Send a friendly invoice reminder to ${appointment.patient_name || fallbackName}? Email + SMS will go out.`)) return;
-    try {
-      const { data, error } = await supabase.functions.invoke('send-manual-invoice-reminder', {
-        body: { appointment_id: appointment.id, email: true, sms: true },
-      });
-      if (error) throw error;
-      const results = (data as any)?.results || {};
-      const okBits: string[] = [];
-      if (results.email?.ok) okBits.push('email');
-      if (results.sms?.ok) okBits.push('SMS');
-      if (okBits.length === 0) {
-        toast.error(`Reminder failed — ${results.email?.error || results.sms?.error || 'unknown'}`);
-        return;
+  const bucketOf = useMemo(() => {
+    const m = new Map<string, PatientBucket>();
+    for (const p of allPatients) m.set(p.id, derivePatientBucket(statsOf.get(p.id)));
+    return m;
+  }, [allPatients, statsOf]);
+
+  const tierFor = useCallback((p: PatientRow) => (p.user_id ? tierOf.get(p.user_id) : undefined), [tierOf]);
+
+  const counts = useMemo(() => {
+    const c = Object.fromEntries(PATIENT_FILTERS.map(f => [f.key, 0])) as Record<PatientFilterKey, number>;
+    for (const p of allPatients) {
+      const b = bucketOf.get(p.id)!;
+      for (const f of PATIENT_FILTERS) if (f.match(b)) c[f.key]++;
+    }
+    return c;
+  }, [allPatients, bucketOf]);
+
+  const flagCounts = useMemo(() => {
+    const c = Object.fromEntries(FLAG_KEYS.map(k => [k, 0])) as Record<PatientFlag, number>;
+    for (const p of allPatients) {
+      const ctx = { stats: statsOf.get(p.id), tier: tierFor(p) };
+      for (const k of FLAG_KEYS) if (FLAG_META[k].test(p, ctx)) c[k]++;
+    }
+    return c;
+  }, [allPatients, statsOf, tierFor]);
+
+  const filtered = useMemo(() => {
+    const def = PATIENT_FILTERS.find(f => f.key === filter)!;
+    const q = search.trim().toLowerCase();
+    const qd = digits(q);
+    const list = allPatients.filter(p => {
+      if (!def.match(bucketOf.get(p.id)!)) return false;
+      if (flags.size > 0) {
+        const ctx = { stats: statsOf.get(p.id), tier: tierFor(p) };
+        for (const k of flags) if (!FLAG_META[k].test(p, ctx)) return false;
       }
-      toast.success(`Reminder sent via ${okBits.join(' + ')}`);
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to send reminder');
-    }
-  };
+      return matchesSearch(p, q, qd);
+    });
+    const lastDay = (p: PatientRow) => apptDay(statsOf.get(p.id)?.last || { appointment_date: null }) || '';
+    if (sort === 'recent') list.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    else if (sort === 'last_visit') list.sort((a, b) => lastDay(b).localeCompare(lastDay(a)) || fullName(a).localeCompare(fullName(b)));
+    // 'name' keeps the server order (last name, first name).
+    return list;
+  }, [allPatients, filter, flags, search, sort, bucketOf, statsOf, tierFor]);
 
-  const sendAppointmentPayLink = async (appointmentId: string) => {
+  // "Needs action" lane on top when viewing everything.
+  const lanes = useMemo(() => {
+    if (filter !== 'all') return null;
+    const action = filtered.filter(p => NEEDS_ACTION.has(bucketOf.get(p.id)!));
+    if (action.length === 0) return null;
+    return { action, rest: filtered.filter(p => !NEEDS_ACTION.has(bucketOf.get(p.id)!)) };
+  }, [filtered, filter, bucketOf]);
+
+  // ── Actions ───────────────────────────────────────────────────
+  const openChart = useCallback((p: PatientRow) => {
+    // Household clicks hand back a partial row — resolve to the full one.
+    const full = allPatients.find(x => x.id === p.id) || p;
+    setSelectedPatient(full);
+    try { window.scrollTo({ top: 0 }); } catch {}
+  }, [allPatients]);
+
+  const schedule = useCallback((p: PatientRow) => {
+    stashAdminPrefill(p);
+    setActionPatient(p);
+    setScheduleOpen(true);
+  }, []);
+
+  const sendLink = useCallback((p: PatientRow) => {
+    if (!p.email && !p.phone) { toast.error('No phone or email on file — add one first'); return; }
+    setActionPatient(p);
+    setSendLinkOpen(true);
+  }, []);
+
+  const handlers: RowHandlers = { onOpen: openChart, onSchedule: schedule, onSendLink: sendLink };
+  const ctx: RowCtx = { statsOf, bucketOf, tierOf };
+
+  const createPatient = async () => {
+    setCreateError('');
+    setIsCreating(true);
     try {
-      const { data, error } = await supabase.functions.invoke('generate-appointment-pay-token', {
-        body: { appointment_id: appointmentId },
-      });
-      if (error) throw error;
-      const url = (data as any)?.url;
-      if (!url) throw new Error('No link returned');
-      try { await navigator.clipboard.writeText(url); } catch { /* clipboard may be blocked */ }
-      if ((data as any)?.emailed) {
-        toast.success('Pay link emailed to patient (and copied to clipboard)');
-      } else {
-        toast.success('Pay link copied — paste it to the patient', { description: url, duration: 15000 });
+      if (newPatient.email) {
+        const { data: existing } = await db.from('tenant_patients').select('id').ilike('email', newPatient.email.trim()).is('deleted_at', null).limit(1);
+        if (existing && existing.length > 0) { setCreateError('A patient with this email already exists'); return; }
       }
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to create pay link');
+      const { data, error } = await db.from('tenant_patients').insert({
+        first_name: newPatient.firstName.trim(),
+        last_name: newPatient.lastName.trim(),
+        email: newPatient.email?.trim() || null,
+        phone: newPatient.phone?.trim() || null,
+        date_of_birth: newPatient.dob || null,
+        address: newPatient.address?.trim() || null,
+        city: newPatient.city?.trim() || null,
+        state: newPatient.state?.trim() || null,
+        zipcode: newPatient.zipcode?.trim() || null,
+        insurance_provider: newPatient.insuranceProvider?.trim() || null,
+        insurance_member_id: newPatient.insuranceMemberId?.trim() || null,
+        insurance_group_number: newPatient.insuranceGroup?.trim() || null,
+        tenant_id: '00000000-0000-0000-0000-000000000001',
+      }).select().single();
+      if (error) throw error;
+      if (!data) throw new Error('Patient was not created');
+      toast.success(`${newPatient.firstName} ${newPatient.lastName} added`);
+      setNewPatient(EMPTY_NEW);
+      setCreateOpen(false);
+      setAllPatients(prev => [...prev, data as PatientRow]);
+      openChart(data as PatientRow);
+    } catch (err: any) {
+      console.error('[patients] create failed:', err?.code || err?.message);
+      const msg = err?.message || 'Failed to create patient';
+      setCreateError(msg);
+      toast.error(msg, { duration: 6000 });
+    } finally {
+      setIsCreating(false);
     }
   };
 
-  const copyVisitAddress = async (appointment: any) => {
-    if (!appointment?.address) {
-      toast.error('No visit address on file');
-      return;
-    }
-    const lines = [appointment.address];
-    if (appointment.gate_code) lines.push(`Gate code: ${appointment.gate_code}`);
-    try {
-      await navigator.clipboard.writeText(lines.join('\n'));
-      toast.success('Visit address copied');
-    } catch {
-      toast.error('Could not copy the visit address');
-    }
-  };
+  const activeFilter = PATIENT_FILTERS.find(f => f.key === filter)!;
 
-  // Patient profile view
+  // ── Chart view ────────────────────────────────────────────────
   if (selectedPatient) {
-    const p = selectedPatient;
-    const upcomingAppts = appointments.filter(a => ['scheduled', 'confirmed'].includes(a.status));
-    const pastAppts = appointments.filter(a => ['completed', 'specimen_delivered'].includes(a.status));
-    const cancelledAppts = appointments.filter(a => a.status === 'cancelled');
-    const totalSpent = appointments.filter(a => a.payment_status === 'completed').reduce((s, a) => s + (a.total_amount || 0), 0);
-
+    const s = statsOf.get(selectedPatient.id);
     return (
-      <div className="space-y-6">
-        {/* Back + Header + Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" onClick={() => setSelectedPatient(null)}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-2xl font-bold">{p.first_name} {p.last_name}</h1>
-                {p.user_id && memberTiers.has(p.user_id) && (
-                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide ${tierBadgeClass(memberTiers.get(p.user_id))}`}>
-                    <Crown className="h-3 w-3" /> {memberTiers.get(p.user_id)}
-                  </span>
-                )}
-                {protectedIds.has(p.id) && !(p.user_id && memberTiers.has(p.user_id)) && (
-                  <span
-                    title="Protected from auto-cancel — not a paid member"
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-300"
-                  >
-                    <Shield className="h-3 w-3" /> Protected
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-muted-foreground">Patient Chart</p>
-
-              {/* Referring-provider badge — context for every conversation */}
-              {referringProvider && (referringProvider.provider_name || referringProvider.practice_name) && (
-                <div className={`inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-1 rounded-md text-[11px] border ${
-                  referringProvider.status === 'converted'
-                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                    : referringProvider.status === 'unsubscribed' || referringProvider.status === 'declined'
-                    ? 'bg-gray-50 border-gray-200 text-gray-500'
-                    : 'bg-blue-50 border-blue-200 text-blue-800'
-                }`}>
-                  <span className="font-semibold">Referred by:</span>
-                  <span>
-                    {referringProvider.provider_name ? `${referringProvider.provider_name}` : ''}
-                    {referringProvider.provider_name && referringProvider.practice_name ? ' · ' : ''}
-                    {referringProvider.practice_name || ''}
-                    {referringProvider.practice_city ? ` (${referringProvider.practice_city})` : ''}
-                  </span>
-                  {referringProvider.status === 'converted' && (
-                    <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-semibold">✓ Active partner</span>
-                  )}
-                  {referringProvider.status === 'contacted' && (
-                    <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-semibold">In sequence</span>
-                  )}
-                  {referringProvider.status === 'unsubscribed' && (
-                    <span className="text-[10px] bg-gray-400 text-white px-1.5 py-0.5 rounded-full font-semibold">Unsubscribed</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 pl-10 sm:pl-0">
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              setEditForm({ firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '', dob: p.date_of_birth || '', address: p.address || '', city: p.city || '', state: p.state || '', zipcode: p.zipcode || '', gateCode: p.gate_code || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '', insuranceGroup: p.insurance_group_number || '' });
-              setEditError(null);
-              setEditModalOpen(true);
-            }}>
-              <Edit3 className="h-3.5 w-3.5" /> Edit Info
-            </Button>
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              // Stash patient prefill for BookingFlow to consume on mount
-              // (cleared after one consumption to avoid leaking to next session).
-              // Hormozi: every click that doesn't serve the patient is waste —
-              // admin-booking-for-patient should NOT require retyping their info.
-              try {
-                sessionStorage.setItem('convelabs_admin_prefill_patient', JSON.stringify({
-                  firstName: p.first_name || '',
-                  lastName: p.last_name || '',
-                  email: p.email || '',
-                  phone: p.phone || '',
-                  address: p.address || '',
-                  city: p.city || '',
-                  state: p.state || 'FL',
-                  zipCode: p.zipcode || '',
-                  gateCode: p.gate_code || '',
-                  patientId: p.id,
-                  insuranceProvider: p.insurance_provider || '',
-                  insuranceMemberId: p.insurance_member_id || '',
-                }));
-              } catch (e) { /* non-blocking */ }
-
-              // FIX 2026-05-05: open the admin ScheduleAppointmentModal
-              // directly. Previous code went through bookingModal.openModal
-              // which navigated to /book-now (the patient-facing flow) —
-              // wrong context. Admin needs override powers (waivers,
-              // forced phleb assign, no-buffer same-day, etc.) that the
-              // public flow doesn't expose.
-              setScheduleModalOpen(true);
-            }}>
-              <CalendarPlus className="h-3.5 w-3.5" /> Schedule
-            </Button>
-            {/* Hormozi "send the patient a pre-loaded booking link" button.
-                4-second loop: click ⚡ → pick service → SMS+email fly. */}
-            {(p.email || p.phone) && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5 text-xs border-amber-300 text-amber-800 hover:bg-amber-50"
-                onClick={() => setSendLinkModalOpen(true)}
-              >
-                <Zap className="h-3.5 w-3.5" /> Send booking link
-              </Button>
-            )}
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => {
-              setInvoiceForm({ amount: '', description: '', memo: '' });
-              setInvoiceModalOpen(true);
-            }}>
-              <Receipt className="h-3.5 w-3.5" /> Generate Invoice
-            </Button>
-            {(p.phone || p.email) && (
-              <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => openMessageThread(p.phone, p.email)}>
-                <MessageSquare className="h-3.5 w-3.5" /> Message
-              </Button>
-            )}
-            {/*
-              Membership button — Hormozi rule: never stop selling the next
-              tier up. Show for non-members (initial offer) AND for current
-              members below Concierge (tier upgrade nudge). Only hides when
-              the patient is already at the top tier.
-            */}
-            {p.email && (() => {
-              const currentTier = p.user_id ? (memberTiers.get(p.user_id) || '').toLowerCase() : '';
-              if (currentTier === 'concierge') return null; // already at top tier
-              const isUpgrade = currentTier === 'member' || currentTier === 'vip';
-              const label = isUpgrade ? `Upgrade · ${currentTier === 'member' ? 'VIP' : 'Concierge'}` : 'Membership';
-              return (
-                <Button
-                  size="sm"
-                  className="gap-1.5 text-xs bg-[#B91C1C] hover:bg-[#991B1B] text-white"
-                  onClick={() => setShowMembershipModal(true)}
-                  title={isUpgrade ? `${p.first_name || 'Patient'} is currently ${currentTier.toUpperCase()} — send a one-tier-up offer` : 'Send a membership offer to this patient'}
-                >
-                  <Sparkles className="h-3.5 w-3.5" /> {label}
-                </Button>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/*
-          Membership offer / registration modal — defaults the tier selector
-          to the next tier UP from the patient's current membership so the
-          admin doesn't have to think about it. Member → VIP, VIP → Concierge,
-          non-member → VIP (the most popular).
-        */}
-        <MembershipActionsModal
-          open={showMembershipModal}
-          onClose={() => setShowMembershipModal(false)}
-          patientEmail={p.email || ''}
-          patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
-          defaultTier={(() => {
-            const curr = p.user_id ? (memberTiers.get(p.user_id) || '').toLowerCase() : '';
-            if (curr === 'member') return 'vip';
-            if (curr === 'vip') return 'concierge';
-            return 'vip'; // non-members default to the "Most popular" tier
-          })()}
-          currentTier={p.user_id ? (memberTiers.get(p.user_id) || '').toLowerCase() : ''}
-          onSuccess={() => loadPatientData(p)}
-        />
-
-        {/* Admin schedule modal — opens with admin override powers.
-            Pass the chart's patient directly so the modal hydrates the
-            form + skips the dead "search for the patient you're already
-            looking at" step. (Owner bug 2026-05-13 — John Struck chart →
-            Schedule button opened an empty search modal.) */}
-        <ScheduleAppointmentModal
-          open={scheduleModalOpen}
-          onClose={() => setScheduleModalOpen(false)}
-          onCreated={() => { setScheduleModalOpen(false); loadPatientData(p); }}
-          prefilledPatient={{
-            id: p.id,
-            firstName: p.first_name || '',
-            lastName: p.last_name || '',
-            email: p.email || null,
-            phone: p.phone || null,
-            address: p.address || '',
-            city: p.city || '',
-            state: p.state || 'FL',
-            zipCode: p.zipcode || '',
-            gateCode: p.gate_code || '',
-            insuranceProvider: p.insurance_provider || '',
-            insuranceMemberId: p.insurance_member_id || '',
-          }}
-        />
-
-        {/* "Send booking link" — Hormozi 4-second loop: click ⚡, pick
-            service, SMS+email fly with token URL. Patient lands on
-            /book-now?prefill=… with service + identity pre-loaded. */}
-        <SendBookingLinkModal
-          open={sendLinkModalOpen}
-          onClose={() => setSendLinkModalOpen(false)}
-          patient={{
-            id: p.id,
-            firstName: p.first_name || '',
-            lastName: p.last_name || '',
-            email: p.email,
-            phone: p.phone,
-          }}
-        />
-
-        <AppointmentDetailModal
-          appointment={selectedAppointment}
-          open={!!selectedAppointment}
-          onClose={() => setSelectedAppointment(null)}
-          onUpdate={() => loadPatientData(p)}
-        />
-
-        {/* Recurring-series gap detector — only renders if gaps exist. */}
-        <RecurringGapsCard patientId={p.id} onGapsFilled={() => loadPatientData(p)} />
-
-        {/* Unified comms timeline — every SMS/email/tokenized link sent to
-            (or received from) this patient. Hormozi: relationship visibility
-            so "did Susan get the link?" is answered in one click. */}
-        <PatientCommsTimeline
-          patientId={p.id}
-          patientEmail={p.email || null}
-          patientPhone={p.phone || null}
-        />
-
-        {/* Patient Info Card */}
-        <Card className="shadow-sm">
-          <CardContent className="p-5">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-14 h-14 rounded-full bg-[#B91C1C]/10 flex items-center justify-center">
-                    <User className="h-7 w-7 text-[#B91C1C]" />
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold">{p.first_name} {p.last_name}</p>
-                    {p.date_of_birth && <p className="text-xs text-muted-foreground">DOB: {p.date_of_birth}</p>}
-                  </div>
-                </div>
-                {p.email && <p className="flex items-center gap-2 text-sm"><Mail className="h-4 w-4 text-muted-foreground" /> {p.email}</p>}
-                {p.phone && <p className="flex items-center gap-2 text-sm"><Phone className="h-4 w-4 text-muted-foreground" /> {p.phone}</p>}
-                {(() => {
-                  const line1 = selectedPatient.address || '';
-                  const line2 = [selectedPatient.city, selectedPatient.state, selectedPatient.zipcode].filter(Boolean).join(', ');
-                  const tpAddr = [line1, line2].filter(Boolean).join(', ');
-                  const latestWithAddress = appointments.find(a => a.address && a.address !== 'Pending');
-                  const displayAddress = tpAddr || latestWithAddress?.address || null;
-                  if (displayAddress) {
-                    return (
-                      <p className="flex items-start gap-2 text-sm">
-                        <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                        <span>{displayAddress}</span>
-                      </p>
-                    );
-                  }
-                  return (
-                    <p className="flex items-start gap-2 text-sm text-amber-700">
-                      <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0" />
-                      <span>No address on file — click Edit Info to add</span>
-                    </p>
-                  );
-                })()}
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-semibold flex items-center gap-1.5"><Shield className="h-4 w-4" /> Insurance</p>
-                {p.insurance_provider ? (
-                  <>
-                    <p className="text-sm">{p.insurance_provider}</p>
-                    {p.insurance_member_id && <p className="text-xs text-muted-foreground">Member ID: {p.insurance_member_id}</p>}
-                    {p.insurance_group_number && <p className="text-xs text-muted-foreground">Group: {p.insurance_group_number}</p>}
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Self-pay (no insurance on file)</p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-blue-50 rounded-lg p-3 text-center">
-                  <p className="text-xl font-bold text-blue-700">{appointments.length}</p>
-                  <p className="text-[10px] text-muted-foreground">Total Visits</p>
-                </div>
-                <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                  <p className="text-xl font-bold text-emerald-700">${totalSpent}</p>
-                  <p className="text-[10px] text-muted-foreground">Total Spent</p>
-                </div>
-                <div className="bg-purple-50 rounded-lg p-3 text-center">
-                  <p className="text-xl font-bold text-purple-700">{specimens.length}</p>
-                  <p className="text-[10px] text-muted-foreground">Specimens</p>
-                </div>
-                <div className="bg-amber-50 rounded-lg p-3 text-center">
-                  <p className="text-xl font-bold text-amber-700">{upcomingAppts.length}</p>
-                  <p className="text-[10px] text-muted-foreground">Upcoming</p>
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Family / Household — add + link family members, feeds one-click
-            family booking (companions) downstream. */}
-        <FamilyHouseholdCard
-          patient={p}
-          onChanged={() => loadPatientData(p)}
-          onOpenPatient={(m) => loadPatientData(m)}
-        />
-
-        {/* Tabs */}
-        <Tabs defaultValue="appointments">
-          <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full">
-            <TabsTrigger value="appointments">Appointments ({appointments.length})</TabsTrigger>
-            <TabsTrigger value="specimens">Specimens ({specimens.length})</TabsTrigger>
-            <TabsTrigger value="notes">Notes ({activities.length})</TabsTrigger>
-            <TabsTrigger value="billing">Billing</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="appointments" className="space-y-3 mt-4">
-            {upcomingAppts.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold mb-2 text-blue-700">Upcoming ({upcomingAppts.length})</p>
-                {upcomingAppts.map(a => (
-                  <Card key={a.id} className="shadow-sm mb-2">
-                    <CardContent className="p-3 space-y-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className={`text-[10px] ${STATUS_COLORS[a.status] || ''}`}>{a.status}</Badge>
-                          <span className="text-sm font-medium">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}</span>
-                          <span className="text-xs text-muted-foreground">{a.appointment_time || ''}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 capitalize">{(a.service_name || a.service_type || '').replace(/_|-/g, ' ')}</p>
-                        {a.address && <p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="h-3 w-3" /> {a.address}</p>}
-                        {a.gate_code && <p className="text-xs text-amber-600">Gate: {a.gate_code}</p>}
-                      </div>
-                      <span className="text-sm font-medium flex-shrink-0">${a.total_amount || 0}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs"
-                          onClick={() => setSelectedAppointment(a)}
-                        >
-                          Manage
-                        </Button>
-                        <SendRescheduleLinkButton
-                          appointmentId={a.id}
-                          size="sm"
-                          variant="outline"
-                          className="h-8 text-xs"
-                          label="Send reschedule link"
-                        />
-                        {(a.patient_phone || p.phone || a.patient_email || p.email) && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs gap-1.5"
-                            onClick={() => openMessageThread(a.patient_phone || p.phone, a.patient_email || p.email)}
-                          >
-                            <MessageSquare className="h-3.5 w-3.5" />
-                            Message
-                          </Button>
-                        )}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button size="sm" variant="outline" className="h-8 px-2">
-                              <MoreHorizontal className="h-3.5 w-3.5" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-56">
-                            <DropdownMenuItem onClick={() => setSelectedAppointment(a)}>
-                              Manage appointment
-                            </DropdownMenuItem>
-                            {!['paid', 'completed', 'succeeded'].includes(String(a.payment_status)) &&
-                              a.status !== 'cancelled' &&
-                              (a.total_amount || 0) > 0 && (
-                              <>
-                                <DropdownMenuItem onClick={() => sendAppointmentPayLink(a.id)}>
-                                  <Send className="mr-2 h-3.5 w-3.5" />
-                                  Send pay link
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => sendInvoiceReminder(a)}>
-                                  <Receipt className="mr-2 h-3.5 w-3.5" />
-                                  Send invoice reminder
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            {a.address && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => copyVisitAddress(a)}>
-                                  <Copy className="mr-2 h-3.5 w-3.5" />
-                                  Copy visit address
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-            {pastAppts.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold mb-2 text-gray-600">Past ({pastAppts.length})</p>
-                {pastAppts.map(a => (
-                  <Card key={a.id} className="shadow-sm mb-2 opacity-75">
-                    <CardContent className="p-3 flex items-center justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="outline" className="text-[10px] bg-gray-50 text-gray-600">{a.status}</Badge>
-                          <span className="text-sm">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d, yyyy') : ''}</span>
-                          {(a.refunded_at || a.refund_status === 'refunded') && (
-                            <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">Refunded</Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 capitalize">{(a.service_type || '').replace(/_|-/g, ' ')}</p>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSelectedAppointment(a)}>
-                          Manage
-                        </Button>
-                        <span className="text-sm font-medium">${a.total_amount || 0}</span>
-                        {a.payment_status === 'completed' && (a.total_amount || 0) > 0 && (
-                          <StaffRefundButton
-                            appointmentId={a.id}
-                            patientEmail={p.email}
-                            patientName={`${p.first_name || ''} ${p.last_name || ''}`.trim()}
-                            totalAmountDollars={a.total_amount || 0}
-                            alreadyRefunded={!!a.refunded_at || a.refund_status === 'refunded'}
-                            refundedAmountCents={a.refund_amount_cents}
-                            onRefunded={() => loadPatientData(p)}
-                          />
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-            {cancelledAppts.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold mb-2 text-red-600">Cancelled ({cancelledAppts.length})</p>
-                {cancelledAppts.map(a => (
-                  <Card key={a.id} className="shadow-sm mb-2 opacity-50">
-                    <CardContent className="p-3 flex items-center justify-between gap-2">
-                      <div>
-                        <Badge variant="outline" className="text-[10px] bg-red-50 text-red-700">cancelled</Badge>
-                        <span className="text-sm ml-2">{a.appointment_date?.substring(0, 10) ? format(new Date(a.appointment_date.substring(0, 10) + 'T12:00:00'), 'MMM d') : ''}</span>
-                      </div>
-                      <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setSelectedAppointment(a)}>
-                        Manage
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-            {appointments.length === 0 && <p className="text-center text-muted-foreground py-8">No appointments found</p>}
-          </TabsContent>
-
-          <TabsContent value="specimens" className="mt-4">
-            {specimens.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">No specimens recorded</p>
-            ) : (
-              <div className="space-y-2">
-                {specimens.map((s: any) => (
-                  <Card key={s.id} className="shadow-sm">
-                    <CardContent className="p-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-mono font-medium text-sm">{s.specimen_id}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="outline" className="text-[10px]">{s.lab_name}</Badge>
-                            <span className="text-xs text-muted-foreground">{s.tube_count} tube{s.tube_count !== 1 ? 's' : ''}{s.tube_types ? ` (${s.tube_types})` : ''}</span>
-                          </div>
-                        </div>
-                        <span className="text-xs text-muted-foreground">{s.delivered_at ? format(new Date(s.delivered_at), 'MMM d, h:mm a') : ''}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="notes" className="mt-4">
-            {activities.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">No activity notes for this patient</p>
-            ) : (
-              <div className="space-y-2">
-                {activities.map((a: any) => (
-                  <div key={a.id} className="flex gap-3 p-3 rounded-lg border">
-                    <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-                      <ClipboardList className="h-4 w-4 text-gray-500" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-[10px]">{a.activity_type}</Badge>
-                        <span className="text-[10px] text-muted-foreground">{a.created_at ? format(new Date(a.created_at), 'MMM d, h:mm a') : ''}</span>
-                      </div>
-                      <p className="text-sm mt-1">{a.description}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </TabsContent>
-
-          <TabsContent value="billing" className="mt-4">
-            <Card className="shadow-sm">
-              <CardContent className="p-4 space-y-3">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Appointments</span><span className="font-medium">{appointments.length}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Paid Appointments</span><span className="font-medium">{appointments.filter(a => a.payment_status === 'completed').length}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Revenue</span><span className="font-bold text-emerald-700">${totalSpent}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Total Tips</span><span className="font-medium">${appointments.reduce((s, a) => s + (a.tip_amount || 0), 0)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Outstanding</span><span className="font-medium text-red-600">${appointments.filter(a => a.payment_status !== 'completed' && a.status !== 'cancelled').reduce((s, a) => s + (a.total_amount || 0), 0)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Insurance</span><span>{p.insurance_provider || 'Self-pay'}</span></div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-
-        {/* Edit Patient Modal — Square "Edit Customer" style */}
-        <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-          <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle className="text-lg font-bold text-center">Edit Customer</DialogTitle></DialogHeader>
-            <div className="divide-y">
-              {/* Name */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600">First Name</Label>
-                <Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} className="h-9" />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600">Last Name</Label>
-                <Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} className="h-9" />
-              </div>
-              {/* Birthday */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600">Birthday</Label>
-                <Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} className="h-9" />
-              </div>
-              {/* Address */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600 sm:mt-2">Address</Label>
-                <div className="space-y-2">
-                  <AddressAutocomplete
-                    value={editForm.address}
-                    onChange={v => setEditForm(pr => ({ ...pr, address: v }))}
-                    onPlaceSelected={(place) => {
-                      // Use street-only in Address — City/State/Zip are separate fields below.
-                      setEditForm(pr => ({ ...pr, address: place.street || place.address, city: place.city || pr.city, state: place.state || pr.state, zipcode: place.zipCode || pr.zipcode }));
-                    }}
-                    placeholder="Start typing address — Google suggestions"
-                    className="h-9"
-                  />
-                  <Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} placeholder="City" className="h-9" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value }))} placeholder="State" maxLength={2} className="h-9" />
-                    <Input value={editForm.zipcode} onChange={e => setEditForm(pr => ({ ...pr, zipcode: e.target.value }))} placeholder="ZIP" className="h-9" />
-                  </div>
-                </div>
-              </div>
-              {/* Gate Code */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600">Gate Code</Label>
-                <Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Gate Code" className="h-9" />
-              </div>
-              {/* Phone */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600">Phone Number</Label>
-                <Input value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} className="h-9" />
-              </div>
-              {/* Email */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start sm:items-center py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600">Email Address</Label>
-                <Input type="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} className="h-9" />
-              </div>
-              {/* Insurance */}
-              <div className="grid grid-cols-1 sm:grid-cols-[140px_1fr] items-start py-3 gap-1 sm:gap-3">
-                <Label className="text-sm font-semibold text-gray-600 text-[#B91C1C]">Insurance Courier &amp; Member ID</Label>
-                <div className="space-y-2">
-                  <Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="Insurance provider" className="h-9 text-sm" />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} placeholder="Member ID" className="h-9" />
-                    <Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} placeholder="Group #" className="h-9" />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="flex justify-between items-center gap-3 pt-4 border-t mt-2">
-              {/* Danger zone — delete. Soft-deletes by default; server decides
-                  hard vs soft based on whether the patient has any history. */}
-              <Button
-                variant="outline"
-                className="h-10 px-4 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
-                onClick={async (e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-
-                  // eslint-disable-next-line no-console
-                  console.log('[delete-patient] click fired for', p.id, `${p.first_name} ${p.last_name}`);
-
-                  const reason = window.prompt(
-                    `Delete patient "${p.first_name} ${p.last_name}"?\n\n` +
-                    `Patients with appointment history are SOFT-deleted (hidden but audit-preserved for HIPAA).\n` +
-                    `Patients with no history are removed permanently.\n\n` +
-                    `Enter a short reason (min 3 chars):`
-                  );
-                  if (!reason || reason.trim().length < 3) {
-                    console.log('[delete-patient] cancelled — no/short reason');
-                    return;
-                  }
-
-                  // Verify caller's role from JWT so we can explain failures
-                  const { data: sess } = await supabase.auth.getSession();
-                  const role = getTrustedRole(sess?.session?.user) || 'unknown';
-                  const uid = sess?.session?.user?.id || 'no-session';
-                  console.log('[delete-patient] calling RPC as', { uid, role });
-
-                  try {
-                    const { data, error } = await supabase.rpc('delete_patient', {
-                      p_patient_id: p.id,
-                      p_reason: reason.trim(),
-                      p_hard_delete: true,
-                    });
-
-                    console.log('[delete-patient] RPC response', { data, error });
-
-                    if (error) {
-                      const details = `code=${(error as any).code || 'n/a'} · ${error.message || 'no message'}${(error as any).hint ? ' · hint: ' + (error as any).hint : ''} · role=${role}`;
-                      toast.error(`Delete failed: ${details}`, { duration: 12000 });
-                      return;
-                    }
-                    if ((data as any)?.action === 'hard_delete') {
-                      toast.success('Patient permanently deleted (no history)');
-                    } else {
-                      toast.success(`Patient soft-deleted${(data as any)?.note ? ` · ${(data as any).note}` : ''}`);
-                    }
-                    setEditModalOpen(false);
-                    try {
-                      const refreshed = await fetchAllTenantPatients();
-                      setAllPatients(refreshed);
-                    } catch (refErr) {
-                      console.error('[delete-patient] refresh failed', refErr);
-                      toast.warning('Delete succeeded but list refresh failed — reload the page');
-                    }
-                    setSelectedPatient(null);
-                  } catch (err: any) {
-                    console.error('[delete-patient] threw', err);
-                    toast.error(`Delete crashed: ${err?.message || String(err)}`, { duration: 12000 });
-                  }
-                }}
-              >
-                Delete Patient
-              </Button>
-              <div className="flex gap-3">
-              {editError && (
-                <div className="basis-full rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 mb-2 whitespace-pre-wrap">
-                  <strong>Save failed:</strong> {editError}
-                </div>
-              )}
-              <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-6">Cancel</Button>
-              <Button
-                type="button"
-                disabled={savingPatient}
-                className="h-10 px-6 bg-[#1e293b] hover:bg-[#0f172a] text-white font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
-                onClick={async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (savingPatient) return;
-                setSavingPatient(true);
-                setEditError(null);
-                console.log('[patient-save] click fired for', p.id, 'email:', editForm.email);
-                try {
-                  // Pre-flight: confirm the session is still valid. An expired
-                  // JWT silently turns auth.role() into 'anon' and RLS blocks
-                  // both UPDATE + the .select() return — looks like "0 rows
-                  // returned" with no error. Catch it here and prompt re-auth.
-                  const { data: { session } } = await supabase.auth.getSession();
-                  if (!session?.user) {
-                    setEditError('Your session expired. Please refresh the page and sign in again, then re-open Edit.');
-                    toast.error('Session expired — refresh + sign in again', { duration: 12000 });
-                    return;
-                  }
-
-                  const updatePayload: any = {
-                    first_name: editForm.firstName, last_name: editForm.lastName,
-                    email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
-                    address: editForm.address || null,
-                    city: editForm.city || null,
-                    state: editForm.state || null,
-                    zipcode: editForm.zipcode || null,
-                    gate_code: editForm.gateCode || null,
-                    insurance_provider: editForm.insuranceProvider || null,
-                    insurance_member_id: editForm.insuranceMemberId || null,
-                    insurance_group_number: editForm.insuranceGroup || null,
-                  };
-                  console.log('[patient-save] payload:', updatePayload);
-                  const { data, error } = await supabase.from('tenant_patients').update(updatePayload).eq('id', p.id).select();
-                  console.log('[patient-save] response:', { data, error });
-
-                  if (error) {
-                    console.error('[patient-save] DB error:', error);
-                    // Special-case 23505 (unique violation on email) — look up
-                    // who else has this email so the admin can decide:
-                    // merge, pick a different email, or fix the other row.
-                    if (error.code === '23505' && /email/i.test(error.message || '')) {
-                      const target = (editForm.email || '').trim().toLowerCase();
-                      let conflictDetail = '';
-                      try {
-                        const { data: collide } = await supabase
-                          .from('tenant_patients')
-                          .select('id, first_name, last_name, phone, deleted_at, created_at')
-                          .ilike('email', target)
-                          .is('deleted_at', null)
-                          .neq('id', p.id)
-                          .limit(3);
-                        const list = (collide as any[] | null) || [];
-                        if (list.length > 0) {
-                          conflictDetail = list.map(r => `• ${r.first_name || ''} ${r.last_name || ''} (id ${String(r.id).slice(0, 8)}…${r.phone ? ` · ${r.phone}` : ''})`).join('\n');
-                        }
-                      } catch { /* probe is best-effort */ }
-                      const msg = `Email "${editForm.email}" is already used by another active patient${conflictDetail ? `:\n${conflictDetail}` : '.'}\n\nFix options:\n  1. Edit the OTHER patient first (change or remove their email)\n  2. Use a different email here\n  3. Soft-delete the other patient if it's a duplicate`;
-                      setEditError(msg);
-                      toast.error('Email already in use by another patient — see the red banner above for details', { duration: 14000 });
-                      return;
-                    }
-                    const detail = `Update failed — code ${error.code || 'n/a'}: ${error.message || 'no message'}${error.hint ? ` · hint: ${error.hint}` : ''}`;
-                    setEditError(detail);
-                    toast.error(detail, { duration: 12000 });
-                    return;
-                  }
-                  if (!data || data.length === 0) {
-                    // Diagnose: role + does the patient still exist?
-                    const role = getTrustedRole(session.user as any) || 'unknown';
-                    // Probe a SELECT to disambiguate "row missing" vs "RLS blocked"
-                    const { data: probe } = await supabase
-                      .from('tenant_patients')
-                      .select('id, deleted_at')
-                      .eq('id', p.id)
-                      .maybeSingle();
-                    const detail = !probe
-                      ? `No patient row found for id ${p.id}. Reload and try again — the patient may have been deleted in another tab.`
-                      : (probe as any).deleted_at
-                        ? `This patient was soft-deleted on ${(probe as any).deleted_at}. Reload to see the current list.`
-                        : `Update returned 0 rows — RLS blocked the write. Your role: ${role}. Need super_admin / office_manager. Sign out + back in.`;
-                    setEditError(detail);
-                    toast.error(detail, { duration: 12000 });
-                    return;
-                  }
-                  toast.success('Patient info updated');
-
-                  // ─── EMAIL-CHANGE → AUTO-REISSUE OPEN INVOICES
-                  // appointments.patient_email is set at booking time, NOT
-                  // derived from tenant_patients. So when admin corrects a
-                  // patient's email, any open Stripe invoice + dunning
-                  // cascade still fires to the OLD email — hits a black
-                  // hole, customer never pays, we auto-cancel 24h later.
-                  // Find every open invoice on the OLD email, prompt admin
-                  // to reissue (void old + send fresh) to the new address.
-                  const emailChanged = editForm.email && p.email && editForm.email.trim().toLowerCase() !== p.email.trim().toLowerCase();
-                  if (emailChanged) {
-                    try {
-                      const { data: openInvoices } = await supabase
-                        .from('appointments')
-                        .select('id, total_amount, service_type, appointment_date, invoice_status, stripe_invoice_id')
-                        .ilike('patient_email', p.email)
-                        .in('invoice_status', ['sent', 'reminded', 'final_warning', 'pending_send']);
-                      const list = openInvoices || [];
-                      if (list.length > 0) {
-                        const summary = list.slice(0, 5).map((a: any, i: number) =>
-                          `  ${i + 1}. ${a.appointment_date?.substring(0, 10) || '?'} · $${a.total_amount} · ${a.invoice_status}`
-                        ).join('\n');
-                        const more = list.length > 5 ? `\n  …and ${list.length - 5} more` : '';
-                        const ok = confirm(
-                          `${list.length} open invoice${list.length === 1 ? '' : 's'} ${list.length === 1 ? 'is' : 'are'} still on the old email (${p.email}).\n\n${summary}${more}\n\nVoid and reissue ${list.length === 1 ? 'it' : 'them all'} to ${editForm.email}?\n\n(Click Cancel to leave the existing invoices on the old email.)`
-                        );
-                        if (ok) {
-                          let success = 0, failed = 0;
-                          for (const inv of list) {
-                            try {
-                              const { error: rxErr } = await supabase.functions.invoke('reissue-stripe-invoice', {
-                                body: {
-                                  appointmentId: inv.id,
-                                  newPatientEmail: editForm.email,
-                                  newPatientName: `${editForm.firstName} ${editForm.lastName}`.trim(),
-                                  reason: `Patient email corrected from ${p.email} to ${editForm.email}`,
-                                },
-                              });
-                              if (rxErr) { failed++; console.warn('[reissue-on-email-change] failed for', inv.id, rxErr); }
-                              else success++;
-                            } catch (e) { failed++; console.warn('[reissue-on-email-change] threw for', inv.id, e); }
-                          }
-                          if (success > 0) toast.success(`${success} invoice${success === 1 ? '' : 's'} reissued to ${editForm.email}`);
-                          if (failed > 0) toast.error(`${failed} reissue${failed === 1 ? '' : 's'} failed — check Invoices tab`, { duration: 8000 });
-                        }
-                      }
-                    } catch (reissueLookupErr) {
-                      console.warn('[reissue-on-email-change] lookup failed (non-blocking):', reissueLookupErr);
-                    }
-                  }
-
-                  setSelectedPatient({
-                    ...p,
-                    first_name: editForm.firstName, last_name: editForm.lastName,
-                    email: editForm.email, phone: editForm.phone,
-                    date_of_birth: editForm.dob || null,
-                    address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null,
-                    gate_code: editForm.gateCode || null,
-                    insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null, insurance_group_number: editForm.insuranceGroup || null,
-                  });
-                  setEditModalOpen(false);
-                  try {
-                    const refreshed = await fetchAllTenantPatients();
-                    setAllPatients(refreshed);
-                  } catch (refreshErr: any) {
-                    console.warn('[patient-save] refresh failed (save itself OK):', refreshErr);
-                    toast.warning('Saved, but list refresh failed — reload to see the latest.');
-                  }
-                } catch (err: any) {
-                  console.error('[patient-save] threw:', err);
-                  const detail = `Save crashed: ${err?.message || String(err)}. Open DevTools Console for the full trace.`;
-                  setEditError(detail);
-                  toast.error(detail, { duration: 12000 });
-                } finally {
-                  setSavingPatient(false);
-                }
-              }}>{savingPatient ? 'Saving…' : 'Save Changes'}</Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* Generate Invoice — attach to existing appointment OR standalone,
-            route to patient OR organization. Hormozi rule: make the money
-            destination explicit on every screen that touches money. */}
-        <Dialog open={invoiceModalOpen} onOpenChange={setInvoiceModalOpen}>
-          <DialogContent className="max-w-md w-[95vw] sm:w-full">
-            <DialogHeader><DialogTitle>Generate Invoice for {p.first_name}</DialogTitle></DialogHeader>
-            <div className="space-y-3">
-              {/* Attach to existing appointment (optional) */}
-              <div>
-                <Label className="text-xs">Attach to appointment <span className="text-gray-400 font-normal">(optional — leave blank for standalone)</span></Label>
-                <select
-                  value={invoiceForm.attachAppointmentId}
-                  onChange={(e) => {
-                    const apptId = e.target.value;
-                    const appt = appointments.find(a => a.id === apptId);
-                    setInvoiceForm(pr => ({
-                      ...pr,
-                      attachAppointmentId: apptId,
-                      // Pre-fill amount + description from the appointment when chosen
-                      amount: appt ? String(appt.total_amount || appt.service_price || '') : pr.amount,
-                      description: appt ? (appt.service_name || appt.service_type || '') : pr.description,
-                      // If appt has an org linked, default recipient to org
-                      recipient: appt?.organization_id ? 'organization' : pr.recipient,
-                      orgId: appt?.organization_id || pr.orgId,
-                    }));
-                  }}
-                  className="mt-1 w-full h-9 text-sm border rounded-md px-2 bg-white"
-                >
-                  <option value="">— Create new / standalone invoice —</option>
-                  {appointments.filter(a => a.payment_status !== 'completed').map(a => (
-                    <option key={a.id} value={a.id}>
-                      {a.appointment_date?.substring(0, 10)} · {a.service_name || a.service_type} · ${Number(a.total_amount || 0).toFixed(2)} · {a.payment_status}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Recipient picker — Patient vs Organization */}
-              <div>
-                <Label className="text-xs">Send invoice to *</Label>
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  <button type="button"
-                    onClick={() => setInvoiceForm(pr => ({ ...pr, recipient: 'patient' }))}
-                    className={`text-left p-2 rounded border-2 text-sm ${invoiceForm.recipient === 'patient' ? 'border-[#B91C1C] bg-red-50' : 'border-gray-200'}`}>
-                    <span className="block font-semibold">Patient</span>
-                    <span className="block text-[11px] text-gray-500 truncate">{p.email || 'no email on file'}</span>
-                  </button>
-                  <button type="button"
-                    onClick={() => setInvoiceForm(pr => ({ ...pr, recipient: 'organization' }))}
-                    className={`text-left p-2 rounded border-2 text-sm ${invoiceForm.recipient === 'organization' ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200'}`}>
-                    <span className="block font-semibold">Organization</span>
-                    <span className="block text-[11px] text-gray-500">Bill a partner practice</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Org picker only shown when recipient = organization */}
-              {invoiceForm.recipient === 'organization' && (
-                <div>
-                  <Label className="text-xs">Organization *</Label>
-                  <select
-                    value={invoiceForm.orgId}
-                    onChange={(e) => setInvoiceForm(pr => ({ ...pr, orgId: e.target.value }))}
-                    className="mt-1 w-full h-9 text-sm border rounded-md px-2 bg-white">
-                    <option value="">— Select organization —</option>
-                    {allOrgs.map(o => (
-                      <option key={o.id} value={o.id}>
-                        {o.name} {o.billing_email ? `· ${o.billing_email}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div><Label className="text-xs">Amount ($) *</Label><Input type="number" min="0" step="0.01" value={invoiceForm.amount} onChange={e => setInvoiceForm(pr => ({ ...pr, amount: e.target.value }))} placeholder="150.00" /></div>
-                <div><Label className="text-xs">Service</Label><Input value={invoiceForm.description} onChange={e => setInvoiceForm(pr => ({ ...pr, description: e.target.value }))} placeholder="Blood Draw" /></div>
-              </div>
-              <div><Label className="text-xs">Memo</Label><Input value={invoiceForm.memo} onChange={e => setInvoiceForm(pr => ({ ...pr, memo: e.target.value }))} placeholder="Optional notes" /></div>
-
-              {(() => {
-                const selectedOrg = allOrgs.find(o => o.id === invoiceForm.orgId);
-                const recipientEmail = invoiceForm.recipient === 'organization'
-                  ? (selectedOrg?.billing_email || selectedOrg?.contact_email || '')
-                  : (p.email || '');
-                return (
-                  <p className={`text-xs ${recipientEmail ? 'text-muted-foreground' : 'text-red-600'}`}>
-                    Invoice will be sent to <strong>{recipientEmail || 'NO EMAIL ON FILE — pick a recipient with an email'}</strong>
-                    {invoiceForm.attachAppointmentId && <span className="block text-emerald-700 mt-1">✓ Attached to existing appointment</span>}
-                  </p>
-                );
-              })()}
-
-              <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white"
-                disabled={(() => {
-                  if (!invoiceForm.amount) return true;
-                  if (invoiceForm.recipient === 'patient' && !p.email) return true;
-                  if (invoiceForm.recipient === 'organization' && !invoiceForm.orgId) return true;
-                  return false;
-                })()}
-                onClick={async () => {
-                  try {
-                    const amount = parseFloat(invoiceForm.amount);
-                    const selectedOrg = allOrgs.find(o => o.id === invoiceForm.orgId);
-                    const recipientEmail = invoiceForm.recipient === 'organization'
-                      ? (selectedOrg?.billing_email || selectedOrg?.contact_email || '')
-                      : (p.email || '');
-                    const recipientName = invoiceForm.recipient === 'organization'
-                      ? (selectedOrg?.name || 'Organization')
-                      : `${p.first_name} ${p.last_name}`;
-
-                    let appointmentId = invoiceForm.attachAppointmentId;
-
-                    // Case A: attach to existing appointment — update its invoice columns
-                    if (appointmentId) {
-                      const { error: updateErr } = await supabase.from('appointments').update({
-                        total_amount: amount,
-                        service_price: amount,
-                        invoice_status: 'sent',
-                        invoice_sent_at: new Date().toISOString(),
-                        invoice_due_at: new Date(Date.now() + 7*24*60*60*1000).toISOString(),
-                        payment_status: 'pending',
-                        billed_to: invoiceForm.recipient === 'organization' ? 'org' : 'patient',
-                        ...(invoiceForm.recipient === 'organization' && invoiceForm.orgId ? { organization_id: invoiceForm.orgId } : {}),
-                        notes: invoiceForm.memo || null,
-                      }).eq('id', appointmentId);
-                      if (updateErr) throw updateErr;
-                    } else {
-                      // Case B: standalone placeholder appointment (old behavior, but now org-aware)
-                      const { data: appt, error } = await supabase.from('appointments').insert([{
-                        appointment_date: new Date().toISOString(), patient_id: p.id,
-                        patient_name: `${p.first_name} ${p.last_name}`, patient_email: p.email || null,
-                        service_type: 'invoice', service_name: invoiceForm.description || 'Invoice',
-                        status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
-                        total_amount: amount, service_price: amount, booking_source: 'manual',
-                        invoice_status: 'sent', invoice_sent_at: new Date().toISOString(),
-                        invoice_due_at: new Date(Date.now() + 7*24*60*60*1000).toISOString(),
-                        payment_status: 'pending', notes: invoiceForm.memo || null,
-                        billed_to: invoiceForm.recipient === 'organization' ? 'org' : 'patient',
-                        ...(invoiceForm.recipient === 'organization' && invoiceForm.orgId ? { organization_id: invoiceForm.orgId } : {}),
-                      }]).select().single();
-                      if (error) throw error;
-                      appointmentId = appt.id;
-                    }
-
-                    await supabase.functions.invoke('send-appointment-invoice', {
-                      body: {
-                        appointmentId,
-                        patientName: recipientName,
-                        patientEmail: recipientEmail,
-                        serviceName: invoiceForm.description || 'ConveLabs Service',
-                        servicePrice: amount,
-                        memo: invoiceForm.memo || (invoiceForm.recipient === 'organization' ? `Patient: ${p.first_name} ${p.last_name}` : ''),
-                        orgName: invoiceForm.recipient === 'organization' ? (selectedOrg?.name || undefined) : undefined,
-                      },
-                    });
-                    toast.success(`Invoice for $${amount.toFixed(2)} sent to ${recipientEmail}`);
-                    setInvoiceModalOpen(false);
-                    loadPatientData(p);
-                  } catch (err: any) { toast.error(err.message || 'Failed'); }
-                }}>
-                Send Invoice — ${parseFloat(invoiceForm.amount || '0').toFixed(2)}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+      <PatientChart
+        key={selectedPatient.id}
+        patient={selectedPatient}
+        memberTier={tierFor(selectedPatient)}
+        isProtected={!!s?.isProtected}
+        canDelete={canDelete}
+        canRefund={canDelete}
+        onBack={() => setSelectedPatient(null)}
+        onPatientSaved={(updated) => {
+          setSelectedPatient(updated);
+          setAllPatients(prev => prev.map(x => (x.id === updated.id ? { ...x, ...updated } : x)));
+        }}
+        onPatientDeleted={() => {
+          setAllPatients(prev => prev.filter(x => x.id !== selectedPatient.id));
+          setSelectedPatient(null);
+          refresh();
+        }}
+        onOpenPatient={openChart}
+        refreshDirectory={refresh}
+      />
     );
   }
 
-  // Search view — Square Customer Directory style
+  // ── Directory view ────────────────────────────────────────────
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="space-y-4">
-      {/* Header row */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Customers</h1>
-          <p className="text-sm text-muted-foreground">{allPatients.length.toLocaleString()} total customers in your directory</p>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-gray-900">
+            <Users className="h-6 w-6 text-[#B91C1C]" aria-hidden="true" />
+            Patients
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Every patient on file — {loading ? 'loading…' : `${allPatients.length.toLocaleString()} total.`}
+            {!loading && counts.needs_action > 0 && (
+              <span className="ml-1 font-medium text-red-700">{counts.needs_action} need{counts.needs_action === 1 ? 's' : ''} action.</span>
+            )}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" className="bg-[#1e293b] hover:bg-[#0f172a] text-white gap-1.5 h-9 text-xs" onClick={() => setCreatePatientOpen(true)}>
-            <UserPlus className="h-3.5 w-3.5" /> Create
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={refresh} className="gap-1.5 text-xs h-10 sm:h-9 min-w-10 sm:min-w-9" disabled={loading} aria-label="Refresh">
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} aria-hidden="true" />
+            <span className="hidden sm:inline">Refresh</span>
+          </Button>
+          <Button size="sm" className="gap-1.5 text-xs h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={() => { setCreateError(''); setCreateOpen(true); }}>
+            <UserPlus className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Add patient</span>
+            <span className="sm:hidden">Add</span>
           </Button>
         </div>
       </div>
 
-      {/* Search + filter bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        <div className="relative flex-1 w-full">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search..."
-            className="pl-9 h-9 text-sm"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {(() => {
-            const dormantCount = allPatients.filter(p => !patientsWithAppts.has(p.id)).length;
-            const incompleteCount = allPatients.filter(p => !p.address || p.address.trim() === '').length;
-            const membersCount = allPatients.filter(p => p.user_id && memberTiers.has(p.user_id)).length;
+      {/* Stat tiles — click to filter. The four tiles partition every patient. */}
+      <div className="-mx-4 sm:mx-0 px-4 sm:px-0 overflow-x-auto sm:overflow-visible snap-x">
+        <div className="grid grid-flow-col auto-cols-[46%] sm:auto-cols-auto sm:grid-cols-4 sm:grid-flow-row gap-2" role="group" aria-label="Patient counts">
+          {PATIENT_TILE_KEYS.map(k => {
+            const def = PATIENT_FILTERS.find(f => f.key === k)!;
+            const active = filter === k;
             return (
-              <>
-                <button onClick={() => setFilter('all')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'all' ? 'bg-[#1e293b] text-white border-[#1e293b]' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
-                  All ({allPatients.length})
-                </button>
-                <button onClick={() => setFilter('members')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition inline-flex items-center gap-1 ${filter === 'members' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white hover:bg-gray-50 text-emerald-700 border-emerald-300'}`}>
-                  <Crown className="h-3 w-3" /> Members ({membersCount})
-                </button>
-                <button onClick={() => setFilter('dormant')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'dormant' ? 'bg-amber-600 text-white border-amber-600' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
-                  Never Booked ({dormantCount})
-                </button>
-                <button onClick={() => setFilter('incomplete')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium border transition ${filter === 'incomplete' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'}`}>
-                  Missing Address ({incompleteCount})
-                </button>
-              </>
+              <button
+                key={k}
+                type="button"
+                onClick={() => setFilter(active ? 'all' : k)}
+                aria-pressed={active}
+                title={def.desc}
+                className={cn(
+                  'text-left rounded-lg border px-3 py-2.5 min-h-[64px] snap-start transition shadow-sm',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40',
+                  active ? cn('ring-2 ring-[#B91C1C]/30', PATIENT_TILE_STYLE[k]) : 'bg-white border-gray-200 hover:border-[#B91C1C]/40',
+                )}
+              >
+                <p className="text-[10px] uppercase tracking-wider font-semibold opacity-70 truncate">{def.label}</p>
+                <p className={cn('text-2xl font-bold leading-tight mt-0.5 tabular-nums', k === 'needs_action' && counts[k] > 0 && !active && 'text-red-700')}>
+                  {loading ? '–' : counts[k]}
+                </p>
+              </button>
             );
-          })()}
+          })}
         </div>
       </div>
 
-      {/* Table */}
-      {patients.length > 0 ? (
-        <div className="border rounded-lg overflow-hidden bg-white">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-gray-50/80">
-                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide">Name</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden sm:table-cell">Email</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden md:table-cell">Phone</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden lg:table-cell">Birthday</th>
-                  <th className="text-left px-4 py-3 font-semibold text-xs text-gray-500 uppercase tracking-wide hidden lg:table-cell">Address</th>
-                </tr>
-              </thead>
-              <tbody>
-                {patients.map(p => (
-                  <tr key={p.id} className="border-b last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => loadPatientData(p)}>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-blue-700 hover:underline">{p.first_name} {p.last_name}</span>
-                        {p.user_id && memberTiers.has(p.user_id) && (
-                          <span
-                            title={`${memberTiers.get(p.user_id)} member`}
-                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${tierBadgeClass(memberTiers.get(p.user_id))}`}
-                          >
-                            <Crown className="h-2.5 w-2.5" /> {memberTiers.get(p.user_id)}
-                          </span>
-                        )}
-                        {protectedIds.has(p.id) && !(p.user_id && memberTiers.has(p.user_id)) && (
-                          <span
-                            title="Protected from auto-cancel — not a paid member"
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-600 border border-slate-300"
-                          >
-                            <Shield className="h-2.5 w-2.5" /> Protected
-                          </span>
-                        )}
-                        {!patientsWithAppts.has(p.id) && (
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" title="Never booked" />
-                        )}
-                      </div>
-                      {/* Mobile: show email/phone inline */}
-                      <div className="sm:hidden text-xs text-muted-foreground mt-0.5">
-                        {p.email && <span className="truncate block">{p.email}</span>}
-                        {p.phone && <span>{p.phone}</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">
-                      <span className="truncate block max-w-[220px]">{p.email || '—'}</span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{p.phone || '—'}</td>
-                    <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">
-                      {p.date_of_birth ? format(new Date(p.date_of_birth + 'T12:00:00'), 'MMM d, yyyy') : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">
-                      <span className="truncate block max-w-[200px]">
-                        {p.address ? `${p.address}${p.city ? `, ${p.city}` : ''}` : '—'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : searchQuery ? (
-        <p className="text-muted-foreground text-center py-8">No patients found matching "{searchQuery}"</p>
-      ) : (
-        <div className="flex justify-center py-12">
-          <div className="w-8 h-8 border-4 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
-        </div>
+      {lastError && (
+        <Card className="border-red-300 bg-red-50" role="alert">
+          <CardContent className="p-3 flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <div className="text-xs flex-1">
+              <p className="font-semibold text-red-800">Couldn't load patients</p>
+              <p className="text-red-700 mt-0.5 font-mono break-all">{lastError}</p>
+              <p className="text-red-600 mt-1">If this says "JWT" or "401/403", log out and back in to refresh your session.</p>
+            </div>
+            <Button variant="outline" size="sm" className="h-9 text-xs" onClick={refresh}>Retry</Button>
+          </CardContent>
+        </Card>
       )}
 
-      {/* Create Patient Modal */}
-      <Dialog open={createPatientOpen} onOpenChange={setCreatePatientOpen}>
+      {/* Search + sort + chips */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" aria-hidden="true" />
+            <Input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search name, email, phone, address, DOB…"
+              aria-label="Search patients"
+              className="h-10 sm:h-9 pl-8 text-sm"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center text-gray-400 hover:text-gray-700">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <select
+            value={sort}
+            onChange={e => setSort(e.target.value as SortKey)}
+            aria-label="Sort patients"
+            className="h-10 sm:h-9 text-xs font-medium border border-gray-200 rounded-md px-2 bg-white text-gray-700"
+          >
+            <option value="name">Name A–Z</option>
+            <option value="recent">Recently added</option>
+            <option value="last_visit">Last visit</option>
+          </select>
+        </div>
+        <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:flex-wrap" role="group" aria-label="Status filter">
+          {PATIENT_FILTERS.map(f => {
+            const active = filter === f.key;
+            const n = counts[f.key];
+            return (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setFilter(f.key)}
+                aria-pressed={active}
+                title={f.desc}
+                className={cn(
+                  'inline-flex items-center gap-1.5 h-9 px-3 rounded-full border text-xs font-medium whitespace-nowrap transition',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40',
+                  active ? 'bg-[#B91C1C] text-white border-[#B91C1C]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400',
+                  !active && n === 0 && 'text-gray-400',
+                )}
+              >
+                {f.key !== 'all' && f.key !== 'needs_action' && (
+                  <span className={cn('w-1.5 h-1.5 rounded-full', active ? 'bg-white' : BUCKET_META[f.key as PatientBucket].dot)} aria-hidden="true" />
+                )}
+                {f.label}
+                <span className={cn('tabular-nums', active ? 'opacity-90' : 'text-gray-500')}>{loading ? '–' : n}</span>
+              </button>
+            );
+          })}
+        </div>
+        {/* Flag chips — multi-select, AND-ed with the bucket filter. */}
+        <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:flex-wrap items-center" role="group" aria-label="Flag filter">
+          <span className="text-[10px] uppercase tracking-wider font-semibold text-gray-400 whitespace-nowrap mr-0.5">Flags</span>
+          {FLAG_KEYS.map(k => {
+            const meta = FLAG_META[k];
+            const active = flags.has(k);
+            const n = flagCounts[k];
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setFlags(prev => { const next = new Set(prev); if (next.has(k)) next.delete(k); else next.add(k); return next; })}
+                aria-pressed={active}
+                title={meta.desc}
+                className={cn(
+                  'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full border text-[11px] font-medium whitespace-nowrap transition',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40',
+                  active ? cn('ring-2 ring-[#B91C1C]/30', meta.chip) : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400',
+                  !active && n === 0 && 'text-gray-400',
+                )}
+              >
+                {k === 'member' && <Crown className="h-3 w-3" aria-hidden="true" />}
+                {k === 'protected' && <Shield className="h-3 w-3" aria-hidden="true" />}
+                {meta.label}
+                <span className="tabular-nums opacity-70">{loading ? '–' : n}</span>
+              </button>
+            );
+          })}
+          {flags.size > 0 && (
+            <button type="button" onClick={() => setFlags(new Set())} className="text-[11px] text-gray-500 underline whitespace-nowrap h-8 px-1">Clear flags</button>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      {loading && allPatients.length === 0 ? (
+        <LoadingRows />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          filterLabel={activeFilter.label}
+          filterDesc={activeFilter.desc}
+          hasSearch={search.trim() !== ''}
+          hasFlags={flags.size > 0}
+          total={allPatients.length}
+          onReset={() => { setFilter('all'); setFlags(new Set()); setSearch(''); }}
+          onCreate={() => { setCreateError(''); setCreateOpen(true); }}
+        />
+      ) : lanes ? (
+        <div className="space-y-5">
+          <section aria-labelledby="lane-action">
+            <LaneHeader id="lane-action" title="Needs action" count={lanes.action.length} tone="red" />
+            <PatientRows rows={lanes.action} ctx={ctx} handlers={handlers} />
+          </section>
+          {lanes.rest.length > 0 && (
+            <section aria-labelledby="lane-rest">
+              <LaneHeader id="lane-rest" title="Everyone else" count={lanes.rest.length} tone="gray" />
+              <PatientRows rows={lanes.rest} ctx={ctx} handlers={handlers} />
+            </section>
+          )}
+        </div>
+      ) : (
+        <PatientRows rows={filtered} ctx={ctx} handlers={handlers} />
+      )}
+
+      <p className="text-[11px] text-gray-400">
+        Showing {filtered.length} of {allPatients.length} patient{allPatients.length === 1 ? '' : 's'}
+      </p>
+
+      {/* Row-level quick actions */}
+      <ScheduleAppointmentModal
+        open={scheduleOpen}
+        onClose={() => { setScheduleOpen(false); setActionPatient(null); }}
+        onCreated={() => { setScheduleOpen(false); setActionPatient(null); refresh(); }}
+        prefilledPatient={actionPatient ? toPrefilledPatient(actionPatient) : null}
+      />
+      <SendBookingLinkModal
+        open={sendLinkOpen}
+        onClose={() => { setSendLinkOpen(false); setActionPatient(null); }}
+        patient={actionPatient ? { id: actionPatient.id, firstName: actionPatient.first_name || '', lastName: actionPatient.last_name || '', email: actionPatient.email, phone: actionPatient.phone } : null}
+      />
+
+      {/* Add patient */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-[#B91C1C]" /> Add New Patient</DialogTitle>
+            <DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-[#B91C1C]" aria-hidden="true" /> Add patient</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><Label>First Name *</Label><Input value={newPatient.firstName} onChange={e => setNewPatient(p => ({ ...p, firstName: e.target.value }))} placeholder="John" /></div>
-              <div><Label>Last Name *</Label><Input value={newPatient.lastName} onChange={e => setNewPatient(p => ({ ...p, lastName: e.target.value }))} placeholder="Smith" /></div>
+              <div><Label>First name *</Label><Input value={newPatient.firstName} onChange={e => setNewPatient(p => ({ ...p, firstName: e.target.value }))} placeholder="John" /></div>
+              <div><Label>Last name *</Label><Input value={newPatient.lastName} onChange={e => setNewPatient(p => ({ ...p, lastName: e.target.value }))} placeholder="Smith" /></div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Email</Label><Input type="email" value={newPatient.email} onChange={e => setNewPatient(p => ({ ...p, email: e.target.value }))} placeholder="john@email.com" /></div>
               <div><Label>Phone</Label><Input type="tel" value={newPatient.phone} onChange={e => setNewPatient(p => ({ ...p, phone: e.target.value }))} placeholder="4071234567" /></div>
             </div>
-            <div><Label>Date of Birth</Label><Input type="date" value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))} /></div>
+            <div><Label>Date of birth</Label><Input type="date" value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))} /></div>
 
             <div className="border-t pt-3">
               <p className="text-sm font-semibold mb-2">Address</p>
@@ -1545,21 +573,14 @@ const PatientProfileTab: React.FC = () => {
                     value={newPatient.address}
                     onChange={v => setNewPatient(p => ({ ...p, address: v }))}
                     onPlaceSelected={(place) => {
-                      // Use street-only in Address — City/State/Zip are separate fields below.
-                      setNewPatient(p => ({
-                        ...p,
-                        address: place.street || place.address,
-                        city: place.city || p.city,
-                        state: place.state || p.state,
-                        zipcode: place.zipCode || p.zipcode,
-                      }));
+                      setNewPatient(p => ({ ...p, address: place.street || place.address, city: place.city || p.city, state: place.state || p.state, zipcode: place.zipCode || p.zipcode }));
                     }}
                     placeholder="Start typing address — Google will suggest"
                   />
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div><Label>City</Label><Input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))} placeholder="Orlando" /></div>
-                  <div><Label>State</Label><Input value={newPatient.state} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))} /></div>
+                  <div><Label>State</Label><Input value={newPatient.state} maxLength={2} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))} /></div>
                   <div><Label>ZIP</Label><Input value={newPatient.zipcode} onChange={e => setNewPatient(p => ({ ...p, zipcode: e.target.value }))} placeholder="32801" /></div>
                 </div>
               </div>
@@ -1577,65 +598,306 @@ const PatientProfileTab: React.FC = () => {
             </div>
 
             {createError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{createError}</div>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700" role="alert">{createError}</div>
             )}
 
-            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!newPatient.firstName || !newPatient.lastName || isCreating}
-              onClick={async () => {
-                console.log('Create patient clicked:', newPatient.firstName, newPatient.lastName);
-                setCreateError('');
-                setIsCreating(true);
-                try {
-                  if (newPatient.email) {
-                    const { data: existing } = await supabase.from('tenant_patients').select('id').ilike('email', newPatient.email.trim()).maybeSingle();
-                    if (existing) { setCreateError('A patient with this email already exists'); setIsCreating(false); return; }
-                  }
-
-                  console.log('Inserting patient...');
-                  const { data, error } = await supabase.from('tenant_patients').insert({
-                    first_name: newPatient.firstName.trim(),
-                    last_name: newPatient.lastName.trim(),
-                    email: newPatient.email?.trim() || null,
-                    phone: newPatient.phone?.trim() || null,
-                    date_of_birth: newPatient.dob || null,
-                    address: newPatient.address?.trim() || null,
-                    city: newPatient.city?.trim() || null,
-                    state: newPatient.state?.trim() || null,
-                    zipcode: newPatient.zipcode?.trim() || null,
-                    insurance_provider: newPatient.insuranceProvider?.trim() || null,
-                    insurance_member_id: newPatient.insuranceMemberId?.trim() || null,
-                    insurance_group_number: newPatient.insuranceGroup?.trim() || null,
-                    tenant_id: '00000000-0000-0000-0000-000000000001',
-                  }).select().single();
-
-                  console.log('Insert result:', { data, error });
-                  if (error) throw error;
-                  if (!data) throw new Error('Patient was not created');
-
-                  toast.success(`${newPatient.firstName} ${newPatient.lastName} added!`);
-                  setNewPatient({ firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' });
-                  setCreatePatientOpen(false);
-
-                  const refreshed = await fetchAllTenantPatients();
-                  setAllPatients(refreshed);
-                  setPatients(refreshed);
-
-                  if (data) loadPatientData(data);
-                } catch (err: any) {
-                  console.error('Create patient error:', err);
-                  const msg = err.message || 'Failed to create patient';
-                  setCreateError(msg);
-                  toast.error(msg, { duration: 6000 });
-                } finally {
-                  setIsCreating(false);
-                }
-              }}>
-              {isCreating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Creating...</> : 'Create Patient'}
+            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!newPatient.firstName.trim() || !newPatient.lastName.trim() || isCreating} onClick={createPatient}>
+              {isCreating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" /> Creating…</> : 'Create patient'}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────
+// Small presentational pieces
+// ──────────────────────────────────────────────────────────────────
+const LaneHeader: React.FC<{ id: string; title: string; count: number; tone: 'red' | 'gray' }> = ({ id, title, count, tone }) => (
+  <div className="flex items-center gap-2 mb-2">
+    <h2 id={id} className={cn('text-sm font-bold', tone === 'red' ? 'text-red-800' : 'text-gray-700')}>{title}</h2>
+    <span className={cn('inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full', tone === 'red' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-700')}>{count}</span>
+  </div>
+);
+
+const LoadingRows: React.FC = () => (
+  <div className="space-y-1.5" aria-busy="true" aria-label="Loading patients">
+    {[1, 2, 3, 4, 5].map(i => (
+      <Card key={i} className="shadow-sm">
+        <CardContent className="p-3 flex items-center gap-3 animate-pulse">
+          <div className="w-9 h-9 rounded-full bg-gray-200 flex-shrink-0" />
+          <div className="flex-1 min-w-0 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="h-3.5 bg-gray-200 rounded w-32" />
+              <div className="h-3 bg-gray-100 rounded w-16" />
+            </div>
+            <div className="h-2.5 bg-gray-100 rounded w-48" />
+          </div>
+          <div className="h-7 w-20 bg-gray-100 rounded flex-shrink-0 hidden sm:block" />
+        </CardContent>
+      </Card>
+    ))}
+  </div>
+);
+
+const EmptyState: React.FC<{ filterLabel: string; filterDesc: string; hasSearch: boolean; hasFlags: boolean; total: number; onReset: () => void; onCreate: () => void }> =
+  ({ filterLabel, filterDesc, hasSearch, hasFlags, total, onReset, onCreate }) => (
+  <Card className="border-dashed">
+    <CardContent className="p-8 text-center">
+      <Users className="h-10 w-10 text-gray-300 mx-auto mb-2" aria-hidden="true" />
+      {total === 0 ? (
+        <>
+          <p className="text-sm font-semibold text-gray-700">No patients yet.</p>
+          <p className="text-xs text-gray-500 mt-1">Patients appear here when they book, when a provider sends an order, or when you add one.</p>
+          <Button size="sm" className="mt-3 text-xs h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" onClick={onCreate}><UserPlus className="h-3.5 w-3.5" aria-hidden="true" /> Add patient</Button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm font-semibold text-gray-700">
+            {hasSearch ? 'No patients match your search.' : hasFlags ? `Nothing in "${filterLabel}" with those flags.` : `Nothing in "${filterLabel}".`}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">{hasSearch ? 'Try a name, email, phone, address or date of birth.' : filterDesc}</p>
+          <Button variant="outline" size="sm" className="mt-3 text-xs h-9" onClick={onReset}>Show all {total} patients</Button>
+        </>
+      )}
+    </CardContent>
+  </Card>
+);
+
+/** One bucket pill + a one-line detail (next visit / balance / last visit). */
+const StatusPill: React.FC<{ bucket: PatientBucket; stats: PatientStats | undefined; className?: string }> = ({ bucket, stats, className }) => {
+  const meta = BUCKET_META[bucket];
+  let text: string = meta.label;
+  if (bucket === 'balance_due' && stats) text = `Balance $${stats.balanceDue.toFixed(0)}`;
+  if (bucket === 'upcoming' && stats?.next) {
+    const d = daysFromToday(apptDay(stats.next));
+    text = d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : `Upcoming · ${fmtDay(apptDay(stats.next), 'MMM d')}`;
+  }
+  if (bucket === 'unresolved_visit' && stats?.unresolved) {
+    const d = daysFromToday(apptDay(stats.unresolved));
+    text = `Unresolved · ${d !== null ? `${Math.abs(d)}d ago` : ''}`;
+  }
+  return (
+    <span className={cn('inline-flex items-center gap-1 px-2 h-6 rounded-full border text-[11px] font-semibold whitespace-nowrap', meta.pill, className)}>
+      <span className={cn('w-1.5 h-1.5 rounded-full', meta.dot)} aria-hidden="true" />
+      {text}
+    </span>
+  );
+};
+
+const TierPills: React.FC<{ p: PatientRow; tier: MemberTier | undefined; stats: PatientStats | undefined; small?: boolean }> = ({ p, tier, stats, small }) => (
+  <>
+    {tier && (
+      <span title={`${tier} member`} className={cn('inline-flex items-center gap-0.5 rounded-full font-bold uppercase tracking-wide', small ? 'px-1.5 h-5 text-[9px]' : 'px-2 h-5 text-[10px]', tierBadgeClass(tier))}>
+        <Crown className="h-2.5 w-2.5" aria-hidden="true" /> {tier}
+      </span>
+    )}
+    {stats?.isProtected && !tier && (
+      <span title="Protected from auto-cancel — not a paid member" className="inline-flex items-center gap-0.5 px-1.5 h-5 rounded-full text-[9px] font-medium bg-slate-100 text-slate-600 border border-slate-300">
+        <Shield className="h-2.5 w-2.5" aria-hidden="true" /> Protected
+      </span>
+    )}
+    {!(p.phone || '').trim() && !(p.email || '').trim() && (
+      <span title="No phone or email on file" className="inline-flex items-center px-1.5 h-5 rounded-full text-[9px] font-semibold bg-red-50 text-red-700 border border-red-200">No contact</span>
+    )}
+  </>
+);
+
+const LastVisit: React.FC<{ stats: PatientStats | undefined }> = ({ stats }) => {
+  if (!stats || stats.total === 0) return <span className="text-gray-400">Never</span>;
+  if (stats.last) return <span>{fmtDay(apptDay(stats.last), 'MMM d, yyyy')}</span>;
+  return <span className="text-gray-400">No completed visit</span>;
+};
+
+const PrimaryAction: React.FC<{ p: PatientRow; bucket: PatientBucket; h: RowHandlers; className?: string }> = ({ p, bucket, h, className }) => {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const reachable = !!(p.email || p.phone);
+  if ((bucket === 'never_booked' || bucket === 'active') && reachable) {
+    return (
+      <Button size="sm" className={cn('bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5', className)} onClick={(e) => { stop(e); h.onSendLink(p); }}>
+        <Zap className="h-3.5 w-3.5" aria-hidden="true" /> Send booking link
+      </Button>
+    );
+  }
+  return (
+    <Button size="sm" variant="outline" className={cn('text-xs gap-1.5', className)} onClick={(e) => { stop(e); h.onOpen(p); }}>
+      <FileText className="h-3.5 w-3.5" aria-hidden="true" /> Open chart
+    </Button>
+  );
+};
+
+/** Overflow menu — every secondary action in one predictable place. */
+const RowMenu: React.FC<{ p: PatientRow; h: RowHandlers; className?: string }> = ({ p, h, className }) => {
+  const addr = [p.address, [p.city, p.state, p.zipcode].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm" className={cn('h-9 w-9 p-0', className)} aria-label={`More actions for ${fullName(p)}`} onClick={(e) => e.stopPropagation()}>
+          <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem onSelect={() => h.onOpen(p)}><FileText className="h-4 w-4 mr-2" aria-hidden="true" /> Open chart</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => h.onSchedule(p)}><CalendarPlus className="h-4 w-4 mr-2" aria-hidden="true" /> Schedule visit</DropdownMenuItem>
+        {(p.email || p.phone) && (
+          <DropdownMenuItem onSelect={() => h.onSendLink(p)}><Zap className="h-4 w-4 mr-2" aria-hidden="true" /> Send booking link</DropdownMenuItem>
+        )}
+        {(p.phone || p.email) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => openMessageThread(p.phone, p.email)}><MessageSquare className="h-4 w-4 mr-2" aria-hidden="true" /> Message</DropdownMenuItem>
+          </>
+        )}
+        {p.phone && (
+          <DropdownMenuItem asChild>
+            <a href={`tel:${p.phone}`}><Phone className="h-4 w-4 mr-2" aria-hidden="true" /> Call {p.phone}</a>
+          </DropdownMenuItem>
+        )}
+        {p.email && (
+          <DropdownMenuItem asChild>
+            <a href={`mailto:${p.email}`}><Mail className="h-4 w-4 mr-2" aria-hidden="true" /> Email patient</a>
+          </DropdownMenuItem>
+        )}
+        {(p.phone || p.email || addr) && <DropdownMenuSeparator />}
+        {p.phone && <DropdownMenuItem onSelect={() => copyText(p.phone!, 'Phone')}><Copy className="h-4 w-4 mr-2" aria-hidden="true" /> Copy phone</DropdownMenuItem>}
+        {p.email && <DropdownMenuItem onSelect={() => copyText(p.email!, 'Email')}><Copy className="h-4 w-4 mr-2" aria-hidden="true" /> Copy email</DropdownMenuItem>}
+        {addr && <DropdownMenuItem onSelect={() => copyText(addr, 'Address')}><MapPin className="h-4 w-4 mr-2" aria-hidden="true" /> Copy address</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
+
+const rowKeyHandler = (open: () => void) => (e: React.KeyboardEvent) => {
+  if (e.target !== e.currentTarget) return; // let buttons/links inside handle their own keys
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+};
+
+// ──────────────────────────────────────────────────────────────────
+// Rows — table on ≥md, cards below. One component so the flat list and
+// the lanes render identically.
+// ──────────────────────────────────────────────────────────────────
+const PatientRows: React.FC<{ rows: PatientRow[]; ctx: RowCtx; handlers: RowHandlers }> = ({ rows, ctx, handlers }) => {
+  const tierFor = (p: PatientRow) => (p.user_id ? ctx.tierOf.get(p.user_id) : undefined);
+  return (
+    <>
+      {/* Desktop table */}
+      <div className="hidden md:block overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gray-50/80 hover:bg-gray-50/80">
+              <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500 pl-4">Patient</TableHead>
+              <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500">Status</TableHead>
+              <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500">Contact</TableHead>
+              <TableHead className="hidden lg:table-cell h-9 text-[11px] uppercase tracking-wider text-gray-500">Address</TableHead>
+              <TableHead className="hidden xl:table-cell h-9 text-[11px] uppercase tracking-wider text-gray-500 whitespace-nowrap">DOB</TableHead>
+              <TableHead className="hidden lg:table-cell h-9 text-[11px] uppercase tracking-wider text-gray-500 whitespace-nowrap">Last visit</TableHead>
+              {/* Actions stay pinned to the right edge so they are never scrolled out of view. */}
+              <TableHead className="sticky right-0 z-10 bg-gray-50 shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)] h-9 text-[11px] uppercase tracking-wider text-gray-500 text-right pr-3">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(p => {
+              const b = ctx.bucketOf.get(p.id) || 'never_booked';
+              const s = ctx.statsOf.get(p.id);
+              const tier = tierFor(p);
+              const open = () => handlers.onOpen(p);
+              return (
+                <TableRow
+                  key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={rowKeyHandler(open)}
+                  aria-label={`${fullName(p)}, ${BUCKET_META[b].label}. Open chart`}
+                  className={cn(
+                    'cursor-pointer bg-white focus:outline-none focus-visible:bg-red-50/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#B91C1C]/40',
+                    b === 'balance_due' && 'border-l-4 border-l-red-500',
+                    b === 'unresolved_visit' && 'border-l-4 border-l-orange-400',
+                  )}
+                >
+                  <TableCell className="py-2.5 pl-4 align-top">
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      <span className="text-sm font-semibold text-gray-900 truncate">{fullName(p)}</span>
+                      <TierPills p={p} tier={tier} stats={s} small />
+                    </div>
+                    {s && s.total > 0 && <p className="text-[11px] text-gray-500">{s.total} visit{s.total === 1 ? '' : 's'}{s.completed !== s.total ? ` · ${s.completed} completed` : ''}</p>}
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top"><StatusPill bucket={b} stats={s} /></TableCell>
+                  <TableCell className="py-2.5 align-top text-xs text-gray-700 max-w-[220px]">
+                    {p.phone && <span className="block truncate">{p.phone}</span>}
+                    {p.email && <span className="block truncate text-gray-500">{p.email}</span>}
+                    {!p.phone && !p.email && <span className="text-gray-400">—</span>}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell py-2.5 align-top text-xs text-gray-700 max-w-[220px]">
+                    {p.address ? <span className="block truncate">{p.address}{p.city ? `, ${p.city}` : ''}</span> : <span className="text-amber-700">Missing</span>}
+                  </TableCell>
+                  <TableCell className="hidden xl:table-cell py-2.5 align-top text-xs text-gray-700 whitespace-nowrap">
+                    {p.date_of_birth ? fmtDay(p.date_of_birth) : <span className="text-gray-400">—</span>}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell py-2.5 align-top text-xs text-gray-700 whitespace-nowrap"><LastVisit stats={s} /></TableCell>
+                  <TableCell className="sticky right-0 z-10 py-2 align-top pr-3 bg-white shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)]">
+                    <div className="flex items-center justify-end gap-1">
+                      <PrimaryAction p={p} bucket={b} h={handlers} className="h-9" />
+                      <RowMenu p={p} h={handlers} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-2">
+        {rows.map(p => {
+          const b = ctx.bucketOf.get(p.id) || 'never_booked';
+          const s = ctx.statsOf.get(p.id);
+          const tier = tierFor(p);
+          const open = () => handlers.onOpen(p);
+          return (
+            <Card
+              key={p.id}
+              role="button"
+              tabIndex={0}
+              onClick={open}
+              onKeyDown={rowKeyHandler(open)}
+              aria-label={`${fullName(p)}, ${BUCKET_META[b].label}. Open chart`}
+              className={cn(
+                'shadow-sm cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40',
+                b === 'balance_due' && 'border-l-4 border-l-red-500',
+                b === 'unresolved_visit' && 'border-l-4 border-l-orange-400',
+              )}
+            >
+              <CardContent className="p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-sm font-semibold text-gray-900">{fullName(p)}</span>
+                      <TierPills p={p} tier={tier} stats={s} small />
+                    </div>
+                    <p className="text-[11px] text-gray-500 truncate mt-0.5">{p.phone || p.email || 'No contact on file'}</p>
+                  </div>
+                  <StatusPill bucket={b} stats={s} />
+                </div>
+                <div className="text-xs text-gray-600 flex flex-wrap gap-x-2 gap-y-0.5">
+                  <span>Last visit <LastVisit stats={s} /></span>
+                  <span className="text-gray-300">·</span>
+                  <span className={cn(!p.address && 'text-amber-700')}>{p.address ? `${p.address}${p.city ? `, ${p.city}` : ''}` : 'No address'}</span>
+                </div>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <PrimaryAction p={p} bucket={b} h={handlers} className="h-11 flex-1 justify-center" />
+                  <RowMenu p={p} h={handlers} className="h-11 w-11 flex-shrink-0 border border-gray-200" />
+                  <ChevronRight className="h-5 w-5 text-gray-300 flex-shrink-0" aria-hidden="true" />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </>
   );
 };
 

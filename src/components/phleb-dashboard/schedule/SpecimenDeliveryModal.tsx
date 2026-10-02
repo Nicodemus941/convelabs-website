@@ -682,8 +682,14 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
 
       // Audit row in specimen_deliveries — fired for both branches so the
       // ledger has one row per delivered patient regardless of mode.
-      try {
-        await supabase.from('specimen_deliveries' as any).insert({
+      // supabase-js RETURNS {error} rather than throwing, so the old
+      // try/catch around this never fired and a failed insert looked like a
+      // successful delivery (2 delivered visits with no ledger row, found
+      // 2026-10-02). Check it, and stop here: nothing else has been written
+      // yet, so the phleb can simply retry. No .select() — phlebs have no
+      // SELECT policy on specimen_deliveries, so returning rows would fail.
+      {
+        const { error: ledgerErr } = await supabase.from('specimen_deliveries' as any).insert({
           appointment_id: row.appointmentId,
           patient_id: row.patientId,
           patient_name: row.patientName,
@@ -698,7 +704,11 @@ const SpecimenDeliveryModal: React.FC<SpecimenDeliveryModalProps> = ({
           delivered_by: deliveredBy,
           status: 'delivered',
         });
-      } catch (e) { console.warn('specimen_deliveries insert failed:', e); }
+        if (ledgerErr) {
+          console.error('specimen_deliveries insert failed:', ledgerErr);
+          throw new Error(`Couldn't save the delivery record for ${row.patientName} — nothing was marked delivered. Check your connection and tap Confirm again.`);
+        }
+      }
 
       // Optional signature upload (only on the FIRST delivered row of the session)
       let signaturePath: string | null = null;

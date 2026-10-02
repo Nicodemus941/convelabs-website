@@ -1,11 +1,29 @@
-import React from 'react';
+/**
+ * HORMOZI DASHBOARD — Owner › Growth model (owner-gated in Dashboard.tsx).
+ *
+ * One page that answers the three questions that actually change behavior:
+ *   1. Are we making or losing money this month?
+ *   2. Which patients / channels / services print cash?
+ *   3. What needs my attention before it costs me money?
+ *
+ * 2026-10-02 redesign (LabOrdersTab language): header + right-aligned
+ * actions, a sticky jump bar so the fifteen cards are navigable, KPI tiles
+ * in the shared tile shell, tables with a sticky Actions column + mobile
+ * cards. Every card and every number from the previous version is still
+ * here; only the chrome changed. Data comes from useHormoziData plus the
+ * per-card hooks each sub-card already owned.
+ */
+import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import {
-  TrendingUp, TrendingDown, DollarSign, Users, Target, AlertTriangle,
-  Activity, Percent, Repeat, Loader2,
+  TrendingUp, TrendingDown, DollarSign, Users, Target, AlertTriangle, Activity, Percent, Repeat,
+  RefreshCw, Calendar, BarChart3, ChevronRight,
 } from 'lucide-react';
+import { format } from 'date-fns';
 import { useHormoziData, MARGIN_TARGET_PCT } from '@/hooks/useHormoziData';
 import DataHealthCard from './DataHealthCard';
 import ActiveSubscriptionsCard from './ActiveSubscriptionsCard';
@@ -22,285 +40,206 @@ import CampaignROICard from './CampaignROICard';
 import CampaignEngagementCard from './CampaignEngagementCard';
 import ChatROICard from './ChatROICard';
 import TrafficCard from './TrafficCard';
+import {
+  SectionHeader, SectionTitle, KpiTile, Pill, LoadingTiles, ErrorBanner, Th, ThActions, TdActions, fmtMoney, fmtMoneyPrecise, fmtPct, fmtInt,
+} from '../owner/sectionUi';
 
-/**
- * HORMOZI DASHBOARD — The Accountability Screen
- *
- * Per the master plan (Part C9): one page that answers the three
- * questions that actually change behavior:
- *   1. Are we making or losing money this month?
- *   2. Which patients / channels / services print cash?
- *   3. What needs my attention before it costs me money?
- *
- * Everything else is accounting theater. This screen is not.
- */
+const BASE = '/dashboard/super_admin';
 
-const fmtMoney = (n: number): string =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', maximumFractionDigits: 0,
-  }).format(n || 0);
+const JUMPS: Array<{ id: string; label: string }> = [
+  { id: 'hz-pulse', label: 'Pulse' },
+  { id: 'hz-month', label: 'This month' },
+  { id: 'hz-revenue', label: 'Revenue' },
+  { id: 'hz-unit', label: 'Unit economics' },
+  { id: 'hz-retention', label: 'Retention' },
+  { id: 'hz-ltv', label: 'LTV' },
+  { id: 'hz-money', label: 'Money flow' },
+  { id: 'hz-acq', label: 'Acquisition' },
+  { id: 'hz-attention', label: 'Needs attention' },
+  { id: 'hz-level', label: 'Level check' },
+];
 
-const fmtMoneyPrecise = (n: number): string =>
-  new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
-  }).format(n || 0);
-
-const fmtPct = (n: number): string => `${(n || 0).toFixed(1)}%`;
-
-interface KpiProps {
-  label: string;
-  value: string;
-  subtext?: string;
-  subtextColor?: 'green' | 'red' | 'amber' | 'muted';
-  icon: React.ComponentType<{ className?: string }>;
-  emphasis?: boolean;
-  trend?: number[]; // optional 14-day daily series
-  trendLabel?: string;
-}
-
-const Kpi: React.FC<KpiProps> = ({ label, value, subtext, subtextColor = 'muted', icon: Icon, emphasis, trend, trendLabel }) => {
-  const subColor = {
-    green: 'text-emerald-600',
-    red: 'text-red-600',
-    amber: 'text-amber-600',
-    muted: 'text-gray-500',
-  }[subtextColor];
-
+const Kpi: React.FC<{
+  label: string; value: string; subtext?: string; subtextColor?: 'green' | 'red' | 'amber' | 'muted';
+  icon: React.ComponentType<{ className?: string }>; emphasis?: boolean; trend?: number[]; trendLabel?: string;
+}> = ({ label, value, subtext, subtextColor = 'muted', icon, emphasis, trend, trendLabel }) => {
+  const tone = emphasis ? 'brand' : subtextColor === 'green' ? 'green' : subtextColor === 'red' ? 'red' : subtextColor === 'amber' ? 'amber' : 'default';
   return (
-    <Card className={emphasis ? 'border-conve-red/30 shadow-md' : ''}>
-      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</CardTitle>
-        <Icon className={`h-4 w-4 ${emphasis ? 'text-conve-red' : 'text-gray-400'}`} />
-      </CardHeader>
-      <CardContent>
-        <div className={`text-2xl font-bold ${emphasis ? 'text-conve-red' : 'text-gray-900'}`}>{value}</div>
-        {subtext && <p className={`text-xs mt-1 ${subColor}`}>{subtext}</p>}
-        {trend && trend.length >= 2 && (
-          <div className="mt-2">
-            <TrendSparkline
-              values={trend}
-              width={110}
-              height={24}
-              strokeColor={emphasis ? '#B91C1C' : '#6B7280'}
-              showDelta
-              ariaLabel={trendLabel || `${label} — last 14 days`}
-            />
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <KpiTile
+      label={label}
+      value={value}
+      icon={icon}
+      tone={emphasis ? 'brand' : 'default'}
+      hint={subtext ? <span className={cn(tone === 'green' && 'text-emerald-700', tone === 'red' && 'text-red-700', tone === 'amber' && 'text-amber-700')}>{subtext}</span> : undefined}
+    >
+      {trend && trend.length >= 2 && (
+        <div className="mt-1.5">
+          <TrendSparkline values={trend} width={110} height={24} strokeColor={emphasis ? '#B91C1C' : '#6B7280'} showDelta ariaLabel={trendLabel || `${label} — last 14 days`} />
+        </div>
+      )}
+    </KpiTile>
   );
 };
 
 const HormoziDashboard: React.FC = () => {
-  const { data, isLoading, error, refetch, isFetching } = useHormoziData();
+  const { data, isLoading, error, refetch, isFetching, dataUpdatedAt } = useHormoziData();
+  const [activeJump, setActiveJump] = useState<string>(JUMPS[0].id);
+
+  // Highlight the jump chip for the section nearest the top of the viewport.
+  useEffect(() => {
+    if (!data) return;
+    const els = JUMPS.map(j => document.getElementById(j.id)).filter(Boolean) as HTMLElement[];
+    if (els.length === 0) return;
+    const obs = new IntersectionObserver((entries) => {
+      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible[0]) setActiveJump(visible[0].target.id);
+    }, { rootMargin: '-96px 0px -70% 0px', threshold: 0 });
+    els.forEach(el => obs.observe(el));
+    return () => obs.disconnect();
+  }, [data]);
+
+  const jumpTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveJump(id);
+  };
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-conve-red" />
+      <div className="space-y-4">
+        <SectionHeader icon={BarChart3} title="Growth model" subtitle="The numbers that actually change decisions." />
+        <LoadingTiles n={4} />
+        <LoadingTiles n={4} />
+        <div className="h-40 rounded-lg border border-gray-200 bg-gray-50 animate-pulse" />
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="p-6 text-center">
-        <p className="text-red-600 mb-4">Failed to load dashboard data.</p>
-        <button onClick={() => refetch()} className="px-4 py-2 bg-conve-red text-white rounded-md">Retry</button>
+      <div className="space-y-4">
+        <SectionHeader icon={BarChart3} title="Growth model" subtitle="The numbers that actually change decisions." />
+        <ErrorBanner title="Couldn't load the growth model" message={(error as any)?.message || 'No data returned'} onRetry={() => refetch()} />
       </div>
     );
   }
 
   const mtdVsLast = data.revenue_last_month > 0
-    ? ((data.revenue_projected_month_end - data.revenue_last_month) / data.revenue_last_month) * 100
-    : 0;
-
+    ? ((data.revenue_projected_month_end - data.revenue_last_month) / data.revenue_last_month) * 100 : 0;
   const marginVsTarget = data.estimated_gross_margin_pct - MARGIN_TARGET_PCT;
 
+  const gates = [
+    { label: '30+ visits / mo (Level 0)', met: data.visits_mtd >= 30, value: `${fmtInt(data.visits_mtd)}/30` },
+    { label: '40+ visits / mo — hire first phleb (Level 1 gate)', met: data.visits_mtd >= 40, value: `${fmtInt(data.visits_mtd)}/40` },
+    { label: '30%+ repeat rate (Level 0 gate)', met: data.repeat_rate_pct >= 30, value: `${fmtPct(data.repeat_rate_pct)}/30%` },
+    { label: '$15K MRR — Level 2 gate', met: data.revenue_projected_month_end >= 15000, value: `${fmtMoney(data.revenue_projected_month_end)}/${fmtMoney(15000)}` },
+  ];
+
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Hormozi Dashboard</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            The numbers that actually change decisions. Updated every 2 minutes.
-          </p>
+    <div className="space-y-5">
+      <SectionHeader
+        icon={BarChart3}
+        title="Growth model"
+        subtitle={<>The numbers that actually change decisions. Live, with a 2-minute background refresh.{dataUpdatedAt ? <span className="text-gray-400"> · updated {format(new Date(dataUpdatedAt), 'h:mm a')}</span> : null}</>}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="gap-1.5 text-xs h-10 sm:h-9 min-w-10 sm:min-w-9" disabled={isFetching} aria-label="Refresh">
+              <RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} aria-hidden="true" />
+              <span className="hidden sm:inline">{isFetching ? 'Refreshing…' : 'Refresh'}</span>
+            </Button>
+            <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs h-10 sm:h-9 gap-1.5" asChild>
+              <Link to={`${BASE}/owner/overview`}><DollarSign className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">Business metrics</span><span className="sm:hidden">Metrics</span></Link>
+            </Button>
+          </>
+        }
+      />
+
+      {/* Jump bar */}
+      <div className="sticky top-0 z-20 -mx-4 sm:mx-0 px-4 sm:px-0 py-1.5 bg-gray-50/95 backdrop-blur supports-[backdrop-filter]:bg-gray-50/80">
+        <div className="flex gap-1.5 overflow-x-auto pb-0.5" role="navigation" aria-label="Sections">
+          {JUMPS.map(j => (
+            <button key={j.id} type="button" onClick={() => jumpTo(j.id)} aria-current={activeJump === j.id ? 'location' : undefined}
+              className={cn('inline-flex items-center h-8 px-3 rounded-full border text-xs font-medium whitespace-nowrap transition',
+                activeJump === j.id ? 'bg-[#B91C1C] text-white border-[#B91C1C]' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400')}>
+              {j.label}
+            </button>
+          ))}
         </div>
-        <button
-          onClick={() => refetch()}
-          disabled={isFetching}
-          className="px-3 py-1.5 text-xs border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
-        >
-          {isFetching ? 'Refreshing…' : 'Refresh'}
-        </button>
       </div>
 
-      {/* ─── ACTIVE CAMPAIGN ROI (auto-hides when none) ───────────── */}
-      <section>
-        <CampaignROICard />
-      </section>
+      {/* Live campaign / chatbot cards — each auto-hides when it has nothing to say */}
+      <CampaignROICard />
+      <CampaignEngagementCard />
+      <ChatROICard />
 
-      {/* ─── CAMPAIGN ENGAGEMENT (live opens/clicks for the most recent broadcast) ─── */}
-      <section>
-        <CampaignEngagementCard />
-      </section>
-
-      {/* ─── CHATBOT ROI (auto-hides when no convos) ──────────────── */}
-      <section>
-        <ChatROICard />
-      </section>
-
-      {/* ─── OPS HEALTH PULSE (Part I2 Phase 1) ───────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Operational Pulse</h2>
+      <section id="hz-pulse" className="scroll-mt-16" aria-labelledby="hz-pulse-t">
+        <SectionTitle id="hz-pulse-t">Operational pulse</SectionTitle>
         <OpsHealthCard />
       </section>
 
-      {/* ─── BREAK-EVEN TRACKER (owner-pay $5K/mo target) ─────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">This month at a glance</h2>
-        <BreakEvenTracker />
-      </section>
-
-      {/* ─── LAB ORDER REQUEST FUNNEL (Sprint 2 metric) ───────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Patient self-service</h2>
-        <LabOrderFunnelCard />
-      </section>
-
-      {/* ─── LEVEL 0 GATE TRACKER (master plan Part B) ───────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Gate Progress</h2>
-        <Level0Tracker />
-      </section>
-
-      {/* ─── HEADLINE NUMBERS ─────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Revenue</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Kpi
-            label="Today"
-            value={fmtMoney(data.revenue_today)}
-            icon={DollarSign}
-            trend={data.revenue_daily_14d}
-            trendLabel="Daily revenue — last 14 days"
-          />
-          <Kpi
-            label="This Month"
-            value={fmtMoney(data.revenue_mtd)}
-            subtext={`${data.visits_mtd} completed visits`}
-            icon={TrendingUp}
-            emphasis
-            trend={data.visits_daily_14d}
-            trendLabel="Daily visits — last 14 days"
-          />
-          <Kpi
-            label="Projected End-of-Month"
-            value={fmtMoney(data.revenue_projected_month_end)}
-            subtext={
-              data.revenue_last_month > 0
-                ? `${mtdVsLast >= 0 ? '+' : ''}${fmtPct(mtdVsLast)} vs last month`
-                : 'No prior month data'
-            }
-            subtextColor={mtdVsLast >= 0 ? 'green' : 'red'}
-            icon={Target}
-          />
-          <Kpi
-            label="Last Month (final)"
-            value={fmtMoney(data.revenue_last_month)}
-            icon={Activity}
-          />
+      <section id="hz-month" className="scroll-mt-16" aria-labelledby="hz-month-t">
+        <SectionTitle id="hz-month-t">This month at a glance</SectionTitle>
+        <div className="space-y-3">
+          <BreakEvenTracker />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div>
+              <p className="text-[11px] text-gray-500 mb-1.5">Patient self-service</p>
+              <LabOrderFunnelCard />
+            </div>
+            <div>
+              <p className="text-[11px] text-gray-500 mb-1.5">Gate progress</p>
+              <Level0Tracker />
+            </div>
+          </div>
         </div>
       </section>
 
-      {/* ─── UNIT ECONOMICS ───────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Unit Economics</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Kpi
-            label="Avg Revenue / Visit"
-            value={fmtMoneyPrecise(data.avg_visit_revenue)}
-            subtext={`MTD across ${data.visits_mtd} visits`}
-            icon={DollarSign}
-          />
-          <Kpi
-            label="Estimated Gross Margin"
-            value={fmtPct(data.estimated_gross_margin_pct)}
-            subtext={
-              marginVsTarget >= 0
-                ? `+${fmtPct(marginVsTarget)} above target`
-                : `${fmtPct(marginVsTarget)} below target (${MARGIN_TARGET_PCT}%)`
-            }
-            subtextColor={marginVsTarget >= 0 ? 'green' : 'red'}
-            icon={Percent}
-            emphasis
-          />
-          <Kpi
-            label="Estimated COGS (MTD)"
-            value={fmtMoney(data.estimated_cogs)}
-            subtext="Phleb $55 + supplies $10 + Stripe fees"
-            icon={TrendingDown}
-          />
-          <Kpi
-            label="Estimated Profit (MTD)"
-            value={fmtMoney(data.estimated_gross_profit)}
-            subtextColor={data.estimated_gross_profit >= 0 ? 'green' : 'red'}
-            subtext={data.estimated_gross_profit >= 0 ? 'Before fixed costs' : 'Losing money'}
-            icon={TrendingUp}
-          />
+      <section id="hz-revenue" className="scroll-mt-16" aria-labelledby="hz-revenue-t">
+        <SectionTitle id="hz-revenue-t" hint="Stripe deposits · stripe_qb_sync_log">Revenue</SectionTitle>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Kpi label="Today" value={fmtMoney(data.revenue_today)} icon={DollarSign} trend={data.revenue_daily_14d} trendLabel="Daily revenue — last 14 days" />
+          <Kpi label="This month" value={fmtMoney(data.revenue_mtd)} subtext={`${fmtInt(data.visits_mtd)} completed visits`} icon={TrendingUp} emphasis trend={data.visits_daily_14d} trendLabel="Daily visits — last 14 days" />
+          <Kpi label="Projected end of month" value={fmtMoney(data.revenue_projected_month_end)}
+            subtext={data.revenue_last_month > 0 ? `${mtdVsLast >= 0 ? '+' : ''}${fmtPct(mtdVsLast)} vs last month` : 'No prior month data'}
+            subtextColor={mtdVsLast >= 0 ? 'green' : 'red'} icon={Target} />
+          <Kpi label="Last month (final)" value={fmtMoney(data.revenue_last_month)} icon={Activity} />
+        </div>
+      </section>
+
+      <section id="hz-unit" className="scroll-mt-16" aria-labelledby="hz-unit-t">
+        <SectionTitle id="hz-unit-t" hint={`target margin ${MARGIN_TARGET_PCT}%`}>Unit economics</SectionTitle>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Kpi label="Avg revenue / visit" value={fmtMoneyPrecise(data.avg_visit_revenue)} subtext={`MTD across ${fmtInt(data.visits_mtd)} visits`} icon={DollarSign} />
+          <Kpi label="Estimated gross margin" value={fmtPct(data.estimated_gross_margin_pct)}
+            subtext={marginVsTarget >= 0 ? `+${fmtPct(marginVsTarget)} above target` : `${fmtPct(marginVsTarget)} below target (${MARGIN_TARGET_PCT}%)`}
+            subtextColor={marginVsTarget >= 0 ? 'green' : 'red'} icon={Percent} emphasis />
+          <Kpi label="Estimated COGS (MTD)" value={fmtMoney(data.estimated_cogs)} subtext="Phleb labor + supplies $10 + Stripe fees" icon={TrendingDown} />
+          <Kpi label="Estimated profit (MTD)" value={fmtMoney(data.estimated_gross_profit)} subtextColor={data.estimated_gross_profit >= 0 ? 'green' : 'red'}
+            subtext={data.estimated_gross_profit >= 0 ? 'Before fixed costs' : 'Losing money'} icon={TrendingUp} />
         </div>
         <p className="text-[11px] text-gray-400 mt-2 italic">
-          Margin estimate assumes $55/visit phleb + $10/visit supplies. Replace with actual phleb_payouts once payroll automation ships.
+          Margin estimate: labor is $0 while phleb payouts are switched off (owner-operator), otherwise actual staff_payouts; supplies assumed $10/visit.
         </p>
       </section>
 
-      {/* ─── RETENTION ────────────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Patient Retention</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Kpi
-            label="Total Patients"
-            value={String(data.total_patients)}
-            icon={Users}
-          />
-          <Kpi
-            label="Repeat Patients"
-            value={String(data.repeat_patients)}
-            subtext={`${data.total_patients > 0 ? '' : ''}${data.total_patients} total`}
-            icon={Repeat}
-          />
-          <Kpi
-            label="Repeat Rate"
-            value={fmtPct(data.repeat_rate_pct)}
-            subtextColor={data.repeat_rate_pct >= 30 ? 'green' : 'amber'}
-            subtext={
-              data.repeat_rate_pct >= 30
-                ? 'Hitting Level 0 target (≥30%)'
-                : 'Below Level 0 gate (30%)'
-            }
-            icon={Percent}
-            emphasis={data.repeat_rate_pct < 30}
-          />
-          <Kpi
-            label="New Patients (30d)"
-            value={String(data.new_patients_30d)}
-            icon={TrendingUp}
-          />
+      <section id="hz-retention" className="scroll-mt-16" aria-labelledby="hz-retention-t">
+        <SectionTitle id="hz-retention-t" hint="completed visits with a patient email">Patient retention</SectionTitle>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <Kpi label="Total patients" value={fmtInt(data.total_patients)} icon={Users} />
+          <Kpi label="Repeat patients" value={fmtInt(data.repeat_patients)} subtext={`of ${fmtInt(data.total_patients)} total`} icon={Repeat} />
+          <Kpi label="Repeat rate" value={fmtPct(data.repeat_rate_pct)} subtextColor={data.repeat_rate_pct >= 30 ? 'green' : 'amber'}
+            subtext={data.repeat_rate_pct >= 30 ? 'Hitting Level 0 target (≥30%)' : 'Below Level 0 gate (30%)'} icon={Percent} emphasis={data.repeat_rate_pct < 30} />
+          <Kpi label="New patients (30d)" value={fmtInt(data.new_patients_30d)} icon={TrendingUp} />
         </div>
       </section>
 
-      {/* ─── REVENUE BY TYPE + CHANNEL ────────────────────────────── */}
-      <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Revenue by Income Type (MTD)</CardTitle>
-          </CardHeader>
+      {/* Revenue by type + channels */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2"><CardTitle className="text-base">Revenue by income type (MTD)</CardTitle></CardHeader>
           <CardContent>
-            {data.revenue_by_type.length === 0 ? (
-              <p className="text-sm text-gray-500">No revenue this month yet.</p>
-            ) : (
+            {data.revenue_by_type.length === 0 ? <p className="text-sm text-gray-500">No revenue this month yet.</p> : (
               <div className="space-y-2">
                 {data.revenue_by_type.map((r) => {
                   const pct = data.revenue_mtd > 0 ? (r.amount / data.revenue_mtd) * 100 : 0;
@@ -308,16 +247,9 @@ const HormoziDashboard: React.FC = () => {
                     <div key={r.type} className="space-y-1">
                       <div className="flex justify-between text-sm">
                         <span className="font-medium capitalize">{r.type}</span>
-                        <span className="text-gray-600">
-                          {fmtMoney(r.amount)} <span className="text-gray-400">· {r.count} charge{r.count !== 1 ? 's' : ''}</span>
-                        </span>
+                        <span className="text-gray-600 tabular-nums">{fmtMoney(r.amount)} <span className="text-gray-400">· {r.count} charge{r.count !== 1 ? 's' : ''}</span></span>
                       </div>
-                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-conve-red"
-                          style={{ width: `${Math.min(pct, 100)}%` }}
-                        />
-                      </div>
+                      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-[#B91C1C] rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} /></div>
                     </div>
                   );
                 })}
@@ -325,24 +257,17 @@ const HormoziDashboard: React.FC = () => {
             )}
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Acquisition Channels (all-time)</CardTitle>
-          </CardHeader>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2"><CardTitle className="text-base">Acquisition channels (all-time)</CardTitle></CardHeader>
           <CardContent>
-            {data.channels.length === 0 ? (
-              <p className="text-sm text-gray-500">No channel data yet.</p>
-            ) : (
-              <div className="space-y-2">
+            {data.channels.length === 0 ? <p className="text-sm text-gray-500">No channel data yet.</p> : (
+              <div className="divide-y">
                 {data.channels.slice(0, 6).map((c) => (
-                  <div key={c.channel} className="flex items-center justify-between text-sm">
+                  <div key={c.channel} className="flex items-center justify-between text-sm py-1.5">
                     <span className="font-medium capitalize">{c.channel.replace(/_/g, ' ')}</span>
                     <div className="text-right">
-                      <div className="font-medium">{fmtMoney(c.revenue)}</div>
-                      <div className="text-[11px] text-gray-500">
-                        {c.patients} patient{c.patients !== 1 ? 's' : ''} · {fmtMoney(c.avg_revenue_per_patient)} avg
-                      </div>
+                      <div className="font-medium tabular-nums">{fmtMoney(c.revenue)}</div>
+                      <div className="text-[11px] text-gray-500">{c.patients} patient{c.patients !== 1 ? 's' : ''} · {fmtMoney(c.avg_revenue_per_patient)} avg</div>
                     </div>
                   </div>
                 ))}
@@ -352,180 +277,158 @@ const HormoziDashboard: React.FC = () => {
         </Card>
       </section>
 
-      {/* ─── LTV COHORTS ──────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">LTV by Acquisition Cohort (last 6 months)</CardTitle>
-          <p className="text-xs text-gray-500">Average cumulative revenue per patient, grouped by the month they first booked.</p>
-        </CardHeader>
-        <CardContent>
-          {data.cohorts.length === 0 ? (
-            <p className="text-sm text-gray-500">No cohort data yet.</p>
-          ) : (
-            <div className="overflow-x-auto">
+      {/* LTV cohorts */}
+      <section id="hz-ltv" className="scroll-mt-16 space-y-2" aria-labelledby="hz-ltv-t">
+        <SectionTitle id="hz-ltv-t" hint="average cumulative revenue per patient, by first-booking month">LTV by acquisition cohort (last 6 months)</SectionTitle>
+        {data.cohorts.length === 0 ? (
+          <Card className="border-dashed"><CardContent className="p-6 text-center text-sm text-gray-500">No cohort data yet.</CardContent></Card>
+        ) : (
+          <>
+            <div className="hidden md:block overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-xs text-gray-500 uppercase tracking-wider">
-                    <th className="text-left py-2">Cohort Month</th>
-                    <th className="text-right py-2">Patients</th>
-                    <th className="text-right py-2">Total Revenue</th>
-                    <th className="text-right py-2">Avg LTV</th>
+                  <tr className="bg-gray-50/80">
+                    <Th className="pl-4">Cohort month</Th>
+                    <Th right>Patients</Th>
+                    <Th right>Total revenue</Th>
+                    <Th right>Avg LTV</Th>
+                    <ThActions />
                   </tr>
                 </thead>
                 <tbody>
                   {data.cohorts.map((c) => (
-                    <tr key={c.cohort_month} className="border-t border-gray-100">
-                      <td className="py-2 font-medium">{c.cohort_month}</td>
-                      <td className="text-right py-2">{c.patients}</td>
-                      <td className="text-right py-2">{fmtMoney(c.total_revenue)}</td>
-                      <td className="text-right py-2 font-semibold">{fmtMoney(c.avg_ltv)}</td>
+                    <tr key={c.cohort_month} className="border-t border-gray-100 hover:bg-gray-50/70">
+                      <td className="py-2.5 pl-4 pr-3 font-medium text-gray-800">{c.cohort_month}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtInt(c.patients)}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums">{fmtMoney(c.total_revenue)}</td>
+                      <td className="py-2.5 px-3 text-right tabular-nums font-semibold">{fmtMoney(c.avg_ltv)}</td>
+                      <TdActions>
+                        <Button size="sm" variant="outline" className="h-9 text-xs gap-1.5" asChild>
+                          <Link to={`${BASE}/patients`}><Users className="h-3.5 w-3.5" aria-hidden="true" /> Patients</Link>
+                        </Button>
+                      </TdActions>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ─── MONEY FLOW (CFO Layer #1: "Where is the money this month?") ─ */}
-      <section className="mb-6">
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Money Flow</h2>
-        <MoneyFlowCard days={30} />
+            <div className="md:hidden space-y-2">
+              {data.cohorts.map((c) => (
+                <Card key={c.cohort_month} className="shadow-sm">
+                  <CardContent className="p-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-800">{c.cohort_month}</p>
+                      <p className="text-[11px] text-gray-500">{fmtInt(c.patients)} patients · {fmtMoney(c.total_revenue)} total</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold tabular-nums">{fmtMoney(c.avg_ltv)}</p>
+                      <p className="text-[10px] uppercase tracking-wide text-gray-500">avg LTV</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
-      {/* ─── REVENUE SPLIT (I3: Profit First bucketing by revenue type) ─ */}
-      <section className="mb-6">
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Revenue Type Split</h2>
-        <RevenueTypeSplit />
+      <section id="hz-money" className="scroll-mt-16" aria-labelledby="hz-money-t">
+        <SectionTitle id="hz-money-t" hint="last 30 days">Money flow</SectionTitle>
+        <div className="space-y-3">
+          <MoneyFlowCard days={30} />
+          <div>
+            <p className="text-[11px] text-gray-500 mb-1.5">Revenue type split · Profit First bucketing</p>
+            <RevenueTypeSplit />
+          </div>
+        </div>
       </section>
 
-      {/* ─── ACQUISITION (Level 0: "CAC documented per channel") ───── */}
-      <section className="mb-6">
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Acquisition</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <section id="hz-acq" className="scroll-mt-16" aria-labelledby="hz-acq-t">
+        <SectionTitle id="hz-acq-t" hint={<Link to={`${BASE}/growth`} className="text-[#B91C1C] hover:underline inline-flex items-center gap-0.5">Growth → traffic by channel <ChevronRight className="h-3 w-3" aria-hidden="true" /></Link>}>Acquisition</SectionTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <AcquisitionByChannel />
           <TrafficCard />
         </div>
       </section>
 
-      {/* ─── ATTENTION ITEMS ──────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Needs Attention</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <section id="hz-attention" className="scroll-mt-16 space-y-3" aria-labelledby="hz-attention-t">
+        <SectionTitle id="hz-attention-t">Needs attention</SectionTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <DataHealthCard />
           <ActiveSubscriptionsCard />
           <ReviewsWidget />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                Top Unpaid Invoices
-              </CardTitle>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-amber-600" aria-hidden="true" /> Top unpaid invoices</CardTitle>
             </CardHeader>
-            <CardContent>
-              {data.unpaid_invoices.length === 0 ? (
-                <p className="text-sm text-emerald-600">✓ No unpaid invoices.</p>
-              ) : (
-                <div className="space-y-2">
+            <CardContent className="p-0">
+              {data.unpaid_invoices.length === 0 ? <p className="text-sm text-emerald-600 px-5 pb-4">✓ No unpaid invoices.</p> : (
+                <div className="divide-y">
                   {data.unpaid_invoices.map((u) => (
-                    <div key={u.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2 last:border-0">
-                      <div>
-                        <div className="font-medium">{u.patient_name || 'Unknown patient'}</div>
-                        <div className="text-xs text-gray-500">{u.age_days} days old</div>
+                    <div key={u.id} className={cn('flex items-center justify-between gap-3 px-4 py-2.5', u.age_days > 7 && 'border-l-4 border-l-red-500')}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{u.patient_name || 'Unknown patient'}</p>
+                        <p className="text-[11px] text-gray-500">{u.age_days} days old</p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{fmtMoney(u.amount)}</span>
-                        <Badge variant="outline" className={u.age_days > 7 ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200'}>
-                          {u.age_days > 7 ? 'Stale' : 'Open'}
-                        </Badge>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="font-semibold tabular-nums text-sm">{fmtMoney(u.amount)}</span>
+                        <Pill className={u.age_days > 7 ? 'bg-red-100 text-red-800 border-red-200' : 'bg-amber-100 text-amber-800 border-amber-200'} dot={u.age_days > 7 ? 'bg-red-500' : 'bg-amber-500'}>{u.age_days > 7 ? 'Stale' : 'Open'}</Pill>
+                        <Button size="sm" variant="ghost" className="h-9 w-9 p-0" aria-label="Open appointment" asChild>
+                          <a href={`${BASE}/calendar?appointment=${u.id}`} target="_blank" rel="noopener noreferrer"><Calendar className="h-4 w-4" aria-hidden="true" /></a>
+                        </Button>
                       </div>
                     </div>
                   ))}
+                  <div className="px-4 py-2">
+                    <Button size="sm" variant="outline" className="h-9 text-xs" asChild><Link to={`${BASE}/billing/invoices`}>All invoices <ChevronRight className="h-3.5 w-3.5 ml-0.5" aria-hidden="true" /></Link></Button>
+                  </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="h-4 w-4 text-gray-500" />
-                System Health
-              </CardTitle>
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2"><Activity className="h-4 w-4 text-gray-500" aria-hidden="true" /> System health</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Unclassified Stripe charges</span>
-                  <span className={`font-semibold ${data.unclassified_charges > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {data.unclassified_charges}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Refunded (MTD)</span>
-                  <span className="font-semibold">{fmtMoney(data.refunded_mtd)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Stuck post-visit sequences</span>
-                  <span className={`font-semibold ${data.stuck_sequences > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {data.stuck_sequences}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Unresolved errors (30d)</span>
-                  <span className={`font-semibold ${data.unresolved_errors > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {data.unresolved_errors}
-                  </span>
-                </div>
+                {[
+                  { label: 'Unclassified Stripe charges', value: fmtInt(data.unclassified_charges), warn: data.unclassified_charges > 0 },
+                  { label: 'Refunded (MTD)', value: fmtMoney(data.refunded_mtd), warn: false },
+                  { label: 'Stuck post-visit sequences', value: fmtInt(data.stuck_sequences), warn: data.stuck_sequences > 0 },
+                  { label: 'Unresolved errors (30d)', value: fmtInt(data.unresolved_errors), warn: data.unresolved_errors > 0 },
+                ].map(r => (
+                  <div key={r.label} className="flex justify-between">
+                    <span className="text-gray-600">{r.label}</span>
+                    <span className={cn('font-semibold tabular-nums', r.warn ? 'text-amber-600' : 'text-emerald-600')}>{r.value}</span>
+                  </div>
+                ))}
                 <Separator />
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Stripe fees (MTD)</span>
-                  <span>{fmtMoneyPrecise(data.stripe_fees_mtd)}</span>
-                </div>
+                <div className="flex justify-between"><span className="text-gray-600">Stripe fees (MTD)</span><span className="tabular-nums">{fmtMoneyPrecise(data.stripe_fees_mtd)}</span></div>
               </div>
             </CardContent>
           </Card>
         </div>
       </section>
 
-      {/* ─── MILESTONE GATE ───────────────────────────────────────── */}
-      <Card className="bg-gray-50 border-gray-200">
-        <CardHeader>
-          <CardTitle className="text-base">Level Check</CardTitle>
-          <p className="text-xs text-gray-500">From the master plan — current level gate status.</p>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span>30+ visits/mo (Level 0)</span>
-              <Badge variant="outline" className={data.visits_mtd >= 30 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600'}>
-                {data.visits_mtd}/30 {data.visits_mtd >= 30 ? '✓' : ''}
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>40+ visits/mo — hire first phleb (Level 1 gate)</span>
-              <Badge variant="outline" className={data.visits_mtd >= 40 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600'}>
-                {data.visits_mtd}/40 {data.visits_mtd >= 40 ? '✓' : ''}
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>30%+ repeat rate (Level 0 gate)</span>
-              <Badge variant="outline" className={data.repeat_rate_pct >= 30 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600'}>
-                {fmtPct(data.repeat_rate_pct)}/30% {data.repeat_rate_pct >= 30 ? '✓' : ''}
-              </Badge>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>$15K MRR — Level 2 gate</span>
-              <Badge variant="outline" className={data.revenue_projected_month_end >= 15000 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-600'}>
-                {fmtMoney(data.revenue_projected_month_end)}/{fmtMoney(15000)} {data.revenue_projected_month_end >= 15000 ? '✓' : ''}
-              </Badge>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <section id="hz-level" className="scroll-mt-16" aria-labelledby="hz-level-t">
+        <SectionTitle id="hz-level-t" hint="from the master plan">Level check</SectionTitle>
+        <Card className="shadow-sm">
+          <CardContent className="p-0 divide-y">
+            {gates.map(g => (
+              <div key={g.label} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                <span className="text-gray-800">{g.label}</span>
+                <Pill className={g.met ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-gray-100 text-gray-700 border-gray-200'} dot={g.met ? 'bg-emerald-500' : 'bg-gray-400'}>
+                  {g.value}{g.met ? ' ✓' : ''}
+                </Pill>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 };

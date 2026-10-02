@@ -8,7 +8,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Loader2, Receipt, Building2, User, AlertTriangle } from 'lucide-react';
+import { Loader2, Receipt, Building2, User, AlertTriangle, Link2 } from 'lucide-react';
+import { copyOnsitePayLink } from '@/lib/payLink';
 
 /**
  * AppointmentBillingPanel — bill-to target, editable price, and invoice
@@ -60,6 +61,8 @@ export const AppointmentBillingPanel: React.FC<{
   const [billedTo, setBilledTo] = useState<BilledTo>('patient');
   const [memo, setMemo] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [payLinkBusy, setPayLinkBusy] = useState(false);
+  const [payLinkUrl, setPayLinkUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -270,10 +273,42 @@ export const AppointmentBillingPanel: React.FC<{
         </>
       )}
 
+      {/* Patient pay link = on-site /pay page (tip optional). Org invoices
+          stay on Stripe's hosted page, so the button only shows for patients. */}
+      {hasInvoice && billedTo === 'patient' && !isPaid && (
+        <div className="space-y-1.5">
+          <div className="flex gap-2">
+            <Button
+              type="button" size="sm" variant="outline"
+              className="flex-1 border-conve-red/30 text-conve-red hover:bg-red-50"
+              disabled={payLinkBusy}
+              onClick={async () => {
+                setPayLinkBusy(true);
+                try {
+                  const info = await copyOnsitePayLink(appointmentId);
+                  if (info) setPayLinkUrl(info.url);
+                } finally { setPayLinkBusy(false); }
+              }}
+            >
+              {payLinkBusy ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1.5" />}
+              Copy patient pay link
+            </Button>
+          </div>
+          {payLinkUrl && (
+            <p className="text-[11px] text-muted-foreground break-all text-center">
+              <a href={payLinkUrl} target="_blank" rel="noopener noreferrer" className="text-conve-red hover:underline">{payLinkUrl}</a>
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground text-center">
+            Opens convelabs.com/pay — patient can add a tip, pays on-site (no Stripe redirect).
+          </p>
+        </div>
+      )}
+
       {state.stripe_invoice_url && (
         <a href={state.stripe_invoice_url} target="_blank" rel="noopener noreferrer"
-          className="block text-[11px] text-conve-red hover:underline text-center">
-          View current invoice in Stripe →
+          className="block text-[11px] text-muted-foreground hover:underline text-center">
+          {billedTo === 'org' ? 'View invoice in Stripe →' : 'Stripe hosted invoice (backup, no tip) →'}
         </a>
       )}
 
