@@ -2,7 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { linkRecordingConsent } from '../_shared/recording-consent.ts';
-import { timeBlockAppliesOn, timeBlockDateFilter } from '../_shared/timeBlocks.ts';
+import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow, visitMinutesForBlocks } from '../_shared/timeBlocks.ts';
 
 /**
  * VERIFY APPOINTMENT CHECKOUT — Post-Stripe-redirect fallback + notification hub.
@@ -70,7 +70,7 @@ function minutesOfDay(raw: string | null | undefined): number | null {
   return mil ? parseInt(mil[1], 10) * 60 + parseInt(mil[2], 10) : null;
 }
 
-async function isDateBlocked(dateOnly: string, appointmentTime?: string | null): Promise<{ blocked: boolean; reason?: string }> {
+async function isDateBlocked(dateOnly: string, appointmentTime?: string | null, serviceType?: string | null): Promise<{ blocked: boolean; reason?: string }> {
   try {
     const { data } = await supabaseClient
       .from('time_blocks')
@@ -90,7 +90,8 @@ async function isDateBlocked(dateOnly: string, appointmentTime?: string | null):
         if (!b.start_time || !b.end_time) return true; // whole-day closure
         const s = minutesOfDay(b.start_time), e = minutesOfDay(b.end_time);
         if (s === null || e === null || apptMin === null) return false;
-        return apptMin >= s && apptMin < e;
+        // Overlap, not start-in-window (mirrors availability.ts / checkout).
+        return visitOverlapsWindow(apptMin, visitMinutesForBlocks(serviceType), s, e);
       });
     if (applies.length > 0) {
       return { blocked: true, reason: applies[0].reason || 'office closure' };
@@ -186,7 +187,7 @@ Deno.serve(async (req) => {
       let blockedFlag = false;
       let blockedReason: string | undefined;
       if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-        const check = await isDateBlocked(dateOnly, metadata.appointment_time || null);
+        const check = await isDateBlocked(dateOnly, metadata.appointment_time || null, metadata.service_type || null);
         blockedFlag = check.blocked;
         blockedReason = check.reason;
       }
