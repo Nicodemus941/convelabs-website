@@ -1042,8 +1042,9 @@ const OrderRows: React.FC<{
               <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500">Tests</TableHead>
               <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500 whitespace-nowrap">Draw by</TableHead>
               <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500">Status</TableHead>
-              <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500 whitespace-nowrap">Last activity</TableHead>
-              <TableHead className="h-9 text-[11px] uppercase tracking-wider text-gray-500 text-right pr-3">Actions</TableHead>
+              <TableHead className="hidden xl:table-cell h-9 text-[11px] uppercase tracking-wider text-gray-500 whitespace-nowrap">Last activity</TableHead>
+              {/* Actions stay pinned to the right edge so they are never scrolled out of view on narrower screens. */}
+              <TableHead className="sticky right-0 z-10 bg-gray-50 shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)] h-9 text-[11px] uppercase tracking-wider text-gray-500 text-right pr-3">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1103,7 +1104,7 @@ const OrderRows: React.FC<{
                         </span>
                       </TableCell>
                     )}
-                    <TableCell className="py-2.5 align-top text-xs text-gray-700 max-w-[240px]">
+                    <TableCell className="py-2.5 align-top text-xs text-gray-700 max-w-[200px]">
                       <TestsSummary row={row} />
                     </TableCell>
                     <TableCell className="py-2.5 align-top text-xs whitespace-nowrap">
@@ -1112,11 +1113,11 @@ const OrderRows: React.FC<{
                     <TableCell className="py-2.5 align-top">
                       <StatusPill row={row} bucket={b} />
                     </TableCell>
-                    <TableCell className="py-2.5 align-top text-xs text-gray-600 whitespace-nowrap">
+                    <TableCell className="hidden xl:table-cell py-2.5 align-top text-xs text-gray-600 whitespace-nowrap">
                       <span className="block">{act.label}</span>
                       <span className="block text-[11px] text-gray-400">{ago(act.at)}</span>
                     </TableCell>
-                    <TableCell className="py-2 align-top pr-3">
+                    <TableCell className={cn('sticky right-0 z-10 py-2 align-top pr-3 shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)]', nested ? 'bg-gray-50' : 'bg-white')}>
                       <div className="flex items-center justify-end gap-1">
                         <PrimaryAction row={row} bucket={b} h={handlers} className="h-9" />
                         {row.lab_order_file_path && (
