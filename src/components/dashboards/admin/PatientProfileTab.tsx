@@ -29,7 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -47,11 +47,12 @@ import ScheduleAppointmentModal from '@/components/calendar/ScheduleAppointmentM
 import SendBookingLinkModal from '@/components/admin/SendBookingLinkModal';
 import PatientChart from './PatientChart';
 import {
-  BUCKET_META, FLAG_KEYS, FLAG_META, NEEDS_ACTION, PATIENT_FILTERS, PATIENT_TILE_KEYS, PATIENT_TILE_STYLE,
-  type ApptLite, type MemberTier, type PatientBucket, type PatientFilterKey, type PatientFlag, type PatientRow, type PatientStats,
-  apptDay, computeStats, daysFromToday, derivePatientBucket, digits, fmtDay, fullName, matchesSearch,
-  openMessageThread, stashAdminPrefill, tierBadgeClass, toPrefilledPatient,
+  BUCKET_META, DUP_REASON_LABEL, FLAG_KEYS, FLAG_META, NEEDS_ACTION, PATIENT_FILTERS, PATIENT_TILE_KEYS, PATIENT_TILE_STYLE,
+  type ApptLite, type DuplicateHit, type MemberTier, type PatientBucket, type PatientFilterKey, type PatientFlag, type PatientRow, type PatientStats,
+  apptDay, buildDuplicateIndex, computeStats, dataQualityIssues, daysFromToday, derivePatientBucket, digits, dobIssue, fmtDay, fullName, looksLikeOrganization, matchesSearch,
+  openMessageThread, stashAdminPrefill, tierBadgeClass, todayKey, toPrefilledPatient, validatePatientFields,
 } from './patientDirectory';
+import { InlineError, ModalTitle } from './chartModalKit';
 
 // Untyped table access — tenant_patients / user_memberships columns used
 // here aren't all in the generated Database type.
@@ -114,6 +115,7 @@ interface RowCtx {
   statsOf: Map<string, PatientStats>;
   bucketOf: Map<string, PatientBucket>;
   tierOf: Map<string, MemberTier>;
+  dupIndex: Map<string, DuplicateHit[]>;
 }
 
 const EMPTY_NEW = { firstName: '', lastName: '', email: '', phone: '', dob: '', address: '', city: '', state: 'FL', zipcode: '', insuranceProvider: '', insuranceMemberId: '', insuranceGroup: '' };
@@ -199,6 +201,10 @@ const PatientProfileTab: React.FC = () => {
 
   const tierFor = useCallback((p: PatientRow) => (p.user_id ? tierOf.get(p.user_id) : undefined), [tierOf]);
 
+  // Shared email / phone / name+DOB across records — read-only detection.
+  const dupIndex = useMemo(() => buildDuplicateIndex(allPatients), [allPatients]);
+  const flagCtx = useCallback((p: PatientRow) => ({ stats: statsOf.get(p.id), tier: tierFor(p), dups: dupIndex.get(p.id) }), [statsOf, tierFor, dupIndex]);
+
   const counts = useMemo(() => {
     const c = Object.fromEntries(PATIENT_FILTERS.map(f => [f.key, 0])) as Record<PatientFilterKey, number>;
     for (const p of allPatients) {
@@ -211,11 +217,11 @@ const PatientProfileTab: React.FC = () => {
   const flagCounts = useMemo(() => {
     const c = Object.fromEntries(FLAG_KEYS.map(k => [k, 0])) as Record<PatientFlag, number>;
     for (const p of allPatients) {
-      const ctx = { stats: statsOf.get(p.id), tier: tierFor(p) };
+      const ctx = flagCtx(p);
       for (const k of FLAG_KEYS) if (FLAG_META[k].test(p, ctx)) c[k]++;
     }
     return c;
-  }, [allPatients, statsOf, tierFor]);
+  }, [allPatients, flagCtx]);
 
   const filtered = useMemo(() => {
     const def = PATIENT_FILTERS.find(f => f.key === filter)!;
@@ -224,7 +230,7 @@ const PatientProfileTab: React.FC = () => {
     const list = allPatients.filter(p => {
       if (!def.match(bucketOf.get(p.id)!)) return false;
       if (flags.size > 0) {
-        const ctx = { stats: statsOf.get(p.id), tier: tierFor(p) };
+        const ctx = flagCtx(p);
         for (const k of flags) if (!FLAG_META[k].test(p, ctx)) return false;
       }
       return matchesSearch(p, q, qd);
@@ -234,7 +240,7 @@ const PatientProfileTab: React.FC = () => {
     else if (sort === 'last_visit') list.sort((a, b) => lastDay(b).localeCompare(lastDay(a)) || fullName(a).localeCompare(fullName(b)));
     // 'name' keeps the server order (last name, first name).
     return list;
-  }, [allPatients, filter, flags, search, sort, bucketOf, statsOf, tierFor]);
+  }, [allPatients, filter, flags, search, sort, bucketOf, statsOf, flagCtx]);
 
   // "Needs action" lane on top when viewing everything.
   const lanes = useMemo(() => {
@@ -265,10 +271,34 @@ const PatientProfileTab: React.FC = () => {
   }, []);
 
   const handlers: RowHandlers = { onOpen: openChart, onSchedule: schedule, onSendLink: sendLink };
-  const ctx: RowCtx = { statsOf, bucketOf, tierOf };
+  const ctx: RowCtx = { statsOf, bucketOf, tierOf, dupIndex };
+
+  // Add-patient: validation + live "already on file?" check against the
+  // loaded directory (email / phone / name+DOB / name) before anything is inserted.
+  const newErrors = useMemo(() => validatePatientFields(newPatient), [newPatient]);
+  const newDobWarn = useMemo(() => { const i = dobIssue(newPatient.dob || null); return i && i.severity === 'warn' ? i : null; }, [newPatient.dob]);
+  const newMatches = useMemo<DuplicateHit[]>(() => {
+    const email = newPatient.email.trim().toLowerCase();
+    const ph = digits(newPatient.phone);
+    const name = `${newPatient.firstName} ${newPatient.lastName}`.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (!email && ph.length < 10 && name.length < 4) return [];
+    const hits: DuplicateHit[] = [];
+    for (const p of allPatients) {
+      if (email && (p.email || '').trim().toLowerCase() === email) { hits.push({ reason: 'email', other: p }); continue; }
+      if (ph.length >= 10 && digits(p.phone).slice(-10) === ph.slice(-10)) { hits.push({ reason: 'phone', other: p }); continue; }
+      if (name.length >= 4 && fullName(p).toLowerCase().replace(/\s+/g, ' ') === name) {
+        hits.push({ reason: newPatient.dob && p.date_of_birth === newPatient.dob ? 'name_dob' : 'name', other: p });
+      }
+    }
+    return hits.slice(0, 5);
+  }, [newPatient, allPatients]);
+  const newBlockingMatch = newMatches.find(h => h.reason === 'email') || null;
+  const newLooksLikeOrg = looksLikeOrganization({ first_name: newPatient.firstName, last_name: newPatient.lastName });
 
   const createPatient = async () => {
     setCreateError('');
+    if (Object.keys(newErrors).length > 0) { setCreateError(Object.values(newErrors).join(' ')); return; }
+    if (newBlockingMatch) { setCreateError(`${fullName(newBlockingMatch.other)} already has this email — open their chart instead.`); return; }
     setIsCreating(true);
     try {
       if (newPatient.email) {
@@ -332,6 +362,7 @@ const PatientProfileTab: React.FC = () => {
         }}
         onOpenPatient={openChart}
         refreshDirectory={refresh}
+        duplicates={dupIndex.get(selectedPatient.id)}
       />
     );
   }
@@ -351,6 +382,11 @@ const PatientProfileTab: React.FC = () => {
             Every patient on file — {loading ? 'loading…' : `${allPatients.length.toLocaleString()} total.`}
             {!loading && counts.needs_action > 0 && (
               <span className="ml-1 font-medium text-red-700">{counts.needs_action} need{counts.needs_action === 1 ? 's' : ''} action.</span>
+            )}
+            {!loading && (flagCounts.data_quality > 0 || flagCounts.duplicate > 0) && (
+              <button type="button" className="ml-1 font-medium text-amber-800 underline decoration-dotted underline-offset-2" onClick={() => { setFilter('all'); setFlags(new Set<PatientFlag>(flagCounts.data_quality > 0 ? ['data_quality'] : ['duplicate'])); }}>
+                {flagCounts.data_quality} data check{flagCounts.data_quality === 1 ? '' : 's'}{flagCounts.duplicate > 0 ? ` · ${flagCounts.duplicate} possible duplicate${flagCounts.duplicate === 1 ? '' : 's'}` : ''}.
+              </button>
             )}
           </p>
         </div>
@@ -547,28 +583,54 @@ const PatientProfileTab: React.FC = () => {
         patient={actionPatient ? { id: actionPatient.id, firstName: actionPatient.first_name || '', lastName: actionPatient.last_name || '', email: actionPatient.email, phone: actionPatient.phone } : null}
       />
 
-      {/* Add patient */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg w-[95vw] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-[#B91C1C]" aria-hidden="true" /> Add patient</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
+      {/* Add patient — scrollable body, pinned footer, live duplicate check. */}
+      <Dialog open={createOpen} onOpenChange={(v) => { if (!isCreating) setCreateOpen(v); }}>
+        <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[92vh] p-0 gap-0 flex flex-col overflow-hidden">
+          <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 border-b flex-shrink-0">
+            <ModalTitle icon={UserPlus} title="Add patient" context="A person who gets drawn — not a clinic. Practices live under Organizations." />
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><Label>First name *</Label><Input value={newPatient.firstName} onChange={e => setNewPatient(p => ({ ...p, firstName: e.target.value }))} placeholder="John" /></div>
-              <div><Label>Last name *</Label><Input value={newPatient.lastName} onChange={e => setNewPatient(p => ({ ...p, lastName: e.target.value }))} placeholder="Smith" /></div>
+              <Field label="First name" required error={newPatient.firstName ? newErrors.firstName : undefined}><Input value={newPatient.firstName} onChange={e => setNewPatient(p => ({ ...p, firstName: e.target.value }))} placeholder="John" className="h-10 sm:h-9" autoFocus /></Field>
+              <Field label="Last name" required error={newPatient.lastName ? newErrors.lastName : undefined}><Input value={newPatient.lastName} onChange={e => setNewPatient(p => ({ ...p, lastName: e.target.value }))} placeholder="Smith" className="h-10 sm:h-9" /></Field>
             </div>
+            {newLooksLikeOrg && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 flex items-start gap-2" role="status">
+                <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <p><span className="font-semibold">This name reads like a clinic, not a person.</span> Partner practices belong under Organizations; add the actual people being drawn as patients and attach their visits to the practice there.</p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><Label>Email</Label><Input type="email" value={newPatient.email} onChange={e => setNewPatient(p => ({ ...p, email: e.target.value }))} placeholder="john@email.com" /></div>
-              <div><Label>Phone</Label><Input type="tel" value={newPatient.phone} onChange={e => setNewPatient(p => ({ ...p, phone: e.target.value }))} placeholder="4071234567" /></div>
+              <Field label="Email" error={newErrors.email}><Input type="email" inputMode="email" autoComplete="off" value={newPatient.email} onChange={e => setNewPatient(p => ({ ...p, email: e.target.value }))} placeholder="john@email.com" className="h-10 sm:h-9" /></Field>
+              <Field label="Phone" error={newErrors.phone}><Input type="tel" inputMode="tel" autoComplete="off" value={newPatient.phone} onChange={e => setNewPatient(p => ({ ...p, phone: e.target.value }))} placeholder="(407) 123-4567" className="h-10 sm:h-9" /></Field>
             </div>
-            <div><Label>Date of birth</Label><Input type="date" value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))} /></div>
+            <Field label="Date of birth" hint="labs need it on the requisition" error={newErrors.dob} warn={newDobWarn?.detail}>
+              <Input type="date" max={todayKey()} value={newPatient.dob} onChange={e => setNewPatient(p => ({ ...p, dob: e.target.value }))} className="h-10 sm:h-9 max-w-[220px]" />
+            </Field>
+
+            {newMatches.length > 0 && (
+              <div className={cn('rounded-lg border p-3 space-y-2', newBlockingMatch ? 'border-red-300 bg-red-50' : 'border-fuchsia-300 bg-fuchsia-50')} role="status">
+                <p className={cn('text-xs font-semibold', newBlockingMatch ? 'text-red-900' : 'text-fuchsia-900')}>
+                  {newBlockingMatch ? 'Already on file — this email belongs to:' : 'Possibly already on file — check before creating a duplicate:'}
+                </p>
+                <ul className="space-y-1.5">
+                  {newMatches.map(h => (
+                    <li key={h.other.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="min-w-0 truncate text-gray-800">
+                        <span className="font-medium">{fullName(h.other)}</span>
+                        <span className="text-gray-500"> · {DUP_REASON_LABEL[h.reason]}{h.other.date_of_birth ? ` · DOB ${fmtDay(h.other.date_of_birth)}` : ''}{h.other.phone ? ` · ${h.other.phone}` : ''}</span>
+                      </span>
+                      <Button size="sm" variant="outline" className="h-8 text-xs flex-shrink-0" onClick={() => { setCreateOpen(false); openChart(h.other); }}>Open chart</Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="border-t pt-3">
-              <p className="text-sm font-semibold mb-2">Address</p>
+              <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-2 flex items-center gap-1.5"><MapPin className="h-3 w-3" aria-hidden="true" /> Address <span className="text-gray-400 normal-case font-normal">(where we draw)</span></p>
               <div className="space-y-3">
-                <div>
-                  <Label>Street</Label>
+                <div className="min-w-0">
                   <AddressAutocomplete
                     value={newPatient.address}
                     onChange={v => setNewPatient(p => ({ ...p, address: v }))}
@@ -576,33 +638,34 @@ const PatientProfileTab: React.FC = () => {
                       setNewPatient(p => ({ ...p, address: place.street || place.address, city: place.city || p.city, state: place.state || p.state, zipcode: place.zipCode || p.zipcode }));
                     }}
                     placeholder="Start typing address — Google will suggest"
+                    className="h-10 sm:h-9"
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div><Label>City</Label><Input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))} placeholder="Orlando" /></div>
-                  <div><Label>State</Label><Input value={newPatient.state} maxLength={2} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value }))} /></div>
-                  <div><Label>ZIP</Label><Input value={newPatient.zipcode} onChange={e => setNewPatient(p => ({ ...p, zipcode: e.target.value }))} placeholder="32801" /></div>
+                <div className="grid grid-cols-[1fr_64px_96px] gap-2">
+                  <Input value={newPatient.city} onChange={e => setNewPatient(p => ({ ...p, city: e.target.value }))} placeholder="City" aria-label="City" className="h-10 sm:h-9 min-w-0" />
+                  <Input value={newPatient.state} maxLength={2} onChange={e => setNewPatient(p => ({ ...p, state: e.target.value.toUpperCase() }))} placeholder="FL" aria-label="State" className="h-10 sm:h-9 min-w-0 uppercase" />
+                  <Input value={newPatient.zipcode} inputMode="numeric" onChange={e => setNewPatient(p => ({ ...p, zipcode: e.target.value }))} placeholder="ZIP" aria-label="ZIP" className="h-10 sm:h-9 min-w-0" />
                 </div>
               </div>
             </div>
 
             <div className="border-t pt-3">
-              <p className="text-sm font-semibold mb-2">Insurance</p>
-              <div className="space-y-3">
-                <div><Label>Provider</Label><Input value={newPatient.insuranceProvider} onChange={e => setNewPatient(p => ({ ...p, insuranceProvider: e.target.value }))} placeholder="Blue Cross" /></div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div><Label>Member ID</Label><Input value={newPatient.insuranceMemberId} onChange={e => setNewPatient(p => ({ ...p, insuranceMemberId: e.target.value }))} /></div>
-                  <div><Label>Group #</Label><Input value={newPatient.insuranceGroup} onChange={e => setNewPatient(p => ({ ...p, insuranceGroup: e.target.value }))} /></div>
+              <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-2 flex items-center gap-1.5"><Shield className="h-3 w-3" aria-hidden="true" /> Insurance <span className="text-gray-400 normal-case font-normal">(optional — blank = self-pay)</span></p>
+              <div className="space-y-2">
+                <Input value={newPatient.insuranceProvider} onChange={e => setNewPatient(p => ({ ...p, insuranceProvider: e.target.value }))} placeholder="Insurance provider" aria-label="Insurance provider" className="h-10 sm:h-9" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input value={newPatient.insuranceMemberId} onChange={e => setNewPatient(p => ({ ...p, insuranceMemberId: e.target.value }))} placeholder="Member ID" aria-label="Member ID" className="h-10 sm:h-9 min-w-0" />
+                  <Input value={newPatient.insuranceGroup} onChange={e => setNewPatient(p => ({ ...p, insuranceGroup: e.target.value }))} placeholder="Group #" aria-label="Group number" className="h-10 sm:h-9 min-w-0" />
                 </div>
               </div>
             </div>
 
-            {createError && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700" role="alert">{createError}</div>
-            )}
-
-            <Button className="w-full bg-[#B91C1C] hover:bg-[#991B1B] text-white h-11" disabled={!newPatient.firstName.trim() || !newPatient.lastName.trim() || isCreating} onClick={createPatient}>
-              {isCreating ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" /> Creating…</> : 'Create patient'}
+            <InlineError message={createError || null} />
+          </div>
+          <div className="flex items-center justify-end gap-2 px-4 sm:px-6 py-3 border-t bg-white flex-shrink-0">
+            <Button variant="outline" className="h-10 sm:h-9" onClick={() => setCreateOpen(false)} disabled={isCreating}>Cancel</Button>
+            <Button className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" disabled={!newPatient.firstName.trim() || !newPatient.lastName.trim() || Object.keys(newErrors).length > 0 || !!newBlockingMatch || isCreating} onClick={createPatient}>
+              {isCreating ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Creating…</> : <><UserPlus className="h-4 w-4" aria-hidden="true" /> Create patient</>}
             </Button>
           </div>
         </DialogContent>
@@ -621,6 +684,37 @@ const LaneHeader: React.FC<{ id: string; title: string; count: number; tone: 're
     <span className={cn('inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold rounded-full', tone === 'red' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-700')}>{count}</span>
   </div>
 );
+
+/** Labelled field with inline error / warning — shared by the Add patient form. */
+const Field: React.FC<{ label: string; required?: boolean; hint?: string; error?: string; warn?: string; children: React.ReactNode }> = ({ label, required, hint, error, warn, children }) => (
+  <div className="space-y-1 min-w-0">
+    <Label className="text-xs font-semibold text-gray-700">
+      {label}{required && <span className="text-[#B91C1C]"> *</span>}
+      {hint && <span className="font-normal text-gray-400"> · {hint}</span>}
+    </Label>
+    {children}
+    {error ? <p className="text-[11px] text-red-600">{error}</p> : warn ? <p className="text-[11px] text-amber-700">{warn}</p> : null}
+  </div>
+);
+
+/** Amber "Data check" / fuchsia "Dup" pills — orthogonal to bucket + tier. */
+const QualityPills: React.FC<{ p: PatientRow; dups: DuplicateHit[] | undefined }> = ({ p, dups }) => {
+  const issues = dataQualityIssues(p);
+  const strongDup = (dups || []).some(d => d.reason !== 'name');
+  if (issues.length === 0 && !strongDup) return null;
+  return (
+    <>
+      {issues.length > 0 && (
+        <span title={issues.map(i => i.detail).join('\n')} className="inline-flex items-center gap-0.5 px-1.5 h-5 rounded-full text-[9px] font-semibold bg-amber-50 text-amber-900 border border-amber-300">
+          <AlertTriangle className="h-2.5 w-2.5" aria-hidden="true" /> {issues.length === 1 ? issues[0].label : `${issues.length} data checks`}
+        </span>
+      )}
+      {strongDup && (
+        <span title={`Possible duplicate — ${Array.from(new Set((dups || []).map(d => DUP_REASON_LABEL[d.reason]))).join(', ')}`} className="inline-flex items-center px-1.5 h-5 rounded-full text-[9px] font-semibold bg-fuchsia-50 text-fuchsia-800 border border-fuchsia-300">Possible dup</span>
+      )}
+    </>
+  );
+};
 
 const LoadingRows: React.FC = () => (
   <div className="space-y-1.5" aria-busy="true" aria-label="Loading patients">
@@ -821,6 +915,7 @@ const PatientRows: React.FC<{ rows: PatientRow[]; ctx: RowCtx; handlers: RowHand
                     <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                       <span className="text-sm font-semibold text-gray-900 truncate">{fullName(p)}</span>
                       <TierPills p={p} tier={tier} stats={s} small />
+                      <QualityPills p={p} dups={ctx.dupIndex.get(p.id)} />
                     </div>
                     {s && s.total > 0 && <p className="text-[11px] text-gray-500">{s.total} visit{s.total === 1 ? '' : 's'}{s.completed !== s.total ? ` · ${s.completed} completed` : ''}</p>}
                   </TableCell>
@@ -877,6 +972,7 @@ const PatientRows: React.FC<{ rows: PatientRow[]; ctx: RowCtx; handlers: RowHand
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-sm font-semibold text-gray-900">{fullName(p)}</span>
                       <TierPills p={p} tier={tier} stats={s} small />
+                      <QualityPills p={p} dups={ctx.dupIndex.get(p.id)} />
                     </div>
                     <p className="text-[11px] text-gray-500 truncate mt-0.5">{p.phone || p.email || 'No contact on file'}</p>
                   </div>

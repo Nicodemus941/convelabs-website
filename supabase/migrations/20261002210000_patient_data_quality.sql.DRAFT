@@ -1,0 +1,153 @@
+-- ============================================================================
+-- DRAFT — NOT APPLIED (the .DRAFT extension keeps the Supabase CLI from
+-- picking it up; rename to .sql only when approved)
+--
+-- Patient data quality — companion to the admin Patients workflow pass
+-- (src/components/dashboards/admin/patientDirectory.ts: dataQualityIssues,
+-- buildDuplicateIndex). Everything the UI ships today is READ-ONLY
+-- detection; this draft adds the two write-side tools it is missing.
+--
+-- Live counts (read-only SQL, tenant_patients WHERE deleted_at IS NULL,
+-- 2026-10-02): 751 patients · 1 organization stored as a patient
+-- ("Clinical Associates of Orlando", 13 visits, placeholder DOB 2008-01-01,
+-- organizations.id 2c17de02-980e-496f-9e07-7f6a90ae2640 already exists) ·
+-- 2 Jan-1 DOBs · 8 DOBs within the last 12 months (booking date typed as
+-- DOB) · 271 no DOB · 26 no phone+email · 149 no address · 30 phone numbers
+-- shared by 2+ records · 11 same name+DOB pairs · 43 same-name groups ·
+-- 2 malformed emails · 1 phone under 10 digits · 13 names containing "test".
+-- ============================================================================
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 1. Mark a patient row as "this is really an organization" without deleting
+--    it. The directory can then hide it behind the Data-check chip and the
+--    chart can show the org link. Non-destructive and reversible.
+-- ─────────────────────────────────────────────────────────────────────────
+ALTER TABLE public.tenant_patients
+  ADD COLUMN IF NOT EXISTS retired_as_organization_id uuid
+    REFERENCES public.organizations(id) ON DELETE SET NULL;
+
+COMMENT ON COLUMN public.tenant_patients.retired_as_organization_id IS
+  'Set when a patient row was actually a practice/clinic. Row is kept for the audit trail; visits should be re-pointed to the real patients and organization_id on appointments set to this org.';
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2. merge_patients(src → dst): the "Possible duplicate" chip has nowhere to
+--    go today. Moves everything that references the source patient onto the
+--    destination, fills blank identity fields on the destination from the
+--    source, then soft-deletes the source with the reason logged.
+--    super_admin only (same gate as delete_patient).
+-- ─────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.merge_patients(
+  p_src_id uuid,
+  p_dst_id uuid,
+  p_reason text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+  v_moved_appts int := 0;
+  v_moved_specimens int := 0;
+  v_moved_activity int := 0;
+  v_src public.tenant_patients%ROWTYPE;
+  v_dst public.tenant_patients%ROWTYPE;
+BEGIN
+  v_role := COALESCE(auth.jwt() -> 'user_metadata' ->> 'role', auth.jwt() -> 'app_metadata' ->> 'role', '');
+  IF v_role <> 'super_admin' THEN
+    RAISE EXCEPTION 'merge_patients: super_admin only (role=%)', v_role USING ERRCODE = '42501';
+  END IF;
+  IF p_src_id = p_dst_id THEN
+    RAISE EXCEPTION 'merge_patients: source and destination are the same record';
+  END IF;
+  IF length(trim(coalesce(p_reason, ''))) < 3 THEN
+    RAISE EXCEPTION 'merge_patients: a reason is required';
+  END IF;
+
+  SELECT * INTO v_src FROM public.tenant_patients WHERE id = p_src_id AND deleted_at IS NULL FOR UPDATE;
+  SELECT * INTO v_dst FROM public.tenant_patients WHERE id = p_dst_id AND deleted_at IS NULL FOR UPDATE;
+  IF v_src.id IS NULL OR v_dst.id IS NULL THEN
+    RAISE EXCEPTION 'merge_patients: both records must exist and not be deleted';
+  END IF;
+
+  -- Re-point everything that hangs off the source.
+  UPDATE public.appointments SET patient_id = p_dst_id WHERE patient_id = p_src_id;
+  GET DIAGNOSTICS v_moved_appts = ROW_COUNT;
+  UPDATE public.specimen_deliveries SET patient_id = p_dst_id WHERE patient_id = p_src_id;
+  GET DIAGNOSTICS v_moved_specimens = ROW_COUNT;
+  UPDATE public.activity_log SET patient_id = p_dst_id WHERE patient_id = p_src_id;
+  GET DIAGNOSTICS v_moved_activity = ROW_COUNT;
+
+  -- Fill blanks on the destination from the source — never overwrite.
+  UPDATE public.tenant_patients d SET
+    email                  = COALESCE(NULLIF(d.email, ''), v_src.email),
+    phone                  = COALESCE(NULLIF(d.phone, ''), v_src.phone),
+    date_of_birth          = COALESCE(d.date_of_birth, v_src.date_of_birth),
+    address                = COALESCE(NULLIF(d.address, ''), v_src.address),
+    city                   = COALESCE(NULLIF(d.city, ''), v_src.city),
+    state                  = COALESCE(NULLIF(d.state, ''), v_src.state),
+    zipcode                = COALESCE(NULLIF(d.zipcode, ''), v_src.zipcode),
+    gate_code              = COALESCE(NULLIF(d.gate_code, ''), v_src.gate_code),
+    insurance_provider     = COALESCE(NULLIF(d.insurance_provider, ''), v_src.insurance_provider),
+    insurance_member_id    = COALESCE(NULLIF(d.insurance_member_id, ''), v_src.insurance_member_id),
+    insurance_group_number = COALESCE(NULLIF(d.insurance_group_number, ''), v_src.insurance_group_number),
+    household_id           = COALESCE(d.household_id, v_src.household_id),
+    household_relation     = COALESCE(d.household_relation, v_src.household_relation),
+    patient_notes          = CASE
+                               WHEN v_src.patient_notes IS NULL OR v_src.patient_notes = '' THEN d.patient_notes
+                               WHEN d.patient_notes IS NULL OR d.patient_notes = '' THEN v_src.patient_notes
+                               ELSE d.patient_notes || E'\n--- merged from duplicate ---\n' || v_src.patient_notes
+                             END,
+    updated_at             = now()
+  WHERE d.id = p_dst_id;
+
+  -- Source becomes a soft-deleted tombstone (email cleared so the unique
+  -- index on active emails can't collide if it is ever restored).
+  UPDATE public.tenant_patients SET
+    deleted_at      = now(),
+    deleted_by      = auth.uid(),
+    deletion_reason = 'merged into ' || p_dst_id::text || ' — ' || trim(p_reason),
+    household_id    = NULL,
+    household_relation = NULL
+  WHERE id = p_src_id;
+
+  INSERT INTO public.activity_log (patient_id, activity_type, description, created_at)
+  VALUES (p_dst_id, 'merge', format('Merged duplicate record %s (%s %s) into this chart: %s appointments, %s specimens moved. Reason: %s',
+          p_src_id, v_src.first_name, v_src.last_name, v_moved_appts, v_moved_specimens, trim(p_reason)), now());
+
+  RETURN jsonb_build_object(
+    'merged_into', p_dst_id,
+    'moved_appointments', v_moved_appts,
+    'moved_specimens', v_moved_specimens,
+    'moved_activity', v_moved_activity
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.merge_patients(uuid, uuid, text) FROM public;
+GRANT EXECUTE ON FUNCTION public.merge_patients(uuid, uuid, text) TO authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- 3. Proposed one-off data fix for the known org-as-patient (NOT part of the
+--    migration — run by hand after review, each step verified read-only):
+--
+--   -- a. Which real people were drawn on the 13 visits? (needs the owner —
+--   --    patient_name on those rows is the clinic name, so the person must
+--   --    come from the lab order / phleb notes.)
+--   -- b. For each visit: UPDATE appointments SET patient_id = <real patient>,
+--   --    patient_name = <real name>, organization_id = '2c17de02-980e-496f-9e07-7f6a90ae2640'
+--   --    WHERE id = <visit>;   (2 visits from 2026-04-13 have organization_id NULL today)
+--   -- c. UPDATE tenant_patients SET retired_as_organization_id = '2c17de02-…', date_of_birth = NULL
+--   --    WHERE id = '82cb8cd6-1ce4-4dfd-b9c2-37846d84e543';
+--   -- d. Only once no appointment references it: delete_patient(…, 'organization stored as patient').
+--
+-- 4. Proposed fixes for the other findings (all owner-approved, by hand):
+--   -- 8 DOBs within the last year: NULL them (they are booking dates), the
+--   --    "No DOB" flag then nudges staff to collect the real one.
+--   -- 2 Jan-1 DOBs (1987-01-01, 2008-01-01): confirm with patient / provider.
+--   -- 30 shared phones / 11 same name+DOB: review via the "Possible duplicate"
+--   --    chip; merge with merge_patients() once applied. Household members
+--   --    legitimately share a phone — the UI only calls name+DOB "strong".
+--   -- 13 "test" names: delete_patient() with reason 'test record'.
+--   -- 2 malformed emails / 1 short phone: fix via Edit info (now validated).
+-- ============================================================================
