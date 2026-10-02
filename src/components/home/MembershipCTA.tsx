@@ -35,7 +35,7 @@ const MembershipCTA = () => {
     "Priority and same-day scheduling",
     "Plans from just $99/year — pays for itself in 5 visits",
     "Family member add-ons from $35 per person",
-    "Trusted by 500+ patients across Central Florida"
+    "Trusted across Central Florida — 5.0 from 164 reviews"
   ];
 
   const containerVariants: Variants = {

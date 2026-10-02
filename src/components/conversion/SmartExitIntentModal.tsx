@@ -31,7 +31,7 @@ const SmartExitIntentModal: React.FC<SmartExitIntentModalProps> = ({ isOpen, onC
 
     return {
       headline: "Get 10% Off Your First Visit",
-      subheadline: "Join 500+ Central Florida patients who trust ConveLabs for their lab work.",
+      subheadline: "Join Central Florida patients who trust ConveLabs — 5.0 from 164 reviews.",
       offer: "10% Off + Priority Booking",
       ctaText: "Claim My Discount",
       icon: Star,
@@ -131,7 +131,7 @@ const SmartExitIntentModal: React.FC<SmartExitIntentModalProps> = ({ isOpen, onC
 
         <div className="mt-4 space-y-1 text-center text-xs text-muted-foreground">
           <p className="flex items-center justify-center gap-1"><Shield className="h-3 w-3" /> No spam, unsubscribe anytime</p>
-          <p>500+ patients across Central Florida</p>
+          <p>5.0 from 164 reviews</p>
           <p>Same-day appointments available</p>
         </div>
       </DialogContent>

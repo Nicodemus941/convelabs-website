@@ -129,7 +129,7 @@ const ExitIntentPopup = ({ isOpen, onClose, visitorProfile = 'busy_professional'
             <div className="flex items-center justify-center space-x-4 text-sm text-gray-600">
               <div className="flex items-center">
                 <Shield className="h-4 w-4 mr-1" />
-                99% Success Rate
+                Most Draws Under 10 Minutes
               </div>
               <div className="flex items-center">
                 <Star className="h-4 w-4 mr-1" />

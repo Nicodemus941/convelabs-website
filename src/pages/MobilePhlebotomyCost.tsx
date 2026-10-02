@@ -47,7 +47,7 @@ const COST_FAQS = [
   {
     question: 'Is mobile phlebotomy worth the cost vs. a lab walk-in?',
     answer:
-      'For most people, yes. You skip the waiting room, the drive, and the time off work. ConveLabs adds one-try draws by experienced phlebotomists, results in about 48 hours, and an on-time guarantee — value a walk-in lab can’t match for the convenience of a draw at your door.',
+      'For most people, yes. You skip the waiting room, the drive, and the time off work. ConveLabs adds draws by experienced phlebotomists (most under 10 minutes), samples delivered to Quest, Labcorp or AdventHealth, and an on-time guarantee — value a walk-in lab can’t match for the convenience of a draw at your door.',
   },
 ];
 
@@ -211,8 +211,8 @@ const MobilePhlebotomyCost = () => {
             <ul className="space-y-3">
               {[
                 'No waiting room, no drive, no time off work — the phlebotomist comes to you.',
-                'One-try draws by experienced, licensed phlebotomists.',
-                'Results in about 48 hours, with delivery confirmation.',
+                'Draws by experienced, licensed phlebotomists — most take under 10 minutes.',
+                'Samples delivered to Quest, Labcorp or AdventHealth, with delivery confirmation.',
                 'On-time arrival guarantee — if we’re late, your visit is on us.',
               ].map((t) => (
                 <li key={t} className="flex items-start gap-3">

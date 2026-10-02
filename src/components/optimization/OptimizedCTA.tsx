@@ -41,7 +41,7 @@ const OptimizedCTA = ({
           primary: { text: 'Book Premium Service', icon: Shield },
           secondary: { text: 'Learn About Testing', icon: Calendar },
           urgency: { text: 'Same-Day Results Available', icon: Clock },
-          benefit: { text: '99% Accuracy Guaranteed', icon: Shield }
+          benefit: { text: 'Every sample tracked', icon: Shield }
         };
       default: // busy_professional
         return {

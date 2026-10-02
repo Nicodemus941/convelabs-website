@@ -29,10 +29,10 @@ interface StackItem {
 }
 
 const STACK: StackItem[] = [
-  { label: 'Licensed phlebotomist at your door',     subtext: 'One-try draws, 95%+ success',   value: 150 },
+  { label: 'Licensed phlebotomist at your door',     subtext: 'Most draws take under 10 minutes', value: 150 },
   { label: '60-minute arrival guarantee',            subtext: 'On-time — or your visit is FREE', value: 75 },
   { label: 'Specimen pickup + lab delivery',         subtext: 'We drive it so you don\'t',     value: 40 },
-  { label: 'Results in 48 hours',                    subtext: 'vs. 3–5 days at traditional labs', value: 50 },
+  { label: 'Sample tracked to your lab',             subtext: 'You and your doctor are notified when it\'s delivered', value: 50 },
   { label: 'HIPAA-grade privacy, in your home',      subtext: 'No waiting rooms, no exposure', value: 30 },
   { label: 'Delivery tracking + confirmation',       subtext: 'Real-time status updates',      value: 25 },
   { label: 'Insurance info sent to the lab',         subtext: 'We pass your details so the lab bills correctly', value: 20 },

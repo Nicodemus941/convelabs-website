@@ -107,7 +107,7 @@ const LuxuryMobilePhlebotomy: React.FC = () => {
               <div className="flex justify-center items-center gap-8 flex-wrap">
                 <div className="flex items-center gap-2">
                   <Star className="h-5 w-5 text-conve-gold fill-current" />
-                  <span className="font-semibold">500+ VIP Clients</span>
+                  <span className="font-semibold">5.0 from 164 reviews</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Shield className="h-5 w-5 text-conve-red" />
