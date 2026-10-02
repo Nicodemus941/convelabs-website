@@ -1,82 +1,112 @@
+/**
+ * NotesTab — "Notes & tasks": the owned, dated work list plus the activity
+ * journal, on one activity_log table.
+ *
+ *   • A task is an activity_log row with task_status set. It has an owner
+ *     (assigned_to_user_id), a priority, a due date and a thread (replies
+ *     carry parent_id). Status flows open → in_progress → done / cancelled.
+ *   • A note is any row with task_status NULL — the journal of every call,
+ *     text, email and complaint the office logs.
+ *   • Both arrive live over the activity_log realtime channel.
+ *
+ * Assignment is fixed here: the old rpc('get_assignable_staff') never
+ * existed (404 on every load) and its fallback read columns staff_profiles
+ * does not have, so the Owner dropdown was always empty. Staff now come
+ * from inbox/staff.ts (get_staff_activity_summary, which exists and is
+ * admin-gated), with the intended RPC in a DRAFT migration.
+ *
+ * Layout follows LabOrdersTab: title row → count tiles → chips → "Needs
+ * action" lane (overdue, urgent, due today, assigned to me) over
+ * "Everything else" → task drawer with the full thread. The daily-pace
+ * coaching widgets (scoreboard, morning ritual, quick log) and the team
+ * activity card still exist, folded under the list so the work comes first.
+ */
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { format, formatDistanceToNow } from 'date-fns';
+import { format, formatDistanceToNow, isToday, isPast } from 'date-fns';
 import {
-  FileText, Search, RefreshCw, Plus, Phone, Mail, Calendar,
-  AlertTriangle, XCircle, ClipboardList, MessageSquare, Clock,
-  Send, Download, CheckCircle2, Loader2, ArrowRight, Reply,
-  CornerDownRight, UserCheck, Flag,
+  FileText, Search, Phone, Mail, Calendar, AlertTriangle, XCircle, ClipboardList, MessageSquare, Clock,
+  Send, Download, CheckCircle2, Loader2, ArrowRight, Reply, CornerDownRight, Flag, X, Link2, Plus,
+  RotateCcw, UserCheck, ChevronDown,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import StaffActivityCard from './StaffActivityCard';
+import { InboxHero, ChipRow, LaneHeader } from './inbox/InboxHero';
+import CreateTaskSheet, { type TaskDefaults } from './inbox/CreateTaskSheet';
+import { fetchAssignableStaff, staffLabel, initialsOf, type StaffMember } from './inbox/staff';
+import { adminBasePath } from './inbox/inboxQueries';
 
-/**
- * NotesTab — Hormozi-graded activity log + task assignment workspace.
- *
- *   • Owner creates a "task" by adding a note + selecting an assignee.
- *   • Assignee sees it live (Supabase realtime channel on activity_log
- *     INSERT/UPDATE) and gets a one-tap "Mark in progress / Mark done"
- *     button.
- *   • Every activity threads under its parent task via parent_id, so
- *     every action on a task is visible in one place — required by
- *     the "she adds notes for every activity performed" workflow.
- *   • A "My Tasks" tab is the default view for any user with open
- *     tasks; "Activity Feed" is the firehose view of everything.
- */
+const db = supabase as any;
 
 const ACTIVITY_TYPES = [
   { value: 'task', label: 'Task', icon: Flag, color: 'bg-red-50 text-red-700 border-red-200' },
-  { value: 'call', label: 'Phone Call', icon: Phone, color: 'bg-blue-50 text-blue-700' },
-  { value: 'sms', label: 'SMS Sent', icon: MessageSquare, color: 'bg-emerald-50 text-emerald-700' },
-  { value: 'email', label: 'Email Sent', icon: Mail, color: 'bg-purple-50 text-purple-700' },
-  { value: 'voicemail', label: 'Left Voicemail', icon: Phone, color: 'bg-amber-50 text-amber-700' },
-  { value: 'contact_attempt', label: 'Contact Attempt', icon: Phone, color: 'bg-orange-50 text-orange-700' },
-  { value: 'specimen_request', label: 'Specimen Request', icon: ClipboardList, color: 'bg-teal-50 text-teal-700' },
-  { value: 'lab_order_missing', label: 'Lab Order Not Received', icon: AlertTriangle, color: 'bg-red-50 text-red-700' },
-  { value: 'cancellation', label: 'Appointment Cancelled', icon: XCircle, color: 'bg-red-50 text-red-700' },
-  { value: 'reschedule', label: 'Appointment Rescheduled', icon: Calendar, color: 'bg-indigo-50 text-indigo-700' },
-  // NEW Hormozi categories — every operator interaction must have a home
+  { value: 'call', label: 'Phone call', icon: Phone, color: 'bg-blue-50 text-blue-700' },
+  { value: 'sms', label: 'SMS sent', icon: MessageSquare, color: 'bg-emerald-50 text-emerald-700' },
+  { value: 'email', label: 'Email sent', icon: Mail, color: 'bg-purple-50 text-purple-700' },
+  { value: 'voicemail', label: 'Left voicemail', icon: Phone, color: 'bg-amber-50 text-amber-700' },
+  { value: 'contact_attempt', label: 'Contact attempt', icon: Phone, color: 'bg-orange-50 text-orange-700' },
+  { value: 'specimen_request', label: 'Specimen request', icon: ClipboardList, color: 'bg-teal-50 text-teal-700' },
+  { value: 'lab_order_missing', label: 'Lab order not received', icon: AlertTriangle, color: 'bg-red-50 text-red-700' },
+  { value: 'cancellation', label: 'Appointment cancelled', icon: XCircle, color: 'bg-red-50 text-red-700' },
+  { value: 'reschedule', label: 'Appointment rescheduled', icon: Calendar, color: 'bg-indigo-50 text-indigo-700' },
   { value: 'complaint', label: 'Complaint', icon: AlertTriangle, color: 'bg-rose-50 text-rose-800 border-rose-300' },
-  { value: 'results_request', label: 'Results Request', icon: FileText, color: 'bg-cyan-50 text-cyan-700' },
-  { value: 'inquiry', label: 'Inquiry / New Patient Q', icon: MessageSquare, color: 'bg-sky-50 text-sky-700' },
-  { value: 'owner_call', label: 'Owner Personal Call', icon: Phone, color: 'bg-fuchsia-50 text-fuchsia-700' },
-  { value: 'message_inbound', label: 'Inbound Message', icon: Mail, color: 'bg-lime-50 text-lime-700' },
-  { value: 'appointment_confirmed', label: 'Appt Confirmed', icon: Calendar, color: 'bg-green-50 text-green-700' },
-  { value: 'system', label: 'System Event', icon: Clock, color: 'bg-gray-50 text-gray-600' },
-  { value: 'note', label: 'General Note', icon: FileText, color: 'bg-gray-50 text-gray-700' },
+  { value: 'results_request', label: 'Results request', icon: FileText, color: 'bg-cyan-50 text-cyan-700' },
+  { value: 'inquiry', label: 'Inquiry', icon: MessageSquare, color: 'bg-sky-50 text-sky-700' },
+  { value: 'owner_call', label: 'Owner personal call', icon: Phone, color: 'bg-fuchsia-50 text-fuchsia-700' },
+  { value: 'message_inbound', label: 'Inbound message', icon: Mail, color: 'bg-lime-50 text-lime-700' },
+  { value: 'appointment_confirmed', label: 'Appt confirmed', icon: Calendar, color: 'bg-green-50 text-green-700' },
+  { value: 'system', label: 'System', icon: Clock, color: 'bg-gray-50 text-gray-600' },
+  { value: 'note', label: 'Note', icon: FileText, color: 'bg-gray-50 text-gray-700' },
 ];
+const typeCfg = (t: string) => ACTIVITY_TYPES.find(x => x.value === t) || ACTIVITY_TYPES[ACTIVITY_TYPES.length - 1];
 
-// Hormozi daily target: 50 documented touches/day. Operators only do what
-// they can measure; this number drives the scoreboard at the top of the page.
+// Hormozi daily target: 50 documented touches/day.
 const DAILY_TOUCH_GOAL = 50;
-
-// Morning checklist — Naquala completes these each day before 9 AM. Items
-// here become her routing so she doesn't have to remember what comes next.
-// Removed (owner directive 2026-05-14):
-//   • voicemail_review — calls forward to her but she can't access owner's voicemails
-//   • sms_review — SMS tab is real-time (subscribes to sms_messages INSERT),
-//     so inbound messages surface instantly throughout the day; no morning clear needed
-//   • confirm_today — automated SMS/email confirmation cron handles this
 const MORNING_CHECKLIST = [
   { id: 'email_review', label: 'Clear overnight email inbox (results requests, inquiries, complaints)', expectedActivity: 'email' },
-  { id: 'no_show_followup', label: 'Follow up on yesterday\'s no-shows & cancellations (reschedule them)', expectedActivity: 'contact_attempt' },
+  { id: 'no_show_followup', label: "Follow up on yesterday's no-shows & cancellations (reschedule them)", expectedActivity: 'contact_attempt' },
   { id: 'provider_portal_check', label: 'Check provider portal for new lab orders (route to right phleb)', expectedActivity: 'specimen_request' },
   { id: 'unpaid_invoices', label: 'Review Stripe unpaid invoices — text/email patients owing money', expectedActivity: 'contact_attempt' },
-  { id: 'pheb_huddle', label: '5-min standup with phleb on the day\'s route + any prep needs', expectedActivity: 'note' },
+  { id: 'pheb_huddle', label: "5-min standup with phleb on the day's route + any prep needs", expectedActivity: 'note' },
+];
+const QUICK_LOG = [
+  { type: 'call', label: 'Call', desc: 'Phone call: ' },
+  { type: 'voicemail', label: 'Voicemail', desc: 'Left voicemail for: ' },
+  { type: 'sms', label: 'SMS', desc: 'SMS to: ' },
+  { type: 'email', label: 'Email', desc: 'Email to: ' },
+  { type: 'inquiry', label: 'Inquiry', desc: 'Inquiry from: ' },
+  { type: 'complaint', label: 'Complaint', desc: 'Complaint from: ' },
+  { type: 'results_request', label: 'Results', desc: 'Results request from: ' },
+  { type: 'owner_call', label: 'Owner call', desc: 'Personal call for Nico from: ' },
+  { type: 'appointment_confirmed', label: 'Confirmed', desc: 'Confirmed appt for: ' },
+  { type: 'specimen_request', label: 'Specimen', desc: 'Specimen request for: ' },
 ];
 
-const PRIORITY_COLOR: Record<string, string> = {
+const PRIORITY_PILL: Record<string, string> = {
   urgent: 'bg-red-600 text-white border-red-600',
-  normal: 'bg-amber-100 text-amber-800 border-amber-200',
-  low:    'bg-gray-100 text-gray-700 border-gray-200',
+  normal: 'bg-amber-50 text-amber-800 border-amber-200',
+  low: 'bg-gray-100 text-gray-700 border-gray-200',
 };
+const STATUS_PILL: Record<string, string> = {
+  open: 'bg-amber-50 text-amber-700 border-amber-200',
+  in_progress: 'bg-blue-50 text-blue-700 border-blue-200',
+  done: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  cancelled: 'bg-gray-50 text-gray-500 border-gray-200',
+};
+const STATUS_LABEL: Record<string, string> = { open: 'Open', in_progress: 'In progress', done: 'Done', cancelled: 'Cancelled' };
+
+type TaskStatus = 'open' | 'in_progress' | 'done' | 'cancelled';
 
 interface ActivityEntry {
   id: string;
@@ -90,62 +120,53 @@ interface ActivityEntry {
   metadata: any;
   staff_id: string | null;
   assigned_to_user_id: string | null;
-  task_status: 'open' | 'in_progress' | 'done' | 'cancelled' | null;
+  task_status: TaskStatus | null;
   task_priority: 'low' | 'normal' | 'urgent' | null;
   task_due_at: string | null;
   task_completed_at: string | null;
 }
 
-interface AssigneeUser {
-  id: string;
-  email: string;
-  full_name: string | null;
-}
+type FilterKey = 'open' | 'mine' | 'overdue' | 'unassigned' | 'in_progress' | 'done' | 'notes';
+
+const isOpenStatus = (s: TaskStatus | null) => s === 'open' || s === 'in_progress';
+const isOverdue = (a: ActivityEntry) => !!a.task_due_at && isOpenStatus(a.task_status) && isPast(new Date(a.task_due_at));
+const isDueToday = (a: ActivityEntry) => !!a.task_due_at && isOpenStatus(a.task_status) && isToday(new Date(a.task_due_at));
 
 const NotesTab: React.FC = () => {
   const { user } = useAuth();
   const myUserId = user?.id;
-
-  const [activities, setActivities] = useState<ActivityEntry[]>([]);
-  const [assignees, setAssignees] = useState<AssigneeUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('all');
-  const [view, setView] = useState<'my_tasks' | 'all_tasks' | 'feed'>('my_tasks');
-  const [showAddNote, setShowAddNote] = useState(false);
-
-  // Add-note form state
-  const [noteType, setNoteType] = useState('task');
-  const [noteDescription, setNoteDescription] = useState('');
-  const [notePatientSearch, setNotePatientSearch] = useState('');
-  const [notePatientId, setNotePatientId] = useState<string | null>(null);
-  const [patientResults, setPatientResults] = useState<any[]>([]);
-  const [assignTo, setAssignTo] = useState<string>('unassigned');
-  const [priority, setPriority] = useState<'low' | 'normal' | 'urgent'>('normal');
-  const [dueAt, setDueAt] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-
-  // Per-thread reply boxes (keyed by parent task id)
-  const [replyTarget, setReplyTarget] = useState<string | null>(null);
-  const [replyText, setReplyText] = useState('');
-  const [replyBusy, setReplyBusy] = useState(false);
-
+  const basePath = adminBasePath(user?.role);
   const myDisplayName = useMemo(
     () => `${user?.firstName || ''} ${user?.lastName || ''}`.trim() || user?.email || 'Staff',
-    [user]
+    [user],
   );
 
-  // Initial fetch — pull a wider window so threads + their parents resolve
+  const [activities, setActivities] = useState<ActivityEntry[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<FilterKey>('open');
+  const [patientNames, setPatientNames] = useState<Record<string, string>>({});
+
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerDefaults, setComposerDefaults] = useState<TaskDefaults | null>(null);
+  const openComposer = (d: TaskDefaults | null = null) => { setComposerDefaults(d); setComposerOpen(true); };
+
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [replyBusy, setReplyBusy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [showPace, setShowPace] = useState(false);
+  const [showTeam, setShowTeam] = useState(false);
+
+  const staffById = useMemo(() => new Map(staff.map(s => [s.id, s])), [staff]);
+
   const fetchActivities = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('activity_log' as any)
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(400);
+      const { data, error } = await db.from('activity_log').select('*').order('created_at', { ascending: false }).limit(500);
       if (error) throw error;
-      setActivities((data as unknown as ActivityEntry[]) || []);
+      setActivities((data as ActivityEntry[]) || []);
     } catch (err) {
       console.error('Failed to load activities:', err);
     } finally {
@@ -153,135 +174,90 @@ const NotesTab: React.FC = () => {
     }
   }, []);
 
-  // Load assignable staff (admins + office_managers + super_admins)
-  const fetchAssignees = useCallback(async () => {
-    try {
-      const { data, error } = await supabase.rpc('get_assignable_staff' as any);
-      if (!error && Array.isArray(data) && data.length > 0) {
-        setAssignees(data as any);
-        return;
-      }
-      // Fallback: read user_roles directly
-      const { data: rows } = await supabase
-        .from('user_roles')
-        .select('user_id, role')
-        .in('role', ['super_admin', 'admin', 'office_manager', 'owner']);
-      const ids = Array.from(new Set((rows || []).map((r: any) => r.user_id)));
-      if (ids.length === 0) { setAssignees([]); return; }
-      const { data: profiles } = await supabase
-        .from('staff_profiles' as any)
-        .select('user_id, email, first_name, last_name')
-        .in('user_id', ids);
-      const list: AssigneeUser[] = (profiles || []).map((p: any) => ({
-        id: p.user_id,
-        email: p.email || '',
-        full_name: [p.first_name, p.last_name].filter(Boolean).join(' ') || null,
-      }));
-      setAssignees(list);
-    } catch (e) {
-      console.warn('[notes-tab] assignee load failed:', e);
-      setAssignees([]);
-    }
-  }, []);
+  useEffect(() => { fetchActivities(); fetchAssignableStaff().then(setStaff); }, [fetchActivities]);
 
-  useEffect(() => { fetchActivities(); fetchAssignees(); }, [fetchActivities, fetchAssignees]);
+  // Resolve patient names for linked rows (one query, cached by id).
+  useEffect(() => {
+    const ids = Array.from(new Set(activities.map(a => a.patient_id).filter((x): x is string => !!x && !patientNames[x])));
+    if (ids.length === 0) return;
+    db.from('tenant_patients').select('id, first_name, last_name').in('id', ids.slice(0, 200)).then(({ data }: any) => {
+      if (!data) return;
+      setPatientNames(prev => {
+        const next = { ...prev };
+        for (const p of data) next[p.id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Patient';
+        return next;
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activities]);
 
-  // Realtime subscription — new tasks/notes appear without a refresh.
+  // Realtime — new tasks/notes and status flips appear without a refresh.
   useEffect(() => {
     const channel = supabase
       .channel('activity_log_realtime')
-      .on(
-        'postgres_changes' as any,
-        { event: 'INSERT', schema: 'public', table: 'activity_log' },
-        (payload: any) => {
-          const row = payload.new as ActivityEntry;
-          setActivities(prev => [row, ...prev.filter(a => a.id !== row.id)]);
-          if (row.assigned_to_user_id === myUserId && row.task_status === 'open') {
-            toast.info(`📋 New task assigned to you: ${row.description.slice(0, 80)}`);
-          }
+      .on('postgres_changes' as any, { event: 'INSERT', schema: 'public', table: 'activity_log' }, (payload: any) => {
+        const row = payload.new as ActivityEntry;
+        setActivities(prev => [row, ...prev.filter(a => a.id !== row.id)]);
+        if (row.assigned_to_user_id === myUserId && row.task_status === 'open' && row.staff_id !== myUserId) {
+          toast.info(`New task for you: ${row.description.slice(0, 80)}`);
         }
-      )
-      .on(
-        'postgres_changes' as any,
-        { event: 'UPDATE', schema: 'public', table: 'activity_log' },
-        (payload: any) => {
-          const row = payload.new as ActivityEntry;
-          setActivities(prev => prev.map(a => a.id === row.id ? row : a));
-        }
-      )
+      })
+      .on('postgres_changes' as any, { event: 'UPDATE', schema: 'public', table: 'activity_log' }, (payload: any) => {
+        const row = payload.new as ActivityEntry;
+        setActivities(prev => prev.map(a => a.id === row.id ? row : a));
+      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [myUserId]);
 
-  // Patient search for the new-note form
-  useEffect(() => {
-    if (notePatientSearch.length < 2) { setPatientResults([]); return; }
-    const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('tenant_patients')
-        .select('id, first_name, last_name, email')
-        .or(`first_name.ilike.%${notePatientSearch}%,last_name.ilike.%${notePatientSearch}%`)
-        .limit(5);
-      setPatientResults(data || []);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [notePatientSearch]);
+  /* ─── Mutations ───────────────────────────────────────────────── */
 
-  const handleAddNote = async () => {
-    if (!noteDescription.trim()) { toast.error('Description is required'); return; }
-    setIsSaving(true);
+  const logSystem = async (parentId: string, text: string) => {
+    await db.from('activity_log').insert({ activity_type: 'system', description: text, parent_id: parentId, staff_id: myUserId, created_by_name: myDisplayName });
+  };
+
+  const updateTaskStatus = async (id: string, status: TaskStatus) => {
+    setBusyId(id);
     try {
-      const isTask = noteType === 'task' || assignTo !== 'unassigned';
-      const payload: any = {
-        activity_type: noteType,
-        description: noteDescription.trim(),
-        patient_id: notePatientId,
-        created_by_name: myDisplayName,
-        staff_id: myUserId,
-        assigned_to_user_id: assignTo !== 'unassigned' ? assignTo : null,
-        task_status: isTask ? 'open' : null,
-        task_priority: isTask ? priority : null,
-        task_due_at: isTask && dueAt ? new Date(dueAt).toISOString() : null,
-      };
-      const { error } = await supabase.from('activity_log' as any).insert(payload);
+      const patch: Record<string, unknown> = { task_status: status };
+      if (status === 'done') { patch.task_completed_at = new Date().toISOString(); patch.task_completed_by = myUserId; }
+      if (status === 'open') { patch.task_completed_at = null; patch.task_completed_by = null; }
+      const { error } = await db.from('activity_log').update(patch).eq('id', id);
       if (error) throw error;
-      toast.success(isTask ? 'Task created' : 'Note added');
-      setNoteDescription('');
-      setNotePatientSearch('');
-      setNotePatientId(null);
-      setAssignTo('unassigned');
-      setPriority('normal');
-      setDueAt('');
-      setNoteType('task');
-      setShowAddNote(false);
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to add note');
+      await logSystem(id, `Task marked ${STATUS_LABEL[status].toLowerCase()} by ${myDisplayName}`);
+      toast.success(`Marked ${STATUS_LABEL[status].toLowerCase()}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Status update failed');
     } finally {
-      setIsSaving(false);
+      setBusyId(null);
     }
   };
 
-  const updateTaskStatus = async (id: string, status: 'open' | 'in_progress' | 'done' | 'cancelled') => {
+  const reassign = async (id: string, assigneeId: string | null) => {
+    setBusyId(id);
     try {
-      const patch: any = { task_status: status };
-      if (status === 'done') {
-        patch.task_completed_at = new Date().toISOString();
-        patch.task_completed_by = myUserId;
-      }
-      const { error } = await supabase.from('activity_log' as any).update(patch).eq('id', id);
+      const { error } = await db.from('activity_log').update({ assigned_to_user_id: assigneeId, task_status: 'open' }).eq('id', id);
       if (error) throw error;
-
-      // Auto-add a system thread reply so the audit trail is complete.
-      await supabase.from('activity_log' as any).insert({
-        activity_type: 'system',
-        description: `Task marked ${status} by ${myDisplayName}`,
-        parent_id: id,
-        staff_id: myUserId,
-        created_by_name: myDisplayName,
-      });
-      toast.success(`Marked ${status}`);
+      await logSystem(id, assigneeId ? `Reassigned to ${staffLabel(staffById.get(assigneeId))} by ${myDisplayName}` : `Unassigned by ${myDisplayName}`);
+      toast.success(assigneeId ? `Assigned to ${staffLabel(staffById.get(assigneeId))}` : 'Unassigned');
     } catch (e: any) {
-      toast.error(e.message || 'Status update failed');
+      toast.error(e?.message || 'Reassign failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const setDue = async (id: string, dueLocal: string) => {
+    setBusyId(id);
+    try {
+      const iso = dueLocal ? new Date(dueLocal).toISOString() : null;
+      const { error } = await db.from('activity_log').update({ task_due_at: iso }).eq('id', id);
+      if (error) throw error;
+      await logSystem(id, iso ? `Due date set to ${format(new Date(iso), 'MMM d, h:mm a')} by ${myDisplayName}` : `Due date cleared by ${myDisplayName}`);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not update due date');
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -289,557 +265,458 @@ const NotesTab: React.FC = () => {
     if (!replyText.trim()) return;
     setReplyBusy(true);
     try {
-      const { error } = await supabase.from('activity_log' as any).insert({
-        activity_type: 'note',
-        description: replyText.trim(),
-        parent_id: parentId,
-        staff_id: myUserId,
-        created_by_name: myDisplayName,
+      const { error } = await db.from('activity_log').insert({
+        activity_type: 'note', description: replyText.trim(), parent_id: parentId, staff_id: myUserId, created_by_name: myDisplayName,
       });
       if (error) throw error;
       setReplyText('');
-      setReplyTarget(null);
-      toast.success('Reply added');
+      toast.success('Added to the thread');
     } catch (e: any) {
-      toast.error(e.message || 'Reply failed');
+      toast.error(e?.message || 'Reply failed');
     } finally {
       setReplyBusy(false);
     }
   };
 
-  // Build threaded view — group replies under their parents.
+  /* ─── Derived ─────────────────────────────────────────────────── */
+
   const threadsByParent = useMemo(() => {
     const m = new Map<string, ActivityEntry[]>();
     for (const a of activities) {
-      if (a.parent_id) {
-        const arr = m.get(a.parent_id) || [];
-        arr.push(a);
-        m.set(a.parent_id, arr);
-      }
+      if (!a.parent_id) continue;
+      const arr = m.get(a.parent_id) || [];
+      arr.push(a);
+      m.set(a.parent_id, arr);
     }
-    for (const arr of m.values()) {
-      arr.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    }
+    for (const arr of m.values()) arr.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     return m;
   }, [activities]);
 
-  // Tabbed filtering
-  const filtered = useMemo(() => {
-    return activities.filter(a => {
-      if (a.parent_id) return false; // replies render inside their parent
-      if (view === 'my_tasks') {
-        if (a.assigned_to_user_id !== myUserId) return false;
-        if (!a.task_status || a.task_status === 'done' || a.task_status === 'cancelled') return false;
-      } else if (view === 'all_tasks') {
-        if (!a.task_status) return false;
-      }
-      if (filterType !== 'all' && a.activity_type !== filterType) return false;
-      if (!searchQuery) return true;
-      const q = searchQuery.toLowerCase();
-      return (
-        a.description.toLowerCase().includes(q) ||
-        (a.created_by_name && a.created_by_name.toLowerCase().includes(q))
-      );
-    });
-  }, [activities, view, filterType, searchQuery, myUserId]);
+  const roots = useMemo(() => activities.filter(a => !a.parent_id), [activities]);
+  const tasks = useMemo(() => roots.filter(a => !!a.task_status), [roots]);
+  const notes = useMemo(() => roots.filter(a => !a.task_status), [roots]);
 
-  const myOpenCount = useMemo(
-    () => activities.filter(a =>
-      a.assigned_to_user_id === myUserId &&
-      (a.task_status === 'open' || a.task_status === 'in_progress')
-    ).length,
-    [activities, myUserId]
-  );
+  const counts = useMemo(() => ({
+    open: tasks.filter(a => isOpenStatus(a.task_status)).length,
+    mine: tasks.filter(a => a.assigned_to_user_id === myUserId && isOpenStatus(a.task_status)).length,
+    overdue: tasks.filter(isOverdue).length,
+    due_today: tasks.filter(a => isDueToday(a) && !isOverdue(a)).length,
+    unassigned: tasks.filter(a => !a.assigned_to_user_id && isOpenStatus(a.task_status)).length,
+    in_progress: tasks.filter(a => a.task_status === 'in_progress').length,
+    done: tasks.filter(a => a.task_status === 'done' && a.task_completed_at && Date.now() - new Date(a.task_completed_at).getTime() < 7 * 86_400_000).length,
+    notes: notes.length,
+  }), [tasks, notes, myUserId]);
+
+  const needsAction = useCallback((a: ActivityEntry) =>
+    isOpenStatus(a.task_status) && (isOverdue(a) || isDueToday(a) || a.task_priority === 'urgent' || a.assigned_to_user_id === myUserId),
+  [myUserId]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const base = filter === 'notes' ? notes : tasks;
+    return base.filter(a => {
+      if (filter === 'open' && !isOpenStatus(a.task_status)) return false;
+      if (filter === 'mine' && !(a.assigned_to_user_id === myUserId && isOpenStatus(a.task_status))) return false;
+      if (filter === 'overdue' && !isOverdue(a)) return false;
+      if (filter === 'unassigned' && !(!a.assigned_to_user_id && isOpenStatus(a.task_status))) return false;
+      if (filter === 'in_progress' && a.task_status !== 'in_progress') return false;
+      if (filter === 'done' && !(a.task_status === 'done' || a.task_status === 'cancelled')) return false;
+      if (!q) return true;
+      const owner = staffLabel(staffById.get(a.assigned_to_user_id || ''));
+      const patient = a.patient_id ? patientNames[a.patient_id] || '' : '';
+      return [a.description, a.created_by_name, owner, patient, a.activity_type].some(v => (v || '').toLowerCase().includes(q));
+    }).sort((a, b) => {
+      // Overdue first, then by due date, then newest.
+      const ao = isOverdue(a) ? 0 : 1, bo = isOverdue(b) ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      if (a.task_due_at && b.task_due_at) return new Date(a.task_due_at).getTime() - new Date(b.task_due_at).getTime();
+      if (a.task_due_at) return -1;
+      if (b.task_due_at) return 1;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [tasks, notes, filter, search, myUserId, staffById, patientNames]);
+
+  const lanes = useMemo(() => {
+    if (filter !== 'open') return null;
+    return { action: filtered.filter(needsAction), rest: filtered.filter(a => !needsAction(a)) };
+  }, [filtered, filter, needsAction]);
+
+  const selected = useMemo(() => activities.find(a => a.id === selectedId) || null, [activities, selectedId]);
+
+  const CHIPS: Array<{ key: FilterKey; label: string; count: number; dot?: string; desc: string }> = [
+    { key: 'open', label: 'Open tasks', count: counts.open, desc: 'Every open or in-progress task' },
+    { key: 'mine', label: 'Mine', count: counts.mine, dot: 'bg-[#B91C1C]', desc: 'Open tasks assigned to me' },
+    { key: 'overdue', label: 'Overdue', count: counts.overdue, dot: 'bg-red-500', desc: 'Past the due date' },
+    { key: 'unassigned', label: 'Unassigned', count: counts.unassigned, dot: 'bg-gray-400', desc: 'Nobody owns these yet' },
+    { key: 'in_progress', label: 'In progress', count: counts.in_progress, dot: 'bg-blue-500', desc: 'Someone has started' },
+    { key: 'done', label: 'Done', count: tasks.filter(a => a.task_status === 'done' || a.task_status === 'cancelled').length, dot: 'bg-emerald-500', desc: 'Completed or cancelled' },
+    { key: 'notes', label: 'Activity feed', count: counts.notes, dot: 'bg-gray-300', desc: 'Logged calls, texts, emails and notes' },
+  ];
 
   const exportCSV = () => {
-    const headers = ['Date', 'Type', 'Status', 'Priority', 'Due', 'Description', 'By', 'Assigned'];
+    const headers = ['Date', 'Type', 'Status', 'Priority', 'Due', 'Description', 'By', 'Owner', 'Patient'];
     const rows = filtered.map(a => [
       a.created_at ? format(new Date(a.created_at), 'MMM d yyyy h:mm a') : '',
-      a.activity_type,
-      a.task_status || '',
-      a.task_priority || '',
+      a.activity_type, a.task_status || '', a.task_priority || '',
       a.task_due_at ? format(new Date(a.task_due_at), 'MMM d yyyy h:mm a') : '',
-      a.description,
-      a.created_by_name || '',
-      a.assigned_to_user_id || '',
+      a.description, a.created_by_name || '',
+      staffLabel(staffById.get(a.assigned_to_user_id || '')),
+      a.patient_id ? patientNames[a.patient_id] || a.patient_id : '',
     ]);
-    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${c}"`).join(','))].join('\n');
+    const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `convelabs-activity-log-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    a.download = `convelabs-tasks-${format(new Date(), 'yyyy-MM-dd')}.csv`;
     a.click();
   };
 
-  const renderThread = (thread: ActivityEntry[]) => (
-    <div className="mt-2 ml-12 space-y-1.5 border-l-2 border-gray-200 pl-3">
-      {thread.map(r => {
-        const cfg = ACTIVITY_TYPES.find(t => t.value === r.activity_type) || ACTIVITY_TYPES[ACTIVITY_TYPES.length - 1];
-        const Icon = cfg.icon;
-        return (
-          <div key={r.id} className="flex items-start gap-2 text-xs">
-            <CornerDownRight className="h-3.5 w-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
-            <Icon className="h-3.5 w-3.5 text-gray-500 mt-0.5 flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="text-gray-700">{r.description}</div>
-              <div className="text-[10px] text-gray-500 mt-0.5">
-                {r.created_by_name || 'System'} · {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
+  /* ─── Row ─────────────────────────────────────────────────────── */
 
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <ClipboardList className="h-6 w-6 text-[#B91C1C]" /> Activity Log &amp; Tasks
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {activities.length} entries
-            {myOpenCount > 0 && (
-              <span className="ml-2 inline-flex items-center gap-1 text-red-700 font-semibold">
-                · {myOpenCount} open task{myOpenCount === 1 ? '' : 's'} for you
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={() => setShowAddNote(!showAddNote)}>
-            <Plus className="h-4 w-4" /> {noteType === 'task' ? 'New Task' : 'Add Note'}
-          </Button>
-          <Button variant="outline" size="sm" onClick={exportCSV} className="gap-1"><Download className="h-4 w-4" /> Export</Button>
-          <Button variant="outline" size="sm" onClick={fetchActivities} className="gap-1"><RefreshCw className="h-4 w-4" /> Refresh</Button>
-        </div>
-      </div>
+  const OwnerChip: React.FC<{ id: string | null }> = ({ id }) => {
+    const s = id ? staffById.get(id) : null;
+    const label = id ? staffLabel(s) : 'Unassigned';
+    return (
+      <span className={cn('inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium',
+        id ? (id === myUserId ? 'bg-[#B91C1C]/10 text-[#B91C1C] border-[#B91C1C]/30' : 'bg-gray-50 text-gray-700 border-gray-200') : 'bg-white text-gray-400 border-dashed border-gray-300')}>
+        <span className={cn('h-4 w-4 rounded-full text-[9px] font-bold flex items-center justify-center', id ? 'bg-gray-800 text-white' : 'bg-gray-200 text-gray-500')}>{id ? initialsOf(label) : '?'}</span>
+        {id === myUserId ? 'Me' : label}
+      </span>
+    );
+  };
 
-      {/* Staff activity at a glance — logins, notes, org edits per person */}
-      <StaffActivityCard />
+  const SourceLink: React.FC<{ meta: any }> = ({ meta }) => {
+    const src = meta?.source;
+    if (!src?.type || src.type === 'manual') return null;
+    const inner = <><Link2 className="h-3 w-3" aria-hidden="true" /> {src.label || src.type.replace('_', ' ')}</>;
+    return src.url
+      ? <Link to={src.url} onClick={e => e.stopPropagation()} className="inline-flex items-center gap-1 text-[10px] text-blue-700 hover:underline">{inner}</Link>
+      : <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">{inner}</span>;
+  };
 
-      {/* ─────────── HORMOZI DAILY SCOREBOARD ───────────
-          Single sentence answers: "How is today going?" Updated in real-time
-          as Naquala logs activities. Tone color flips red/amber/green based
-          on pace vs daily 50-touch goal. */}
-      {(() => {
-        const todayStr = new Date().toISOString().substring(0, 10);
-        const todayActivities = activities.filter(a => (a.created_at || '').startsWith(todayStr));
-        const countByType: Record<string, number> = {};
-        for (const a of todayActivities) {
-          countByType[a.activity_type] = (countByType[a.activity_type] || 0) + 1;
-        }
-        const totalToday = todayActivities.length;
-        const pct = Math.round((totalToday / DAILY_TOUCH_GOAL) * 100);
-        const tone = pct >= 100 ? 'emerald' : pct >= 50 ? 'amber' : 'red';
-        const now = new Date();
-        const hoursIntoDay = now.getHours() + now.getMinutes() / 60;
-        const expectedByNow = Math.max(0, Math.round(DAILY_TOUCH_GOAL * Math.min(1, (hoursIntoDay - 8) / 9))); // 8am→5pm
-        return (
-          <div className={`rounded-xl border-2 p-4 ${
-            tone === 'emerald' ? 'bg-gradient-to-r from-emerald-50 to-emerald-100 border-emerald-300' :
-            tone === 'amber' ? 'bg-gradient-to-r from-amber-50 to-amber-100 border-amber-300' :
-            'bg-gradient-to-r from-red-50 to-red-100 border-red-300'
-          }`}>
-            <div className="flex items-baseline justify-between mb-2">
-              <div>
-                <p className={`text-xs uppercase tracking-wider font-bold ${tone === 'emerald' ? 'text-emerald-800' : tone === 'amber' ? 'text-amber-800' : 'text-red-800'}`}>
-                  Today's scoreboard · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
-                </p>
-                <p className={`text-3xl font-bold ${tone === 'emerald' ? 'text-emerald-900' : tone === 'amber' ? 'text-amber-900' : 'text-red-900'}`}>
-                  {totalToday} <span className="text-base font-normal opacity-70">/ {DAILY_TOUCH_GOAL} touches</span>
-                </p>
-              </div>
-              <div className="text-right">
-                <p className={`text-xs ${tone === 'emerald' ? 'text-emerald-700' : tone === 'amber' ? 'text-amber-700' : 'text-red-700'}`}>
-                  Pace target by now: {expectedByNow}
-                </p>
-                <p className={`text-lg font-bold ${
-                  totalToday >= expectedByNow ? 'text-emerald-700' :
-                  totalToday >= expectedByNow * 0.7 ? 'text-amber-700' : 'text-red-700'
-                }`}>
-                  {totalToday >= expectedByNow ? `+${totalToday - expectedByNow} ahead` :
-                   `${expectedByNow - totalToday} behind`}
-                </p>
-              </div>
-            </div>
-            {/* Per-category breakdown */}
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {[
-                ['call', 'Calls', countByType.call || 0],
-                ['sms', 'SMS', countByType.sms || 0],
-                ['email', 'Emails', countByType.email || 0],
-                ['voicemail', 'Voicemails', countByType.voicemail || 0],
-                ['appointment_confirmed', 'Confirmed', countByType.appointment_confirmed || 0],
-                ['inquiry', 'Inquiries', countByType.inquiry || 0],
-                ['complaint', 'Complaints', countByType.complaint || 0],
-                ['results_request', 'Results req', countByType.results_request || 0],
-                ['owner_call', 'Owner calls', countByType.owner_call || 0],
-              ].map(([key, lbl, count]) => (
-                <span key={key as string} className="text-[11px] bg-white/70 border border-gray-300 rounded-full px-2.5 py-0.5">
-                  <strong>{count}</strong> {lbl}
-                </span>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ─────────── BEHIND-PACE NUDGE ───────────
-          Fires after 11 AM ET when scoreboard < 15. Drops a red bar with a
-          specific outbound action so Naquala has somewhere to go immediately. */}
-      {(() => {
-        const todayStr = new Date().toISOString().substring(0, 10);
-        const todayCount = activities.filter(a => (a.created_at || '').startsWith(todayStr)).length;
-        const hour = new Date().getHours();
-        // Show between 11 AM and 4 PM if pace is sub-15
-        if (hour < 11 || hour > 16) return null;
-        if (todayCount >= 15) return null;
-        return (
-          <div className="rounded-xl bg-red-600 text-white p-4 shadow-lg border-2 border-red-700 flex items-start gap-3">
-            <div className="text-2xl">⚠️</div>
+  const renderTask = (a: ActivityEntry) => {
+    const cfg = typeCfg(a.activity_type);
+    const Icon = cfg.icon;
+    const thread = threadsByParent.get(a.id) || [];
+    const mine = a.assigned_to_user_id === myUserId;
+    const overdue = isOverdue(a);
+    const dueToday = isDueToday(a) && !overdue;
+    const open = () => setSelectedId(a.id);
+    return (
+      <Card key={a.id} role="button" tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
+        aria-label={`${a.description.slice(0, 80)}. Open task`}
+        className={cn('shadow-sm cursor-pointer transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40 hover:border-gray-300',
+          overdue && 'border-l-4 border-l-red-500', !overdue && a.task_priority === 'urgent' && isOpenStatus(a.task_status) && 'border-l-4 border-l-orange-500',
+          a.task_status === 'done' && 'opacity-70')}>
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex gap-3">
+            <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0', cfg.color)} aria-hidden="true"><Icon className="h-4 w-4" /></div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold">You're behind pace · {todayCount} touches by {hour > 12 ? hour - 12 : hour} {hour >= 12 ? 'PM' : 'AM'}</p>
-              <p className="text-[12px] mt-1 leading-relaxed">
-                Drop into outbound NOW: <strong>Pick 5 patients with appts next week</strong> and call to confirm.
-                <strong> Reach out to 3 partner orgs</strong> with open invoices.
-                <strong> Each touch = 1 toward your 50 goal</strong>.
-              </p>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ─────────── MORNING CHECKLIST ───────────
-          Hormozi: "The first 60 minutes of the day own the next 480."
-          Each item maps to a documented activity Naquala should log. */}
-      {(() => {
-        const todayStr = new Date().toISOString().substring(0, 10);
-        const todayActivities = activities.filter(a => (a.created_at || '').startsWith(todayStr));
-        const hasTypeToday = (type: string) => todayActivities.some(a => a.activity_type === type);
-        const completedCount = MORNING_CHECKLIST.filter(item => hasTypeToday(item.expectedActivity)).length;
-        const allDone = completedCount === MORNING_CHECKLIST.length;
-        return (
-          <Card className={`shadow-sm border ${allDone ? 'border-emerald-300 bg-emerald-50/30' : 'border-blue-200 bg-blue-50/30'}`}>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="font-bold text-sm flex items-center gap-1.5">
-                  ☀️ Morning ritual
-                  <span className={`text-xs font-normal ${allDone ? 'text-emerald-700' : 'text-blue-700'}`}>
-                    · {completedCount}/{MORNING_CHECKLIST.length} done
-                  </span>
-                </h2>
-                <span className="text-[10px] uppercase tracking-wider text-gray-500">Before 9 AM ET</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Badge variant="outline" className={cn('text-[10px]', STATUS_PILL[a.task_status || 'open'])}>{STATUS_LABEL[a.task_status || 'open']}</Badge>
+                {a.task_priority && isOpenStatus(a.task_status) && <Badge variant="outline" className={cn('text-[10px] capitalize', PRIORITY_PILL[a.task_priority])}>{a.task_priority}</Badge>}
+                {overdue && <Badge variant="outline" className="text-[10px] bg-red-600 text-white border-red-600">Overdue</Badge>}
+                {dueToday && <Badge variant="outline" className="text-[10px] bg-amber-500 text-white border-amber-500">Due today</Badge>}
+                <OwnerChip id={a.assigned_to_user_id} />
+                <span className="text-[10px] text-gray-400 ml-auto whitespace-nowrap">{formatDistanceToNow(new Date(a.created_at), { addSuffix: true })}</span>
               </div>
-              <ul className="space-y-1 text-xs">
-                {MORNING_CHECKLIST.map(item => {
-                  const done = hasTypeToday(item.expectedActivity);
-                  return (
-                    <li key={item.id} className={`flex items-start gap-2 ${done ? 'text-emerald-800' : 'text-gray-700'}`}>
-                      <span className={`mt-0.5 flex-shrink-0 ${done ? '' : 'opacity-30'}`}>{done ? '✅' : '⬜'}</span>
-                      <span className={done ? 'line-through opacity-70' : ''}>{item.label}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-              {allDone && (
-                <p className="text-[11px] text-emerald-700 mt-2 font-medium">🎯 Morning routine complete — full day ahead.</p>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })()}
+              <p className={cn('text-sm mt-1.5 text-gray-900', a.task_status === 'done' && 'line-through')}>{a.description}</p>
+              <div className="flex flex-wrap gap-x-2 gap-y-1 items-center mt-1.5 text-[10px] text-gray-500">
+                <span>{cfg.label} · by {a.created_by_name || 'System'}</span>
+                {a.task_due_at && <span className={cn(overdue ? 'text-red-700 font-semibold' : dueToday ? 'text-amber-700 font-semibold' : '')}>· due {format(new Date(a.task_due_at), 'MMM d, h:mm a')}</span>}
+                {a.patient_id && <span className="inline-flex items-center gap-1 text-gray-700">· <UserCheck className="h-3 w-3" aria-hidden="true" /> {patientNames[a.patient_id] || 'patient'}</span>}
+                {thread.length > 0 && <span>· {thread.length} update{thread.length === 1 ? '' : 's'}</span>}
+                <SourceLink meta={a.metadata} />
+              </div>
 
-      {/* ─────────── QUICK-LOG BAR ───────────
-          One-tap logging for the most common activity types. Speed > polish. */}
-      <Card className="shadow-sm">
-        <CardContent className="p-3">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs font-bold text-gray-700">⚡ Quick log:</span>
-            <span className="text-[11px] text-gray-500">tap once = open a pre-filled note</span>
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {[
-              { type: 'call', label: '📞 Call', desc: 'Phone call: ' },
-              { type: 'voicemail', label: '🎙️ Voicemail', desc: 'Left voicemail for: ' },
-              { type: 'sms', label: '💬 SMS', desc: 'SMS to: ' },
-              { type: 'email', label: '✉️ Email', desc: 'Email to: ' },
-              { type: 'inquiry', label: '❓ Inquiry', desc: 'Inquiry from: ' },
-              { type: 'complaint', label: '⚠️ Complaint', desc: 'Complaint from: ' },
-              { type: 'results_request', label: '📋 Results', desc: 'Results request from: ' },
-              { type: 'owner_call', label: '👤 Owner call', desc: 'Personal call for Nico from: ' },
-              { type: 'appointment_confirmed', label: '✅ Confirmed', desc: 'Confirmed appt for: ' },
-              { type: 'specimen_request', label: '🧪 Specimen', desc: 'Specimen request for: ' },
-            ].map(b => (
-              <button
-                key={b.type}
-                type="button"
-                onClick={() => {
-                  setNoteType(b.type);
-                  setNoteDescription(b.desc);
-                  setShowAddNote(true);
-                  setTimeout(() => {
-                    const ta = document.querySelector('textarea');
-                    if (ta) (ta as HTMLTextAreaElement).focus();
-                  }, 100);
-                }}
-                className="text-xs px-2.5 py-1 rounded-full bg-white border border-gray-300 hover:border-[#B91C1C] hover:bg-red-50 hover:text-[#B91C1C] transition"
-              >
-                {b.label}
-              </button>
-            ))}
+              {isOpenStatus(a.task_status) && (
+                <div className="flex flex-wrap gap-1.5 mt-2" onClick={e => e.stopPropagation()}>
+                  {a.task_status === 'open' && (mine || !a.assigned_to_user_id) && (
+                    <Button size="sm" variant="outline" className="h-8 text-[11px] gap-1" disabled={busyId === a.id}
+                      onClick={() => { if (!a.assigned_to_user_id && myUserId) reassign(a.id, myUserId).then(() => updateTaskStatus(a.id, 'in_progress')); else updateTaskStatus(a.id, 'in_progress'); }}>
+                      <ArrowRight className="h-3 w-3" /> {a.assigned_to_user_id ? 'Start' : 'Take it'}
+                    </Button>
+                  )}
+                  <Button size="sm" className="h-8 text-[11px] gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" disabled={busyId === a.id} onClick={() => updateTaskStatus(a.id, 'done')}>
+                    <CheckCircle2 className="h-3 w-3" /> Done
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-8 text-[11px] gap-1" onClick={() => { setSelectedId(a.id); }}>
+                    <Reply className="h-3 w-3" /> Add update
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
+    );
+  };
 
-      {/* View tabs */}
-      <div className="flex gap-1 border-b">
-        {[
-          { key: 'my_tasks', label: `My Tasks${myOpenCount > 0 ? ` (${myOpenCount})` : ''}` },
-          { key: 'all_tasks', label: 'All Tasks' },
-          { key: 'feed', label: 'Activity Feed' },
-        ].map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setView(tab.key as any)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 transition ${
-              view === tab.key ? 'border-[#B91C1C] text-[#B91C1C]' : 'border-transparent text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            {tab.label}
+  const renderNote = (a: ActivityEntry) => {
+    const cfg = typeCfg(a.activity_type);
+    const Icon = cfg.icon;
+    return (
+      <div key={a.id} className="flex gap-3 p-3 rounded-lg border bg-white">
+        <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0', cfg.color)} aria-hidden="true"><Icon className="h-3.5 w-3.5" /></div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge variant="outline" className={cn('text-[10px]', cfg.color)}>{cfg.label}</Badge>
+            {a.patient_id && <span className="text-[10px] text-gray-600 inline-flex items-center gap-1"><UserCheck className="h-3 w-3" /> {patientNames[a.patient_id] || 'patient'}</span>}
+            <span className="text-[10px] text-gray-400 ml-auto">{format(new Date(a.created_at), 'MMM d, h:mm a')}</span>
+          </div>
+          <p className="text-sm mt-1 text-gray-800 whitespace-pre-wrap">{a.description}</p>
+          <p className="text-[10px] text-gray-500 mt-0.5">by {a.created_by_name || 'System'}</p>
+        </div>
+      </div>
+    );
+  };
+
+  /* ─── Daily pace (folded) ─────────────────────────────────────── */
+
+  const todayStr = new Date().toISOString().substring(0, 10);
+  const todayActivities = activities.filter(a => (a.created_at || '').startsWith(todayStr));
+  const totalToday = todayActivities.length;
+  const paceTone = totalToday >= DAILY_TOUCH_GOAL ? 'emerald' : totalToday >= DAILY_TOUCH_GOAL / 2 ? 'amber' : 'red';
+  const hasTypeToday = (type: string) => todayActivities.some(a => a.activity_type === type);
+  const morningDone = MORNING_CHECKLIST.filter(i => hasTypeToday(i.expectedActivity)).length;
+
+  return (
+    <div className="space-y-4 sm:space-y-5">
+      <InboxHero
+        icon={ClipboardList}
+        title="Notes & tasks"
+        subtitle={<>Owned, dated work for the team — plus the journal of every touch. {counts.mine > 0 && <span className="font-medium text-red-700">{counts.mine} open for you.</span>}</>}
+        loading={loading}
+        onRefresh={fetchActivities}
+        activeKey={['mine', 'overdue', 'unassigned', 'done'].includes(filter) ? filter : null}
+        onTile={(k) => setFilter(filter === k ? 'open' : (k as FilterKey))}
+        tiles={[
+          { key: 'mine', label: 'Mine · open', value: counts.mine, tone: 'red', hot: true, desc: 'Open tasks assigned to me' },
+          { key: 'overdue', label: 'Overdue', value: counts.overdue, tone: 'red', hot: true, desc: 'Past the due date' },
+          { key: 'unassigned', label: 'Unassigned', value: counts.unassigned, tone: 'amber', desc: 'Nobody owns these yet' },
+          { key: 'done', label: 'Done · 7 days', value: counts.done, tone: 'emerald', desc: 'Completed this week' },
+        ]}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={exportCSV} className="h-10 sm:h-9 text-xs gap-1 hidden sm:inline-flex"><Download className="h-4 w-4" /> Export</Button>
+            <Button size="sm" className="h-10 sm:h-9 text-xs bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5" onClick={() => openComposer({ activityType: 'task', source: { type: 'manual' } })}>
+              <Plus className="h-4 w-4" /> New task
+            </Button>
+          </>
+        }
+      />
+
+      {/* Quick log — one tap opens a pre-filled note */}
+      <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:flex-wrap items-center" role="group" aria-label="Quick log">
+        <span className="text-[11px] font-semibold text-gray-500 whitespace-nowrap">Quick log:</span>
+        {QUICK_LOG.map(b => (
+          <button key={b.type} type="button" onClick={() => openComposer({ activityType: b.type, description: b.desc, source: { type: 'manual' } })}
+            className="text-[11px] h-8 px-2.5 rounded-full bg-white border border-gray-200 hover:border-[#B91C1C]/50 hover:text-[#B91C1C] whitespace-nowrap transition">
+            {b.label}
           </button>
         ))}
       </div>
 
-      {/* Add Note / Task form */}
-      {showAddNote && (
-        <Card className="shadow-sm border-[#B91C1C]/20">
-          <CardContent className="p-4 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs font-medium">Type</label>
-                <Select value={noteType} onValueChange={setNoteType}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {ACTIVITY_TYPES.map(t => (
-                      <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs font-medium">Assign to</label>
-                <Select value={assignTo} onValueChange={setAssignTo}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned (just a note)" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unassigned">Unassigned (just a note)</SelectItem>
-                    {assignees.map(a => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.full_name || a.email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs font-medium">Priority</label>
-                <Select value={priority} onValueChange={(v) => setPriority(v as any)}>
-                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="normal">Normal</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="text-xs font-medium">Due (optional)</label>
-                <Input type="datetime-local" value={dueAt} onChange={e => setDueAt(e.target.value)} className="h-9" />
-              </div>
-              <div className="relative sm:col-span-2">
-                <label className="text-xs font-medium">Patient (optional)</label>
-                <Input
-                  value={notePatientSearch}
-                  onChange={e => { setNotePatientSearch(e.target.value); setNotePatientId(null); }}
-                  placeholder="Search patient by name..."
-                  className="h-9"
-                />
-                {patientResults.length > 0 && (
-                  <div className="absolute z-50 mt-1 w-full bg-white border rounded-lg shadow-lg max-h-32 overflow-y-auto">
-                    {patientResults.map((p: any) => (
-                      <button key={p.id} className="w-full text-left px-3 py-1.5 hover:bg-muted/50 text-sm"
-                        onClick={() => { setNotePatientId(p.id); setNotePatientSearch(`${p.first_name} ${p.last_name}`); setPatientResults([]); }}>
-                        {p.first_name} {p.last_name} <span className="text-xs text-muted-foreground">{p.email || ''}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium">Description *</label>
-              <Textarea value={noteDescription} onChange={e => setNoteDescription(e.target.value)} placeholder="What needs to happen? Be specific so the assignee knows exactly what to do." rows={3} />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" size="sm" onClick={() => setShowAddNote(false)}>Cancel</Button>
-              <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1" onClick={handleAddNote} disabled={isSaving}>
-                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                {assignTo === 'unassigned' && noteType !== 'task' ? 'Save Note' : 'Send Task'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Filters (type + search) */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="flex flex-wrap gap-1.5">
-          <Button size="sm" variant={filterType === 'all' ? 'default' : 'outline'}
-            className={`text-xs h-7 ${filterType === 'all' ? 'bg-[#B91C1C]' : ''}`}
-            onClick={() => setFilterType('all')}>All</Button>
-          {ACTIVITY_TYPES.slice(0, 7).map(t => (
-            <Button key={t.value} size="sm" variant={filterType === t.value ? 'default' : 'outline'}
-              className={`text-xs h-7 ${filterType === t.value ? 'bg-[#B91C1C]' : ''}`}
-              onClick={() => setFilterType(t.value)}>{t.label}</Button>
-          ))}
+      {/* Search + chips */}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" aria-hidden="true" />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search tasks, notes, owner, patient…" aria-label="Search tasks" className="h-10 sm:h-9 pl-8 text-sm" />
+          {search && <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center text-gray-400 hover:text-gray-700"><X className="h-4 w-4" /></button>}
         </div>
-        <div className="relative ml-auto">
-          <Search className="h-4 w-4 absolute left-2.5 top-1.5 text-muted-foreground" />
-          <Input placeholder="Search notes..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="pl-8 h-7 w-48 text-xs" />
-        </div>
+        <ChipRow chips={CHIPS} active={filter} onChange={k => setFilter(k as FilterKey)} ariaLabel="Task filter" />
       </div>
 
-      {/* Activity Feed */}
+      {/* Body */}
+      {loading && activities.length === 0 ? (
+        <div className="space-y-2">{[1, 2, 3, 4].map(i => <div key={i} className="h-20 bg-gray-100 animate-pulse rounded-lg" />)}</div>
+      ) : filtered.length === 0 ? (
+        <Card><CardContent className="p-8 text-center">
+          <CheckCircle2 className="h-7 w-7 text-emerald-500 mx-auto mb-2" aria-hidden="true" />
+          <p className="text-sm font-semibold">{filter === 'mine' ? "You're all caught up" : filter === 'notes' ? 'Nothing logged yet' : 'No tasks here'}</p>
+          <p className="text-xs text-gray-500 mt-1">
+            {search ? <button type="button" onClick={() => setSearch('')} className="text-[#B91C1C] hover:underline">Clear the search</button>
+              : filter === 'open' ? 'Create a task with "New task", or turn an inbox item or a website chat into one.' : <button type="button" onClick={() => setFilter('open')} className="text-[#B91C1C] hover:underline">Show open tasks</button>}
+          </p>
+        </CardContent></Card>
+      ) : filter === 'notes' ? (
+        <div className="space-y-2">{filtered.map(renderNote)}</div>
+      ) : lanes ? (
+        <div className="space-y-5">
+          {lanes.action.length > 0 && (
+            <section aria-labelledby="lane-task-action" className="space-y-2">
+              <LaneHeader id="lane-task-action" title="Needs action" count={lanes.action.length} tone="red" hint="overdue, due today, urgent, or yours" />
+              {lanes.action.map(renderTask)}
+            </section>
+          )}
+          {lanes.rest.length > 0 && (
+            <section aria-labelledby="lane-task-rest" className="space-y-2">
+              <LaneHeader id="lane-task-rest" title="Everything else" count={lanes.rest.length} tone="gray" />
+              {lanes.rest.map(renderTask)}
+            </section>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">{filtered.map(renderTask)}</div>
+      )}
+
+      <p className="text-[11px] text-gray-400">Showing {filtered.length} · {tasks.length} task{tasks.length === 1 ? '' : 's'} and {notes.length} note{notes.length === 1 ? '' : 's'} loaded (newest 500).</p>
+
+      {/* Daily pace — folded coaching widgets */}
       <Card className="shadow-sm">
-        <CardContent className="p-4">
-          {loading ? (
-            <div className="space-y-3">{[1,2,3,4].map(i => <div key={i} className="h-12 bg-muted/50 animate-pulse rounded" />)}</div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-12">
-              <ClipboardList className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <p className="font-semibold">
-                {view === 'my_tasks' ? 'You\'re all caught up' : 'No entries to show'}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {view === 'my_tasks' ? 'No open tasks assigned to you. Switch tabs to see all tasks or activity feed.' : 'Click "New Task" to assign work, or change filters above.'}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filtered.map(activity => {
-                const typeCfg = ACTIVITY_TYPES.find(t => t.value === activity.activity_type) || ACTIVITY_TYPES[ACTIVITY_TYPES.length - 1];
-                const Icon = typeCfg.icon;
-                const thread = threadsByParent.get(activity.id) || [];
-                const isMineToDo = activity.assigned_to_user_id === myUserId &&
-                                   (activity.task_status === 'open' || activity.task_status === 'in_progress');
-                const isOverdue = activity.task_due_at && activity.task_status !== 'done' && new Date(activity.task_due_at) < new Date();
-                return (
-                  <div key={activity.id} className={`p-3 rounded-lg border transition ${
-                    isMineToDo ? 'border-red-300 bg-red-50/40 hover:bg-red-50' : 'hover:bg-muted/20'
-                  }`}>
-                    <div className="flex gap-3">
-                      <div className={`w-9 h-9 rounded-lg ${typeCfg.color} flex items-center justify-center flex-shrink-0`}>
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <Badge variant="outline" className={`text-[10px] ${typeCfg.color}`}>{typeCfg.label}</Badge>
-                          {activity.task_status && (
-                            <Badge variant="outline" className={`text-[10px] ${
-                              activity.task_status === 'done' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                              activity.task_status === 'in_progress' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                              activity.task_status === 'cancelled' ? 'bg-gray-50 text-gray-600 border-gray-200' :
-                              'bg-amber-50 text-amber-700 border-amber-200'
-                            }`}>
-                              {activity.task_status === 'in_progress' ? 'In progress' : activity.task_status}
-                            </Badge>
-                          )}
-                          {activity.task_priority && activity.task_status !== 'done' && (
-                            <Badge variant="outline" className={`text-[10px] ${PRIORITY_COLOR[activity.task_priority] || ''}`}>
-                              {activity.task_priority}
-                            </Badge>
-                          )}
-                          {activity.assigned_to_user_id && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-gray-600">
-                              <UserCheck className="h-3 w-3" />
-                              {assignees.find(a => a.id === activity.assigned_to_user_id)?.full_name ||
-                               assignees.find(a => a.id === activity.assigned_to_user_id)?.email ||
-                               'assigned'}
-                            </span>
-                          )}
-                          {isOverdue && (
-                            <Badge variant="outline" className="text-[10px] bg-red-600 text-white border-red-600">
-                              OVERDUE
-                            </Badge>
-                          )}
-                          <span className="text-[10px] text-muted-foreground ml-auto">
-                            {activity.created_at ? formatDistanceToNow(new Date(activity.created_at), { addSuffix: true }) : ''}
-                          </span>
-                        </div>
-                        <p className="text-sm mt-1.5">{activity.description}</p>
-                        <div className="flex flex-wrap gap-1.5 items-center mt-1.5">
-                          <span className="text-[10px] text-muted-foreground">
-                            by {activity.created_by_name || 'System'}
-                          </span>
-                          {activity.task_due_at && (
-                            <span className={`text-[10px] ${isOverdue ? 'text-red-700 font-semibold' : 'text-muted-foreground'}`}>
-                              · due {format(new Date(activity.task_due_at), 'MMM d, h:mm a')}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Action row — task status + reply */}
-                        {(activity.task_status || isMineToDo) && (
-                          <div className="flex flex-wrap gap-1.5 mt-2">
-                            {isMineToDo && activity.task_status === 'open' && (
-                              <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1"
-                                onClick={() => updateTaskStatus(activity.id, 'in_progress')}>
-                                <ArrowRight className="h-3 w-3" /> Start working
-                              </Button>
-                            )}
-                            {isMineToDo && (
-                              <Button size="sm" className="h-7 text-[11px] gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                onClick={() => updateTaskStatus(activity.id, 'done')}>
-                                <CheckCircle2 className="h-3 w-3" /> Mark done
-                              </Button>
-                            )}
-                            {activity.task_status && activity.task_status !== 'done' && (
-                              <Button size="sm" variant="ghost" className="h-7 text-[11px] gap-1"
-                                onClick={() => setReplyTarget(replyTarget === activity.id ? null : activity.id)}>
-                                <Reply className="h-3 w-3" /> Add note
-                              </Button>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Inline reply box */}
-                        {replyTarget === activity.id && (
-                          <div className="mt-2 flex gap-1.5">
-                            <Textarea
-                              value={replyText}
-                              onChange={e => setReplyText(e.target.value)}
-                              placeholder="What did you do? (auto-saved to the task thread)"
-                              rows={2}
-                              className="text-xs"
-                            />
-                            <Button size="sm" className="h-9 self-start gap-1 bg-[#B91C1C] hover:bg-[#991B1B] text-white"
-                              onClick={() => submitReply(activity.id)} disabled={replyBusy || !replyText.trim()}>
-                              {replyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {thread.length > 0 && renderThread(thread)}
-                  </div>
-                );
-              })}
+        <CardContent className="p-0">
+          <button type="button" onClick={() => setShowPace(v => !v)} aria-expanded={showPace}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left">
+            <span className="text-sm font-semibold flex items-center gap-2">
+              <span className={cn('h-2.5 w-2.5 rounded-full', paceTone === 'emerald' ? 'bg-emerald-500' : paceTone === 'amber' ? 'bg-amber-500' : 'bg-red-500')} aria-hidden="true" />
+              Today's pace · <span className="tabular-nums">{totalToday}</span><span className="text-gray-400 font-normal">/{DAILY_TOUCH_GOAL} touches</span>
+              <span className="text-xs text-gray-500 font-normal hidden sm:inline">· morning ritual {morningDone}/{MORNING_CHECKLIST.length}</span>
+            </span>
+            <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', showPace && 'rotate-180')} aria-hidden="true" />
+          </button>
+          {showPace && (
+            <div className="px-4 pb-4 space-y-3 border-t pt-3">
+              <div className="flex flex-wrap gap-1.5">
+                {[['call', 'Calls'], ['sms', 'SMS'], ['email', 'Emails'], ['voicemail', 'Voicemails'], ['appointment_confirmed', 'Confirmed'], ['inquiry', 'Inquiries'], ['complaint', 'Complaints'], ['results_request', 'Results req'], ['owner_call', 'Owner calls']].map(([k, l]) => (
+                  <span key={k} className="text-[11px] bg-white border border-gray-200 rounded-full px-2.5 py-0.5"><strong>{todayActivities.filter(a => a.activity_type === k).length}</strong> {l}</span>
+                ))}
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-700 mb-1">Morning ritual · before 9 AM ET</p>
+                <ul className="space-y-1 text-xs">
+                  {MORNING_CHECKLIST.map(item => {
+                    const done = hasTypeToday(item.expectedActivity);
+                    return (
+                      <li key={item.id} className={cn('flex items-start gap-2', done ? 'text-emerald-800' : 'text-gray-700')}>
+                        <CheckCircle2 className={cn('h-3.5 w-3.5 mt-0.5 flex-shrink-0', done ? 'text-emerald-600' : 'text-gray-300')} aria-hidden="true" />
+                        <span className={done ? 'line-through opacity-70' : ''}>{item.label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
+
+      <Card className="shadow-sm">
+        <CardContent className="p-0">
+          <button type="button" onClick={() => setShowTeam(v => !v)} aria-expanded={showTeam} className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left">
+            <span className="text-sm font-semibold">Team activity</span>
+            <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', showTeam && 'rotate-180')} aria-hidden="true" />
+          </button>
+          {showTeam && <div className="px-2 pb-2 border-t"><StaffActivityCard /></div>}
+        </CardContent>
+      </Card>
+
+      <CreateTaskSheet open={composerOpen} onOpenChange={setComposerOpen} defaults={composerDefaults} />
+
+      {/* Task drawer — full thread, owner, due, status */}
+      <Sheet open={!!selected} onOpenChange={(v) => { if (!v) { setSelectedId(null); setReplyText(''); } }}>
+        <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto p-0">
+          {selected && (() => {
+            const a = selected;
+            const cfg = typeCfg(a.activity_type);
+            const thread = threadsByParent.get(a.id) || [];
+            const overdue = isOverdue(a);
+            const dueLocal = a.task_due_at ? (() => { const d = new Date(a.task_due_at); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; })() : '';
+            return (
+              <>
+                <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white p-4 sm:p-5 sticky top-0 z-10">
+                  <SheetHeader className="text-left space-y-1">
+                    <p className="text-[11px] uppercase tracking-wider opacity-90">{cfg.label}{a.task_status ? ' · task' : ''}</p>
+                    <SheetTitle className="text-white text-base leading-snug">{a.description}</SheetTitle>
+                    <SheetDescription className="text-rose-100 text-xs">
+                      Created {format(new Date(a.created_at), 'MMM d, h:mm a')} by {a.created_by_name || 'System'}
+                      {a.patient_id && <> · patient {patientNames[a.patient_id] || ''}</>}
+                    </SheetDescription>
+                  </SheetHeader>
+                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                    {a.task_status && <Badge variant="outline" className={cn('text-[10px] bg-white/95', STATUS_PILL[a.task_status])}>{STATUS_LABEL[a.task_status]}</Badge>}
+                    {a.task_priority && <Badge variant="outline" className={cn('text-[10px] capitalize bg-white/95', PRIORITY_PILL[a.task_priority])}>{a.task_priority}</Badge>}
+                    {overdue && <Badge variant="outline" className="text-[10px] bg-white text-red-700 border-white">Overdue</Badge>}
+                  </div>
+                </div>
+
+                <div className="p-4 sm:p-5 space-y-4">
+                  {a.metadata?.source && a.metadata.source.type !== 'manual' && (
+                    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs flex items-center justify-between gap-2">
+                      <span className="text-gray-700 truncate">From <strong>{a.metadata.source.label || a.metadata.source.type}</strong></span>
+                      {a.metadata.source.url && <Link to={a.metadata.source.url} className="text-blue-700 hover:underline whitespace-nowrap">Open source</Link>}
+                    </div>
+                  )}
+
+                  {a.task_status && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">Owner</label>
+                        <Select value={a.assigned_to_user_id || 'unassigned'} onValueChange={(v) => reassign(a.id, v === 'unassigned' ? null : v)} disabled={busyId === a.id}>
+                          <SelectTrigger className="h-10 mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            {staff.map(s => <SelectItem key={s.id} value={s.id}>{staffLabel(s)}{s.id === myUserId ? ' (me)' : ''}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <label htmlFor="drawer-due" className="text-xs font-medium text-gray-700">Due</label>
+                        <Input id="drawer-due" type="datetime-local" defaultValue={dueLocal} key={a.id + dueLocal} className="h-10 mt-1"
+                          onBlur={e => { if (e.target.value !== dueLocal) setDue(a.id, e.target.value); }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {a.task_status && (
+                    <div className="flex flex-wrap gap-2">
+                      {a.task_status === 'open' && <Button size="sm" variant="outline" className="h-10 text-xs gap-1" disabled={busyId === a.id} onClick={() => updateTaskStatus(a.id, 'in_progress')}><ArrowRight className="h-3.5 w-3.5" /> Start working</Button>}
+                      {isOpenStatus(a.task_status) && <Button size="sm" className="h-10 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" disabled={busyId === a.id} onClick={() => updateTaskStatus(a.id, 'done')}><CheckCircle2 className="h-3.5 w-3.5" /> Mark done</Button>}
+                      {isOpenStatus(a.task_status) && <Button size="sm" variant="ghost" className="h-10 text-xs gap-1 text-gray-500" disabled={busyId === a.id} onClick={() => updateTaskStatus(a.id, 'cancelled')}><XCircle className="h-3.5 w-3.5" /> Cancel task</Button>}
+                      {!isOpenStatus(a.task_status) && <Button size="sm" variant="outline" className="h-10 text-xs gap-1" disabled={busyId === a.id} onClick={() => updateTaskStatus(a.id, 'open')}><RotateCcw className="h-3.5 w-3.5" /> Reopen</Button>}
+                    </div>
+                  )}
+
+                  <div>
+                    <p className="text-xs font-semibold text-gray-700 mb-2">Thread · {thread.length}</p>
+                    {thread.length === 0 ? (
+                      <p className="text-xs text-gray-400">No updates yet. Every status change and reply lands here.</p>
+                    ) : (
+                      <div className="space-y-2 border-l-2 border-gray-200 pl-3">
+                        {thread.map(r => {
+                          const rc = typeCfg(r.activity_type);
+                          const RIcon = rc.icon;
+                          return (
+                            <div key={r.id} className="flex items-start gap-2 text-xs">
+                              <CornerDownRight className="h-3.5 w-3.5 text-gray-300 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                              <RIcon className="h-3.5 w-3.5 text-gray-500 mt-0.5 flex-shrink-0" aria-hidden="true" />
+                              <div className="min-w-0 flex-1">
+                                <div className={cn('text-gray-800 whitespace-pre-wrap', r.activity_type === 'system' && 'text-gray-500 italic')}>{r.description}</div>
+                                <div className="text-[10px] text-gray-400 mt-0.5">{r.created_by_name || 'System'} · {format(new Date(r.created_at), 'MMM d, h:mm a')}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="sticky bottom-0 bg-white border-t p-3 sm:p-4">
+                  <label htmlFor="drawer-reply" className="sr-only">Add an update</label>
+                  <div className="flex gap-2">
+                    <Textarea id="drawer-reply" value={replyText} onChange={e => setReplyText(e.target.value)} rows={2} className="text-sm"
+                      placeholder="What did you do? (saved to the thread)"
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitReply(a.id); }} />
+                    <Button className="h-auto self-stretch bg-[#B91C1C] hover:bg-[#991B1B] text-white" onClick={() => submitReply(a.id)} disabled={replyBusy || !replyText.trim()} aria-label="Send update">
+                      {replyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 };

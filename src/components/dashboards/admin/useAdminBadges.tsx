@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { getUnreadReleaseCount } from '@/data/releaseNotes';
+import { countActionItems } from './inbox/inboxQueries';
 
 /**
  * Live counts for the admin sidebar badges.
@@ -65,58 +66,27 @@ export function useAdminBadges(userId: string | undefined): AdminBadgeCounts {
     let mounted = true;
     const recount = async () => {
       try {
-        // BUG FIX 2026-05-21: this used to count 24 ghost rows (merged orgs,
-        // welcomed orgs, unreachable_no_email orgs) that InboxTab itself
-        // filters out, so the badge never matched the list. Mirror the
-        // InboxTab query EXACTLY so the number equals the rows you'll see.
-        const [{ count: insC }, { count: orgC }] = await Promise.all([
-          supabase.from('pending_insurance_changes' as any)
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'open'),
-          supabase.from('organizations')
-            .select('id', { count: 'exact', head: true })
-            .eq('discovered_from_lab_order', true as any)
-            .eq('is_active', true)
-            .or('outreach_status.is.null,outreach_status.in.(pending,untouched,contacted)')
-            .or('manager_email.is.null,contact_email.is.null'),
-        ]);
-        if (mounted) setActionItems((insC || 0) + (orgC || 0));
+        // 2026-05-21: a hand-copied filter here drifted from InboxTab (ghost
+        // rows, snoozed orgs, patients who already attached a card), so the
+        // badge never matched the list. 2026-10-02: both now call the SAME
+        // functions in inbox/inboxQueries.ts — insurance + practices to call
+        // + new partner inquiries — so the number equals the rows you'll see.
+        const c = await countActionItems();
+        if (mounted) { setActionItems(c.insurance + c.orgs); setPartnerInquiries(c.partners); }
       } catch { /* silent */ }
     };
     recount();
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const bump = () => { if (t) clearTimeout(t); t = setTimeout(recount, 500); };
     const ch = supabase
       .channel('admin-inbox-badge')
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'pending_insurance_changes' }, () => recount())
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'organizations' }, () => recount())
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'pending_insurance_changes' }, bump)
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'organizations' }, bump)
+      // A practice asking to partner is the highest-value lead the business
+      // gets; it is listed in Needs attention and counted here.
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'provider_partnership_inquiries' }, bump)
       .subscribe();
-    return () => { mounted = false; supabase.removeChannel(ch); };
-  }, [userId]);
-
-  // ── PARTNER INQUIRIES ─────────────────────────────────────────────
-  // A practice asking to partner is the highest-value lead the business gets.
-  // These were only visible inside Partners > Organizations > Outreach, and
-  // only fetched once that sub-tab was opened, so one could sit untouched for
-  // days with nothing anywhere indicating it had arrived.
-  useEffect(() => {
-    if (!userId) return;
-    let mounted = true;
-    const recount = async () => {
-      try {
-        // Cast the builder: this table is not in the generated types, so the
-        // column name on .eq() does not typecheck without it.
-        const { count } = await (supabase
-          .from('provider_partnership_inquiries' as any)
-          .select('id', { count: 'exact', head: true }) as any)
-          .eq('status', 'new');
-        if (mounted) setPartnerInquiries(count || 0);
-      } catch { /* silent */ }
-    };
-    recount();
-    const ch = supabase
-      .channel('admin-partner-inquiry-badge')
-      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'provider_partnership_inquiries' }, () => recount())
-      .subscribe();
-    return () => { mounted = false; supabase.removeChannel(ch); };
+    return () => { mounted = false; if (t) clearTimeout(t); supabase.removeChannel(ch); };
   }, [userId]);
 
   // ── LAB ORDERS ────────────────────────────────────────────────────
