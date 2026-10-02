@@ -25,18 +25,24 @@ import CampaignAnalyticsDashboard from '@/components/admin/marketing/CampaignAna
 import ScheduledCampaignsTable from '@/components/admin/marketing/ScheduledCampaignsTable';
 import { SectionHeader, Segmented } from './owner/sectionUi';
 import GrowthOverview, { RANGES, type RangeKey } from './growth/GrowthOverview';
+import AbandonedBookings from './growth/AbandonedBookings';
 
-type View = 'overview' | 'compose' | 'scheduled' | 'email';
+type View = 'overview' | 'abandoned' | 'compose' | 'scheduled' | 'email';
 
 const VIEWS: Array<{ key: View; label: string }> = [
   { key: 'overview', label: 'Overview' },
+  { key: 'abandoned', label: 'Abandoned bookings' },
   { key: 'compose', label: 'Compose' },
   { key: 'scheduled', label: 'Scheduled' },
   { key: 'email', label: 'Email log' },
 ];
 
+// Abandoned bookings carries patient contact details + draft PHI → admins only.
+const ABANDONED_ROLES = new Set(['super_admin', 'admin']);
+
 const SUBTITLES: Record<View, string> = {
   overview: 'Where visitors come from, what they do, and every broadcast you have sent.',
+  abandoned: 'Patients who started a booking and stopped — who, where, what we sent, and whether they came back.',
   compose: 'Write and send (or schedule) an email broadcast to patients or partners.',
   scheduled: 'Broadcasts queued to go out later — edit or cancel before they send.',
   email: 'Delivery log and history for every campaign email.',
@@ -46,6 +52,8 @@ const MarketingTab: React.FC = () => {
   const { user } = useAuth();
   const basePath = `/dashboard/${user?.role === 'office_manager' ? 'office_manager' : 'super_admin'}`;
   const isPlatformOwner = checkPlatformOwner(user?.email);
+  const canSeeAbandoned = ABANDONED_ROLES.has(String(user?.role || ''));
+  const visibleViews = VIEWS.filter(v => v.key !== 'abandoned' || canSeeAbandoned);
 
   const [view, setView] = useState<View>('overview');
   const [range, setRange] = useState<RangeKey>(() => {
@@ -69,7 +77,13 @@ const MarketingTab: React.FC = () => {
         subtitle={SUBTITLES[view]}
         actions={
           <>
-            <Segmented<View> value={view} onChange={(v) => setView(v)} options={VIEWS} label="Growth view" />
+            <Segmented<View> value={view} onChange={(v) => setView(v)} options={visibleViews} label="Growth view" />
+            {view === 'abandoned' && (
+              <Button variant="outline" size="sm" onClick={() => setReloadToken(t => t + 1)} className="gap-1.5 text-xs h-10 sm:h-9 min-w-10 sm:min-w-9" disabled={loading} aria-label="Refresh">
+                <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} aria-hidden="true" />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+            )}
             {view === 'overview' && (
               <>
                 <div className="inline-flex rounded-md border border-gray-200 overflow-hidden" role="group" aria-label="Date range">
@@ -105,6 +119,9 @@ const MarketingTab: React.FC = () => {
 
       {view === 'overview' && (
         <GrowthOverview range={range} basePath={basePath} isPlatformOwner={isPlatformOwner} reloadToken={reloadToken} onLoadingChange={onLoadingChange} />
+      )}
+      {view === 'abandoned' && canSeeAbandoned && (
+        <AbandonedBookings reloadToken={reloadToken} onLoadingChange={onLoadingChange} />
       )}
       {view === 'compose' && (
         <MarketingCampaignForm onCancel={() => setView('overview')} onSuccess={() => setReloadToken(t => t + 1)} />

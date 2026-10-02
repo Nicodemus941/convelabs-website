@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { linkRecordingConsent } from '../_shared/recording-consent.ts';
+import { markBookingDraftRecovered } from '../_shared/booking-draft.ts';
 import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow, visitMinutesForBlocks } from '../_shared/timeBlocks.ts';
 
 /**
@@ -267,6 +268,14 @@ Deno.serve(async (req) => {
           { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      // ── Abandoned-booking recovery: close the draft (same as the webhook) ──
+      await markBookingDraftRecovered(supabaseClient, {
+        appointmentId: newAppt.id,
+        email: metadata.patient_email || null,
+        phone: metadata.patient_phone || null,
+        origin: 'verify-appointment-checkout',
+      });
 
       // ── Recording consent: same linking the webhook does (idempotent) ──
       await linkRecordingConsent(supabaseClient, {

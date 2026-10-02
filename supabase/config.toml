@@ -8,6 +8,18 @@ schemas = ["public", "storage"]
 [functions.ai-sales-chat]
 verify_jwt = false
 
+# Abandoned-booking recovery. The booking page writes drafts and the resume
+# page reads them with the anon key only (the resume token is the auth); the
+# processor is cron-only. abandoned-booking-admin stays verify_jwt=true.
+[functions.booking-draft-upsert]
+verify_jwt = false
+
+[functions.booking-draft-resolve]
+verify_jwt = false
+
+[functions.process-abandoned-bookings]
+verify_jwt = false
+
 # Twilio MMS webhook: Twilio doesn't include our JWT, just signs the
 # request body. Auth here is implicit via the From-number → request
 # row match (and could be tightened with Twilio signature validation

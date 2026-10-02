@@ -7,6 +7,7 @@ import { resolveMembershipPlan, upsertUserMembership, userIdFromEmail } from "..
 import { sendMetaPurchase } from "../_shared/meta-capi.ts";
 import { linkRecordingConsent } from '../_shared/recording-consent.ts';
 import { revokePayTokens } from '../_shared/pay-link.ts';
+import { markBookingDraftRecovered } from '../_shared/booking-draft.ts';
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -2358,6 +2359,15 @@ async function handleAppointmentPayment(session: any) {
     }
 
     console.log(`Created appointment ${appointment.id} for ${metadata.patient_email} on ${appointmentDate} at ${appointmentTime}`);
+
+    // Abandoned-booking recovery: the patient finished, so close their draft
+    // (matched by email / phone) and stop the reminder sequence. Non-blocking.
+    await markBookingDraftRecovered(supabaseClient, {
+      appointmentId: appointment.id,
+      email: metadata.patient_email || null,
+      phone: resolvedPhone || metadata.patient_phone || null,
+      origin: 'stripe-webhook',
+    });
 
     // ─── META CONVERSIONS API ────────────────────────────────────
     // Tell the ad platform a booking happened, from the one place that knows

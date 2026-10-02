@@ -34,6 +34,7 @@ const ProviderDrawPlan = lazy(() => import('../pages/ProviderDrawPlan'));
 const BookNow = lazy(() => import('../pages/BookNow'));
 // Paid-ads landing page (Meta). noindex; not in STATIC_ROUTES or the sitemap.
 const MobileLabDrawsLanding = lazy(() => import('../pages/MobileLabDrawsLanding'));
+const BookResume = lazy(() => import('../pages/BookResume'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 const ProviderAuthPage = lazy(() => import('../pages/ProviderAuthPage'));
 const ProviderDashboardPage = lazy(() => import('../pages/ProviderDashboardPage'));
@@ -79,6 +80,8 @@ export const routes = [
   <Route key="book-now" path="/book-now" element={<BookNow />} />,
   <Route key="lp-mobile-lab-draws" path="/mobile-lab-draws" element={<MobileLabDrawsLanding />} />,
   <Route key="lp-mobile-alias" path="/lp/mobile" element={<MobileLabDrawsLanding />} />,
+  // Abandoned-booking recovery link (SMS/email) — token is the only auth, 7-day TTL.
+  <Route key="book-resume" path="/book/resume/:token" element={<BookResume />} />,
   <Route key="pricing" path="/pricing" element={<Pricing />} />,
   <Route key="brand" path="/brand" element={<Brand />} />,
   <Route key="about" path="/about" element={<About />} />,

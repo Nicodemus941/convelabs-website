@@ -20,6 +20,7 @@ import { Form, FormField, FormItem, FormControl, FormMessage } from '@/component
 import { BookingFormValues } from '@/types/appointmentTypes';
 import DateOfBirthInput from '@/components/ui/DateOfBirthInput';
 import { isSeniorAge } from '@/services/pricing/pricingService';
+import BookingDraftConsent from './BookingDraftConsent';
 
 interface PatientInfoStepProps {
   onNext: () => void;
@@ -545,8 +546,11 @@ const PatientInfoStep: React.FC<PatientInfoStepProps> = ({
                 </FormItem>
               )}
             />
+
+            {/* SMS opt-in for the "finish booking" nudge — see useBookingDraft */}
+            <BookingDraftConsent />
           </div>
-          
+
           {/* Additional Patients — couples / households at same address.
               Hormozi: surface savings + fasting-per-person FIRST so the
               Amy/Robert "couple, one fasts, one doesn't" case has a path
