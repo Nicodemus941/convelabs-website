@@ -1,9 +1,4 @@
--- ============================================================================
--- DRAFT — NOT APPLIED. The `.sql.DRAFT` suffix keeps the Supabase CLI from
--- picking this up. Rename to `20261002210000_sms_pipeline_fixes.sql` and
--- apply deliberately (owner-run) after reviewing the three changes below.
--- Read-only audit 2026-10-02 (feat/sms-messaging-pipeline).
--- ============================================================================
+-- Applied 2026-10-02 after owner approval (was the .sql.DRAFT from feat/sms-messaging-pipeline).
 
 -- ----------------------------------------------------------------------------
 -- 1. Two-way SMS threading has been dead since the tables were created.
