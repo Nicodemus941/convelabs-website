@@ -32,6 +32,8 @@ const ForProviders = lazy(() => import('../pages/ForProviders'));
 const ProviderRegister = lazy(() => import('../pages/ProviderRegister'));
 const ProviderDrawPlan = lazy(() => import('../pages/ProviderDrawPlan'));
 const BookNow = lazy(() => import('../pages/BookNow'));
+// Paid-ads landing page (Meta). noindex; not in STATIC_ROUTES or the sitemap.
+const MobileLabDrawsLanding = lazy(() => import('../pages/MobileLabDrawsLanding'));
 const ProviderLogin = lazy(() => import('../pages/ProviderLogin'));
 const ProviderAuthPage = lazy(() => import('../pages/ProviderAuthPage'));
 const ProviderDashboardPage = lazy(() => import('../pages/ProviderDashboardPage'));
@@ -75,6 +77,8 @@ export const routes = [
   <Route key="home" path="/" element={<Home />} />,
   <Route key="appointments" path="/appointments" element={<AppointmentsPage />} />,
   <Route key="book-now" path="/book-now" element={<BookNow />} />,
+  <Route key="lp-mobile-lab-draws" path="/mobile-lab-draws" element={<MobileLabDrawsLanding />} />,
+  <Route key="lp-mobile-alias" path="/lp/mobile" element={<MobileLabDrawsLanding />} />,
   <Route key="pricing" path="/pricing" element={<Pricing />} />,
   <Route key="brand" path="/brand" element={<Brand />} />,
   <Route key="about" path="/about" element={<About />} />,

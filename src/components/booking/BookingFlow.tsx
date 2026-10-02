@@ -76,13 +76,45 @@ function computeDisplayStep(
   return 6;
 }
 
+// Visit types a landing page may preselect through `/book-now?visit=<id>`.
+// Partner ids (`partner-<slug>`) are accepted as-is; anything else is ignored
+// and the patient simply starts at the Visit Type step as before.
+const PRESELECTABLE_VISIT_TYPES = new Set([
+  'mobile', 'senior', 'in-office', 'specialty-kit', 'specialty-kit-genova', 'therapeutic',
+]);
+const SKIPS_SERVICE_SELECTION = ['specialty-kit', 'in-office', 'therapeutic'];
+
+function readPreselectedVisitType(): string | null {
+  try {
+    const raw = new URL(window.location.href).searchParams.get('visit');
+    if (!raw) return null;
+    const vt = raw.trim().toLowerCase();
+    if (PRESELECTABLE_VISIT_TYPES.has(vt)) return vt;
+    if (/^partner-[a-z0-9-]+$/.test(vt)) return vt;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCancel }) => {
   const { currentTenant } = useTenant();
   const { user } = useAuth();
   const { getAllServiceOptions } = useAvailableServices();
 
-  // Patient lands at the beginning of the wizard (VisitTypeSelector).
-  const [currentStep, setCurrentStep] = useState(BookingStep.VisitType);
+  // A landing page may have already asked "how would you like to be seen?"
+  // (the Meta ad page at /mobile-lab-draws does). When it hands us a valid
+  // `?visit=` we start one step in, exactly as if the patient had tapped
+  // that card here — same form state handleNext would have produced — so the
+  // funnel records booking_service_viewed / booking_date_time_viewed on
+  // mount and never a phantom booking_visit_type_viewed.
+  const [preselectedVisitType] = useState<string | null>(() => readPreselectedVisitType());
+
+  // Patient lands at the beginning of the wizard (VisitTypeSelector) unless
+  // a visit type was preselected upstream.
+  const [currentStep, setCurrentStep] = useState(
+    preselectedVisitType ? BookingStep.ServiceAndDate : BookingStep.VisitType,
+  );
   // Hormozi prefill fast-path. When a token is consumed, this flips to
   // true and the handleNext skip-logic skips the steps whose data was
   // already populated from the patient's record. Lets the patient go
@@ -171,8 +203,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         phone: '',
       },
       serviceDetails: {
-        visitType: '',
-        selectedService: '',
+        visitType: preselectedVisitType || '',
+        // Mirrors handleNext's VisitType branch: partner + service-skipping
+        // visit types carry their own id as the selected service.
+        selectedService:
+          preselectedVisitType &&
+          (preselectedVisitType.startsWith('partner-') || SKIPS_SERVICE_SELECTION.includes(preselectedVisitType))
+            ? preselectedVisitType
+            : '',
         sameDay: false,
         weekend: false,
         fasting: false,
