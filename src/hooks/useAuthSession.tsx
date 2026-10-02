@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Session as SupabaseSession, User as SupabaseUser } from '@supabase/supabase-js';
 import { Session, User, UserRole } from '@/types/auth';
+import { getRoutingRole } from '@/lib/authRole';
 
 export const useAuthSession = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -27,7 +28,8 @@ export const useAuthSession = () => {
       firstName: metadata.firstName || metadata.first_name || '',
       lastName: metadata.lastName || metadata.last_name || '',
       full_name: metadata.full_name || `${metadata.firstName || ''} ${metadata.lastName || ''}`.trim(),
-      role: role as UserRole || (metadata.role as UserRole) || 'patient',
+      // Role comes from app_metadata (service-role only), never user_metadata.
+      role: role as UserRole || (getRoutingRole(supabaseUser) as UserRole) || 'patient',
       createdAt: supabaseUser.created_at || new Date().toISOString(),
       phoneNumber: metadata.phoneNumber || metadata.phone_number || undefined
     };
@@ -37,7 +39,7 @@ export const useAuthSession = () => {
   const mapSessionData = (supabaseSession: SupabaseSession | null): Session | null => {
     if (!supabaseSession) return null;
 
-    const role = supabaseSession?.user?.user_metadata?.role as UserRole || 'patient';
+    const role = getRoutingRole(supabaseSession?.user) as UserRole || 'patient';
     
     return {
       access_token: supabaseSession.access_token,
@@ -68,7 +70,7 @@ export const useAuthSession = () => {
       setSession(mappedSession);
 
       if (supabaseSession?.user) {
-        const role = supabaseSession.user.user_metadata.role || null;
+        const role = getRoutingRole(supabaseSession.user);
         setUserRole(role);
         setUser(mapUserData(supabaseSession.user, role as UserRole));
       } else {

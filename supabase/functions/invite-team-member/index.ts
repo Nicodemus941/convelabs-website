@@ -8,6 +8,7 @@
 // Response: { success: true, user_id, magic_link? }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId, roleAppMetadata, keepElevatedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,8 +47,8 @@ Deno.serve(async (req) => {
     const token = authHeader.replace(/^Bearer\s+/i, '');
     if (!token) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     const { data: caller } = await admin.auth.getUser(token);
-    const callerOrg = caller?.user?.user_metadata?.org_id;
-    const callerRole = caller?.user?.user_metadata?.role;
+    const callerOrg = getTrustedOrgId(caller?.user as any);
+    const callerRole = getTrustedRole(caller?.user as any);
     if (!caller?.user || callerOrg !== org_id || callerRole !== 'provider') {
       return new Response(JSON.stringify({ error: 'Not authorized to invite to this org' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
@@ -73,6 +74,7 @@ Deno.serve(async (req) => {
       userId = existing.id;
       await admin.auth.admin.updateUserById(userId, {
         user_metadata: { ...existing.user_metadata, ...metadata },
+        app_metadata: roleAppMetadata(keepElevatedRole(getTrustedRole(existing), 'provider'), org_id),
         ...(phone ? { phone: normalizePhone(phone), phone_confirm: true } : {}),
         email_confirm: true,
       });
@@ -81,6 +83,7 @@ Deno.serve(async (req) => {
         email: normalizedEmail,
         email_confirm: true,
         user_metadata: metadata,
+        app_metadata: roleAppMetadata('provider', org_id),
       };
       if (phone) {
         createPayload.phone = normalizePhone(phone);

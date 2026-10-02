@@ -20,6 +20,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { roleAppMetadata } from '../_shared/authz.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -76,6 +77,7 @@ async function mintActivationLink(email: string, orgId: string, orgName: string,
     email: normalized,
     email_confirm: true,
     user_metadata: { role: 'provider', org_id: orgId, full_name: contactName || orgName, org_name: orgName },
+    app_metadata: roleAppMetadata('provider', orgId),
   });
 
   if (createErr) {

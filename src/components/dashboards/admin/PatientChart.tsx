@@ -48,6 +48,7 @@ import {
 } from './chartModalKit';
 import { Textarea } from '@/components/ui/textarea';
 import { Trash2, Link as LinkIcon } from 'lucide-react';
+import { getTrustedRole } from '@/lib/authRole';
 
 // Untyped table access — several columns used here (patient_notes, billed_to,
 // invoice_status, …) aren't in the generated Database type.
@@ -303,7 +304,7 @@ const PatientChart: React.FC<Props> = ({
     setDeleteError(null);
     try {
       const { data: sess } = await supabase.auth.getSession();
-      const role = (sess?.session?.user?.user_metadata as any)?.role || (sess?.session?.user?.app_metadata as any)?.role || 'unknown';
+      const role = getTrustedRole(sess?.session?.user) || 'unknown';
       const { data, error } = await db.rpc('delete_patient', { p_patient_id: p.id, p_reason: reason, p_hard_delete: true });
       if (error) {
         setDeleteError(`Delete failed: code=${error.code || 'n/a'} · ${error.message || 'no message'}${error.hint ? ' · hint: ' + error.hint : ''} · role=${role}`);
@@ -397,7 +398,7 @@ const PatientChart: React.FC<Props> = ({
         return;
       }
       if (!data || data.length === 0) {
-        const role = (session.user as any)?.user_metadata?.role || 'unknown';
+        const role = getTrustedRole(session.user as any) || 'unknown';
         const { data: probe } = await db.from('tenant_patients').select('id, deleted_at').eq('id', p.id).maybeSingle();
         const detail = !probe
           ? `No patient row found for id ${p.id}. Reload and try again — the patient may have been deleted in another tab.`

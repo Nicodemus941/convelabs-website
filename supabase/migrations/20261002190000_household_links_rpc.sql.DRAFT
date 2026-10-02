@@ -53,7 +53,7 @@ security definer
 set search_path = public
 as $$
 declare
-  v_role text := lower(coalesce(auth.jwt() -> 'user_metadata' ->> 'role', ''));
+  v_role text := public.jwt_role();  -- trusted app_metadata (never user_metadata)
   v_n integer;
 begin
   if v_role not in ('super_admin','admin','owner','office_manager') then

@@ -10,6 +10,7 @@
 //   - Service-role only for mint mode (cron + admin)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole } from '../_shared/authz.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
       let isAdmin = false;
       if (!isServiceRole && token) {
         const { data: userData } = await supabase.auth.getUser(token);
-        const role = String(userData?.user?.user_metadata?.role || '').toLowerCase();
+        const role = getTrustedRole(userData?.user as any);
         isAdmin = ['super_admin','admin','owner'].includes(role);
       }
       if (!isServiceRole && !isAdmin) {
