@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { getRenderedTemplate, sendEmail, logEmailSend, userHasOptedIn } from "../_shared/email/index.ts";
 import { shouldSendNow } from "../_shared/quiet-hours.ts";
+import { resolvePatientPayLink } from "../_shared/pay-link.ts";
 import { formatApptDateLong, formatApptTime, todayInETPlusDays } from "../_shared/format-appt-date.ts";
 
 const corsHeaders = {
@@ -227,7 +228,10 @@ async function processSingleAppointment(appointmentId: string, supabaseClient: a
       appointment.payment_status === 'pending' &&
       ['sent','reminded','final_warning','pending_send'].includes(appointment.invoice_status || '');
     if (isUnpaid) {
-      const payUrl: string | null = appointment.stripe_invoice_url || null;
+      // Patient invoices link to the on-site pay page (tip optional); org
+      // invoices keep Stripe's hosted page. Falls back to hosted on failure.
+      const link = await resolvePatientPayLink(supabaseClient, appointment, { source: 'send-appointment-reminder' });
+      const payUrl: string | null = link.kind === 'none' ? null : link.url;
       const amount = `$${Number(appointment.total_amount || 0).toFixed(2)}`;
       if (payUrl) {
         nudgeHtml = `

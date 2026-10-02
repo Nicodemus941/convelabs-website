@@ -10,12 +10,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
 import {
   FileText, Search, RefreshCw, DollarSign, Clock, AlertTriangle,
-  CheckCircle2, XCircle, Send, Download, Filter, Eye, Plus, Pencil,
+  CheckCircle2, XCircle, Send, Download, Filter, Eye, Plus, Pencil, Link2,
 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
+import { copyOnsitePayLink } from '@/lib/payLink';
 
 interface Invoice {
   id: string;
@@ -483,6 +484,9 @@ const InvoicesTab: React.FC = () => {
                                 <Button size="sm" variant="ghost" className="text-xs h-7" onClick={() => handleResendInvoice(inv)}>
                                   <Send className="h-3 w-3 mr-1" /> Resend
                                 </Button>
+                                <Button size="sm" variant="ghost" className="text-xs h-7 text-[#B91C1C]" title="Copy on-site pay link (convelabs.com/pay — tip optional)" onClick={() => copyOnsitePayLink(inv.id)}>
+                                  <Link2 className="h-3 w-3 mr-1" /> Pay link
+                                </Button>
                                 <Button size="sm" variant="ghost" className="text-xs h-7 text-blue-600" onClick={() => openEditInvoice(inv)}>
                                   <Pencil className="h-3 w-3 mr-1" /> Edit
                                 </Button>
@@ -518,6 +522,14 @@ const InvoicesTab: React.FC = () => {
                 <div><span className="text-muted-foreground">Stripe ID:</span><p className="truncate">{selectedInvoice.stripe_invoice_id || '—'}</p></div>
                 <div><span className="text-muted-foreground">Reminder Sent:</span><p>{selectedInvoice.invoice_reminder_sent_at ? format(new Date(selectedInvoice.invoice_reminder_sent_at), 'MMM d, h:mm a') : '—'}</p></div>
               </div>
+              {!['paid', 'completed', 'succeeded'].includes(String(selectedInvoice.payment_status)) && selectedInvoice.invoice_status !== 'paid' && (
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t">
+                  <Button size="sm" variant="outline" className="text-xs h-8 border-[#B91C1C]/30 text-[#B91C1C] hover:bg-red-50" onClick={() => copyOnsitePayLink(selectedInvoice.id)}>
+                    <Link2 className="h-3.5 w-3.5 mr-1.5" /> Copy patient pay link
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">convelabs.com/pay — on-site payment, tip optional. Reuses the link already sent to the patient.</span>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

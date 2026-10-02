@@ -6,6 +6,7 @@ import { isSlotStillAvailable } from "../_shared/availability.ts";
 import { resolveMembershipPlan, upsertUserMembership, userIdFromEmail } from "../_shared/membership.ts";
 import { sendMetaPurchase } from "../_shared/meta-capi.ts";
 import { linkRecordingConsent } from '../_shared/recording-consent.ts';
+import { revokePayTokens } from '../_shared/pay-link.ts';
 
 // Initialize Supabase client
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
@@ -208,6 +209,34 @@ Deno.serve(async (req) => {
     else if (event.type === 'charge.refunded') {
       await handleChargeRefunded(event.data.object);
     }
+    // ── ON-SITE (/pay) RECONCILIATION GUARD ───────────────────────────
+    // When the patient pays on convelabs.com/pay/:token, the branded
+    // checkout handler marks the open Stripe invoice paid OUT-OF-BAND (no
+    // second charge) so the hosted link can't be paid again. Stripe then
+    // fires invoice.paid for that invoice. Nothing was charged here: the
+    // appointment rows were already settled (with the tip) by
+    // handleBrandedCheckoutPayment and the phleb earnings row was written
+    // by the DB triggers on that update. Do NOT clobber the checkout's
+    // payment_intent id or route a second phleb cut.
+    else if (event.type === 'invoice.paid' && (event.data.object?.paid_out_of_band === true || event.data.object?.metadata?.convelabs_settled_via === 'onsite_pay')) {
+      const invoice = event.data.object;
+      console.log(`[invoice.paid] ${invoice.id} paid out-of-band (on-site /pay) — invoice_status only, no payout routing`);
+      if (invoice.id) {
+        await supabaseClient.from('appointments')
+          .update({ invoice_status: 'paid' })
+          .eq('stripe_invoice_id', invoice.id)
+          .in('invoice_status', ['sent', 'reminded', 'final_warning', 'pending_send']);
+      }
+    }
+    // Invoice voided / uncollectible (admin, dunning cron, or Stripe
+    // dashboard) → the on-site /pay link for those rows must stop working.
+    else if (event.type === 'invoice.voided' || event.type === 'invoice.marked_uncollectible') {
+      const invoice = event.data.object;
+      if (invoice?.id) {
+        const { data: rows } = await supabaseClient.from('appointments').select('id').eq('stripe_invoice_id', invoice.id).limit(50);
+        await revokePayTokens(supabaseClient, ((rows as any[] | null) || []).map((r) => r.id), `${event.type} ${invoice.id}`);
+      }
+    }
     // Handle invoice paid (for manual appointment invoices)
     else if (event.type === 'invoice.paid') {
       const invoice = event.data.object;
@@ -237,6 +266,20 @@ Deno.serve(async (req) => {
           .eq('stripe_invoice_id', invoice.id);
         if (error) console.error('Error updating by invoice ID:', error);
       }
+
+      // Patient paid the Stripe HOSTED page → the on-site /pay link for
+      // every row on this invoice must die so it can't be paid twice.
+      try {
+        const tokenApptIds: string[] = [];
+        if (appointmentId) tokenApptIds.push(appointmentId);
+        if (primaryApptId) tokenApptIds.push(primaryApptId);
+        if (companionApptId) tokenApptIds.push(companionApptId);
+        if (invoice.id) {
+          const { data: byInv } = await supabaseClient.from('appointments').select('id').eq('stripe_invoice_id', invoice.id).limit(50);
+          for (const r of (byInv as any[] | null) || []) tokenApptIds.push(r.id);
+        }
+        await revokePayTokens(supabaseClient, [...new Set(tokenApptIds)], `paid via Stripe hosted invoice ${invoice.id}`);
+      } catch (e) { console.warn('[invoice.paid] token revoke failed (non-blocking):', (e as any)?.message); }
 
       // ─── HORMOZI: AUTO-ROUTE PHLEB CUT ON EVERY PAID INVOICE ────────
       // Stripe Invoice payments don't auto-Connect-transfer like Checkout
@@ -1775,11 +1818,19 @@ async function handleBrandedCheckoutPayment(session: any) {
   const subtotalCents = Math.max(0, parseInt(metadata.subtotal_cents || '0', 10) || 0);
   const payToken = metadata.pay_token || null;
   const paidTotal = (session.amount_total ?? (subtotalCents + tipCents)) / 100;
+  const paymentIntentId: string | null = typeof session.payment_intent === 'string' ? session.payment_intent : (session.payment_intent?.id || null);
+  const nowIso = new Date().toISOString();
+
+  // Every appointment row this payment settles (family/companion/series
+  // invoices carry several rows). Primary first; falls back to just the
+  // primary for sessions created before appointment_ids existed.
+  const extraIds = String(metadata.appointment_ids || '')
+    .split(',').map((s: string) => s.trim()).filter((s: string) => s && s !== apptId);
 
   // Load current row so we don't clobber an existing tip/total on replay.
   const { data: appt } = await supabaseClient
     .from('appointments')
-    .select('id, tip_amount, payment_status')
+    .select('id, tip_amount, total_amount, payment_status, stripe_invoice_id')
     .eq('id', apptId)
     .maybeSingle();
   if (!appt) {
@@ -1788,29 +1839,96 @@ async function handleBrandedCheckoutPayment(session: any) {
   }
 
   // Idempotent: if already completed, just ensure the token is marked paid.
+  // The tip is written in the SAME update as payment_status so the DB
+  // triggers (auto_reconcile_phleb_payout_v2 / trg_record_phleb_earnings_
+  // tracking → compute_phleb_take_v2, which reads appointments.tip_amount)
+  // see it when they fire on the pending→completed transition. That is the
+  // exact path a booking-time tip takes, so the tip lands in
+  // staff_payouts.tip_cents / amount_cents the same way.
   if (String(appt.payment_status) !== 'completed') {
+    // Primary row carries the tip. total_amount = its own pre-tip amount + tip
+    // (NOT the whole family bill — companions keep their own totals).
+    const primaryPreTip = Math.max(0, Number(appt.total_amount || 0) - Number(appt.tip_amount || 0));
+    const primaryTotal = extraIds.length > 0 ? primaryPreTip + tipCents / 100 : paidTotal;
     await supabaseClient.from('appointments').update({
       tip_amount: tipCents / 100,
-      total_amount: paidTotal,
+      total_amount: primaryTotal,
       payment_status: 'completed',
-      stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : (session.payment_intent?.id || null),
+      invoice_status: 'paid',
+      stripe_payment_intent_id: paymentIntentId,
     }).eq('id', apptId);
+  }
+  if (extraIds.length > 0) {
+    await supabaseClient.from('appointments').update({
+      payment_status: 'completed',
+      invoice_status: 'paid',
+      stripe_payment_intent_id: paymentIntentId,
+    }).in('id', extraIds).not('payment_status', 'in', '("completed","paid","succeeded")');
   }
 
   if (payToken) {
     await supabaseClient.from('appointment_pay_tokens')
-      .update({ paid_at: new Date().toISOString(), selected_tip_cents: tipCents })
+      .update({ paid_at: nowIso, selected_tip_cents: tipCents })
       .eq('access_token', payToken);
   }
+  // Any OTHER active token for these rows is now dead too.
+  await revokePayTokens(supabaseClient, [apptId, ...extraIds], `paid via on-site checkout ${session.id}`);
 
-  // Break the tip out for reporting (auto_reconcile already folded it into
-  // the payout amount; this just populates the dedicated column).
+  // ── RECONCILE THE OPEN STRIPE INVOICE (no double payment) ────────────
+  // The invoice email/SMS used to link to Stripe's hosted invoice; the
+  // patient has now paid the same bill through Checkout. Mark the invoice
+  // paid OUT-OF-BAND: no second charge, the hosted page flips to "Paid",
+  // Stripe stops its own reminders, and invoice.paid fires with
+  // paid_out_of_band=true (handled above as a no-op). Voiding would be
+  // wrong — the patient would open a "voided" invoice they just paid.
+  const invoiceId: string | null = metadata.stripe_invoice_id || appt.stripe_invoice_id || null;
+  if (invoiceId) {
+    try {
+      const inv: any = await stripe.invoices.retrieve(invoiceId);
+      if (inv?.status === 'open') {
+        try { await stripe.invoices.update(invoiceId, { metadata: { ...(inv.metadata || {}), convelabs_settled_via: 'onsite_pay', checkout_session_id: session.id, payment_intent_id: paymentIntentId || '' } }); } catch { /* best effort */ }
+        await stripe.invoices.pay(invoiceId, { paid_out_of_band: true } as any);
+        console.log(`[branded-checkout] invoice ${invoiceId} marked paid out-of-band (settled by session ${session.id})`);
+      } else if (inv?.status === 'draft') {
+        // Drafts can't be voided — delete so it is never finalized/sent later.
+        await stripe.invoices.del(invoiceId);
+      } else if (inv?.status === 'paid' && inv.paid_out_of_band !== true && inv.amount_paid > 0) {
+        // Both links were paid → real double payment. Loud alert for a refund.
+        await supabaseClient.from('error_logs').insert({
+          error_type: 'double_payment_invoice_and_checkout',
+          component: 'stripe-webhook',
+          action: 'handleBrandedCheckoutPayment',
+          error_message: `Appointment ${apptId}: Stripe invoice ${invoiceId} was ALREADY paid ($${(inv.amount_paid / 100).toFixed(2)}) and the patient also paid $${paidTotal.toFixed(2)} via on-site checkout ${session.id}. Refund one.`,
+          payload: { appointment_id: apptId, invoice_id: invoiceId, session_id: session.id, payment_intent_id: paymentIntentId, tip_cents: tipCents },
+          resolved: false,
+        });
+      }
+    } catch (e: any) {
+      console.error(`[branded-checkout] invoice ${invoiceId} reconcile failed:`, e?.message || e);
+      try {
+        await supabaseClient.from('error_logs').insert({
+          error_type: 'onsite_pay_invoice_reconcile_failed',
+          component: 'stripe-webhook',
+          action: 'handleBrandedCheckoutPayment',
+          error_message: `Could not mark Stripe invoice ${invoiceId} paid out-of-band after on-site payment for appointment ${apptId}: ${e?.message || e}. The hosted link is still payable — mark it paid out-of-band in the Stripe dashboard.`,
+          payload: { appointment_id: apptId, invoice_id: invoiceId, session_id: session.id },
+          resolved: false,
+        });
+      } catch { /* non-blocking */ }
+    }
+  }
+
+  // Break the tip out for reporting on whichever earnings row the DB
+  // triggers wrote (manual_owed when Connect payouts are on, tracking_only
+  // under the kill switch). compute_phleb_take_v2 already folded it into
+  // amount_cents; this just populates the dedicated column when it is 0.
   if (tipCents > 0) {
     try {
       await supabaseClient.from('staff_payouts')
         .update({ tip_cents: tipCents })
         .eq('appointment_id', apptId)
-        .eq('status', 'manual_owed');
+        .in('status', ['manual_owed', 'tracking_only', 'pending'])
+        .or('tip_cents.is.null,tip_cents.eq.0');
     } catch (e) { console.warn('[branded-checkout] tip_cents stamp failed:', e); }
 
     // Phleb recognition: text the assigned phlebotomist that a tip came in.

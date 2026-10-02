@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { verifyRecipientEmail, verifyRecipientPhone } from '../_shared/verify-recipient.ts';
+import { resolvePatientPayLink, revokePayTokens } from '../_shared/pay-link.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -242,23 +243,27 @@ Deno.serve(async (req) => {
       } catch (logErr) { console.warn('[invoice-reminders] SMS log failed (non-blocking):', logErr); }
     };
 
-    // ── Helper: Stripe pay link ───────────────────────────────────
+    // ── Helper: pay link ──────────────────────────────────────────
+    // PATIENT reminders always link to the on-site pay page (/pay/:token —
+    // tip optional, no redirect to Stripe). The active token is reused so
+    // the link in the original invoice SMS keeps working. Falls back to
+    // Stripe's hosted invoice URL (logged to error_logs) only if a token
+    // cannot be minted. Org-billed rows never reach this loop.
     const getPayLink = async (appt: any): Promise<string> => {
-      if (appt.stripe_invoice_url) return appt.stripe_invoice_url;
-      if (appt.stripe_invoice_id) {
+      if (!appt.stripe_invoice_url && appt.stripe_invoice_id) {
+        // Backfill the hosted URL so the fallback has something to use.
         try {
           const inv = await stripe.invoices.retrieve(appt.stripe_invoice_id);
           if (inv.hosted_invoice_url) {
-            await supabase.from('appointments').update({
-              stripe_invoice_url: inv.hosted_invoice_url,
-            }).eq('id', appt.id);
-            return inv.hosted_invoice_url;
+            appt.stripe_invoice_url = inv.hosted_invoice_url;
+            await supabase.from('appointments').update({ stripe_invoice_url: inv.hosted_invoice_url }).eq('id', appt.id);
           }
         } catch (e) {
           console.error(`Failed to fetch Stripe invoice ${appt.stripe_invoice_id}:`, e);
         }
       }
-      return 'https://convelabs.com/book-now';
+      const link = await resolvePatientPayLink(supabase, appt, { source: 'process-invoice-reminders' });
+      return link.url;
     };
 
     // ── Helper: email wrapper ─────────────────────────────────────
@@ -376,7 +381,7 @@ Deno.serve(async (req) => {
         console.warn(`HIPAA guard blocked SMS to ${phone}: ${phoneCheck1.reason}`);
       } else {
         await sendSMS(phone,
-          `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay here: ${payLink} — Looking forward to your visit!`
+          `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay securely on our site (tip optional): ${payLink} — Looking forward to your visit!`
         );
       }
 
@@ -577,6 +582,8 @@ Deno.serve(async (req) => {
           console.error(`Failed to void ${appt.stripe_invoice_id}:`, err.message);
         }
       }
+      // The on-site /pay link in earlier messages must stop working too.
+      await revokePayTokens(supabase, [appt.id], 'auto-cancelled: invoice unpaid');
 
       const emailCheck3 = await verifyRecipientEmail(appt.id, email, name);
       if (!emailCheck3.safe) {

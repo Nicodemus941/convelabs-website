@@ -1,16 +1,21 @@
 /**
- * AppointmentPayPage — branded checkout at /pay/:token.
+ * AppointmentPayPage — branded on-site checkout at /pay/:token.
  *
- * Patient lands here from the invoice email/SMS. Reviews the visit, can add
- * a tip for their phlebotomist, accepts T&C, then "Pay" → redirected to
- * Stripe Checkout (server recomputes the total, never trusts the client).
+ * The patient lands here from the invoice email/SMS (most open it on a
+ * phone). They review the visit, optionally add a tip for their
+ * phlebotomist, accept T&C, and pay with Stripe Embedded Checkout — card,
+ * Apple Pay, Google Pay, Link — WITHOUT leaving convelabs.com. The server
+ * recomputes every amount; this page never sends a total it computed.
+ *
+ * States: loading · unpaid (review → tip → pay) · paid (receipt) ·
+ * expired · voided/cancelled · not found.
  *
  * Token-only; no PHI in the URL.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { Loader2, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { Loader2, CheckCircle2, AlertTriangle, ShieldCheck, Heart, Phone, Mail, MapPin, CalendarDays, Clock, Lock, Pencil } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
 import ReferringProviderCapture from '@/components/patient/ReferringProviderCapture';
 
@@ -22,13 +27,25 @@ const STRIPE_PK = (import.meta as any).env?.VITE_STRIPE_PUBLISHABLE_KEY ||
   'pk_live_51TLWYvAPnMg8iHarlnWKX7obn6WvawSBRFhLUs793yCO55JjSMn2y6zyldU2wJiOxVabqS8iOP3jpRmWD4QrJw2H00HQgI7pTr';
 const stripePromise = loadStripe(STRIPE_PK);
 
-const TIP_PRESETS = [0, 1000, 1500, 2500]; // cents: $0 / $10 / $15 / $25
+const BRAND = '#B91C1C';
+const PHONE_DISPLAY = '(941) 527-9169';
+const PHONE_TEL = 'tel:+19415279169';
+const SUPPORT_EMAIL = 'info@convelabs.com';
 
+// Tip presets as % of the pre-tip subtotal. Server caps at min($500, 50%).
+const TIP_PERCENTS = [15, 20, 25] as const;
+type TipChoice = 'none' | 15 | 20 | 25 | 'custom';
+
+interface PayLine { label: string; cents: number }
 interface PayDetails {
   status: 'unpaid' | 'paid' | 'expired' | 'voided';
   subtotal_cents?: number;
+  lines?: PayLine[];
+  selected_tip_cents?: number | null;
   terms_url?: string;
   privacy_url?: string;
+  receipt_email_hint?: string | null;
+  paid?: { total_cents: number; tip_cents: number; paid_at: string | null };
   appointment?: {
     patient_first_name: string;
     appointment_date: string;
@@ -39,54 +56,149 @@ interface PayDetails {
   };
 }
 
-const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const fmt = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtDate = (d?: string | null) => d
+  ? new Date(String(d).substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  : '';
+const fmtTime = (t?: string | null) => {
+  if (!t) return '';
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t));
+  if (!m) return String(t);
+  const h = parseInt(m[1], 10);
+  return `${((h + 11) % 12) + 1}:${m[2]} ${h >= 12 ? 'PM' : 'AM'}`;
+};
+
+async function fetchDetails(token: string): Promise<PayDetails> {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/get-appointment-pay-details?token=${encodeURIComponent(token)}`, {
+    headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+    cache: 'no-store',
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j?.error || 'not_found');
+  return j as PayDetails;
+}
+
+/* ───────────────────────── Shell ───────────────────────── */
+
+const Shell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="min-h-[100dvh] bg-[#FBF8F2] text-gray-900 flex flex-col">
+    <header className="px-4 pt-[max(16px,env(safe-area-inset-top))] pb-3">
+      <div className="max-w-md mx-auto flex items-center justify-between">
+        <a href="https://www.convelabs.com" className="flex items-center gap-2 font-extrabold tracking-tight text-lg" aria-label="ConveLabs home">
+          <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: BRAND }} aria-hidden="true" />
+          ConveLabs
+        </a>
+        <span className="text-[11px] text-gray-500 flex items-center gap-1"><Lock className="h-3 w-3" aria-hidden="true" /> Secure checkout</span>
+      </div>
+    </header>
+    <main className="flex-1 px-4 pb-[max(24px,env(safe-area-inset-bottom))]">
+      <div className="max-w-md mx-auto">{children}</div>
+    </main>
+    <footer className="px-4 pb-6 text-center text-[11px] text-gray-500">
+      <p>Questions? <a href={PHONE_TEL} className="underline underline-offset-2">{PHONE_DISPLAY}</a> · <a href={`mailto:${SUPPORT_EMAIL}`} className="underline underline-offset-2">{SUPPORT_EMAIL}</a></p>
+      <p className="mt-1">ConveLabs · Mobile phlebotomy · Central Florida</p>
+    </footer>
+  </div>
+);
+
+const Card: React.FC<{ children: React.ReactNode; className?: string }> = ({ children, className = '' }) => (
+  <section className={`bg-white border border-gray-200 rounded-2xl shadow-sm ${className}`}>{children}</section>
+);
+
+const ContactRow: React.FC = () => (
+  <div className="grid grid-cols-2 gap-2 mt-5">
+    <a href={PHONE_TEL} className="min-h-[44px] rounded-xl border border-gray-200 flex items-center justify-center gap-2 text-sm font-semibold text-gray-800 hover:border-gray-400">
+      <Phone className="h-4 w-4" aria-hidden="true" /> Call or text
+    </a>
+    <a href={`mailto:${SUPPORT_EMAIL}`} className="min-h-[44px] rounded-xl border border-gray-200 flex items-center justify-center gap-2 text-sm font-semibold text-gray-800 hover:border-gray-400">
+      <Mail className="h-4 w-4" aria-hidden="true" /> Email us
+    </a>
+  </div>
+);
+
+/* ───────────────────────── Page ───────────────────────── */
 
 const AppointmentPayPage: React.FC = () => {
   const { token } = useParams<{ token: string }>();
+  const [searchParams] = useSearchParams();
+  const returnedPaid = searchParams.get('paid') === '1';
+
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<PayDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tipCents, setTipCents] = useState(0);
+
+  const [tipChoice, setTipChoice] = useState<TipChoice>(20);
   const [customTip, setCustomTip] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
   const [acceptTc, setAcceptTc] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [checkoutReady, setCheckoutReady] = useState(false);
+  const [lockedTotal, setLockedTotal] = useState<{ subtotal: number; tip: number } | null>(null);
   const [paidInline, setPaidInline] = useState(false);
-  const [providerOpen, setProviderOpen] = useState(true);
+  const [recorded, setRecorded] = useState(false);
+  const [providerOpen, setProviderOpen] = useState(false);
+
   const checkoutRef = useRef<HTMLDivElement | null>(null);
   const checkoutInstanceRef = useRef<any>(null);
+  const errorRef = useRef<HTMLParagraphElement | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!token) return;
-    (async () => {
-      try {
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/get-appointment-pay-details?token=${encodeURIComponent(token)}`, {
-          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        });
-        const j = await res.json();
-        if (!res.ok) setError('We couldn\'t find this payment link.');
-        else setData(j);
-      } catch {
-        setError('Something went wrong loading your invoice.');
-      } finally {
-        setLoading(false);
+    try {
+      const j = await fetchDetails(token);
+      setData(j);
+      if (j.status === 'unpaid' && typeof j.selected_tip_cents === 'number' && j.subtotal_cents) {
+        // Restore the tip the patient picked before a refresh.
+        const pct = TIP_PERCENTS.find((p) => Math.round(j.subtotal_cents! * p / 100) === j.selected_tip_cents);
+        if (j.selected_tip_cents === 0) setTipChoice('none');
+        else if (pct) setTipChoice(pct);
+        else { setTipChoice('custom'); setCustomTip((j.selected_tip_cents / 100).toFixed(2)); }
       }
-    })();
+    } catch (e: any) {
+      setError(e?.message === 'token_not_found' ? 'not_found' : 'load_failed');
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
 
-  const subtotal = data?.subtotal_cents || 0;
-  const effectiveTip = useCustom
-    ? Math.max(0, Math.round((parseFloat(customTip) || 0) * 100))
-    : tipCents;
-  const total = subtotal + effectiveTip;
+  useEffect(() => { load(); }, [load]);
 
-  // Mount Stripe Embedded Checkout once we have a client secret (V2: card
-  // entry stays on this page — no redirect to Stripe).
+  // After an on-page payment (or a ?paid=1 return from the redirect
+  // fallback), poll until the webhook has stamped the appointment so the
+  // receipt can say "recorded" truthfully. Stops after ~30s.
+  useEffect(() => {
+    if (!token || !(paidInline || returnedPaid)) return;
+    let tries = 0;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const j = await fetchDetails(token);
+        if (j.status === 'paid') { setData(j); setRecorded(true); return; }
+      } catch { /* keep polling */ }
+      if (++tries < 15) setTimeout(tick, 2000);
+    };
+    tick();
+    return () => { cancelled = true; };
+  }, [token, paidInline, returnedPaid]);
+
+  const subtotal = data?.subtotal_cents || 0;
+  const tipCap = Math.min(50000, Math.round(subtotal * 0.5));
+  const presetCents = useMemo(() => Object.fromEntries(TIP_PERCENTS.map((p) => [p, Math.round(subtotal * p / 100)])) as Record<number, number>, [subtotal]);
+  const customCents = Math.max(0, Math.round((parseFloat(customTip) || 0) * 100));
+  const tipCents = tipChoice === 'none' ? 0 : tipChoice === 'custom' ? customCents : presetCents[tipChoice];
+  const tipTooLarge = tipCents > tipCap;
+  const total = subtotal + tipCents;
+  const phleb = data?.appointment?.phleb_first_name || null;
+  const phlebLabel = phleb || 'your phlebotomist';
+
+  // Mount Stripe Embedded Checkout once we have a client secret.
   useEffect(() => {
     if (!clientSecret) return;
     let cancelled = false;
+    setCheckoutReady(false);
     (async () => {
       try {
         const stripe = await stripePromise;
@@ -98,9 +210,11 @@ const AppointmentPayPage: React.FC = () => {
         if (cancelled) { try { checkout.destroy(); } catch { /* */ } return; }
         checkoutInstanceRef.current = checkout;
         if (checkoutRef.current) checkout.mount(checkoutRef.current);
+        setCheckoutReady(true);
       } catch {
-        setSubmitError('Could not load the payment form. Please refresh or call (941) 527-9169.');
+        setSubmitError(`Could not load the payment form. Please refresh, or call ${PHONE_DISPLAY}.`);
         setClientSecret(null);
+        setLockedTotal(null);
       }
     })();
     return () => {
@@ -110,201 +224,316 @@ const AppointmentPayPage: React.FC = () => {
     };
   }, [clientSecret]);
 
+  useEffect(() => { if (submitError && errorRef.current) errorRef.current.focus(); }, [submitError]);
+
   async function handlePay() {
-    if (!token || submitting || !acceptTc) return;
+    if (!token || submitting || !acceptTc || tipTooLarge) return;
     setSubmitting(true); setSubmitError(null);
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/proceed-to-stripe-checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-        body: JSON.stringify({ token, tip_cents: effectiveTip, accept_tc: true, embedded: true }),
+        body: JSON.stringify({ token, tip_cents: tipCents, accept_tc: true, embedded: true }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.client_secret) {
+        setLockedTotal({ subtotal, tip: tipCents });
         setClientSecret(j.client_secret);
       } else if (j.error === 'tip_too_large') {
-        setSubmitError('That tip is larger than we can accept — please lower it.');
+        setSubmitError(`That tip is larger than we can accept (max ${fmt(j.max_tip_cents || tipCap)}). Please lower it.`);
       } else if (j.error === 'already_paid') {
-        setSubmitError('This invoice has already been paid.');
+        setSubmitError('Good news — this invoice is already paid.');
+        load();
       } else if (j.error === 'expired' || j.error === 'voided') {
-        setSubmitError('This payment link is no longer valid. Please contact us for a new one.');
+        setSubmitError(`This payment link is no longer valid. Call or text ${PHONE_DISPLAY} for a new one.`);
+        load();
       } else {
-        setSubmitError('We couldn\'t start checkout. Please try again or call (941) 527-9169.');
+        setSubmitError(`We couldn't start checkout. Please try again or call ${PHONE_DISPLAY}.`);
       }
     } catch {
-      setSubmitError('We couldn\'t start checkout. Please try again or call (941) 527-9169.');
+      setSubmitError(`We couldn't start checkout. Please try again or call ${PHONE_DISPLAY}.`);
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>;
+  function changeTip() {
+    // Tear down the mounted form and go back to the tip picker. The server
+    // expires the stale session when a new total is requested.
+    try { checkoutInstanceRef.current?.destroy(); } catch { /* */ }
+    checkoutInstanceRef.current = null;
+    setClientSecret(null);
+    setLockedTotal(null);
+    setCheckoutReady(false);
+  }
 
-  if (paidInline) {
-    const firstName = data?.appointment?.patient_first_name || 'there';
+  /* ── Loading ── */
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="max-w-md w-full bg-white border rounded-2xl p-6 shadow-sm text-center">
+      <Shell>
+        <div role="status" aria-live="polite" className="py-24 flex flex-col items-center gap-3 text-gray-500">
+          <Loader2 className="h-8 w-8 animate-spin" style={{ color: BRAND }} aria-hidden="true" />
+          <span className="text-sm">Loading your invoice…</span>
+        </div>
+      </Shell>
+    );
+  }
+
+  const a = data?.appointment;
+  const firstName = a?.patient_first_name || 'there';
+
+  /* ── Paid (just now, or earlier) ── */
+  if (paidInline || returnedPaid || data?.status === 'paid') {
+    const paidTip = data?.paid?.tip_cents ?? lockedTotal?.tip ?? 0;
+    const paidTotal = data?.paid?.total_cents ?? (lockedTotal ? lockedTotal.subtotal + lockedTotal.tip : 0);
+    const paidVisit = Math.max(0, paidTotal - paidTip);
+    const justPaid = paidInline || returnedPaid;
+    return (
+      <Shell>
+        <Card className="p-6 text-center">
           <div className="bg-emerald-100 rounded-full w-16 h-16 mx-auto flex items-center justify-center mb-4">
-            <CheckCircle2 className="h-9 w-9 text-emerald-600" />
+            <CheckCircle2 className="h-9 w-9 text-emerald-600" aria-hidden="true" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Payment received ✓</h1>
-          <p className="text-sm text-gray-600">Thank you! A receipt is on its way to your email. See you at your appointment.</p>
-          <p className="text-xs text-gray-400 mt-4">Questions? info@convelabs.com · (941) 527-9169</p>
-        </div>
-        {/* Keep the patient's doctor in the loop (was on /welcome in the
-            redirect flow; V2 stays on-page, so we surface it here). */}
-        {token && (
-          <ReferringProviderCapture
-            open={providerOpen}
-            onClose={() => setProviderOpen(false)}
-            payToken={token}
-            appointmentId=""
-            patientEmail=""
-            patientName={firstName}
-          />
+          <h1 className="text-2xl font-extrabold tracking-tight">{justPaid ? `Thank you, ${firstName}!` : 'This visit is paid'}</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            {justPaid ? 'Your payment went through.' : 'Nothing more to do here.'}
+            {justPaid && (
+              <span className="block mt-1 text-xs" aria-live="polite">
+                {recorded
+                  ? <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Recorded on your appointment</span>
+                  : <span className="inline-flex items-center gap-1 text-gray-500"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Updating your appointment…</span>}
+              </span>
+            )}
+          </p>
+
+          {paidTotal > 0 && (
+            <dl className="mt-5 text-sm text-left bg-[#FBF8F2] border border-gray-200 rounded-xl p-4 space-y-1.5">
+              <div className="flex justify-between"><dt className="text-gray-600">Visit</dt><dd className="font-medium">{fmt(paidVisit)}</dd></div>
+              {paidTip > 0 && <div className="flex justify-between"><dt className="text-gray-600">Tip for {phlebLabel}</dt><dd className="font-medium">{fmt(paidTip)}</dd></div>}
+              <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1.5"><dt className="font-semibold">Total paid</dt><dd className="font-extrabold">{fmt(paidTotal)}</dd></div>
+            </dl>
+          )}
+
+          {paidTip > 0 && (
+            <p className="mt-4 text-sm text-gray-700 flex items-start gap-2 text-left bg-rose-50 border border-rose-100 rounded-xl p-3">
+              <Heart className="h-4 w-4 mt-0.5 shrink-0" style={{ color: BRAND }} aria-hidden="true" />
+              <span>100% of your {fmt(paidTip)} tip goes to {phleb ? <strong>{phleb}</strong> : 'your phlebotomist'}. That means a lot — thank you.</span>
+            </p>
+          )}
+
+          <div className="mt-5 text-xs text-gray-500 space-y-1">
+            {data?.receipt_email_hint && <p>A card receipt from Stripe is on its way to <span className="font-medium text-gray-700">{data.receipt_email_hint}</span>.</p>}
+            {a?.appointment_date && <p>See you {fmtDate(a.appointment_date)}{a.appointment_time ? ` at ${fmtTime(a.appointment_time)}` : ''}.</p>}
+          </div>
+
+          <ContactRow />
+        </Card>
+
+        {justPaid && token && (
+          <>
+            <button
+              type="button"
+              onClick={() => setProviderOpen(true)}
+              className="mt-4 w-full text-sm text-gray-600 underline underline-offset-2 min-h-[44px]"
+            >
+              Want your doctor to receive the results? Add their info
+            </button>
+            <ReferringProviderCapture
+              open={providerOpen}
+              onClose={() => setProviderOpen(false)}
+              payToken={token}
+              appointmentId=""
+              patientEmail=""
+              patientName={firstName}
+            />
+          </>
         )}
-      </div>
+      </Shell>
     );
   }
 
-  const statusMsg: Record<string, { title: string; body: string }> = {
-    paid: { title: 'This visit is paid ✓', body: 'Thanks! Nothing more to do. See you at your appointment.' },
-    expired: { title: 'This link has expired', body: 'Reply to your booking confirmation or call (941) 527-9169 for a fresh link.' },
-    voided: { title: 'This invoice was voided', body: 'Contact us for an updated invoice.' },
-  };
-
-  if (error || !data || (data.status && data.status !== 'unpaid')) {
-    const s = (data?.status && statusMsg[data.status]) || { title: 'Hmm — let\'s try that again', body: error || 'We couldn\'t load this invoice.' };
+  /* ── Expired / voided / not found ── */
+  if (error || !data || data.status !== 'unpaid') {
+    const kind = data?.status === 'expired' ? 'expired' : data?.status === 'voided' ? 'voided' : error === 'not_found' ? 'not_found' : 'failed';
+    const copy: Record<string, { title: string; body: string }> = {
+      expired: { title: 'This payment link has expired', body: `No charge was made. Call or text ${PHONE_DISPLAY} and we'll send you a fresh link in a minute.` },
+      voided: { title: 'This invoice is no longer active', body: `It was cancelled or replaced, so nothing is due on this link. If you think that's a mistake, call or text ${PHONE_DISPLAY}.` },
+      not_found: { title: "We couldn't find this payment link", body: `Double-check the link in your message, or call or text ${PHONE_DISPLAY} and we'll resend it.` },
+      failed: { title: "Hmm — that didn't load", body: 'Please refresh the page. If it keeps happening, we can take payment over the phone.' },
+    };
+    const c = copy[kind];
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="max-w-md w-full bg-white border rounded-2xl p-6 shadow-sm text-center">
-          {data?.status === 'paid'
-            ? <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto mb-3" />
-            : <AlertTriangle className="h-10 w-10 text-amber-500 mx-auto mb-3" />}
-          <h1 className="text-lg font-semibold text-gray-900 mb-2">{s.title}</h1>
-          <p className="text-sm text-gray-600">{s.body}</p>
-          <p className="text-xs text-gray-400 mt-4">info@convelabs.com · (941) 527-9169</p>
-        </div>
-      </div>
+      <Shell>
+        <Card className="p-6 text-center">
+          <AlertTriangle className="h-10 w-10 text-amber-500 mx-auto mb-3" aria-hidden="true" />
+          <h1 className="text-lg font-bold">{c.title}</h1>
+          <p className="text-sm text-gray-600 mt-2">{c.body}</p>
+          {kind === 'failed' && (
+            <button type="button" onClick={() => { setLoading(true); setError(null); load(); }} className="mt-4 min-h-[44px] px-5 rounded-xl text-white font-semibold" style={{ background: BRAND }}>
+              Try again
+            </button>
+          )}
+          <ContactRow />
+        </Card>
+      </Shell>
     );
   }
 
-  const a = data.appointment!;
-  const dateLabel = a.appointment_date
-    ? new Date(String(a.appointment_date).substring(0, 10) + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-    : '';
+  /* ── Unpaid: review → tip → pay ── */
+  const lines = data.lines && data.lines.length > 0 ? data.lines : [{ label: a?.service_name || 'Mobile Blood Draw', cents: subtotal }];
+  const inCheckout = !!clientSecret;
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-8">
-      <div className="max-w-md mx-auto">
-        <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
-          <div className="bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white px-6 py-5 text-center">
-            <h1 className="text-xl font-bold">Almost done — review &amp; pay</h1>
-          </div>
+    <Shell>
+      <h1 className="text-2xl font-extrabold tracking-tight mb-1">Hi {firstName}, here's your invoice</h1>
+      <p className="text-sm text-gray-600 mb-4">Review your visit, add an optional tip, and pay right here. Takes about a minute.</p>
 
-          <div className="p-6 space-y-5">
-            {/* Visit summary */}
-            <div className="bg-gray-50 border rounded-lg p-3 text-sm">
-              <p className="text-gray-900">Hi <strong>{a.patient_first_name}</strong>,</p>
-              {dateLabel && <p className="text-gray-700 mt-1"><strong>{dateLabel}{a.appointment_time ? ` at ${a.appointment_time}` : ''}</strong></p>}
-              {a.address && <p className="text-gray-600 text-xs mt-1">{a.address}</p>}
-              {a.service_name && <p className="text-gray-500 text-xs mt-1">{a.service_name}</p>}
-              {a.phleb_first_name && <p className="text-gray-500 text-xs mt-1">Phlebotomist: {a.phleb_first_name}</p>}
-            </div>
+      {/* Visit summary */}
+      <Card className="p-4 mb-3">
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Your visit</h2>
+        <ul className="text-sm space-y-1.5">
+          {a?.appointment_date && (
+            <li className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-gray-400 shrink-0" aria-hidden="true" /><span className="font-medium">{fmtDate(a.appointment_date)}</span></li>
+          )}
+          {a?.appointment_time && (
+            <li className="flex items-center gap-2"><Clock className="h-4 w-4 text-gray-400 shrink-0" aria-hidden="true" /><span>{fmtTime(a.appointment_time)}</span></li>
+          )}
+          {a?.address && (
+            <li className="flex items-start gap-2"><MapPin className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" aria-hidden="true" /><span className="text-gray-700">{a.address}</span></li>
+          )}
+        </ul>
+        <dl className="mt-3 pt-3 border-t border-gray-100 text-sm space-y-1">
+          {lines.map((l, i) => (
+            <div key={i} className="flex justify-between gap-3"><dt className="text-gray-700">{l.label}</dt><dd className="font-medium tabular-nums">{fmt(l.cents)}</dd></div>
+          ))}
+          {lines.length > 1 && (
+            <div className="flex justify-between pt-1 border-t border-gray-100"><dt className="text-gray-600">Subtotal</dt><dd className="font-semibold tabular-nums">{fmt(subtotal)}</dd></div>
+          )}
+        </dl>
+      </Card>
 
-            {/* Pricing */}
+      {/* Tip */}
+      <Card className="p-4 mb-3">
+        {inCheckout ? (
+          <div className="flex items-center justify-between gap-3">
             <div className="text-sm">
-              <div className="flex justify-between text-gray-700"><span>Visit total</span><span>{fmt(subtotal)}</span></div>
+              <p className="font-semibold">Tip for {phlebLabel}: <span className="tabular-nums">{fmt(lockedTotal?.tip ?? tipCents)}</span></p>
+              <p className="text-xs text-gray-500">100% goes to {phlebLabel}.</p>
             </div>
-
-            {clientSecret ? (
-              /* V2: Stripe Embedded Checkout mounts here — card entry on-page */
-              <div>
-                <div className="flex justify-between items-center border-t border-b py-2 mb-3">
-                  <span className="text-sm font-semibold text-gray-900">Total</span>
-                  <span className="text-xl font-extrabold text-gray-900">{fmt(total)}</span>
-                </div>
-                <div ref={checkoutRef} className="min-h-[320px]" />
-                <p className="text-center text-[11px] text-gray-400 mt-3 flex items-center justify-center gap-1">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Secured by Stripe — your card never touches ConveLabs.
-                </p>
-              </div>
-            ) : (
-            <>
-            {/* Tip */}
-            <div>
-              <p className="text-sm font-semibold text-gray-900 mb-2">Add a tip for {a.phleb_first_name || 'your phlebotomist'}? <span className="font-normal text-gray-400">(optional)</span></p>
-              <div className="grid grid-cols-4 gap-1.5">
-                {TIP_PRESETS.map((c) => (
+            <button type="button" onClick={changeTip} className="min-h-[44px] px-3 rounded-lg border border-gray-200 text-sm font-medium flex items-center gap-1.5 hover:border-gray-400">
+              <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Change
+            </button>
+          </div>
+        ) : (
+          <fieldset>
+            <legend className="text-sm font-semibold">Add a tip for {phlebLabel}? <span className="font-normal text-gray-500">Optional</span></legend>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">100% of your tip goes to {phlebLabel} — it's added to their next payout.</p>
+            <div role="radiogroup" aria-label="Tip amount" className="grid grid-cols-4 gap-1.5">
+              {TIP_PERCENTS.map((p) => {
+                const on = tipChoice === p;
+                return (
                   <button
-                    key={c}
-                    type="button"
-                    onClick={() => { setUseCustom(false); setTipCents(c); }}
-                    className={`py-2.5 rounded-lg text-sm font-semibold border min-h-[44px] ${!useCustom && tipCents === c ? 'bg-[#B91C1C] text-white border-[#B91C1C]' : 'bg-white text-gray-700 border-gray-200 hover:border-[#B91C1C]'}`}
+                    key={p} type="button" role="radio" aria-checked={on}
+                    onClick={() => setTipChoice(p)}
+                    className={`min-h-[56px] rounded-xl border text-center leading-tight focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#B91C1C] ${on ? 'text-white border-transparent' : 'bg-white text-gray-800 border-gray-200 hover:border-gray-400'}`}
+                    style={on ? { background: BRAND } : undefined}
                   >
-                    {c === 0 ? 'None' : `$${c / 100}`}
+                    <span className="block text-sm font-bold">{p}%</span>
+                    <span className={`block text-[11px] tabular-nums ${on ? 'text-white/85' : 'text-gray-500'}`}>{fmt(presetCents[p])}</span>
                   </button>
-                ))}
-              </div>
+                );
+              })}
               <button
-                type="button"
-                onClick={() => setUseCustom(true)}
-                className={`mt-1.5 w-full py-2.5 rounded-lg text-sm font-medium border ${useCustom ? 'border-[#B91C1C] text-[#B91C1C]' : 'border-gray-200 text-gray-600'}`}
+                type="button" role="radio" aria-checked={tipChoice === 'custom'}
+                onClick={() => setTipChoice('custom')}
+                className={`min-h-[56px] rounded-xl border text-sm font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#B91C1C] ${tipChoice === 'custom' ? 'text-white border-transparent' : 'bg-white text-gray-800 border-gray-200 hover:border-gray-400'}`}
+                style={tipChoice === 'custom' ? { background: BRAND } : undefined}
               >
-                Custom amount
+                Other
               </button>
-              {useCustom && (
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="text-gray-500">$</span>
+            </div>
+            <div className="mt-2 min-h-[48px]">
+              {tipChoice === 'custom' ? (
+                <label className="flex items-center gap-2 border border-gray-300 rounded-xl px-3 min-h-[48px] focus-within:ring-2 focus-within:ring-[#B91C1C]">
+                  <span className="text-gray-500" aria-hidden="true">$</span>
+                  <span className="sr-only">Custom tip amount in dollars</span>
                   <input
-                    type="number" min="0" step="1" inputMode="decimal"
+                    type="text" inputMode="decimal" autoFocus
                     value={customTip}
-                    onChange={(e) => setCustomTip(e.target.value)}
-                    placeholder="Tip amount"
-                    className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                    onChange={(e) => setCustomTip(e.target.value.replace(/[^0-9.]/g, ''))}
+                    placeholder="0.00"
+                    aria-invalid={tipTooLarge}
+                    className="w-full py-2 text-base outline-none bg-transparent"
                   />
-                </div>
+                </label>
+              ) : (
+                <button type="button" onClick={() => setTipChoice('none')} aria-pressed={tipChoice === 'none'}
+                  className={`min-h-[44px] w-full rounded-xl text-sm font-medium border ${tipChoice === 'none' ? 'border-gray-800 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+                  {tipChoice === 'none' ? '✓ No tip this time' : 'No tip this time'}
+                </button>
               )}
             </div>
+            {tipTooLarge && <p className="text-xs text-red-600 mt-1" role="alert">Max tip is {fmt(tipCap)}.</p>}
+          </fieldset>
+        )}
+      </Card>
 
-            {/* Total */}
-            <div className="border-t pt-3 flex justify-between items-center">
-              <span className="text-sm font-semibold text-gray-900">Total</span>
-              <span className="text-2xl font-extrabold text-gray-900">{fmt(total)}</span>
+      {/* Total + pay */}
+      <Card className="p-4">
+        <div className="flex items-baseline justify-between">
+          <span className="text-sm font-semibold">Total</span>
+          <span className="text-2xl font-extrabold tabular-nums" aria-live="polite">{fmt(inCheckout && lockedTotal ? lockedTotal.subtotal + lockedTotal.tip : total)}</span>
+        </div>
+        {tipCents > 0 && !inCheckout && <p className="text-xs text-gray-500 text-right -mt-0.5">includes {fmt(tipCents)} tip</p>}
+
+        {inCheckout ? (
+          <div className="mt-4">
+            {/* Fixed-height slot so the page doesn't jump while Stripe loads. */}
+            <div className="relative min-h-[420px]">
+              {!checkoutReady && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-500 text-sm" role="status" aria-live="polite">
+                  <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" /> Loading secure payment form…
+                </div>
+              )}
+              <div ref={checkoutRef} aria-label="Payment form" />
             </div>
-
-            {/* T&C */}
-            <label className="flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
-              <input type="checkbox" checked={acceptTc} onChange={(e) => setAcceptTc(e.target.checked)} className="mt-0.5" />
+            <p className="text-center text-[11px] text-gray-500 mt-3 flex items-center justify-center gap-1">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" /> Secured by Stripe. Your card details never touch ConveLabs.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <label className="flex items-start gap-3 text-xs text-gray-600 cursor-pointer min-h-[44px]">
+              <input type="checkbox" checked={acceptTc} onChange={(e) => setAcceptTc(e.target.checked)} className="mt-0.5 h-5 w-5 accent-[#B91C1C]" />
               <span>
                 I confirm my visit details and agree to ConveLabs'{' '}
-                <a href={data.terms_url} target="_blank" rel="noreferrer" className="text-[#B91C1C] underline">Terms</a> &amp;{' '}
-                <a href={data.privacy_url} target="_blank" rel="noreferrer" className="text-[#B91C1C] underline">Privacy Policy</a>.
+                <a href={data.terms_url} target="_blank" rel="noreferrer" className="underline underline-offset-2" style={{ color: BRAND }}>Terms</a> and{' '}
+                <a href={data.privacy_url} target="_blank" rel="noreferrer" className="underline underline-offset-2" style={{ color: BRAND }}>Privacy Policy</a>.
               </span>
             </label>
 
-            {submitError && <p className="text-xs text-red-600">{submitError}</p>}
+            <p ref={errorRef} tabIndex={-1} role="alert" aria-live="assertive" className={`text-xs text-red-600 min-h-[16px] outline-none ${submitError ? '' : 'sr-only'}`}>{submitError || ''}</p>
 
             <button
               type="button"
               onClick={handlePay}
-              disabled={submitting || !acceptTc}
-              className="w-full bg-[#B91C1C] hover:bg-[#991B1B] disabled:opacity-50 text-white py-4 rounded-xl font-bold text-base flex items-center justify-center gap-2"
+              disabled={submitting || !acceptTc || tipTooLarge || subtotal <= 0}
+              aria-disabled={submitting || !acceptTc || tipTooLarge}
+              className="w-full min-h-[56px] rounded-xl text-white font-bold text-base flex items-center justify-center gap-2 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#B91C1C] transition-opacity"
+              style={{ background: BRAND }}
             >
-              {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-              Continue to payment · {fmt(total)}
+              {submitting ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <Lock className="h-4 w-4" aria-hidden="true" />}
+              Pay {fmt(total)}
             </button>
+            {!acceptTc && <p className="text-[11px] text-gray-500 text-center">Tick the box above to continue.</p>}
 
-            <p className="text-center text-[11px] text-gray-400 flex items-center justify-center gap-1">
-              <ShieldCheck className="h-3.5 w-3.5" /> Powered by Stripe. Your card never touches ConveLabs.
+            <p className="text-center text-[11px] text-gray-500 flex items-center justify-center gap-1">
+              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" /> Card, Apple Pay &amp; Google Pay · processed by Stripe
             </p>
-            </>
-            )}
           </div>
-        </div>
-      </div>
-    </div>
+        )}
+      </Card>
+    </Shell>
   );
 };
 
