@@ -33,7 +33,7 @@ import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
 import { getBufferMinutes } from '@/lib/bookingBuffer';
 import { getVisitDuration, getServiceBufferMinutes, SURCHARGES } from '@/services/pricing/pricingService';
-import { timeBlockAppliesOn, type TimeBlockRow } from '@/lib/timeBlocks';
+import { timeBlockAppliesOn, visitOverlapsWindow, type TimeBlockRow } from '@/lib/timeBlocks';
 
 // US Government holidays - ConveLabs is closed on these dates
 function getBlockedHolidays(year: number): Date[] {
@@ -460,7 +460,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
             const sMin = parseTimeStr(b.start_time);
             const eMin = parseTimeStr(b.end_time);
             if (sMin === null || eMin === null) continue;
-            for (let t = sMin; t < eMin; t += 15) {
+            // Grey out every slot whose visit would RUN INTO the window, not
+            // just the ones starting inside it: with a 6:15 block a 6:00 AM
+            // 60-min visit overlaps (mirrors availability.ts on the server).
+            const firstT = Math.max(0, Math.floor((sMin - NEW_APPT_FOOTPRINT_MIN) / 15) * 15);
+            for (let t = firstT; t < eMin; t += 15) {
+              if (!visitOverlapsWindow(t, NEW_APPT_FOOTPRINT_MIN, sMin, eMin)) continue;
               const h = Math.floor(t / 60); const m = t % 60;
               booked.add(toSlotKey(h, m));
             }
