@@ -19,6 +19,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import { blockedDays } from '@/lib/blockedDays';
+import { timeBlockAppliesOn } from '@/lib/timeBlocks';
 import { gridRange, regularSlots, toBusinessHours } from '@/lib/officeHours';
 import { useOfficeHours } from '@/hooks/useOfficeHours';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -662,6 +663,25 @@ const AdminCalendar: React.FC = () => {
   // Pre-fix bug (Tuesday 5/19 case): every block rendered allDay=true regardless
   // of times, so a 12:30 PM–8:00 PM block painted the entire day red and staff
   // had no idea why the morning was also greyed.
+  // Which dates a block actually lands on. One-off blocks: every day of the
+  // stored range. Recurring blocks: only their weekday (timeBlockAppliesOn,
+  // the same rule the booking engine uses), from start_date on. Before this,
+  // the five Mon–Fri 6:15–7:45 rows (one per weekday, same range) were each
+  // drawn on EVERY day of the range — five stacked bands on every date,
+  // Saturdays included — while bookings correctly honoured the weekday.
+  // A recurring row saved with end_date == start_date repeats open-ended, so
+  // walk a one-year horizon for it.
+  const blockDates = (block: any): string[] => {
+    if (!block.recurring) return blockedDays(block.start_date, block.end_date);
+    let end = block.end_date;
+    if (!end || end <= block.start_date) {
+      const d = new Date(`${block.start_date}T12:00:00`);
+      d.setDate(d.getDate() + 365);
+      end = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    return blockedDays(block.start_date, end).filter((day) => timeBlockAppliesOn(block, day));
+  };
+
   const blockEvents = timeBlocks.flatMap((block: any) => {
     const start24 = time12to24(block.start_time);
     const end24 = time12to24(block.end_time);
@@ -685,7 +705,7 @@ const AdminCalendar: React.FC = () => {
       // Dates are walked at NOON LOCAL for the same reason the appointment
       // list does it: parsing 'YYYY-MM-DD' alone lands on UTC midnight, which
       // is the previous day for a US-East user.
-      const days = blockedDays(block.start_date, block.end_date);
+      const days = blockDates(block);
 
       return days.map(day => ({
         id: `block-${block.id}-${day}`,
@@ -699,6 +719,25 @@ const AdminCalendar: React.FC = () => {
         classNames: ['fc-blocked-date'],
         extendedProps: { isBlock: true, reason: block.reason, partial: true, start_time: block.start_time, end_time: block.end_time },
       }));
+    }
+
+    // Recurring full-day block (e.g. "closed every Sunday"): one all-day
+    // background + label per matching date, not one span over the range.
+    if (block.recurring) {
+      return blockDates(block).flatMap((day) => [
+        {
+          id: `block-${block.id}-${day}`,
+          title, start: day, allDay: true, display: 'background',
+          backgroundColor: '#fecaca', borderColor: '#ef4444', classNames: ['fc-blocked-date'],
+          extendedProps: { isBlock: true, reason: block.reason, partial: false },
+        },
+        {
+          id: `block-label-${block.id}-${day}`,
+          title, start: day, allDay: true,
+          backgroundColor: '#ef4444', borderColor: '#dc2626', textColor: '#ffffff',
+          extendedProps: { isBlock: true, reason: block.reason },
+        },
+      ]);
     }
 
     // Full-day block — covers the whole date as a background event + a
