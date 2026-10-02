@@ -15,6 +15,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedOrgId } from '../_shared/authz.ts';
 import { stripe } from '../_shared/stripe.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -53,9 +54,9 @@ Deno.serve(async (req) => {
     // CLIENT-writable via supabase.auth.updateUser — never trust it alone to
     // scope billing. Prefer the trusted source; if we must fall back to the
     // client-supplied org_id, we verify ownership by email below.
-    const trustedOrgId = (user.app_metadata?.organization_id as string) || null;
-    const claimedOrgId = (user.user_metadata?.org_id as string) || null;
-    const orgId = trustedOrgId || claimedOrgId;
+    const trustedOrgId = getTrustedOrgId(user);
+
+    const orgId = trustedOrgId; // user_metadata fallback removed: client-writable
     if (!orgId) {
       return new Response(JSON.stringify({ error: 'no_org_scope', message: 'Your login isn\'t tied to an organization yet.' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

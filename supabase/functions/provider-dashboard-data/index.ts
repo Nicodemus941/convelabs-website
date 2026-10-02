@@ -12,10 +12,11 @@
 // Response: { org, liveOps, thisMonth, upcoming, patients, invoices, team }
 //
 // Authorization: caller must be role='provider' and have org_id in metadata.
-// Data is scoped server-side to caller.user_metadata.org_id — clients cannot
+// Data is scoped server-side to caller.app_metadata.organization_id — clients cannot
 // request other orgs' data.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -64,8 +65,8 @@ Deno.serve(async (req) => {
     // the same view as the doctor to do their job.)
     // Also accept either org_id or organization_id metadata shape (legacy users
     // have one, fresh invite-org-manager users have the other).
-    const role = String(user.user_metadata?.role || '').toLowerCase();
-    const orgId = user.user_metadata?.org_id || user.user_metadata?.organization_id;
+    const role = getTrustedRole(user);
+    const orgId = getTrustedOrgId(user);
     if (!['provider','office_manager'].includes(role) || !orgId) {
       return new Response(JSON.stringify({
         error: 'Not a provider account',
@@ -346,10 +347,8 @@ Deno.serve(async (req) => {
     }
     const team = allUsers
       .filter(u =>
-        // Match either metadata field name. New invite-org-manager users
-        // have organization_id; legacy users have org_id.
-        u.user_metadata?.org_id === orgId ||
-        u.user_metadata?.organization_id === orgId
+        // Membership comes from service-role-only app_metadata.
+        getTrustedOrgId(u) === orgId
       )
       .map(u => ({
         id: u.id,

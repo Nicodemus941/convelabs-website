@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { getTrustedRole } from '@/lib/authRole';
 
 interface ErrorLogEntry {
   error_type: 'save_failure' | 'upload_failure' | 'api_failure' | 'rls_blocked' | 'missing_column' | 'ui_error' | 'notification_failure';
@@ -18,7 +19,7 @@ export async function logError(entry: ErrorLogEntry): Promise<void> {
     // Get current user info
     const { data: { session } } = await supabase.auth.getSession();
     const userEmail = session?.user?.email || 'anonymous';
-    const userRole = session?.user?.user_metadata?.role || 'unknown';
+    const userRole = getTrustedRole(session?.user) || 'unknown';
 
     await supabase.from('error_logs' as any).insert({
       ...entry,

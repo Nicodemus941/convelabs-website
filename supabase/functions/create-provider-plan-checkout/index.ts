@@ -3,6 +3,7 @@
 // resolves/creates the org, writes a pending provider_plans row, and opens a
 // Stripe subscription checkout with the first cycle + setup fee charged upfront.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { getTrustedRole, getTrustedOrgId, roleAppMetadata } from '../_shared/authz.ts';
 import { stripe } from '../_shared/stripe.ts';
 import { computeQuote, type DrawFrequency, type RateTier } from '../_shared/provider-pricing.ts';
 
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return json({ error: 'invalid_start_date' }, 400);
 
     // ── Resolve or create the org ─────────────────────────────────────
-    let orgId = (user.app_metadata?.organization_id as string) || (user.user_metadata?.org_id as string) || null;
+    let orgId = getTrustedOrgId(user);
     let org: any = null;
     if (orgId) {
       const { data } = await admin.from('organizations')
@@ -65,7 +66,11 @@ Deno.serve(async (req) => {
       if (createErr || !created) return json({ error: 'org_create_failed' }, 500);
       org = created;
       orgId = created.id;
-      await admin.auth.admin.updateUserById(user.id, { app_metadata: { organization_id: orgId } });
+      // The creator owns this brand-new org, so grant org-staff scope on it.
+      // Never downgrade an existing platform/staff role.
+      const currentRole = getTrustedRole(user);
+      const nextRole = ['', 'patient', 'user'].includes(currentRole) ? 'provider' : currentRole;
+      await admin.auth.admin.updateUserById(user.id, { app_metadata: roleAppMetadata(nextRole, orgId) });
     }
 
     if (org.subscription_status === 'active') {

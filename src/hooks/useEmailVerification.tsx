@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { getRoutingRole } from '@/lib/authRole';
 
 export const useEmailVerification = (
   setIsLoading: (loading: boolean) => void,
@@ -39,7 +40,7 @@ export const useEmailVerification = (
               
               // Redirect to appropriate page after successful OAuth login
               const userData = await supabase.auth.getUser();
-              const role = userData?.data?.user?.user_metadata?.role || 'patient';
+              const role = getRoutingRole(userData?.data?.user) || 'patient';
               
               // Use replace to avoid history stacking
               navigate(`/dashboard/${role}`, { replace: true });

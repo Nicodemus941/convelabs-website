@@ -7,6 +7,7 @@
 // Auth: caller must be role='provider' AND belong to the request's org.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const { data: userResp } = await admin.auth.getUser(token);
     const user = userResp?.user;
-    if (!user || user.user_metadata?.role !== 'provider') {
+    if (!user || getTrustedRole(user) !== 'provider') {
       return new Response(JSON.stringify({ error: 'Not a provider' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -48,7 +49,7 @@ Deno.serve(async (req) => {
 
     const { data: request } = await admin.from('patient_lab_requests').select('*').eq('id', request_id).maybeSingle();
     if (!request) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    if (request.organization_id !== user.user_metadata?.org_id) {
+    if (request.organization_id !== getTrustedOrgId(user)) {
       return new Response(JSON.stringify({ error: 'You can only cancel requests for your own org' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     if (request.status !== 'pending_schedule' && request.status !== 'scheduled') {

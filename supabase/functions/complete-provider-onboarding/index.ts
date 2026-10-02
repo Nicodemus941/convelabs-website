@@ -10,6 +10,7 @@
 // Response: { success: true }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
     // invited partner-org staff (office_manager) both go through this
     // endpoint to set/update password + stamp onboarded_at.
     // (Lara/Littleton 2026-05-07 invited-staff password-creation flow.)
-    const role = String(user.user_metadata?.role || '').toLowerCase();
+    const role = getTrustedRole(user);
     if (!['provider', 'office_manager'].includes(role)) {
       return new Response(JSON.stringify({ error: 'Not a provider/staff account' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }

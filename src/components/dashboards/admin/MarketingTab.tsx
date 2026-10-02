@@ -4,12 +4,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MarketingCampaignForm } from "@/components/admin/marketing";
 import CampaignAnalyticsDashboard from "@/components/admin/marketing/CampaignAnalyticsDashboard";
 import { useNavigate } from "react-router-dom";
+import { getRoutingRole } from '@/lib/authRole';
 
 const MarketingTab = () => {
   const navigate = useNavigate();
   
   const handleCancel = () => {
-    const role = JSON.parse(localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token') || '{}')?.user?.user_metadata?.role || 'office_manager';
+    const role = getRoutingRole(JSON.parse(localStorage.getItem('sb-yluyonhrxxtyuiyrdixl-auth-token') || '{}')?.user) || 'office_manager';
     navigate(`/dashboard/${role}`);
   };
 

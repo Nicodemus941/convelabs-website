@@ -6,6 +6,7 @@
 // Body: { token, password?, dateOfBirth?, acceptedTerms: boolean }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, roleAppMetadata, keepElevatedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -66,9 +67,11 @@ Deno.serve(async (req) => {
     if (existing) {
       userId = existing.id;
       // If a password was supplied, update it (opt-in; empty = keep existing)
-      if (password) {
-        await admin.auth.admin.updateUserById(userId, { password });
-      }
+      // Role lives in service-role-only app_metadata (authorization source).
+      await admin.auth.admin.updateUserById(userId, {
+        ...(password ? { password } : {}),
+        app_metadata: roleAppMetadata(keepElevatedRole(getTrustedRole(existing as any), String(invite.role || ''))),
+      });
     } else {
       if (!password || password.length < 8) {
         return json({ error: 'Password must be at least 8 characters' }, 400);
@@ -80,9 +83,10 @@ Deno.serve(async (req) => {
         user_metadata: {
           first_name: invite.first_name,
           last_name: invite.last_name,
-          role: invite.role,
+          role: invite.role, // display only
           phone: invite.phone,
         },
+        app_metadata: roleAppMetadata(String(invite.role || '')),
       });
       if (createErr || !created.user) return json({ error: createErr?.message || 'Failed to create user' }, 500);
       userId = created.user.id;

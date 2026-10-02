@@ -6,6 +6,7 @@
 
 import { Session } from "@/types/auth";
 import { supabase } from "@/integrations/supabase/client";
+import { getRoutingRole } from '@/lib/authRole';
 
 /**
  * Creates an encoded authentication payload that can be sent to external systems
@@ -77,7 +78,7 @@ export const refreshSessionBeforeRedirect = async (): Promise<Session | null> =>
         firstName: data.session.user.user_metadata?.firstName || '',
         lastName: data.session.user.user_metadata?.lastName || '',
         full_name: data.session.user.user_metadata?.full_name || '',
-        role: data.session.user.user_metadata?.role || 'patient',
+        role: getRoutingRole(data.session.user) || 'patient',
         createdAt: data.session.user.created_at || '',
       } : null
     };

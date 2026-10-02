@@ -20,6 +20,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { getTrustedRole, getTrustedOrgId } from '../_shared/authz.ts';
 import { renderEmail, okBlock, warnBlock, card, paragraph } from '../_shared/emailTemplates.ts';
 
 const corsHeaders = {
@@ -78,9 +79,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!reqRow) return json({ error: 'request_not_found' }, 404);
 
-    const meta: any = user.user_metadata || {};
-    const metaRole = String(meta.role || '').toLowerCase();
-    const metaOrg = meta.organization_id || meta.org_id || null;
+    const metaRole = getTrustedRole(user);
+    const metaOrg = getTrustedOrgId(user);
     let authorized = false;
     if (['provider', 'office_manager'].includes(metaRole) && metaOrg && String(metaOrg) === String(reqRow.organization_id)) {
       authorized = true;

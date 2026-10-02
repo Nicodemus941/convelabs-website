@@ -7,6 +7,7 @@
 // Response: { success: true, escalation_id }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,7 +32,7 @@ Deno.serve(async (req) => {
     const user = userResp?.user;
     if (!user) return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
-    const role = user.user_metadata?.role;
+    const role = getTrustedRole(user);
     if (role !== 'super_admin' && role !== 'office_manager') {
       return new Response(JSON.stringify({ error: 'Admin access required' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }

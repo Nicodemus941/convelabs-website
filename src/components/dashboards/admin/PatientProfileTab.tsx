@@ -36,6 +36,7 @@ import FamilyHouseholdCard from '@/components/admin/FamilyHouseholdCard';
 import AppointmentDetailModal from '@/components/calendar/AppointmentDetailModal';
 import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
 import { Zap } from 'lucide-react';
+import { getTrustedRole } from '@/lib/authRole';
 
 /**
  * Load EVERY non-deleted patient, paging past PostgREST's per-response row cap.
@@ -1002,9 +1003,7 @@ const PatientProfileTab: React.FC = () => {
 
                   // Verify caller's role from JWT so we can explain failures
                   const { data: sess } = await supabase.auth.getSession();
-                  const role = (sess?.session?.user?.user_metadata as any)?.role
-                    || (sess?.session?.user?.app_metadata as any)?.role
-                    || 'unknown';
+                  const role = getTrustedRole(sess?.session?.user) || 'unknown';
                   const uid = sess?.session?.user?.id || 'no-session';
                   console.log('[delete-patient] calling RPC as', { uid, role });
 
@@ -1123,7 +1122,7 @@ const PatientProfileTab: React.FC = () => {
                   }
                   if (!data || data.length === 0) {
                     // Diagnose: role + does the patient still exist?
-                    const role = (session.user as any)?.user_metadata?.role || 'unknown';
+                    const role = getTrustedRole(session.user as any) || 'unknown';
                     // Probe a SELECT to disambiguate "row missing" vs "RLS blocked"
                     const { data: probe } = await supabase
                       .from('tenant_patients')
