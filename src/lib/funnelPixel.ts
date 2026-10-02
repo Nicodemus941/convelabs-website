@@ -35,9 +35,15 @@ function newEventId(name: string): string {
   return `${name}-${rand}`;
 }
 
-export function trackFunnelEvent(name: string, params: PixelParams = {}): void {
-  if (sent.has(name)) return;
-  sent.add(name);
+/**
+ * @param dedupeKey Defaults to the event name, i.e. "once per page instance".
+ *   Surfaces that live BEFORE the booking flow in the same SPA instance (the
+ *   Meta ad landing page) pass their own key so their ViewContent does not
+ *   consume the booking flow's single ViewContent/Lead slot — and vice versa.
+ */
+export function trackFunnelEvent(name: string, params: PixelParams = {}, dedupeKey: string = name): void {
+  if (sent.has(dedupeKey)) return;
+  sent.add(dedupeKey);
   try {
     if (typeof window === 'undefined') return;
     const fbq = (window as any).fbq;

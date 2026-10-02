@@ -41,22 +41,53 @@ class AnalyticsTracker {
     );
   }
 
+  // Storage access is wrapped because this singleton is constructed at module
+  // evaluation time and is imported by every public page. In some embedded
+  // browsers (Instagram/Facebook in-app WebViews with cookies blocked, Safari
+  // "Block all cookies", private windows) `sessionStorage`/`localStorage`
+  // THROW a SecurityError on access. Unguarded, that exception escaped the
+  // constructor, failed the whole module, and the app never rendered — a
+  // white screen for exactly the ad traffic we pay for. Fall back to an
+  // in-memory id so tracking degrades instead of taking the page down.
+  private static safeGet(store: 'session' | 'local', key: string): string | null {
+    try {
+      const s = store === 'session' ? window.sessionStorage : window.localStorage;
+      return s.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  private static safeSet(store: 'session' | 'local', key: string, value: string): void {
+    try {
+      const s = store === 'session' ? window.sessionStorage : window.localStorage;
+      s.setItem(key, value);
+    } catch {
+      /* storage unavailable — keep the in-memory id */
+    }
+  }
+
   private getOrCreateSessionId(): string {
-    let sessionId = sessionStorage.getItem('analytics_session_id');
+    let sessionId = AnalyticsTracker.safeGet('session', 'analytics_session_id');
     if (!sessionId) {
       sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      sessionStorage.setItem('analytics_session_id', sessionId);
+      AnalyticsTracker.safeSet('session', 'analytics_session_id', sessionId);
     }
     return sessionId;
   }
 
   private getOrCreateVisitorId(): string {
-    let visitorId = localStorage.getItem('analytics_visitor_id');
+    let visitorId = AnalyticsTracker.safeGet('local', 'analytics_visitor_id');
     if (!visitorId) {
       visitorId = 'visitor_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      localStorage.setItem('analytics_visitor_id', visitorId);
+      AnalyticsTracker.safeSet('local', 'analytics_visitor_id', visitorId);
     }
     return visitorId;
+  }
+
+  /** The id every funnel event in this tab is stamped with (shared with the landing page). */
+  getSessionId(): string {
+    return this.sessionId;
   }
 
   private setupEventListeners() {
