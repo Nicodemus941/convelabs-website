@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { afterHoursSlots, regularSlots } from '@/lib/officeHours';
 import { useOfficeHours } from '@/hooks/useOfficeHours';
 import { format, addDays, subDays } from 'date-fns';
@@ -28,6 +28,9 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { isBookingAllowed, normalizeTime, type MemberTier } from '@/lib/bookingWindows';
 import { getMemberTier } from '@/lib/memberBenefits';
+import { analytics } from '@/utils/analytics';
+import { buildSlotGuidance, slotBucket } from '@/lib/slotGuidance';
+import { useFastingIntent } from '@/hooks/useFastingIntent';
 import { BookingFormValues } from '@/types/appointmentTypes';
 import AvailabilityMap from './AvailabilityMap';
 import { supabase } from '@/integrations/supabase/client';
@@ -645,6 +648,31 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     ? [...baseWindows, ...(phlebOnDuty ? dutyConstrainedAfterHours : afterHoursWindows)]
     : baseWindows;
   
+  // Fasting-aware guidance: ORDER + LABELS only (src/lib/slotGuidance.ts).
+  // activeWindows, bookedSlots, heldSlots, cutoffs and tier gating are
+  // untouched — every window is still rendered, nothing is hidden.
+  const fastingIntent = useFastingIntent();
+  const slotGuidance = useMemo(
+    () => buildSlotGuidance(activeWindows, fastingIntent, (t) => !bookedSlots.has(t) && !heldSlots.has(t)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeWindows.map(w => w.time).join(','), fastingIntent, bookedSlots, heldSlots],
+  );
+  const guidanceShownRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedDate || loadingSlots || activeWindows.length === 0) return;
+    const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    const key = `${dateIso}|${slotGuidance.intent}`;
+    if (guidanceShownRef.current.has(key)) return; // once per date + intent
+    guidanceShownRef.current.add(key);
+    analytics.trackFunnelStage('booking_slot_guidance_shown', 3, {
+      fasting: slotGuidance.intent,
+      recommendedBucket: slotGuidance.recommendedBucket,
+      featured: Object.keys(slotGuidance.badges),
+      dateIso,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate?.getTime(), loadingSlots, slotGuidance.intent, slotGuidance.recommendedBucket]);
+
   // Is this date sold out for the currently-selected service?
   const isSoldOut = activeWindows.length > 0
     && activeWindows.every(w => bookedSlots.has(w.time) || heldSlots.has(w.time));
@@ -1063,8 +1091,15 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       </Button>
                     </div>
                   ) : (
+                    <>
+                    {slotGuidance.message && (
+                      <p className="mb-2 text-xs font-medium text-conve-black" role="note">
+                        {slotGuidance.message}
+                      </p>
+                    )}
                     <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 sm:gap-2">
-                      {activeWindows.map((window) => {
+                      {slotGuidance.ordered.map((window) => {
+                        const guidanceBadge = slotGuidance.badges[window.time];
                         const isSelected = field.value === window.time;
                         const isBooked = bookedSlots.has(window.time);
                         const isHeldByOther = !isSelected && heldSlots.has(window.time);
@@ -1137,6 +1172,13 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                               }
 
                               field.onChange(window.time);
+                              analytics.trackFunnelStage('booking_slot_selected', 3, {
+                                time: window.time,
+                                bucket: slotBucket(window.time),
+                                fasting: slotGuidance.intent,
+                                recommendedBucket: slotGuidance.recommendedBucket,
+                                wasFeatured: Boolean(guidanceBadge),
+                              });
                               // slot_holds REMOVED 2026-04-28 — server no
                               // longer consults them; client no longer creates
                               // them. Race-condition protection lives in
@@ -1148,6 +1190,11 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                               <Lock className="inline h-3 w-3 mr-1 mb-0.5" />
                             )}
                             <span>{window.time}</span>
+                            {guidanceBadge && !isUnavailable && !tierLocked && (
+                              <span className={`block text-[9px] font-semibold uppercase tracking-wider mt-0.5 ${isSelected ? 'text-white/90' : 'text-emerald-700'}`}>
+                                {guidanceBadge}
+                              </span>
+                            )}
                             {tierLocked && tierUnlockTier && (
                               <span className="block text-[9px] font-semibold uppercase tracking-wider mt-0.5">
                                 {tierUnlockTier === 'vip' ? 'VIP' : tierUnlockTier === 'concierge' ? 'Concierge' : 'Member'} only
@@ -1163,6 +1210,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         );
                       })}
                     </div>
+                    </>
                   )}
                   {loadingSlots && (
                     <p className="text-xs text-muted-foreground mt-1">Checking availability...</p>
