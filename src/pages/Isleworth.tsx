@@ -12,10 +12,10 @@ const Isleworth: React.FC = () => {
   return (
     <>
       <Helmet>
-        <title>🏆 Isleworth Mobile Lab Services | VIP Blood Work | ConveLabs | Same-Day Results | 941-527-9169</title>
+        <title>🏆 Isleworth Mobile Lab Services | VIP Blood Work | ConveLabs | 941-527-9169</title>
         <meta 
           name="description" 
-          content="⭐ Exclusive Mobile Lab Services for Isleworth Residents ⭐ Luxury at-home blood work for golf community executives. Same-day results, HIPAA compliant. Serving Bay Hill Club, Phillips Point. Book VIP appointment! 🏌️‍♂️"
+          content="⭐ Exclusive Mobile Lab Services for Isleworth Residents ⭐ Luxury at-home blood work for golf community executives. Results sent straight to your doctor, HIPAA compliant. Serving Bay Hill Club, Phillips Point. Book VIP appointment! 🏌️‍♂️"
         />
         <meta 
           name="keywords" 
@@ -33,7 +33,7 @@ const Isleworth: React.FC = () => {
         {/* Open Graph Tags */}
         <meta property="og:type" content="business.business" />
         <meta property="og:title" content="🏆 Isleworth Mobile Lab Services | VIP Blood Work | ConveLabs" />
-        <meta property="og:description" content="⭐ Exclusive Mobile Lab Services for Isleworth's golf community ⭐ Luxury at-home blood work with same-day results. HIPAA compliant, fully insured." />
+        <meta property="og:description" content="⭐ Exclusive Mobile Lab Services for Isleworth's golf community ⭐ Luxury at-home blood work with results sent straight to your doctor. HIPAA compliant, fully insured." />
         <meta property="og:url" content="https://convelabs.com/isleworth" />
         <meta property="og:image" content="https://convelabs.com/isleworth-mobile-lab.jpg" />
         
@@ -212,10 +212,9 @@ const Isleworth: React.FC = () => {
                   aspects of your lifestyle.
                 </p>
                 
-                <h3 className="font-semibold text-lg mb-3">Same-Day Results</h3>
+                <h3 className="font-semibold text-lg mb-3">Results to Your Doctor</h3>
                 <p className="text-gray-600">
-                  Rapid turnaround times for busy executives who need immediate health insights 
-                  for important decisions.
+                  Results sent straight to your doctor. Same-day results available for select tests delivered to AdventHealth.
                 </p>
               </div>
             </div>

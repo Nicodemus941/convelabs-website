@@ -163,7 +163,7 @@ const B2BPartnerships: React.FC = () => {
                   "name": "How much revenue can healthcare providers generate through ConveLabs partnerships?",
                   "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Healthcare providers typically see 15-35% revenue increases through our mobile phlebotomy partnership programs, with some practices generating over $50,000 in additional monthly revenue."
+                    "text": "Partner practices add a convenient in-home draw option for their patients."
                   }
                 },
                 {

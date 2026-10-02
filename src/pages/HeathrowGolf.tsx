@@ -13,7 +13,7 @@ const HeathrowGolf: React.FC = () => {
         <title>✈️ Heathrow Golf Mobile Lab | Executive Aviation Community | ConveLabs | VIP Services | 941-527-9169</title>
         <meta 
           name="description" 
-          content="⭐ Elite Mobile Lab Services for Heathrow Golf & Country Club ⭐ Executive blood work for Central Florida's aviation community. Same-day results for busy pilots and aviation executives! ✈️"
+          content="⭐ Elite Mobile Lab Services for Heathrow Golf & Country Club ⭐ Executive blood work for Central Florida's aviation community. Results sent straight to your doctor for busy pilots and aviation executives! ✈️"
         />
         <meta 
           name="keywords" 

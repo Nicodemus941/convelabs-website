@@ -37,23 +37,23 @@ const Corporate: React.FC = () => {
   const benefits = [
     {
       icon: DollarSign,
-      title: "30% Fewer Sick Days",
-      description: "Data-driven preventive care reduces absenteeism by 30%, saving an average of $3,200 per employee annually"
+      title: "Fewer Missed Work Hours",
+      description: "On-site preventive screenings mean employees spend less time away from work for routine lab draws"
     },
     {
       icon: TrendingUp,
-      title: "25% Healthcare Cost Reduction", 
-      description: "Early detection and intervention programs cut corporate healthcare spend by 25% through prevention"
+      title: "Preventive Care Support", 
+      description: "Routine screenings help surface health concerns early so employees can follow up with their doctors"
     },
     {
       icon: Users,
-      title: "92% Participation Rate",
-      description: "Mobile convenience at workplace ensures industry-leading participation rates vs traditional health fairs"
+      title: "Easy Employee Participation",
+      description: "Mobile convenience at the workplace makes it simple for employees to take part"
     },
     {
       icon: Clock,
-      title: "10-Minute Productivity Impact",
-      description: "Streamlined screenings take just 10 minutes per employee with zero workplace disruption"
+      title: "Minimal Workplace Disruption",
+      description: "Most draws take under 10 minutes, so employees are back to work quickly"
     },
     {
       icon: Shield,
@@ -72,19 +72,19 @@ const Corporate: React.FC = () => {
       organization: "Major Television Networks",
       type: "Entertainment & Media",
       employees: "1,000+ employees",
-      result: "35% reduction in sick days"
+      result: "On-site screenings for staff"
     },
     {
       organization: "Professional Sports Teams",
       type: "Athletic Organizations", 
       employees: "Staff & athletes",
-      result: "40% faster injury recovery"
+      result: "Mobile draws for busy schedules"
     },
     {
       organization: "Fortune 500 Corporations",
       type: "Enterprise Clients",
       employees: "5,000+ employees",
-      result: "25% healthcare cost savings"
+      result: "Workforce screening programs"
     }
   ];
 
@@ -111,23 +111,23 @@ const Corporate: React.FC = () => {
   const reportingMetrics = [
     {
       metric: "Employee Participation",
-      value: "92%",
-      description: "Average participation rate across all corporate clients"
+      value: "Tracked",
+      description: "Participation reporting for your program"
     },
     {
       metric: "Cost Savings", 
-      value: "$2,400",
-      description: "Average annual savings per employee through preventive care"
+      value: "Reported",
+      description: "Program utilization and cost visibility"
     },
     {
-      metric: "Productivity Increase",
-      value: "15%", 
-      description: "Improvement in team productivity after implementing wellness program"
+      metric: "Productivity",
+      value: "Less downtime",
+      description: "Short on-site visits keep employees at work"
     },
     {
-      metric: "Sick Day Reduction",
-      value: "30%",
-      description: "Decrease in employee sick days and medical absences"
+      metric: "Absence Tracking",
+      value: "Monthly",
+      description: "Monthly reporting to support your wellness program"
     }
   ];
 
@@ -135,13 +135,13 @@ const Corporate: React.FC = () => {
     {
       company: "Orlando Tech Solutions",
       logo: "💼",
-      quote: "We saw a 35% reduction in sick days within 6 months. The mobile service eliminated the need for employees to take time off for routine health screenings.",
+      quote: "The mobile service eliminated the need for employees to take time off for routine health screenings.",
       author: "Sarah Chen, HR Director"
     },
     {
       company: "Central Florida Bank", 
       logo: "🏢",
-      quote: "The monthly reports helped us identify health trends early. Our healthcare costs dropped by 22% year-over-year thanks to preventive interventions.",
+      quote: "The monthly reports helped us identify health trends early. Preventive screenings have been a valuable part of our wellness program.",
       author: "Michael Rodriguez, Benefits Manager"
     },
     {
@@ -155,7 +155,7 @@ const Corporate: React.FC = () => {
   return (
     <>
       <Helmet>
-        <title>Cut Healthcare Costs by 25% | Enterprise Workforce Health Solutions | ConveLabs</title>
+        <title>Enterprise Workforce Health Solutions | ConveLabs</title>
         <meta name="description" content="Enterprise workforce health operations with mobile screenings, centralized scheduling, executive reporting, and multi-location program visibility." />
         <meta name="keywords" content="enterprise healthcare solutions, workforce health platform, executive health programs, employee health screenings, workplace wellness analytics, enterprise phlebotomy services" />
         <link rel="canonical" href="https://convelabs.com/corporate" />
@@ -164,7 +164,7 @@ const Corporate: React.FC = () => {
             "@context": "https://schema.org",
             "@type": "Service", 
             "name": "Enterprise Workforce Health Solutions",
-            "description": "Fortune 500-trusted mobile health platform that reduces healthcare costs by 25% and sick days by 30% through preventive workplace wellness programs.",
+            "description": "Mobile health platform supporting preventive workplace wellness programs with on-site screenings and monthly reporting.",
             "provider": {
               "@type": "Organization",
               "name": "ConveLabs",
@@ -212,9 +212,8 @@ const Corporate: React.FC = () => {
           </Badge>
           
           <h1 className="font-playfair text-4xl md:text-6xl lg:text-7xl font-bold mb-8 leading-tight">
-            Cut Healthcare Costs by 25% 
-            <span className="block text-conve-gold">While Reducing Sick Days by 30%</span>
-            <span className="block text-2xl md:text-3xl mt-4 opacity-90">— in Just 30 Days</span>
+            Workplace Wellness Screenings
+            <span className="block text-conve-gold">That Come to Your Team</span>
           </h1>
           
           <p className="text-xl md:text-2xl mb-12 opacity-95 max-w-4xl mx-auto leading-relaxed">
@@ -256,20 +255,20 @@ const Corporate: React.FC = () => {
           {/* ROI Metrics */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             <div>
-              <div className="text-3xl font-bold text-conve-gold">$3,200</div>
-              <div className="text-sm text-white/80">Annual Savings/Employee</div>
+              <div className="text-3xl font-bold text-conve-gold">On-site</div>
+              <div className="text-sm text-white/80">Employee Screenings</div>
             </div>
             <div>
-              <div className="text-3xl font-bold text-conve-gold">92%</div>
-              <div className="text-sm text-white/80">Participation Rate</div>
+              <div className="text-3xl font-bold text-conve-gold">&lt;10 min</div>
+              <div className="text-sm text-white/80">Most Draws</div>
             </div>
             <div>
-              <div className="text-3xl font-bold text-conve-gold">30%</div>
-              <div className="text-sm text-white/80">Fewer Sick Days</div>
+              <div className="text-3xl font-bold text-conve-gold">Monthly</div>
+              <div className="text-sm text-white/80">Program Reporting</div>
             </div>
             <div>
-              <div className="text-3xl font-bold text-conve-gold">25%</div>
-              <div className="text-sm text-white/80">Cost Reduction</div>
+              <div className="text-3xl font-bold text-conve-gold">Priority</div>
+              <div className="text-sm text-white/80">Scheduling</div>
             </div>
           </div>
         </div>
@@ -346,8 +345,8 @@ const Corporate: React.FC = () => {
               <div className="bg-conve-red/5 p-8 rounded-2xl border border-conve-red/20">
                 <h3 className="text-xl font-bold text-gray-900 mb-4 font-playfair">ROI-Driven Results</h3>
                 <p className="text-gray-600 mb-4 leading-relaxed">
-                  Our enterprise clients see an average <span className="font-bold text-conve-red">$3,200 annual savings per employee</span> through 
-                  preventive care programs that reduce sick days by 30% and emergency healthcare costs by 25%.
+                  Our enterprise programs bring <span className="font-bold text-conve-red">convenient preventive screenings</span> to your workplace, 
+                  helping employees stay on top of their health with minimal time away from work.
                 </p>
                 <div className="flex items-center gap-2 text-conve-red font-medium">
                   <DollarSign className="h-5 w-5" />
@@ -404,8 +403,8 @@ const Corporate: React.FC = () => {
                 <CardDescription className="text-red-600">Health fairs & vendor solutions</CardDescription>
               </CardHeader>
               <CardContent className="p-8 space-y-4">
-                <div className="text-gray-600">• $15,000-50,000 event costs</div>
-                <div className="text-gray-600">• 40-60% participation rates</div>
+                <div className="text-gray-600">• Event setup and vendor costs</div>
+                <div className="text-gray-600">• Participation limited to event day</div>
                 <div className="text-gray-600">• Full day productivity loss</div>
                 <div className="text-gray-600">• No ongoing health monitoring</div>
                 <div className="text-gray-600">• Limited ROI measurement</div>
@@ -426,7 +425,7 @@ const Corporate: React.FC = () => {
                 </div>
                 <div className="text-gray-600 flex items-center gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600" />
-                  92% average participation rate
+                  Convenient on-site participation
                 </div>
                 <div className="text-gray-600 flex items-center gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600" />
@@ -523,7 +522,7 @@ const Corporate: React.FC = () => {
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="font-playfair text-4xl md:text-5xl font-bold mb-6 luxury-heading">
-              <span className="text-conve-red">Enterprise Pricing</span> with Proven ROI
+              <span className="text-conve-red">Enterprise Pricing</span> with Clear Reporting
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
               Transparent pricing designed for HR leaders and CFOs. Every package includes ROI tracking 
@@ -547,8 +546,8 @@ const Corporate: React.FC = () => {
                 </div>
                 <div className="bg-green-50 p-4 rounded-lg mt-4">
                   <div className="text-sm text-green-700 font-medium">
-                    <div>ROI: $3,200 annual savings per employee</div>
-                    <div className="text-xs mt-1">327% return on investment</div>
+                    <div>Preventive screenings at your workplace</div>
+                    <div className="text-xs mt-1">Monthly program reporting included</div>
                   </div>
                 </div>
               </CardHeader>
@@ -633,7 +632,7 @@ const Corporate: React.FC = () => {
                 <h3 className="text-2xl font-bold text-gray-900 mb-4 font-playfair">Enterprise & Custom Solutions</h3>
                 <p className="text-gray-600 mb-6 text-lg">
                   For organizations with 100+ employees. Includes volume discounts, custom integrations, 
-                  and dedicated customer success management. Typical enterprise savings: 15-25% off per-seat pricing.
+                  and dedicated customer success management. Volume pricing available.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <Button 
@@ -784,7 +783,7 @@ const Corporate: React.FC = () => {
               </div>
               <div>
                 <h3 className="font-bold text-lg text-gray-900 mb-3 font-playfair">Do you really only need 10 minutes per employee?</h3>
-                <p className="text-gray-600 leading-relaxed">Yes! Our streamlined mobile process is designed for efficiency. Basic health panels take 10 minutes, comprehensive screenings may take 15-20 minutes.</p>
+                <p className="text-gray-600 leading-relaxed">Yes! Our streamlined mobile process is designed for efficiency. Most draws take under 10 minutes; comprehensive screenings may take longer.</p>
               </div>
               <div>
                 <h3 className="font-bold text-lg text-gray-900 mb-3 font-playfair">What's included in the monthly reporting?</h3>
@@ -794,11 +793,11 @@ const Corporate: React.FC = () => {
             <div className="space-y-8">
               <div>
                 <h3 className="font-bold text-lg text-gray-900 mb-3 font-playfair">How does this compare cost-wise to health fairs?</h3>
-                <p className="text-gray-600 leading-relaxed">Most companies save 40-60% compared to traditional health fairs while achieving higher participation and better outcomes.</p>
+                <p className="text-gray-600 leading-relaxed">On-site draws avoid event setup and vendor costs, and employees can participate on their own schedule.</p>
               </div>
               <div>
                 <h3 className="font-bold text-lg text-gray-900 mb-3 font-playfair">Is this covered by our existing health insurance?</h3>
-                <p className="text-gray-600 leading-relaxed">This is typically a separate employee benefit. Many companies see ROI through reduced healthcare costs and fewer sick days.</p>
+                <p className="text-gray-600 leading-relaxed">This is typically a separate employee benefit. Many employers offer it as a convenient wellness benefit.</p>
               </div>
               <div>
                 <h3 className="font-bold text-lg text-gray-900 mb-3 font-playfair">Can we customize services for our industry?</h3>

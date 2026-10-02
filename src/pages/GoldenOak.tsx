@@ -13,7 +13,7 @@ const GoldenOak: React.FC = () => {
         <title>👑 Golden Oak Disney Mobile Lab | Luxury Resort Blood Work | ConveLabs | VIP Service | 941-527-9169</title>
         <meta 
           name="description" 
-          content="⭐ Exclusive Mobile Lab Services for Golden Oak at Walt Disney World ⭐ Ultra-luxury blood work for Disney's most prestigious neighborhood. Same-day results, white-glove service for Four Seasons residents! 🏰"
+          content="⭐ Exclusive Mobile Lab Services for Golden Oak at Walt Disney World ⭐ Ultra-luxury blood work for Disney's most prestigious neighborhood. Results sent straight to your doctor, white-glove service for Four Seasons residents! 🏰"
         />
         <meta 
           name="keywords" 

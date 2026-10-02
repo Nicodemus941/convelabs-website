@@ -97,7 +97,7 @@ const InOfficeServicePage: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-xl font-semibold mb-2">Corporate Wellness Enhancement</h3>
-                    <p>Significantly increase participation in preventative health screenings by removing barriers to access, leading to healthier employees and reduced healthcare costs.</p>
+                    <p>Significantly increase participation in preventative health screenings by removing barriers to access, leading to healthier employees.</p>
                   </div>
                 </div>
                 

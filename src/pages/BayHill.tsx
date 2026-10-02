@@ -13,7 +13,7 @@ const BayHill: React.FC = () => {
         <title>🏌️ Bay Hill Club Mobile Lab | Arnold Palmer's Community | ConveLabs | VIP Blood Work | 941-527-9169</title>
         <meta 
           name="description" 
-          content="⭐ Exclusive Mobile Lab Services for Bay Hill Club & Lodge ⭐ VIP blood work for Arnold Palmer's legendary golf community. Same-day results, HIPAA compliant. Tournament-ready health screening! 🏆"
+          content="⭐ Exclusive Mobile Lab Services for Bay Hill Club & Lodge ⭐ VIP blood work for Arnold Palmer's legendary golf community. Results sent straight to your doctor, HIPAA compliant. Tournament-ready health screening! 🏆"
         />
         <meta 
           name="keywords" 
@@ -31,7 +31,7 @@ const BayHill: React.FC = () => {
         {/* Open Graph Tags */}
         <meta property="og:type" content="business.business" />
         <meta property="og:title" content="🏌️ Bay Hill Club Mobile Lab | Arnold Palmer's Community | ConveLabs" />
-        <meta property="og:description" content="⭐ Exclusive Mobile Lab Services for Bay Hill Club & Lodge ⭐ VIP blood work for the legendary golf community with same-day results." />
+        <meta property="og:description" content="⭐ Exclusive Mobile Lab Services for Bay Hill Club & Lodge ⭐ VIP blood work for the legendary golf community with results sent straight to your doctor." />
         <meta property="og:url" content="https://convelabs.com/bay-hill" />
         <meta property="og:image" content="https://convelabs.com/bay-hill-mobile-lab.jpg" />
         

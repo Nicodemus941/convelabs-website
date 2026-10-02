@@ -133,7 +133,7 @@ const ExitIntentPopup = ({ isOpen, onClose, visitorProfile = 'busy_professional'
               </div>
               <div className="flex items-center">
                 <Star className="h-4 w-4 mr-1" />
-                5-Star Service
+                5.0 Google rating (164 reviews)
               </div>
             </div>
           </div>
@@ -168,7 +168,7 @@ const ExitIntentPopup = ({ isOpen, onClose, visitorProfile = 'busy_professional'
           <div className="text-center text-xs text-gray-500">
             <p>✓ No spam, unsubscribe anytime</p>
             <p>✓ Professional phlebotomists only</p>
-            <p>✓ Same-day results available</p>
+            <p>✓ Most draws take under 10 minutes</p>
           </div>
 
           {/* Urgency */}

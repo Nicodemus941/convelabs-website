@@ -58,8 +58,8 @@ export const ServiceSchema: React.FC<ServiceOfferProps> = ({
           "@type": "Offer", 
           "itemOffered": {
             "@type": "Service",
-            "name": "Same-Day Results",
-            "description": "Urgent lab results within hours"
+            "name": "Same-Day Results for Select Tests",
+            "description": "Same-day results available for select tests delivered to AdventHealth."
           }
         }
       ]

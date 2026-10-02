@@ -151,7 +151,7 @@ const ConciergePhlebotomy: React.FC = () => {
                 <ul className="space-y-3 text-gray-600">
                   <li className="flex items-start">
                     <div className="w-2 h-2 bg-conve-gold rounded-full mt-2 mr-3 flex-shrink-0"></div>
-                    Same-day results with secure delivery options
+                    Results sent straight to your doctor with secure delivery options
                   </li>
                   <li className="flex items-start">
                     <div className="w-2 h-2 bg-conve-gold rounded-full mt-2 mr-3 flex-shrink-0"></div>

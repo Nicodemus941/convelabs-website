@@ -13,7 +13,7 @@ const VSLabCorp: React.FC = () => {
         <title>ConveLabs vs LabCorp Mobile | Why Choose Premium Over Standard | Orlando Executive Healthcare</title>
         <meta 
           name="description" 
-          content="Compare ConveLabs luxury mobile lab services vs LabCorp mobile phlebotomy. See why Orlando executives choose ConveLabs for white-glove service, same-day results, and VIP treatment over standard mobile services."
+          content="Compare ConveLabs luxury mobile lab services vs LabCorp mobile phlebotomy. See why Orlando executives choose ConveLabs for white-glove service, results sent straight to your doctor, and VIP treatment over standard mobile services."
         />
         <meta 
           name="keywords" 
@@ -73,17 +73,16 @@ const VSLabCorp: React.FC = () => {
                     <td className="py-4 px-4 text-center text-gray-600">Standard Service</td>
                   </tr>
                   <tr className="border-b border-gray-100">
-                    <td className="py-4 px-4 font-medium">Same-Day Results</td>
+                    <td className="py-4 px-4 font-medium">Results to Your Doctor</td>
                     <td className="py-4 px-4 text-center">
                       <span className="inline-flex items-center gap-1 text-green-600">
                         <CheckCircle className="h-5 w-5" />
-                        Available
+                        Sent straight to your doctor
                       </span>
                     </td>
                     <td className="py-4 px-4 text-center">
-                      <span className="inline-flex items-center gap-1 text-red-600">
-                        <X className="h-5 w-5" />
-                        1-3 Days
+                      <span className="inline-flex items-center gap-1 text-gray-600">
+                        Varies
                       </span>
                     </td>
                   </tr>
@@ -143,7 +142,7 @@ const VSLabCorp: React.FC = () => {
                 </li>
                 <li className="flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 mt-1" />
-                  <span><strong>Same-Day Results:</strong> Critical for busy executives who need immediate health insights</span>
+                  <span><strong>Results to Your Doctor:</strong> Same-day results available for select tests delivered to AdventHealth.</span>
                 </li>
                 <li className="flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-600 mt-1" />
