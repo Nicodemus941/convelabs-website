@@ -1192,10 +1192,13 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // 3. Phlebotomist SMS
         supabase.from('staff_profiles').select('phone').eq('user_id', '91c76708-8c5b-4068-92c6-323805a3b164').maybeSingle()
           .then(({ data: staff }) => {
-            if (staff?.phone) {
+            // Skip when the phleb is the owner — he already got the owner text above.
+            const phlebPhone = (staff as { phone?: string | null } | null)?.phone || '';
+            const isOwner = phlebPhone.replace(/\D/g, '').slice(-10) === '9415279169';
+            if (phlebPhone && !isOwner) {
               supabase.functions.invoke('send-sms-notification', {
                 body: {
-                  to: staff.phone,
+                  to: phlebPhone,
                   message: `New Booking!\n\nPatient: ${patientName}\nService: ${svcLabel}\nDate: ${date} at ${time}\nLocation: ${fullAddress}\nAmount: $${finalPrice.toFixed(2)}`,
                 },
               }).catch(() => {});
