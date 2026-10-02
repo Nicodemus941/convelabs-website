@@ -57,6 +57,7 @@ import {
   MoreHorizontal, ExternalLink, Copy, Building2, Calendar, Mail, CreditCard, ChevronRight, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { copyOnsitePayLink } from '@/lib/payLink';
 import {
   SectionHeader, StatTiles, FilterChips, SearchBox, LaneHeader, LoadingRows, EmptyState, ErrorBanner,
   DetailDrawer, Field, FieldGroup, Pill, fmtMoney, fmtMoneyShort, TH, TH_STICKY, TD_STICKY, rowKeyHandler, downloadCsv,
@@ -906,6 +907,11 @@ const DueCell: React.FC<{ inv: Invoice; bucket: Bucket }> = ({ inv, bucket }) =>
 
 const canAct = (b: Bucket) => b === 'sent' || b === 'overdue';
 
+// On-site pay link (convelabs.com/pay/<token> — tip optional, no Stripe
+// redirect) is the PATIENT payment link. Org-billed invoices stay on Stripe's
+// hosted page (ACH / net-30), so it is hidden for them and for settled rows.
+const hasOnsiteLink = (inv: Invoice, b: Bucket) => canAct(b) && inv.billed_to !== 'org';
+
 const PrimaryAction: React.FC<{ inv: Invoice; bucket: Bucket; h: RowHandlers; className?: string }> = ({ inv, bucket, h, className }) => {
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   if (canAct(bucket) && isPaidElsewhere(inv)) {
@@ -992,14 +998,19 @@ const RowMenu: React.FC<{ inv: Invoice; bucket: Bucket; h: RowHandlers; classNam
         </DropdownMenuItem>
       )}
       <DropdownMenuSeparator />
-      {inv.stripe_invoice_url && (
-        <DropdownMenuItem onSelect={() => window.open(inv.stripe_invoice_url!, '_blank', 'noopener,noreferrer')}>
-          <ExternalLink className="h-4 w-4 mr-2" aria-hidden="true" /> Open hosted invoice
+      {hasOnsiteLink(inv, bucket) && (
+        <DropdownMenuItem onSelect={() => { void copyOnsitePayLink(inv.id); }}>
+          <Copy className="h-4 w-4 mr-2 text-[#B91C1C]" aria-hidden="true" /> Copy patient pay link
         </DropdownMenuItem>
       )}
       {inv.stripe_invoice_url && (
-        <DropdownMenuItem onSelect={() => copyText(inv.stripe_invoice_url!, 'Payment link')}>
-          <Copy className="h-4 w-4 mr-2" aria-hidden="true" /> Copy payment link
+        <DropdownMenuItem onSelect={() => window.open(inv.stripe_invoice_url!, '_blank', 'noopener,noreferrer')}>
+          <ExternalLink className="h-4 w-4 mr-2" aria-hidden="true" /> {inv.billed_to === 'org' ? 'Open hosted invoice' : 'Open Stripe invoice (backup)'}
+        </DropdownMenuItem>
+      )}
+      {inv.stripe_invoice_url && (
+        <DropdownMenuItem onSelect={() => copyText(inv.stripe_invoice_url!, inv.billed_to === 'org' ? 'Payment link' : 'Stripe backup link')}>
+          <Copy className="h-4 w-4 mr-2" aria-hidden="true" /> {inv.billed_to === 'org' ? 'Copy payment link' : 'Copy Stripe link (backup, no tip)'}
         </DropdownMenuItem>
       )}
       <DropdownMenuItem onSelect={() => window.open(`${h.basePath}/calendar?appointment=${inv.id}`, '_blank', 'noopener,noreferrer')}>
@@ -1237,12 +1248,17 @@ const InvoiceDetailDrawer: React.FC<{ inv: Invoice; bucket: Bucket; h: RowHandle
             <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit & reissue
           </Button>
         )}
-        {inv.stripe_invoice_url && (
-          <Button variant="outline" size="sm" className="h-10 text-xs gap-1.5 flex-shrink-0" asChild>
-            <a href={inv.stripe_invoice_url} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /> Hosted invoice</a>
+        {hasOnsiteLink(inv, bucket) && (
+          <Button variant="outline" size="sm" className="h-10 text-xs gap-1.5 flex-shrink-0 border-[#B91C1C]/30 text-[#B91C1C] hover:bg-red-50" title="convelabs.com/pay — on-site payment, tip optional. Reuses the link already sent to the patient." onClick={() => { void copyOnsitePayLink(inv.id); }}>
+            <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy patient pay link
           </Button>
         )}
         {inv.stripe_invoice_url && (
+          <Button variant="outline" size="sm" className="h-10 text-xs gap-1.5 flex-shrink-0" asChild>
+            <a href={inv.stripe_invoice_url} target="_blank" rel="noopener noreferrer"><ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /> {inv.billed_to === 'org' ? 'Hosted invoice' : 'Stripe (backup)'}</a>
+          </Button>
+        )}
+        {inv.stripe_invoice_url && inv.billed_to === 'org' && (
           <Button variant="outline" size="sm" className="h-10 text-xs gap-1.5 flex-shrink-0" onClick={() => copyText(inv.stripe_invoice_url!, 'Payment link')}>
             <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy link
           </Button>

@@ -19,6 +19,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
+import { resolvePatientPayLink } from '../_shared/pay-link.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -78,18 +79,23 @@ function emailWrapper(color: string, headline: string, body: string): string {
   </div>`;
 }
 
-async function getPayLink(appt: any): Promise<string | null> {
-  // Prefer existing Stripe invoice hosted URL
+/**
+ * Patient reminders link to the on-site pay page (/pay/:token — tip
+ * optional, never a redirect to Stripe). We first confirm the Stripe
+ * invoice is still payable (not void/paid) so we never nudge for a dead
+ * bill; then mint/reuse the token. Org-billed rows get the hosted URL.
+ */
+async function getPayLink(admin: any, appt: any): Promise<string | null> {
   if (appt.stripe_invoice_id) {
     try {
       const inv = await stripe.invoices.retrieve(appt.stripe_invoice_id);
-      if (inv?.hosted_invoice_url && (inv as any).status !== 'void' && (inv as any).status !== 'paid') {
-        return inv.hosted_invoice_url;
-      }
-    } catch { /* fall through */ }
+      const st = (inv as any).status;
+      if (st === 'void' || st === 'paid' || st === 'uncollectible') return null;
+      if (inv?.hosted_invoice_url && !appt.stripe_invoice_url) appt.stripe_invoice_url = inv.hosted_invoice_url;
+    } catch { /* fall through — resolve from DB */ }
   }
-  // Fallback: send-appointment-invoice will issue a fresh one
-  return null;
+  const link = await resolvePatientPayLink(admin, appt, { source: 'send-manual-invoice-reminder' });
+  return link.kind === 'none' ? null : link.url;
 }
 
 Deno.serve(async (req) => {
@@ -115,7 +121,8 @@ Deno.serve(async (req) => {
     if (!appt) return new Response(JSON.stringify({ error: 'appointment_not_found' }), { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     // Sanity: don't send a "you owe us" message to someone who's been paid.
-    if (['paid', 'succeeded'].includes(String(appt.payment_status))) {
+    // 'completed' is what card checkout (incl. the on-site /pay page) writes.
+    if (['paid', 'succeeded', 'completed'].includes(String(appt.payment_status)) || appt.invoice_status === 'paid') {
       return new Response(JSON.stringify({ error: 'already_paid', message: 'This appointment is already marked paid.' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
     if (appt.status === 'cancelled') {
@@ -124,7 +131,7 @@ Deno.serve(async (req) => {
 
     const name = (appt.patient_name || 'there').split(' ')[0];
     const amount = `$${(appt.total_amount || 0).toFixed(2)}`;
-    const payLinkRaw = await getPayLink(appt);
+    const payLinkRaw = await getPayLink(admin, appt);
     const payLink = payLinkRaw || 'https://convelabs.com';
     const linkText = payLinkRaw
       ? `<div style="text-align:center;margin:20px 0;"><a href="${payLink}" style="display:inline-block;background:#1e40af;color:white;padding:14px 36px;border-radius:10px;text-decoration:none;font-weight:700;font-size:16px;">Pay ${amount} Now</a></div>`
@@ -141,7 +148,7 @@ Deno.serve(async (req) => {
     );
 
     const sms = payLinkRaw
-      ? `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay here: ${payLink} — Looking forward to your visit!`
+      ? `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay securely on our site (tip optional): ${payLink} — Looking forward to your visit!`
       : `Hi ${name}! Friendly reminder about your ConveLabs invoice (${amount}). Reply here or call (941) 527-9169 and we'll send a fresh pay link — looking forward to your visit!`;
 
     const results: { email?: any; sms?: any } = {};

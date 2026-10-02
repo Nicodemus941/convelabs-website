@@ -2,6 +2,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 import { brandedEmailWrapper } from '../_shared/branded-email.ts';
 import { shouldSendNow, logDeferral } from '../_shared/quiet-hours.ts';
+import { resolvePatientPayLink } from '../_shared/pay-link.ts';
+import { sendInvoiceSms, buildInvoiceSmsBody } from '../_shared/invoice-sms.ts';
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') || '', { apiVersion: '2023-10-16' });
 
 /**
@@ -425,7 +427,15 @@ Deno.serve(async (req) => {
     // Finalize + send (Stripe emails the invoice to the customer on file,
     // which is the ORG for org-billed and the PATIENT for patient-billed)
     const finalizedInvoice = await stripe.invoices.finalizeInvoice(invoice.id);
-    await stripe.invoices.sendInvoice(invoice.id);
+    // Stripe's own "invoice ready" email links to the HOSTED page (no tip,
+    // off-site). Patients get our branded email with the on-site /pay link
+    // instead, so Stripe's email is only sent for org-billed invoices
+    // (ACH / net-30 stay on Stripe). STRIPE_INVOICE_EMAIL_TO_PATIENTS=true
+    // restores the old double-email behaviour.
+    const STRIPE_EMAIL_PATIENTS = (Deno.env.get('STRIPE_INVOICE_EMAIL_TO_PATIENTS') || '').toLowerCase() === 'true';
+    if (billedToOrg || STRIPE_EMAIL_PATIENTS) {
+      await stripe.invoices.sendInvoice(invoice.id);
+    }
 
     // Update appointment with Stripe invoice ID + hosted pay URL
     await supabase.from('appointments').update({
@@ -434,6 +444,20 @@ Deno.serve(async (req) => {
       invoice_status: 'sent',
       invoice_sent_at: new Date().toISOString(),
     }).eq('id', appointmentId);
+
+    // ─── PATIENT PAY LINK — on-site page, never Stripe's hosted invoice ───
+    // A NEW invoice means a FRESH token (any prior link was for a different
+    // bill). Falls back to the hosted URL (logged) only if minting fails.
+    let patientPayUrl: string = finalizedInvoice.hosted_invoice_url || `https://convelabs.com/book-now`;
+    let patientPayKind: 'onsite' | 'hosted' | 'none' = finalizedInvoice.hosted_invoice_url ? 'hosted' : 'none';
+    if (!billedToOrg) {
+      const link = await resolvePatientPayLink(supabase, {
+        id: appointmentId, billed_to: appt.billed_to, organization_id: appt.organization_id,
+        appointment_date: appointmentDate || null, stripe_invoice_url: finalizedInvoice.hosted_invoice_url || null,
+      }, { source: 'send-appointment-invoice', fresh: true });
+      patientPayUrl = link.url;
+      patientPayKind = link.kind;
+    }
 
     // ─── BRANDED MAILGUN EMAIL (ALSO recipient-aware) ─────────────────────
     const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
@@ -452,7 +476,10 @@ Deno.serve(async (req) => {
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
           })
         : '';
-      const paymentUrl = finalizedInvoice.hosted_invoice_url || `https://convelabs.com/book-now`;
+      // Org → Stripe hosted invoice (ACH / net-30). Patient → on-site pay page.
+      const paymentUrl = billedToOrg
+        ? (finalizedInvoice.hosted_invoice_url || `https://convelabs.com/book-now`)
+        : patientPayUrl;
 
       const headerTitle = billedToOrg
         ? `Invoice for ${org!.name}`
@@ -460,7 +487,7 @@ Deno.serve(async (req) => {
       const greetingName = billedToOrg ? (org!.contact_name || org!.name) : patientLabel;
       const purposeLine = billedToOrg
         ? `This invoice covers a ConveLabs concierge lab visit completed on behalf of your organization${maskPatient ? '' : ` for ${patientLabel}`}.`
-        : 'Your appointment has been scheduled. Please review the details below and complete your payment to confirm.';
+        : 'Your appointment is scheduled. Review the details below and pay securely on our site to confirm your visit. Adding a tip for your phlebotomist is optional.';
 
       // Compose body inside the unified branded wrapper. Visit-details
       // table + the urgency / VIP / org-net-30 callouts are body HTML.
@@ -538,6 +565,29 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── PATIENT INVOICE SMS — "/pay link" text alongside the email ──────
+    // Patients mostly open the pay page from a text. Never for org-billed.
+    // Guarded inside the helper: NOTIFICATIONS_SUSPENDED, no valid phone,
+    // HIPAA recipient guard, quiet hours (queued to notification_deferrals
+    // and drained by process-invoice-reminders after 8am ET — never dropped,
+    // never sent at night). Logged to sms_notifications (invoice_sent).
+    let smsResult: { status: string; reason?: string } = { status: 'skipped', reason: billedToOrg ? 'org_billed' : 'no_link' };
+    if (!billedToOrg && patientPayKind !== 'none') {
+      try {
+        const sms = await sendInvoiceSms(supabase, {
+          appointment_id: appointmentId,
+          phone: invoiceToPhone,
+          patient_name: invoiceToName,
+          body: buildInvoiceSmsBody(String(invoiceToName || ''), emailTotalDollars, patientPayUrl),
+        });
+        smsResult = { status: sms.status, reason: sms.reason };
+        console.log(`[send-invoice] SMS ${sms.status}${sms.reason ? ` (${sms.reason})` : ''} for appointment ${appointmentId}`);
+      } catch (smsErr) {
+        smsResult = { status: 'failed', reason: String((smsErr as Error)?.message || smsErr) };
+        console.warn('[send-invoice] SMS failed (non-blocking):', smsErr);
+      }
+    }
+
     console.log(`Invoice ${invoice.id} → ${billedToOrg ? `ORG ${org!.name}` : 'patient'} (${invoiceToEmail}) for appointment ${appointmentId}`);
 
     return new Response(
@@ -545,6 +595,9 @@ Deno.serve(async (req) => {
         success: true,
         invoiceId: invoice.id,
         invoiceUrl: finalizedInvoice.hosted_invoice_url,
+        patientPayUrl: billedToOrg ? null : patientPayUrl,
+        patientPayKind: billedToOrg ? null : patientPayKind,
+        sms: smsResult,
         billedTo: billedToOrg ? 'org' : 'patient',
         recipient: invoiceToEmail,
         phlebTakeCents: totalTakeCents,
