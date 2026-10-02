@@ -4,7 +4,7 @@
  * the external appointments system.
  */
 
-import { Session } from "@/types/auth";
+import { Session, UserRole } from "@/types/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { getRoutingRole } from '@/lib/authRole';
 
@@ -78,7 +78,7 @@ export const refreshSessionBeforeRedirect = async (): Promise<Session | null> =>
         firstName: data.session.user.user_metadata?.firstName || '',
         lastName: data.session.user.user_metadata?.lastName || '',
         full_name: data.session.user.user_metadata?.full_name || '',
-        role: getRoutingRole(data.session.user) || 'patient',
+        role: (getRoutingRole(data.session.user) || 'patient') as UserRole,
         createdAt: data.session.user.created_at || '',
       } : null
     };
