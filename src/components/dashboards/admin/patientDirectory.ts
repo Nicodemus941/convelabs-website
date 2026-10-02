@@ -280,7 +280,8 @@ export function dobIssue(dob: string | null | undefined, now: Date = new Date())
   if (!dob) return null;
   const d = new Date(dob.substring(0, 10) + 'T12:00:00');
   if (!isValid(d)) return { key: 'dob_implausible', label: 'Bad DOB', detail: 'Date of birth is not a valid date.', severity: 'error' };
-  if (d.getTime() > now.getTime()) return { key: 'dob_future', label: 'DOB in future', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} is in the future.`, severity: 'error' };
+  // Compare calendar days so a DOB of "today" (newborn) is not flagged as future.
+  if (dob.substring(0, 10) > format(now, 'yyyy-MM-dd')) return { key: 'dob_future', label: 'DOB in future', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} is in the future.`, severity: 'error' };
   const ageYears = (now.getTime() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
   if (ageYears > 115) return { key: 'dob_implausible', label: 'DOB implausible', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} would make them over 115.`, severity: 'error' };
   if (ageYears < 1) return { key: 'dob_recent', label: 'DOB < 1 yr', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} is within the last year — usually the booking date was typed by mistake.`, severity: 'warn' };
