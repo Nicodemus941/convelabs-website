@@ -79,7 +79,7 @@ const Guarantee = () => {
                 'Hospital-Grade Equipment',
                 'CLIA-Certified Labs',
                 `${COLLECTIONS_COUNT}+ Collections`,
-                '5-Star Google Rating',
+                '5.0 Google rating (164 reviews)',
                 'Same-Day Appointments',
               ].map(item => (
                 <div key={item} className="flex items-center gap-2">

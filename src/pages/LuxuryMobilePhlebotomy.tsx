@@ -12,7 +12,7 @@ const LuxuryMobilePhlebotomy: React.FC = () => {
     <DashboardWrapper>
       <Helmet>
         <title>Luxury Mobile Phlebotomy Orlando | VIP Concierge Blood Draw Services | ConveLabs</title>
-        <meta name="description" content="Central Florida's premier luxury mobile phlebotomy service for high-net-worth individuals, executives, and discerning families. White-glove concierge blood draws at your estate, yacht, or private office with ultimate discretion and same-day results." />
+        <meta name="description" content="Central Florida's premier luxury mobile phlebotomy service for high-net-worth individuals, executives, and discerning families. White-glove concierge blood draws at your estate, yacht, or private office with ultimate discretion and results sent straight to your doctor." />
         <meta name="keywords" content="luxury mobile phlebotomy Orlando, concierge blood draw service Central Florida, private mobile lab testing Orlando, executive health screening at home Orlando, VIP mobile blood work Winter Park, premium home lab services Windermere, white glove medical services, yacht mobile phlebotomy" />
         
         {/* Open Graph for luxury market */}
@@ -139,7 +139,7 @@ const LuxuryMobilePhlebotomy: React.FC = () => {
                 {
                   title: "Executive Office Visits",
                   description: "Seamless lab services at your C-suite office or private business location.",
-                  features: ["Minimal business disruption", "Boardroom privacy", "Same-day results"]
+                  features: ["Minimal business disruption", "Boardroom privacy", "Results sent to your doctor"]
                 },
                 {
                   title: "Country Club Partnerships",
@@ -201,7 +201,7 @@ const LuxuryMobilePhlebotomy: React.FC = () => {
                 "15-minute concierge response time",
                 "Board-certified phlebotomists only",
                 "Hospital-grade equipment & protocols",
-                "Same-day results with secure delivery",
+                "Results sent straight to your doctor",
                 "Coordinated with private physicians",
                 "Membership discounts up to 40%",
                 "24/7 emergency availability",

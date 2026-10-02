@@ -138,7 +138,7 @@ export const PreQualificationModal: React.FC<PreQualificationModalProps> = ({
               <div className="flex items-center justify-center space-x-4 text-sm text-muted-foreground">
                 <div className="flex items-center">
                   <Star className="h-4 w-4 text-yellow-500 mr-1" />
-                  <span>5-star rated service</span>
+                  <span>5.0 Google rating (164 reviews)</span>
                 </div>
                 <div>🕐 Same-day appointments</div>
                 <div>Specimen delivery confirmation sent to you</div>

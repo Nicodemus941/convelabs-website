@@ -87,7 +87,7 @@ const IndustryValueProp: React.FC<IndustryValuePropProps> = ({ content, isActive
                 {content.id === 'healthcare' ? 'Additional Revenue' :
                  content.id === 'talent' ? 'Booking Protection' :
                  content.id === 'sports' ? 'Injury Prevention Savings' :
-                 'Healthcare Cost Reduction'}
+                 'Preventive Screenings'}
               </div>
             </div>
 

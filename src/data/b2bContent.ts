@@ -86,10 +86,10 @@ export const industryContent: Record<string, IndustryContent> = {
     id: 'corporate',
     name: 'Corporations',
     headline: 'Transform Employee Wellness into Competitive Advantage',
-    subtitle: 'Reduce Healthcare Costs While Boosting Productivity',
-    description: 'Executive health programs and employee wellness initiatives that deliver measurable ROI through reduced healthcare costs and increased productivity.',
+    subtitle: 'Make Employee Wellness Convenient',
+    description: 'Executive health programs and employee wellness initiatives that bring convenient preventive screenings to your workplace.',
     benefits: [
-      'Reduce healthcare costs by 20-30%',
+      'Make preventive screenings convenient for employees',
       'Increase productivity through preventive care',
       'Retain top talent with premium benefits',
       'Executive health programs for leadership',
@@ -144,7 +144,7 @@ export const testimonials: TestimonialData[] = [
     title: 'VP of Human Resources',
     company: 'TechCorp Solutions',
     industry: 'corporate',
-    quote: 'Our executive health program has become our top talent retention tool. We\'ve seen a 35% reduction in healthcare costs and dramatically improved executive satisfaction.',
+    quote: 'Our executive health program has become our top talent retention tool. It has dramatically improved executive satisfaction.',
   }
 ];
 

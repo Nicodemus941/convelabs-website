@@ -112,7 +112,7 @@ export const generatePartnershipGuide = async () => {
   addText('• Performance optimization through advanced biomarker tracking\n• Injury prevention saving $500K-2M annually\n• Mobile flexibility for travel teams\n• Real-time health monitoring\n• Competitive edge through data insights');
   
   addText('Corporate Partners', 16, true);
-  addText('• Employee wellness ROI with 20-30% healthcare cost reduction\n• Executive health programs for talent retention\n• Productivity gains through preventive care\n• Comprehensive wellness solutions\n• Custom program development');
+  addText('• Employee wellness through convenient preventive screenings\n• Executive health programs for talent retention\n• Productivity gains through preventive care\n• Comprehensive wellness solutions\n• Custom program development');
 
   // Page 5 - Services Overview
   pdf.addPage();
@@ -150,7 +150,7 @@ export const generatePartnershipGuide = async () => {
   addText('"The biomarker insights have given us a competitive edge. We\'ve reduced injury downtime by 60% and our athletes are performing at unprecedented levels." - Coach Jennifer Walsh, Metro Athletics');
   
   addText('Corporate Partnership Success', 16, true);
-  addText('"Our executive health program has become our top talent retention tool. We\'ve seen a 35% reduction in healthcare costs and dramatically improved executive satisfaction." - David Chen, TechCorp Solutions');
+  addText('"Our executive health program has become our top talent retention tool. It has dramatically improved executive satisfaction." - David Chen, TechCorp Solutions');
 
   // Page 7 - Getting Started
   pdf.addPage();

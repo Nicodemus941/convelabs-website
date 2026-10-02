@@ -13,7 +13,7 @@ const DoctorPhillips: React.FC = () => {
     <DashboardWrapper>
       <Helmet>
         <title>Luxury Mobile Phlebotomy Dr Phillips | Executive Concierge Lab Services | ConveLabs</title>
-        <meta name="description" content="Dr Phillips' premier luxury mobile phlebotomy service for executives and affluent families. White-glove concierge blood draws at your Bay Hill estate or high-end office. VIP lab testing with same-day results and ultimate discretion." />
+        <meta name="description" content="Dr Phillips' premier luxury mobile phlebotomy service for executives and affluent families. White-glove concierge blood draws at your Bay Hill estate or high-end office. VIP lab testing with results sent straight to your doctor and ultimate discretion." />
         <meta name="keywords" content="luxury mobile phlebotomy Dr Phillips, executive health screening Bay Hill, VIP mobile blood work Dr Phillips, concierge phlebotomy Sand Lake, premium lab services Dr Phillips FL, white glove blood draw service, luxury health screening Orlando" />
         
         {/* Open Graph / Facebook */}

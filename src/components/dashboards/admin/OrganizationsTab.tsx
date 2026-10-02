@@ -680,7 +680,7 @@ const OrganizationsTab: React.FC = () => {
 
 I noticed we've drawn blood for ${names.length > 0 ? names.length : 'a handful'} of your patients recently (${patientList})${names.length > 0 ? '' : ''}.
 
-Each was paying $125-150 out of pocket for a mobile draw. We'd like to discuss a partnership rate for your practice — your patients pay $85, you get a priority line + on-site STAT draws when you need them, same-day results routing to your EMR.
+Each was paying $125-150 out of pocket for a mobile draw. We'd like to discuss a partnership rate for your practice — your patients pay $85, you get a priority line + on-site STAT draws when you need them, results routed to your EMR.
 
 Thursday 2 PM or Friday 10 AM — 10 minutes either way.
 

@@ -11,7 +11,7 @@ const ExecutiveHealthOrlando: React.FC = () => {
     <DashboardWrapper>
       <Helmet>
         <title>Executive Health Screening Orlando | Mobile Lab Services for CEOs & Executives | ConveLabs</title>
-        <meta name="description" content="Comprehensive executive health screening and mobile lab services in Orlando for busy CEOs, executives, and C-suite professionals. Time-efficient wellness panels with same-day results at your office or home." />
+        <meta name="description" content="Comprehensive executive health screening and mobile lab services in Orlando for busy CEOs, executives, and C-suite professionals. Time-efficient wellness panels at your office or home, with results sent straight to your doctor." />
         <meta name="keywords" content="executive health screening at home Orlando, mobile phlebotomist for executives Orlando, CEO health screening Orlando, C-suite wellness programs, executive physical blood work at home, corporate wellness mobile lab services, busy professional health screening" />
         
         {/* Open Graph */}
@@ -201,7 +201,7 @@ const ExecutiveHealthOrlando: React.FC = () => {
                 {
                   icon: TrendingUp,
                   title: "Performance Analytics",
-                  description: "Health data analysis to optimize executive performance and reduce sick days."
+                  description: "Health data analysis to support executive performance and wellbeing."
                 },
                 {
                   icon: Clock,
@@ -260,7 +260,7 @@ const ExecutiveHealthOrlando: React.FC = () => {
               </MembershipButton>
             </div>
             <p className="text-sm text-gray-600">
-              Executive scheduling available • Same-day results • Corporate invoicing available
+              Executive scheduling available • Results sent to your doctor • Corporate invoicing available
             </p>
           </div>
         </div>

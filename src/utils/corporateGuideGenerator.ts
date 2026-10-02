@@ -158,14 +158,14 @@ export const generateCorporateWellnessGuide = () => {
   
   addParagraph('Traditional corporate health fairs are disruptive, expensive, and yield poor participation rates. ConveLabs revolutionizes workplace wellness with mobile phlebotomy services that take just 10 minutes per employee, delivering comprehensive health screenings at your location.');
   
-  addParagraph('Our corporate wellness platform reduces employee sick days by 30%, cuts healthcare costs by 25%, and achieves 90%+ participation rates through convenient, on-demand health services.');
+  addParagraph('Our corporate wellness platform brings convenient, on-demand health services to your workplace so employees can complete screenings without taking time off.');
   
   currentY += 10;
   addSectionTitle('Key Benefits at a Glance:');
   addBulletPoint('10-minute service per employee with minimal workplace disruption');
-  addBulletPoint('30% reduction in employee sick days and call-outs');
-  addBulletPoint('25% decrease in corporate healthcare costs');
-  addBulletPoint('90%+ employee participation vs. 40-60% for traditional health fairs');
+  addBulletPoint('Fewer missed work hours for routine screenings');
+  addBulletPoint('Preventive screening support for your wellness program');
+  addBulletPoint('Convenient on-site access that makes participation easy');
   addBulletPoint('Monthly reporting and analytics for program optimization');
   addBulletPoint('HIPAA-compliant platform with enterprise-grade security');
 
@@ -337,13 +337,13 @@ export const generateCorporateWellnessGuide = () => {
     {
       company: 'Orlando Technology Company',
       size: '250 Employees',
-      quote: 'We saw a 35% reduction in sick days within 6 months. The mobile service eliminated the need for employees to take time off for routine health screenings.',
+      quote: 'The mobile service eliminated the need for employees to take time off for routine health screenings.',
       author: 'HR Director'
     },
     {
       company: 'Central Florida Bank',
       size: '150 Employees', 
-      quote: 'The monthly reports helped us identify health trends early. Our healthcare costs dropped by 22% year-over-year thanks to preventive interventions.',
+      quote: 'The monthly reports helped us identify health trends early. Preventive screenings have been a valuable part of our wellness program.',
       author: 'Benefits Manager'
     },
     {

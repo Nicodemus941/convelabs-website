@@ -13,7 +13,7 @@ const LakeNona: React.FC = () => {
         <title>🏥 Lake Nona Medical City Mobile Lab | Innovation District | ConveLabs | Executive Health | 941-527-9169</title>
         <meta 
           name="description" 
-          content="⭐ Premier Mobile Lab Services for Lake Nona Medical City ⭐ Executive blood work for Central Florida's innovation district. Same-day results for busy professionals, medical executives, and tech leaders! 🚀"
+          content="⭐ Premier Mobile Lab Services for Lake Nona Medical City ⭐ Executive blood work for Central Florida's innovation district. Results sent straight to your doctor for busy professionals, medical executives, and tech leaders! 🚀"
         />
         <meta 
           name="keywords" 

@@ -40,7 +40,7 @@ const OptimizedCTA = ({
         return {
           primary: { text: 'Book Premium Service', icon: Shield },
           secondary: { text: 'Learn About Testing', icon: Calendar },
-          urgency: { text: 'Same-Day Results Available', icon: Clock },
+          urgency: { text: 'Most draws take under 10 minutes', icon: Clock },
           benefit: { text: 'Every sample tracked', icon: Shield }
         };
       default: // busy_professional

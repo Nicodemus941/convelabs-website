@@ -12,13 +12,13 @@ const FunnelStep1Welcome = ({ onNext }: FunnelStep1WelcomeProps) => {
   const trustIndicators = [
     { icon: <CheckCircle className="h-5 w-5" />, text: "Most Draws Under 10 Minutes" },
     { icon: <Clock className="h-5 w-5" />, text: "Same-Day Scheduling" },
-    { icon: <Star className="h-5 w-5" />, text: "5-Star Service" },
+    { icon: <Star className="h-5 w-5" />, text: "5.0 Google rating (164 reviews)" },
     { icon: <Shield className="h-5 w-5" />, text: "100% Secure & Private" }
   ];
 
   const benefits = [
     "Personalized plan recommendations based on your unique needs",
-    "Save up to 64% compared to traditional lab testing",
+    "Skip the waiting room — we come to you",
     "Convenient at-home or office blood collection",
     "Licensed phlebotomists — most draws take under 10 minutes"
   ];
