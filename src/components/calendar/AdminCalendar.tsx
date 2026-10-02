@@ -567,9 +567,21 @@ const AdminCalendar: React.FC = () => {
     // way to delete it).
     if (info.event.extendedProps.isBlock) {
       const rawId = String(info.event.id || '');
-      const blockId = rawId.replace(/^block-(label-)?/, '');
+      // Timed bands are drawn one per day with ids `block-<uuid>-YYYY-MM-DD`;
+      // the date suffix must go too, or the delete targets a malformed id
+      // and every timed block was impossible to remove from the calendar.
+      const blockId = rawId.replace(/^block-(label-)?/, '').replace(/-\d{4}-\d{2}-\d{2}$/, '');
       if (!blockId) { toast.info(info.event.title); return; }
-      const ok = window.confirm(`${info.event.title}\n\nRemove this block? Slots in this window will become bookable again.`);
+      // Removing deletes the whole block row, i.e. EVERY date it covers —
+      // say so, rather than implying only the clicked day reopens.
+      const row: any = timeBlocks.find((b: any) => b.id === blockId);
+      const weekday = String(row?.recurring_day || '').replace(/^./, (c: string) => c.toUpperCase());
+      const scope = row?.recurring
+        ? `This removes the weekly block on every ${weekday}${row.end_date && row.end_date > row.start_date ? ` through ${row.end_date}` : ''}.`
+        : row?.end_date && row.end_date !== row.start_date
+          ? `This removes the block on every day from ${row.start_date} to ${row.end_date}.`
+          : 'Slots in this window will become bookable again.';
+      const ok = window.confirm(`${info.event.title}\n\nRemove this block? ${scope}\n\nTo book one patient inside a block without removing it, use New appointment and tick "Override Availability".`);
       if (!ok) return;
       supabase.from('time_blocks' as any).delete().eq('id', blockId).then(({ error }) => {
         if (error) {
