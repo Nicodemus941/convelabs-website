@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { SectionHeader } from './owner/sectionUi';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { supabase } from '@/integrations/supabase/client';
@@ -154,7 +156,7 @@ const FrankCFO: React.FC = () => {
         if (line.startsWith('- ') || line.startsWith('* ')) {
           return (
             <div key={`${i}-${j}`} className="flex gap-2 ml-2 my-0.5">
-              <span className="text-emerald-600 mt-1">•</span>
+              <span className="text-[#B91C1C] mt-1">•</span>
               <span dangerouslySetInnerHTML={{ __html: inlineFormat(line.slice(2)) }} />
             </div>
           );
@@ -164,7 +166,7 @@ const FrankCFO: React.FC = () => {
         if (numMatch) {
           return (
             <div key={`${i}-${j}`} className="flex gap-2 ml-2 my-0.5">
-              <span className="text-emerald-600 font-semibold min-w-[1.2em]">{numMatch[1]}.</span>
+              <span className="text-[#B91C1C] font-semibold min-w-[1.2em]">{numMatch[1]}.</span>
               <span dangerouslySetInnerHTML={{ __html: inlineFormat(line.slice(numMatch[0].length)) }} />
             </div>
           );
@@ -175,7 +177,7 @@ const FrankCFO: React.FC = () => {
           if (cells.every(isMarkdownDividerCell)) return null;
           const isHeader = j > 0 && lines[j + 1]?.includes('---');
           return (
-            <div key={`${i}-${j}`} className={`grid gap-2 text-xs py-1 px-2 ${isHeader ? 'font-semibold bg-emerald-50 rounded' : 'border-b border-gray-100'}`}
+            <div key={`${i}-${j}`} className={`grid gap-2 text-xs py-1 px-2 ${isHeader ? 'font-semibold bg-gray-100 rounded' : 'border-b border-gray-100'}`}
               style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}>
               {cells.map((cell, k) => (
                 <span key={k} className="truncate" dangerouslySetInnerHTML={{ __html: inlineFormat(cell.trim()) }} />
@@ -196,57 +198,56 @@ const FrankCFO: React.FC = () => {
   const inlineFormat = (text: string): string => {
     return text
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono text-emerald-700">$1</code>')
+      .replace(/`(.*?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono text-[#B91C1C]">$1</code>')
       .replace(/✅/g, '<span class="inline-flex items-center justify-center w-4 h-4 bg-green-100 rounded-full text-green-600 text-xs">✓</span>')
       .replace(/❌/g, '<span class="inline-flex items-center justify-center w-4 h-4 bg-red-100 rounded-full text-red-600 text-xs">✗</span>')
       .replace(/⚠️/g, '<span class="inline-flex items-center justify-center w-4 h-4 bg-amber-100 rounded-full text-amber-600 text-xs">!</span>');
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)]">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-green-700 flex items-center justify-center shadow-lg">
-            <Briefcase className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">Frank — Chief Financial Officer</h1>
-            <p className="text-sm text-muted-foreground">
-              Your CFO. Revenue tracking, allocation guidance, and daily/weekly/monthly/YTD reports.
-            </p>
-          </div>
-        </div>
-        {messages.length > 0 && (
-          <Button variant="ghost" size="sm" onClick={clearChat} className="text-muted-foreground">
-            <Trash2 className="h-4 w-4 mr-1" /> Clear
-          </Button>
-        )}
-      </div>
+    <div className="flex flex-col h-[calc(100vh-8rem)] space-y-4">
+      <SectionHeader
+        icon={Briefcase}
+        title="Frank — CFO"
+        subtitle="Your CFO. Revenue tracking, allocation guidance, and daily / weekly / monthly / YTD reports from the Stripe ledger."
+        actions={
+          <>
+            {messages.length > 0 && (
+              <Button variant="outline" size="sm" onClick={clearChat} className="gap-1.5 text-xs h-10 sm:h-9" disabled={isLoading}>
+                <Trash2 className="h-4 w-4" aria-hidden="true" /> <span className="hidden sm:inline">Clear chat</span>
+              </Button>
+            )}
+            <Button variant="outline" size="sm" className="text-xs h-10 sm:h-9 gap-1.5" asChild>
+              <Link to="/dashboard/super_admin/owner/overview"><DollarSign className="h-4 w-4" aria-hidden="true" /><span className="hidden sm:inline">Business metrics</span></Link>
+            </Button>
+          </>
+        }
+      />
 
       {/* Chat area */}
-      <Card className="flex-1 flex flex-col overflow-hidden">
+      <Card className="flex-1 flex flex-col overflow-hidden shadow-sm">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center">
-              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-100 to-green-100 flex items-center justify-center mb-4">
-                <DollarSign className="h-8 w-8 text-emerald-600" />
+              <div className="w-16 h-16 rounded-2xl bg-red-50 border border-red-100 flex items-center justify-center mb-4">
+                <DollarSign className="h-8 w-8 text-[#B91C1C]" aria-hidden="true" />
               </div>
-              <h2 className="text-lg font-semibold text-foreground mb-1">Where's the money, Nicodemme?</h2>
-              <p className="text-sm text-muted-foreground mb-6 text-center max-w-md">
+              <h2 className="text-lg font-semibold text-gray-900 mb-1">Where's the money, Nicodemme?</h2>
+              <p className="text-sm text-gray-500 mb-6 text-center max-w-md">
                 I track every dollar that lands and tell you exactly how to allocate it — owner pay, profit, tax, marketing, and growth. Ask me for a report or how to split this month's cash.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full" role="group" aria-label="Suggested reports">
                 {SUGGESTED_PROMPTS.map((sp, i) => {
                   const Icon = sp.icon;
                   return (
                     <button
                       key={i}
+                      type="button"
                       onClick={() => sendMessage(sp.prompt)}
-                      className="flex items-center gap-2.5 px-4 py-3 rounded-xl border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/50 text-left text-sm transition-all group"
+                      className="flex items-center gap-2.5 px-4 min-h-[44px] py-2.5 rounded-lg border border-gray-200 hover:border-[#B91C1C]/40 hover:bg-red-50/40 text-left text-sm transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40"
                     >
-                      <Icon className="h-4 w-4 text-muted-foreground group-hover:text-emerald-600 flex-shrink-0" />
-                      <span className="text-muted-foreground group-hover:text-foreground">{sp.label}</span>
+                      <Icon className="h-4 w-4 text-gray-400 group-hover:text-[#B91C1C] flex-shrink-0" aria-hidden="true" />
+                      <span className="text-gray-700 group-hover:text-gray-900">{sp.label}</span>
                     </button>
                   );
                 })}
@@ -259,20 +260,20 @@ const FrankCFO: React.FC = () => {
                 className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'assistant' && (
-                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-emerald-500 to-green-700 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Briefcase className="h-3.5 w-3.5 text-white" />
+                  <div className="w-7 h-7 rounded-lg bg-[#B91C1C] flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Briefcase className="h-3.5 w-3.5 text-white" aria-hidden="true" />
                   </div>
                 )}
                 <div
                   className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-conve-red text-white rounded-br-md'
-                      : 'bg-gray-50 text-foreground rounded-bl-md border border-gray-100'
+                      ? 'bg-[#B91C1C] text-white rounded-br-md'
+                      : 'bg-gray-50 text-gray-900 rounded-bl-md border border-gray-200'
                   }`}
                 >
                   {msg.loading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground py-1">
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                    <div className="flex items-center gap-2 text-gray-500 py-1">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                       <span className="text-xs">Frank is pulling the numbers...</span>
                     </div>
                   ) : msg.role === 'assistant' ? (
@@ -294,23 +295,25 @@ const FrankCFO: React.FC = () => {
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
-              placeholder="Ask Frank for a report or how to allocate revenue..."
-              className="flex-1 h-11 rounded-xl border-gray-200 focus:border-emerald-400 focus:ring-emerald-400"
+              placeholder="Ask Frank for a report or how to allocate revenue…"
+              aria-label="Message Frank"
+              className="flex-1 h-11 sm:h-10 border-gray-200 focus-visible:ring-[#B91C1C]/40"
               disabled={isLoading}
             />
             <Button
               type="submit"
               disabled={!input.trim() || isLoading}
-              className="h-11 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-green-700 hover:from-emerald-600 hover:to-green-800 text-white"
+              className="h-11 sm:h-10 px-4 bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+              aria-label="Send"
             >
               {isLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
-                <Send className="h-4 w-4" />
+                <Send className="h-4 w-4" aria-hidden="true" />
               )}
             </Button>
           </form>
-          <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
+          <p className="text-[10px] text-gray-400 mt-1.5 text-center">
             Frank pulls live figures from your Stripe ledger. Verify before any major financial move.
           </p>
         </div>
