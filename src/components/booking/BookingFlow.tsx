@@ -32,6 +32,7 @@ import VisitSummaryCard from './VisitSummaryCard';
 import { readVisitReasonFromUrl, setVisitReason, getVisitReason } from '@/lib/visitReason';
 import { slotBucket, resolveFastingIntent } from '@/lib/slotGuidance';
 import { analytics } from '@/utils/analytics';
+import { useBookingDraft } from '@/hooks/useBookingDraft';
 
 interface BookingFlowProps {
   tenantId?: string;
@@ -1104,6 +1105,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       return 'direct';
     }
   })();
+
+  // Abandoned-booking recovery: saves a draft from Patient Info onward and
+  // restores one when the patient arrives from /book/resume/:token.
+  useBookingDraft({
+    methods,
+    currentStep,
+    displayStep,
+    stepLabel: STEP_LABELS[displayStep],
+    bookingSource,
+    bookingComplete,
+    restore: { setCurrentStep, setShowDatePicker, setShowLabOrder, prevStepRef },
+  });
 
   useEffect(() => {
     const stageKey = STEP_LABELS[displayStep]

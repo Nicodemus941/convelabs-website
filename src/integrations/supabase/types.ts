@@ -152,6 +152,37 @@ export type Database = {
       }
       abandoned_bookings: {
         Row: {
+          consent_ip: string | null
+          consent_user_agent: string | null
+          expires_at: string
+          fasting: boolean | null
+          first_name: string | null
+          lab_order_status: string | null
+          landing_page: string | null
+          last_activity_at: string
+          last_name: string | null
+          last_touch_at: string | null
+          next_touch_at: string | null
+          recovered_appointment_id: string | null
+          recovered_at: string | null
+          resume_open_count: number
+          resume_opened_at: string | null
+          resume_state: Json | null
+          resume_token_hash: string | null
+          session_id: string | null
+          sms_consent: boolean
+          sms_consent_at: string | null
+          sms_consent_text: string | null
+          source: string | null
+          step_key: string | null
+          stop_reason: string | null
+          stopped_at: string | null
+          touch_log: Json
+          touches_sent: number
+          updated_at: string
+          utm: Json | null
+          visit_reason: string | null
+          visit_type: string | null
           created_at: string | null
           email: string | null
           id: string
@@ -164,6 +195,37 @@ export type Database = {
           step_reached: number | null
         }
         Insert: {
+          consent_ip?: string | null
+          consent_user_agent?: string | null
+          expires_at?: string
+          fasting?: boolean | null
+          first_name?: string | null
+          lab_order_status?: string | null
+          landing_page?: string | null
+          last_activity_at?: string
+          last_name?: string | null
+          last_touch_at?: string | null
+          next_touch_at?: string | null
+          recovered_appointment_id?: string | null
+          recovered_at?: string | null
+          resume_open_count?: number
+          resume_opened_at?: string | null
+          resume_state?: Json | null
+          resume_token_hash?: string | null
+          session_id?: string | null
+          sms_consent?: boolean
+          sms_consent_at?: string | null
+          sms_consent_text?: string | null
+          source?: string | null
+          step_key?: string | null
+          stop_reason?: string | null
+          stopped_at?: string | null
+          touch_log?: Json
+          touches_sent?: number
+          updated_at?: string
+          utm?: Json | null
+          visit_reason?: string | null
+          visit_type?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
@@ -176,6 +238,37 @@ export type Database = {
           step_reached?: number | null
         }
         Update: {
+          consent_ip?: string | null
+          consent_user_agent?: string | null
+          expires_at?: string
+          fasting?: boolean | null
+          first_name?: string | null
+          lab_order_status?: string | null
+          landing_page?: string | null
+          last_activity_at?: string
+          last_name?: string | null
+          last_touch_at?: string | null
+          next_touch_at?: string | null
+          recovered_appointment_id?: string | null
+          recovered_at?: string | null
+          resume_open_count?: number
+          resume_opened_at?: string | null
+          resume_state?: Json | null
+          resume_token_hash?: string | null
+          session_id?: string | null
+          sms_consent?: boolean
+          sms_consent_at?: string | null
+          sms_consent_text?: string | null
+          source?: string | null
+          step_key?: string | null
+          stop_reason?: string | null
+          stopped_at?: string | null
+          touch_log?: Json
+          touches_sent?: number
+          updated_at?: string
+          utm?: Json | null
+          visit_reason?: string | null
+          visit_type?: string | null
           created_at?: string | null
           email?: string | null
           id?: string
