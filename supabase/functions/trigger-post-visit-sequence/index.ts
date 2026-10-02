@@ -89,16 +89,33 @@ Deno.serve(async (req) => {
     if (insertRes.error) throw insertRes.error;
 
     // Generate referral code for first-timers (the DB-seeded referral_prompt
-    // step only sends when a code exists).
+    // step only sends when a code exists). patientId is
+    // appointments.patient_id (a tenant_patients id for ~94% of rows); every
+    // consumer resolves referral_codes.user_id on both tenant_patients.id and
+    // tenant_patients.user_id, so either key works downstream.
+    //
+    // referral_codes.code is UNIQUE. The old NAME+2-digit code collided
+    // between patients who share a first name (1-in-100 per pair), the
+    // insert error was swallowed, no code existed, and the referral_prompt
+    // SMS 14 days later was silently skipped. Retry with a wider suffix.
     if (isFirstVisit && patientId && patientName) {
       try {
         const existRes = await supabase.from('referral_codes').select('id').eq('user_id', patientId).maybeSingle();
         if (!existRes.data) {
-          const name = patientName.split(' ')[0] || 'FRIEND';
-          const code = name.toUpperCase() + String(Math.floor(Math.random() * 100));
-          await supabase.from('referral_codes').insert({ user_id: patientId, code: code, discount_amount: 25, referrer_credit: 25 });
+          const name = (patientName.split(' ')[0] || 'FRIEND').toUpperCase().replace(/[^A-Z]/g, '') || 'FRIEND';
+          const attempts = [
+            name + String(Math.floor(Math.random() * 100)),
+            name + String(100 + Math.floor(Math.random() * 900)),
+            name + String(1000 + Math.floor(Math.random() * 9000)),
+            name + '-' + crypto.randomUUID().slice(0, 4).toUpperCase(),
+          ];
+          for (const code of attempts) {
+            const ins = await supabase.from('referral_codes').insert({ user_id: patientId, code, discount_amount: 25, referrer_credit: 25 });
+            if (!ins.error) break;
+            if (ins.error.code !== '23505') { console.warn('[referral-code] insert failed:', ins.error.message); break; }
+          }
         }
-      } catch (_e) { /* ignore */ }
+      } catch (e) { console.warn('[referral-code] generation failed (non-blocking):', (e as any)?.message); }
     }
 
     return new Response(

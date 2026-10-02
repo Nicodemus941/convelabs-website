@@ -244,13 +244,146 @@ export const PATIENT_TILE_STYLE: Record<string, string> = {
 };
 
 // ──────────────────────────────────────────────────────────────────
+// Data quality — detect records that are not really a patient, or whose
+// identity fields can't be trusted. Pure detection: nothing here edits data.
+// (Counts verified against live tenant_patients 2026-10-02: 1 org-as-patient,
+// 2 Jan-1 DOBs, 8 DOBs within the last year, 30 shared phones, 11 same
+// name+DOB pairs, 2 malformed emails.)
+// ──────────────────────────────────────────────────────────────────
+export type DataQualityKey = 'org_name' | 'dob_future' | 'dob_recent' | 'dob_placeholder' | 'dob_implausible' | 'bad_email' | 'bad_phone' | 'missing_name' | 'test_record' | 'duplicate';
+
+export interface DataQualityIssue {
+  key: DataQualityKey;
+  /** Short chip text. */
+  label: string;
+  /** One sentence for the notice / tooltip. */
+  detail: string;
+  severity: 'warn' | 'error';
+}
+
+/** Words that mean "this is an office, not a person". Whole-word, case-insensitive. */
+const ORG_WORDS = /\b(clinic|clinical|associates|medical|health|healthcare|center|centre|practice|group|llc|inc|pllc|corp|wellness|hospital|physicians?|cardiology|pediatrics|dermatology|urgent care|laboratory|labs?|office|institute|partners|services)\b/i;
+
+export function looksLikeOrganization(p: { first_name?: string | null; last_name?: string | null; email?: string | null }): boolean {
+  const name = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+  if (!name) return false;
+  if (ORG_WORDS.test(name)) return true;
+  // "Dr. Smith's Office" style, or an "of"/"&" business name with 3+ words.
+  if (/\bof\b|&/.test(name) && name.split(/\s+/).length >= 3) return true;
+  return false;
+}
+
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** Problems with a DOB string (yyyy-mm-dd). `null` means it looks fine or is blank. */
+export function dobIssue(dob: string | null | undefined, now: Date = new Date()): DataQualityIssue | null {
+  if (!dob) return null;
+  const d = new Date(dob.substring(0, 10) + 'T12:00:00');
+  if (!isValid(d)) return { key: 'dob_implausible', label: 'Bad DOB', detail: 'Date of birth is not a valid date.', severity: 'error' };
+  // Compare calendar days so a DOB of "today" (newborn) is not flagged as future.
+  if (dob.substring(0, 10) > format(now, 'yyyy-MM-dd')) return { key: 'dob_future', label: 'DOB in future', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} is in the future.`, severity: 'error' };
+  const ageYears = (now.getTime() - d.getTime()) / (365.25 * 24 * 3600 * 1000);
+  if (ageYears > 115) return { key: 'dob_implausible', label: 'DOB implausible', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} would make them over 115.`, severity: 'error' };
+  if (ageYears < 1) return { key: 'dob_recent', label: 'DOB < 1 yr', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} is within the last year — usually the booking date was typed by mistake.`, severity: 'warn' };
+  if (/-01-01$/.test(dob.substring(0, 10))) return { key: 'dob_placeholder', label: 'Jan 1 DOB', detail: `Date of birth ${fmtDay(dob.substring(0, 10))} is January 1 — often a placeholder. Confirm with the patient before it goes on a requisition.`, severity: 'warn' };
+  return null;
+}
+
+export interface DuplicateHit {
+  /** Why the two records collide. */
+  reason: 'email' | 'phone' | 'name_dob' | 'name';
+  other: PatientRow;
+}
+
+/**
+ * Index every patient by the identity keys that should be unique. Returns a
+ * map patientId → hits (other records sharing a key). Exact-name-only
+ * collisions are included as the weakest signal and only when neither row
+ * has a DOB to disambiguate.
+ */
+export function buildDuplicateIndex(rows: PatientRow[]): Map<string, DuplicateHit[]> {
+  const byEmail = new Map<string, PatientRow[]>();
+  const byPhone = new Map<string, PatientRow[]>();
+  const byNameDob = new Map<string, PatientRow[]>();
+  const byName = new Map<string, PatientRow[]>();
+  const push = (m: Map<string, PatientRow[]>, k: string, p: PatientRow) => { const l = m.get(k); if (l) l.push(p); else m.set(k, [p]); };
+  for (const p of rows) {
+    const e = (p.email || '').trim().toLowerCase();
+    if (e) push(byEmail, e, p);
+    const ph = digits(p.phone);
+    if (ph.length >= 10) push(byPhone, ph.slice(-10), p);
+    const n = fullName(p).toLowerCase().replace(/\s+/g, ' ');
+    if (n && n !== 'unnamed patient') {
+      push(byName, n, p);
+      if (p.date_of_birth) push(byNameDob, `${n}|${p.date_of_birth.substring(0, 10)}`, p);
+    }
+  }
+  const out = new Map<string, DuplicateHit[]>();
+  const add = (p: PatientRow, hit: DuplicateHit) => {
+    const l = out.get(p.id) || [];
+    if (!l.some(h => h.other.id === hit.other.id)) { l.push(hit); out.set(p.id, l); }
+  };
+  const sweep = (m: Map<string, PatientRow[]>, reason: DuplicateHit['reason'], guard?: (a: PatientRow, b: PatientRow) => boolean) => {
+    for (const list of m.values()) {
+      if (list.length < 2) continue;
+      for (const a of list) for (const b of list) {
+        if (a.id === b.id) continue;
+        if (guard && !guard(a, b)) continue;
+        add(a, { reason, other: b });
+      }
+    }
+  };
+  sweep(byEmail, 'email');
+  sweep(byPhone, 'phone');
+  sweep(byNameDob, 'name_dob');
+  // Same name, and at least one side has no DOB (so we can't rule it out).
+  sweep(byName, 'name', (a, b) => !a.date_of_birth || !b.date_of_birth || a.date_of_birth === b.date_of_birth);
+  return out;
+}
+
+export const DUP_REASON_LABEL: Record<DuplicateHit['reason'], string> = {
+  email: 'same email',
+  phone: 'same phone',
+  name_dob: 'same name and DOB',
+  name: 'same name',
+};
+
+/** Every data-quality issue on one record (not counting duplicates — pass `dups` for those). */
+export function dataQualityIssues(p: PatientRow, dups?: DuplicateHit[]): DataQualityIssue[] {
+  const out: DataQualityIssue[] = [];
+  if (looksLikeOrganization(p)) {
+    out.push({ key: 'org_name', label: 'Looks like a clinic', detail: `"${fullName(p)}" reads like an organization, not a person. Visits for a practice belong under Organizations; the people drawn should each be their own patient.`, severity: 'error' });
+  }
+  const dob = dobIssue(p.date_of_birth);
+  if (dob) out.push(dob);
+  const email = (p.email || '').trim();
+  if (email && !EMAIL_RE.test(email)) out.push({ key: 'bad_email', label: 'Bad email', detail: `"${email}" is not a valid email address — sends will fail.`, severity: 'error' });
+  const ph = digits(p.phone);
+  if ((p.phone || '').trim() && ph.length < 10) out.push({ key: 'bad_phone', label: 'Bad phone', detail: `"${p.phone}" has fewer than 10 digits — texts will fail.`, severity: 'error' });
+  if (!(p.first_name || '').trim() || !(p.last_name || '').trim()) out.push({ key: 'missing_name', label: 'Name incomplete', detail: 'First or last name is blank.', severity: 'warn' });
+  if (/\btest\b/i.test(`${p.first_name || ''} ${p.last_name || ''}`)) out.push({ key: 'test_record', label: 'Test record', detail: 'The name contains "test" — probably not a real patient.', severity: 'warn' });
+  if (dups && dups.length > 0) {
+    const strong = dups.filter(d => d.reason !== 'name');
+    out.push({
+      key: 'duplicate',
+      label: strong.length > 0 ? 'Possible duplicate' : 'Same name',
+      detail: `${dups.length} other record${dups.length === 1 ? '' : 's'} with the ${Array.from(new Set(dups.map(d => DUP_REASON_LABEL[d.reason]))).join(' / ')}.`,
+      severity: strong.length > 0 ? 'warn' : 'warn',
+    });
+  }
+  return out;
+}
+
+// ──────────────────────────────────────────────────────────────────
 // Flags — orthogonal to buckets. Multi-select AND filter.
 // ──────────────────────────────────────────────────────────────────
-export type PatientFlag = 'member' | 'protected' | 'missing_address' | 'no_contact' | 'no_dob' | 'lab_overdue';
+export type PatientFlag = 'member' | 'protected' | 'missing_address' | 'no_contact' | 'no_dob' | 'lab_overdue' | 'data_quality' | 'duplicate';
 
 export interface FlagContext {
   stats: PatientStats | undefined;
   tier: MemberTier | undefined;
+  /** From buildDuplicateIndex — optional so older callers keep working. */
+  dups?: DuplicateHit[];
 }
 
 export const FLAG_META: Record<PatientFlag, { label: string; desc: string; chip: string; test: (p: PatientRow, c: FlagContext) => boolean }> = {
@@ -284,9 +417,19 @@ export const FLAG_META: Record<PatientFlag, { label: string; desc: string; chip:
     chip: 'border-purple-300 text-purple-800 bg-purple-50',
     test: (p) => !!p.lab_reminder_deadline_at && new Date(p.lab_reminder_deadline_at).getTime() < Date.now(),
   },
+  data_quality: {
+    label: 'Data check', desc: 'Looks like a clinic, placeholder or impossible DOB, malformed email/phone, or a test record',
+    chip: 'border-amber-400 text-amber-900 bg-amber-50',
+    test: (p) => dataQualityIssues(p).length > 0,
+  },
+  duplicate: {
+    label: 'Possible duplicate', desc: 'Shares an email, phone, or name + DOB with another patient record',
+    chip: 'border-fuchsia-300 text-fuchsia-800 bg-fuchsia-50',
+    test: (_p, c) => !!c.dups && c.dups.length > 0,
+  },
 };
 
-export const FLAG_KEYS: PatientFlag[] = ['member', 'protected', 'missing_address', 'no_contact', 'no_dob', 'lab_overdue'];
+export const FLAG_KEYS: PatientFlag[] = ['member', 'protected', 'data_quality', 'duplicate', 'missing_address', 'no_contact', 'no_dob', 'lab_overdue'];
 
 // ──────────────────────────────────────────────────────────────────
 // Misc helpers
@@ -295,6 +438,20 @@ export const fullName = (p: { first_name?: string | null; last_name?: string | n
   `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Unnamed patient';
 
 export const digits = (s: string | null | undefined) => (s || '').replace(/\D/g, '');
+
+/** Inline validation shared by Add patient / Edit patient. Empty = valid (optional field). */
+export function validatePatientFields(f: { email?: string; phone?: string; dob?: string; firstName?: string; lastName?: string }): Partial<Record<'email' | 'phone' | 'dob' | 'firstName' | 'lastName', string>> {
+  const errs: Partial<Record<'email' | 'phone' | 'dob' | 'firstName' | 'lastName', string>> = {};
+  if (f.firstName !== undefined && !f.firstName.trim()) errs.firstName = 'First name is required.';
+  if (f.lastName !== undefined && !f.lastName.trim()) errs.lastName = 'Last name is required.';
+  const email = (f.email || '').trim();
+  if (email && !EMAIL_RE.test(email)) errs.email = 'That email address does not look right.';
+  const ph = digits(f.phone);
+  if ((f.phone || '').trim() && ph.length < 10) errs.phone = 'Enter a 10-digit phone number.';
+  const dob = dobIssue(f.dob || null);
+  if (dob && dob.severity === 'error') errs.dob = dob.detail;
+  return errs;
+}
 
 export const tierBadgeClass = (tier: string | undefined) => {
   switch (tier) {

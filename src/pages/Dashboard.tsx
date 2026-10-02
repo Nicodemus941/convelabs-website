@@ -54,6 +54,7 @@ const ExpensesManager = lazyWithRetry(() => import("@/components/dashboards/admi
 const HormoziDashboard = lazyWithRetry(() => import("@/components/dashboards/admin/hormozi/HormoziDashboard"), 'HormoziDashboard');
 const OwnerOverview = lazyWithRetry(() => import("@/components/dashboards/admin/owner/OwnerOverview"), 'OwnerOverview');
 const UpgradesTab = lazyWithRetry(() => import("@/components/dashboards/admin/UpgradesTab"), 'UpgradesTab');
+const ReferralsTab = lazyWithRetry(() => import("@/components/dashboards/admin/ReferralsTab"), 'ReferralsTab');
 const TrainingTab = lazyWithRetry(() => import("@/components/dashboards/admin/TrainingTab"), 'TrainingTab');
 const ChatbotTab = lazyWithRetry(() => import("@/components/dashboards/admin/ChatbotTab"), 'ChatbotTab');
 const ProviderAcquisitionTab = lazyWithRetry(() => import("@/components/dashboards/admin/ProviderAcquisitionTab"), 'ProviderAcquisitionTab');
@@ -87,6 +88,7 @@ const SECTION_SCREENS: Record<string, React.ComponentType<any>> = {
   "owner/hormozi": HormoziDashboard,
   "owner/frank": FrankCFO,
   "owner/upgrades": UpgradesTab,
+  "owner/referrals": ReferralsTab,
   "system/settings": SettingsTab,
   "system/operations": OperationsPanel,
   "system/ai-assistant": AIOpsAssistant,

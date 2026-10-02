@@ -269,13 +269,18 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     (async () => {
       try {
         const { data: tp } = await supabase
-          .from('tenant_patients').select('user_id').ilike('email', email).maybeSingle();
-        if (!tp?.user_id || cancelled) return;
+          .from('tenant_patients').select('id, user_id').ilike('email', email).limit(1).maybeSingle();
+        if (!tp || cancelled) return;
+        // referral_credits.user_id may hold the tenant_patients id (codes
+        // minted after a visit) OR the auth user id — match both. Server
+        // re-verifies ownership + the 12-month expiry.
+        const ownerIds = [(tp as any).id, (tp as any).user_id].filter(Boolean) as string[];
         const { data: rows } = await supabase
           .from('referral_credits' as any)
           .select('id, amount')
-          .eq('user_id', tp.user_id)
-          .eq('redeemed', false);
+          .in('user_id', ownerIds as any)
+          .eq('redeemed', false)
+          .gte('created_at', new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString());
         if (cancelled) return;
         const list = (rows || []) as any[];
         const ids = list.map(r => r.id);
@@ -326,18 +331,33 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
     }
   }, []);
 
+  // The server (create-appointment-checkout) is the only thing that
+  // subtracts the discount — this preview just mirrors it. The code travels
+  // via sessionStorage, so a manually typed code must be persisted here too
+  // (it used to stay local, so the server never saw it) and "Remove" must
+  // clear it (it used to linger and get applied anyway).
   const applyReferral = async (code: string) => {
-    if (!code.trim()) return;
-    const { data } = await supabase.from('referral_codes' as any).select('*').eq('code', code.trim().toUpperCase()).eq('active', true).maybeSingle();
+    const normalized = code.trim().toUpperCase();
+    if (!normalized) return;
+    const { data } = await supabase.from('referral_codes' as any).select('*').eq('code', normalized).eq('active', true).maybeSingle();
     if (data) {
+      setReferralCode(normalized);
       setReferralDiscount((data as any).discount_amount || 25);
       setReferralApplied(true);
+      try { sessionStorage.setItem('convelabs_referral', normalized); } catch { /* private browsing */ }
       toast.success(`Referral code applied! $${(data as any).discount_amount || 25} off`);
     } else {
       toast.error('Invalid referral code');
       setReferralApplied(false);
       setReferralDiscount(0);
+      try { sessionStorage.removeItem('convelabs_referral'); } catch { /* private browsing */ }
     }
+  };
+  const removeReferral = () => {
+    setReferralApplied(false);
+    setReferralDiscount(0);
+    setReferralCode('');
+    try { sessionStorage.removeItem('convelabs_referral'); } catch { /* private browsing */ }
   };
 
   const serviceDetails = getValues('serviceDetails');
@@ -1083,7 +1103,7 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
             <span className="flex items-center gap-1.5 text-emerald-700 font-medium">
               <Gift className="h-4 w-4" /> Referral: -{`$${referralDiscount}`} applied
             </span>
-            <button onClick={() => { setReferralApplied(false); setReferralDiscount(0); setReferralCode(''); }} className="text-xs text-muted-foreground hover:text-red-500">Remove</button>
+            <button type="button" onClick={removeReferral} className="text-xs text-muted-foreground hover:text-red-500">Remove</button>
           </div>
         )}
 

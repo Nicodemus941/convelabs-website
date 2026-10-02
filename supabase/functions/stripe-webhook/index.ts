@@ -1922,13 +1922,38 @@ async function handleBrandedCheckoutPayment(session: any) {
   // triggers wrote (manual_owed when Connect payouts are on, tracking_only
   // under the kill switch). compute_phleb_take_v2 already folded it into
   // amount_cents; this just populates the dedicated column when it is 0.
+  //
+  // Stamp exactly ONE row. auto_reconcile_phleb_payout_v2 writes a DELTA
+  // row per recompute, so a visit booked unpaid and tipped at /pay has two
+  // rows: the original take and a tip-sized top-up. Stamping every row with
+  // tip_cents=0 (the first cut of this code) double-counted the tip in the
+  // phleb ledger — 8 visits since Aug carry it twice. Prefer the row whose
+  // amount IS the tip (the delta row), else the newest unstamped row.
   if (tipCents > 0) {
     try {
-      await supabaseClient.from('staff_payouts')
-        .update({ tip_cents: tipCents })
+      const { data: rows } = await supabaseClient.from('staff_payouts')
+        .select('id, amount_cents, tip_cents, created_at')
         .eq('appointment_id', apptId)
         .in('status', ['manual_owed', 'tracking_only', 'pending'])
-        .or('tip_cents.is.null,tip_cents.eq.0');
+        .order('created_at', { ascending: false });
+      const list = (rows || []) as Array<{ id: string; amount_cents: number; tip_cents: number | null; created_at: string }>;
+      const alreadyStamped = list.some((r) => (r.tip_cents || 0) > 0);
+      if (!alreadyStamped && list.length > 0) {
+        const target = list.find((r) => r.amount_cents === tipCents) || list[0];
+        await supabaseClient.from('staff_payouts').update({ tip_cents: tipCents }).eq('id', target.id);
+      } else if (list.length === 0) {
+        // No earnings row exists (comp / prepaid visits are skipped by the
+        // trigger, and the kill-switch tracking insert was failing on the
+        // status CHECK). Leave a trail so the tip is not lost silently.
+        await supabaseClient.from('error_logs').insert({
+          error_type: 'tip_without_payout_row',
+          component: 'stripe-webhook',
+          action: 'handleBrandedCheckoutPayment',
+          error_message: `Appointment ${apptId}: patient tipped $${(tipCents / 100).toFixed(2)} at /pay but no staff_payouts row exists to carry it (comp/prepaid arrangement or tracking insert failure). Phleb tip pass-through needs a manual row.`,
+          payload: { appointment_id: apptId, tip_cents: tipCents, session_id: session.id },
+          resolved: false,
+        });
+      }
     } catch (e) { console.warn('[branded-checkout] tip_cents stamp failed:', e); }
 
     // Phleb recognition: text the assigned phlebotomist that a tip came in.
@@ -3143,11 +3168,34 @@ async function handleAppointmentPayment(session: any) {
 
     // Process referral code if present (record redemption + credit referrer)
     try {
+      // Source of truth is what create-appointment-checkout ACTUALLY applied
+      // (metadata.referral_code / referral_discount_cents). The notes regex
+      // ("Referral: CODE (-$25)") is only a fallback for sessions created
+      // before the server stamped metadata — on its own it credited the
+      // referrer even when the server had rejected the code (self-referral,
+      // cap) and the friend got no discount.
+      const serverReferralCode = String(metadata.referral_code || '').trim().toUpperCase();
+      const serverReferralDiscountCents = parseInt(String(metadata.referral_discount_cents || '0'), 10) || 0;
       const notes = metadata.additional_notes || '';
       const referralMatch = notes.match(/Referral:\s*(\w+)/);
-      if (referralMatch) {
-        const referralCode = referralMatch[1];
+      const hasServerStamp = 'referral_code' in metadata;
+      const referralCode = hasServerStamp
+        ? (serverReferralDiscountCents > 0 ? serverReferralCode : '')
+        : (referralMatch ? String(referralMatch[1]).toUpperCase() : '');
+      if (referralCode) {
         console.log(`Processing referral code: ${referralCode}`);
+
+        // Replay guard — Stripe can deliver checkout.session.completed more
+        // than once; never credit the referrer twice for one booking.
+        const { data: priorRedemption } = await supabaseClient
+          .from('referral_redemptions')
+          .select('id')
+          .eq('appointment_id', appointment.id)
+          .limit(1);
+        if (Array.isArray(priorRedemption) && priorRedemption.length > 0) {
+          console.log(`Referral ${referralCode}: redemption already recorded for appointment ${appointment.id}, skipping`);
+          throw new Error('__referral_already_recorded__');
+        }
 
         // Find the referral code — pull tier-specific columns so we can
         // route the correct credit amount based on the REFERRER's tier.
@@ -3166,15 +3214,22 @@ async function handleAppointmentPayment(session: any) {
           //   • Concierge: $50 credit + friend gets 20% off  ← new tier
           // Look up the referrer's tier from tenant_patients.membership_tier
           // and pick the matching column. Defaults handle pre-tier rows.
+          //
+          // referral_codes.user_id is a tenant_patients.id for codes minted
+          // by trigger-post-visit-sequence and an auth user id for portal-
+          // minted ones, so the referrer row is resolved on either column.
           let referrerTier: 'none' | 'member' | 'vip' | 'concierge' = 'none';
+          let referrer: { phone: string | null; first_name: string | null; email: string | null } | null = null;
           if (codeData.user_id) {
             const { data: ref } = await supabaseClient
               .from('tenant_patients')
-              .select('membership_tier')
-              .eq('id', codeData.user_id)
+              .select('membership_tier, phone, first_name, email')
+              .or(`id.eq.${codeData.user_id},user_id.eq.${codeData.user_id}`)
+              .limit(1)
               .maybeSingle();
             const t = String((ref as any)?.membership_tier || '').toLowerCase();
             if (t === 'member' || t === 'vip' || t === 'concierge') referrerTier = t;
+            referrer = (ref as any) || null;
           }
 
           const tierCredit = referrerTier === 'concierge'
@@ -3191,12 +3246,21 @@ async function handleAppointmentPayment(session: any) {
             ? 20
             : (codeData.referred_patient_discount_pct ?? 15);
 
+          // Dollars the friend actually saved (server-applied flat $25 by
+          // default). Legacy notes-only sessions fall back to the code's
+          // flat discount — never the percent, which was stored here before
+          // and made every row read "$15".
+          const friendDiscountDollars = hasServerStamp
+            ? serverReferralDiscountCents / 100
+            : Number(codeData.discount_amount || 25);
+
           // Record the redemption
           await supabaseClient.from('referral_redemptions').insert({
             referral_code_id: codeData.id,
+            referred_user_id: patientId || null,
             referred_email: metadata.patient_email,
             appointment_id: appointment.id,
-            discount_applied: friendDiscountPct,  // stored as percent
+            discount_applied: friendDiscountDollars,
             referrer_credited: true,
           });
 
@@ -3217,16 +3281,10 @@ async function handleAppointmentPayment(session: any) {
             description: `Referral from ${metadata.patient_first_name || 'a friend'} (code: ${referralCode}) — ${referrerTier === 'none' ? 'standard' : referrerTier + ' tier'} payout`,
           });
 
-          console.log(`Referral ${referralCode}: tier=${referrerTier} redemption +$${tierCredit} credit (friend got ${friendDiscountPct}% off), uses=${(codeData.uses || 0) + 1}`);
+          console.log(`Referral ${referralCode}: tier=${referrerTier} redemption +$${tierCredit} credit (friend saved $${friendDiscountDollars.toFixed(2)}; tier pct ${friendDiscountPct}%), uses=${(codeData.uses || 0) + 1}`);
 
           // Notify the referrer that their friend booked
           if (codeData.user_id) {
-            const { data: referrer } = await supabaseClient
-              .from('tenant_patients')
-              .select('phone, first_name, email')
-              .eq('id', codeData.user_id)
-              .maybeSingle();
-
             if (referrer?.phone && !Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
               const referrerPhoneCheck = await verifyRecipientPhone(appointment.id, referrer.phone, referrer.first_name || 'Referrer');
               if (!referrerPhoneCheck.safe) {
@@ -3278,7 +3336,7 @@ async function handleAppointmentPayment(session: any) {
                   },
                   body: new URLSearchParams({
                     To: friendPhone.startsWith('+') ? friendPhone : `+1${friendPhone.replace(/\D/g, '')}`,
-                    Body: `ConveLabs: Hi ${friendName}! Your $${codeData.discount_amount || 25} referral discount was applied to your booking. Welcome to ConveLabs! After your visit, you'll get your own referral code to share.`,
+                    Body: `ConveLabs: Hi ${friendName}! Your $${friendDiscountDollars.toFixed(0)} referral discount was applied to your booking. Welcome to ConveLabs! After your visit, you'll get your own referral code to share.`,
                     ...(TWILIO_MESSAGING_SERVICE_SID ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID } : { From: Deno.env.get('TWILIO_PHONE_NUMBER') || '+14074104939' }),
                   }).toString(),
                 });
@@ -3287,8 +3345,10 @@ async function handleAppointmentPayment(session: any) {
           }
         }
       }
-    } catch (refErr) {
-      console.error('Referral processing error (non-fatal):', refErr);
+    } catch (refErr: any) {
+      if (refErr?.message !== '__referral_already_recorded__') {
+        console.error('Referral processing error (non-fatal):', refErr);
+      }
     }
 
     // Send confirmation email + SMS via Mailgun and Twilio
