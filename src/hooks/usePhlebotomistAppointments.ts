@@ -55,6 +55,18 @@ export interface PhlebAppointment {
   lab_destination_pending: boolean;
   // Sprint 3.5: collection timestamp + optional geo-stamp (from TubeLabelModal)
   collection_at: string | null;
+  // 2026-10-03 draw-outcome tracking: "Start draw" stamps start_time, "Draw
+  // done" stamps collection_at + the outcome; delivered_at mirrors the
+  // canonical specimen_deliveries row (SpecimenDeliveryModal writes both).
+  start_time: string | null;
+  completion_time: string | null;
+  delivered_at: string | null;
+  draw_outcome: string | null;
+  draw_failure_reason: string | null;
+  draw_note: string | null;
+  tube_count: number | null;
+  // Redraw link — this visit is a free redraw of original_appointment_id
+  original_appointment_id: string | null;
   // Sprint 4: recurring series linkage (prepaid bundles or per-visit)
   recurrence_group_id: string | null;
   recurrence_sequence: number | null;
@@ -418,6 +430,14 @@ export function usePhlebotomistAppointments() {
             specialty_kit_count: typeof appt.specialty_kit_count === 'number' ? appt.specialty_kit_count : null,
             ocr_processed_at: appt.ocr_processed_at || null,
             collection_at: appt.collection_at || null,
+            start_time: appt.start_time || null,
+            completion_time: appt.completion_time || null,
+            delivered_at: appt.delivered_at || null,
+            draw_outcome: appt.draw_outcome || null,
+            draw_failure_reason: appt.draw_failure_reason || null,
+            draw_note: appt.draw_note || null,
+            tube_count: typeof appt.tube_count === 'number' ? appt.tube_count : null,
+            original_appointment_id: appt.original_appointment_id || null,
             recurrence_group_id: appt.recurrence_group_id || null,
             recurrence_sequence: appt.recurrence_sequence ?? null,
             recurrence_total: appt.recurrence_total ?? null,
@@ -493,9 +513,17 @@ export function usePhlebotomistAppointments() {
       // RLS policy let UPDATEs return success-with-zero-rows, so the
       // UI optimistically advanced status while the DB row stayed stuck.
       // We now require at least one row back from the UPDATE.
+      const current = appointmentsRef.current.find(a => a.id === appointmentId);
+      // "Start draw" (→ in_progress) also stamps start_time — the draw-time
+      // metric is collection_at − start_time. Keep the earliest if a retry
+      // or a second tap lands after the first stamp.
+      const nowIso = new Date().toISOString();
+      const extra: Record<string, any> = {};
+      if (newStatus === 'in_progress' && !current?.start_time) extra.start_time = nowIso;
+
       const { data, error } = await supabase
         .from('appointments')
-        .update({ status: newStatus })
+        .update({ status: newStatus, ...extra })
         .eq('id', appointmentId)
         .select('id');
 
@@ -509,7 +537,7 @@ export function usePhlebotomistAppointments() {
       pendingStatusRef.current[appointmentId] = { status: newStatus, at: Date.now() };
 
       setAppointments(prev =>
-        prev.map(a => a.id === appointmentId ? { ...a, status: newStatus } : a)
+        prev.map(a => a.id === appointmentId ? { ...a, status: newStatus, ...extra } : a)
       );
 
       // Trigger post-visit sequence when appointment is completed

@@ -36,7 +36,12 @@ import TubePredictionPanel from './TubePredictionPanel';
 import AssignOrgButton from '@/components/phleb/AssignOrgButton';
 import UnassignOrgButton from '@/components/appointments/UnassignOrgButton';
 import LabOrderStatusList from './LabOrderStatusList';
-import { computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges } from '@/lib/phlebHelpers';
+import {
+  computeReadiness, detectFastingRequirement, buildLabRouteUrl, extractPanelBadges,
+  isLabBound, isDeliveryPending, DRAW_OUTCOME_LABELS, type DrawOutcome,
+} from '@/lib/phlebHelpers';
+import DrawOutcomeSheet, { type DrawOutcomePatch } from './DrawOutcomeSheet';
+import { Droplets } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
   scheduled: { label: 'Scheduled', color: 'text-blue-700', bgColor: 'bg-blue-50 border-blue-200', borderColor: '#3B82F6' },
@@ -307,6 +312,33 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
   //   • therapeutic — therapeutic phlebotomy; blood is removed for treatment and discarded
   const noSpecimenToDeliver = ['in-office', 'therapeutic'].includes(appointment.service_type || '');
 
+  // ── Draw outcome (2026-10-03 quality tracking) ──
+  // "Draw done" stamps collection_at + a required outcome BEFORE delivery /
+  // completion. Local override so the card updates the moment the sheet
+  // saves, without waiting for the parent refetch (same idiom as
+  // labOrderJustUploaded).
+  const [showDrawOutcome, setShowDrawOutcome] = useState(false);
+  const [outcomeOverride, setOutcomeOverride] = useState<DrawOutcomePatch | null>(null);
+  const drawOutcome = (outcomeOverride?.draw_outcome || appointment.draw_outcome || null) as DrawOutcome | null;
+  const collectionAt = outcomeOverride?.collection_at || appointment.collection_at || null;
+  const effectiveServiceType = outcomeOverride?.service_type || appointment.service_type;
+  const hasOutcome = !!drawOutcome;
+  const drawUnsuccessful = drawOutcome === 'unsuccessful';
+  // Lab-bound = a specimen_deliveries row is expected at the end of this visit.
+  const labBound = isLabBound(effectiveServiceType);
+  // Delivery / completion unlock only after the outcome is recorded. An
+  // unsuccessful draw has nothing to deliver — it completes directly.
+  const outcomeGateOpen = hasOutcome;
+  const deliveryPending = isDeliveryPending({
+    service_type: effectiveServiceType,
+    status: appointment.status,
+    collection_at: collectionAt,
+    completion_time: appointment.completion_time,
+    delivered_at: appointment.delivered_at,
+    draw_outcome: drawOutcome,
+    appointment_date: appointment.appointment_date,
+  });
+
   // Phleb verifies an insurance row at draw time. Stamps verified_at +
   // verified_by_user_id so the chart shows "✓ verified by phleb today."
   const handleVerifyInsurance = async (row: InsRow) => {
@@ -444,10 +476,20 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
           onClick: () => onStatusUpdate(appointment.id, 'in_progress'),
         };
       case 'in_progress':
-        if (noSpecimenToDeliver) {
+        // Outcome first — it stamps collection_at and is the data behind the
+        // draw success rate. Nothing else unlocks until it's recorded.
+        if (!outcomeGateOpen) {
+          return {
+            label: 'Draw done',
+            helper: 'Record how the draw went. Stamps the collection time.',
+            icon: Droplets,
+            onClick: () => setShowDrawOutcome(true),
+          };
+        }
+        if (noSpecimenToDeliver || drawUnsuccessful) {
           return {
             label: 'Complete job',
-            helper: 'No specimen drop-off is required.',
+            helper: drawUnsuccessful ? 'Unsuccessful draw — nothing to deliver.' : 'No specimen drop-off is required.',
             icon: CheckCircle2,
             onClick: () => onStatusUpdate(appointment.id, 'completed'),
           };
@@ -528,6 +570,37 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                     <Badge variant="outline" className={`text-xs font-medium border ${statusConfig.bgColor} ${statusConfig.color}`}>
                       {statusConfig.label}
                     </Badge>
+                    {/* Delivery pending — lab-bound, collected/completed, no delivery
+                        record after 6h. The visit can't close until the drop-off
+                        is logged (DB guard). */}
+                    {deliveryPending && (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border bg-red-50 text-red-700 border-red-300"
+                        title="No specimen delivery record yet — log the lab drop-off"
+                      >
+                        <Package className="h-2.5 w-2.5" /> Delivery pending
+                      </span>
+                    )}
+                    {drawOutcome && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border ${
+                          drawUnsuccessful ? 'bg-red-50 text-red-700 border-red-200'
+                            : drawOutcome === 'success_first_stick' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}
+                        title="Recorded draw outcome"
+                      >
+                        <Droplets className="h-2.5 w-2.5" /> {DRAW_OUTCOME_LABELS[drawOutcome]}
+                      </span>
+                    )}
+                    {appointment.original_appointment_id && (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border bg-purple-50 text-purple-700 border-purple-200"
+                        title="Free redraw of an earlier unsuccessful draw"
+                      >
+                        Free redraw
+                      </span>
+                    )}
                     {/* Promotional recording: only shown when the patient said yes,
                         so the phleb sees it before they walk in. */}
                     <RecordingConsentChip preference={(appointment as any).recording_preference} />
@@ -1279,12 +1352,30 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   <WorkflowButton label="Arrive" icon={MapPin} targetStatus="arrived" enabledWhen={['en_route']} />
                   <WorkflowButton label="Begin Job" icon={Play} targetStatus="in_progress" enabledWhen={['arrived']} />
 
+                  {/* Draw done — stamps collection_at + required outcome. Gates
+                      delivery / completion below. Re-openable to correct. */}
+                  <Button
+                    size="sm"
+                    className={`h-16 flex flex-col gap-1 ${
+                      appointment.status === 'in_progress'
+                        ? hasOutcome
+                          ? 'bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                    disabled={!['in_progress', 'specimen_delivered', 'completed'].includes(appointment.status)}
+                    onClick={(e) => { e.stopPropagation(); setShowDrawOutcome(true); }}
+                  >
+                    <Droplets className="h-4 w-4" />
+                    <span className="text-xs">{hasOutcome ? 'Draw done ✓' : 'Draw done'}</span>
+                  </Button>
+
                   {/* Tube Label (NIIMBOT) — available once arrived, highlighted when in_progress */}
                   <Button
                     size="sm"
                     className={`h-16 flex flex-col gap-1 col-span-2 ${
                       ['arrived', 'in_progress'].includes(appointment.status)
-                        ? (appointment as any).collection_at
+                        ? collectionAt
                           ? 'bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100'
                           : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
@@ -1294,7 +1385,7 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                   >
                     <Printer className="h-4 w-4" />
                     <span className="text-xs">
-                      {(appointment as any).collection_at
+                      {collectionAt
                         ? 'Tube Label (stamped ✓)'
                         : 'Tube Label (NIIMBOT)'}
                     </span>
@@ -1312,32 +1403,45 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
                       remain reachable after status='specimen_delivered' until
                       the delivered_at stamp lands. Once delivered_at is set,
                       the button locks. */}
-                  <Button
-                    size="sm"
-                    className={`h-16 flex flex-col gap-1 ${
-                      !noSpecimenToDeliver && (appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))
-                        ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
-                    disabled={noSpecimenToDeliver || !(appointment.status === 'in_progress' || (appointment.status === 'specimen_delivered' && !(appointment as any).delivered_at))}
-                    onClick={(e) => { e.stopPropagation(); setShowSpecimenDelivery(true); }}
-                  >
-                    <Package className="h-4 w-4" />
-                    <span className="text-xs">{noSpecimenToDeliver ? 'No delivery needed' : 'Specimen Delivered'}</span>
-                  </Button>
-                  <Button
-                    size="sm"
-                    className={`col-span-2 h-12 flex flex-row gap-2 ${
-                      (appointment.status === 'specimen_delivered' || (noSpecimenToDeliver && ['arrived', 'in_progress'].includes(appointment.status)))
-                        ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white'
-                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    }`}
-                    disabled={!(appointment.status === 'specimen_delivered' || (noSpecimenToDeliver && ['arrived', 'in_progress'].includes(appointment.status)))}
-                    onClick={(e) => { e.stopPropagation(); onStatusUpdate(appointment.id, 'completed'); }}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span className="text-xs">Job Completed</span>
-                  </Button>
+                  {/* 2026-10-03: delivery + completion wait for "Draw done"
+                      (the outcome gate). An unsuccessful draw skips delivery
+                      and completes directly; the DB guard separately blocks a
+                      lab-bound visit from closing without a delivery record. */}
+                  {(() => {
+                    const deliveryOpen = !noSpecimenToDeliver && !drawUnsuccessful && (
+                      (appointment.status === 'in_progress' && outcomeGateOpen)
+                      || (appointment.status === 'specimen_delivered' && !appointment.delivered_at)
+                    );
+                    const skipDelivery = noSpecimenToDeliver || drawUnsuccessful;
+                    const completeOpen =
+                      appointment.status === 'specimen_delivered'
+                      || (skipDelivery && appointment.status === 'in_progress' && outcomeGateOpen);
+                    const needsOutcome = appointment.status === 'in_progress' && !outcomeGateOpen;
+                    return (
+                      <>
+                        <Button
+                          size="sm"
+                          className={`h-16 flex flex-col gap-1 ${deliveryOpen ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                          disabled={!deliveryOpen}
+                          title={needsOutcome ? 'Tap "Draw done" first' : undefined}
+                          onClick={(e) => { e.stopPropagation(); setShowSpecimenDelivery(true); }}
+                        >
+                          <Package className="h-4 w-4" />
+                          <span className="text-xs">{skipDelivery ? 'No delivery needed' : needsOutcome ? 'Specimen Delivered (after Draw done)' : 'Specimen Delivered'}</span>
+                        </Button>
+                        <Button
+                          size="sm"
+                          className={`col-span-2 h-12 flex flex-row gap-2 ${completeOpen ? 'bg-[#B91C1C] hover:bg-[#991B1B] text-white' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                          disabled={!completeOpen}
+                          title={needsOutcome ? 'Tap "Draw done" first' : undefined}
+                          onClick={(e) => { e.stopPropagation(); onStatusUpdate(appointment.id, 'completed'); }}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span className="text-xs">Job Completed</span>
+                        </Button>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -1464,8 +1568,24 @@ const PhlebAppointmentCard: React.FC<Props> = ({ appointment, onStatusUpdate, is
         patientName={appointment.patient_name}
         patientDob={appointment.patient_dob}
         companions={companionNames.map(c => ({ name: c.name, dob: c.dob || null }))}
-        existingCollectionAt={(appointment as any).collection_at || null}
+        existingCollectionAt={collectionAt}
         onMarked={() => { /* parent will refetch on next update */ }}
+      />
+
+      <DrawOutcomeSheet
+        open={showDrawOutcome}
+        onClose={() => setShowDrawOutcome(false)}
+        appointmentId={appointment.id}
+        patientName={appointment.patient_name || 'Patient'}
+        serviceType={effectiveServiceType}
+        existingCollectionAt={collectionAt}
+        existing={{
+          draw_outcome: drawOutcome,
+          draw_failure_reason: outcomeOverride?.draw_failure_reason ?? appointment.draw_failure_reason,
+          draw_note: outcomeOverride?.draw_note ?? appointment.draw_note,
+          tube_count: outcomeOverride?.tube_count ?? appointment.tube_count,
+        }}
+        onSaved={(patch) => setOutcomeOverride(patch)}
       />
     </>
   );

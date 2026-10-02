@@ -149,6 +149,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
       { id: 'frank', label: 'Frank (CFO)' },
       { id: 'upgrades', label: 'Upgrades & ROI' },
       { id: 'referrals', label: 'Referrals' },
+      { id: 'quality', label: 'Quality' },
     ],
   },
   {
