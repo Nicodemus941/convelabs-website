@@ -1,7 +1,10 @@
 -- =============================================================================
 -- DRAFT — NOT APPLIED. Do not run until the owner has reviewed it and is
 -- following docs/plans/2026-10-02-roles-to-app-metadata.md (step 3).
--- Requires 20261002130000_roles_to_app_metadata.sql (helpers + backfill).
+-- Requires 20261002130000_roles_to_app_metadata.sql (helpers + backfill) — APPLIED 2026-10-02.
+-- Re-verified read-only against live schema 2026-10-02 after merging main:
+-- all 59 policy names / commands / role lists match, every expression compiles,
+-- all 16 function regexes match and leave no role/org user_metadata reads.
 -- =============================================================================
 --
 -- Roles → app_metadata, PHASE 2 of 2: enforce.

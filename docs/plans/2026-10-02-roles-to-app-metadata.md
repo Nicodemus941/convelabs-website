@@ -1,6 +1,6 @@
 # Roles → `app_metadata` (privilege-escalation fix) — rollout runbook
 
-Status: **DRAFT. Nothing in this branch has been applied or deployed.**
+Status: **Phase 1 APPLIED 2026-10-02 (517 users, 0 downgrades). Phase 2, edge functions and frontend: NOT yet applied/deployed.**
 Branch: `security/roles-app-metadata`.
 
 ## The problem (verified 2026-10-02, read-only)
@@ -161,6 +161,24 @@ corroborated):
    (edge-function) for BOOT_ERROR/5xx. They read the live row, so staff keep
    access immediately. Must come **after** step 1 (before it, app_metadata is
    empty and every staff check would 403).
+   Deploy with the **live** verify_jwt setting (from `list_edge_functions`,
+   2026-10-02; several differ from config.toml):
+   * `--no-verify-jwt` (verify_jwt=false): accept-staff-invitation,
+     backfill-phleb-underpayments, backfill-provider-phone-auth,
+     complete-provider-onboarding, corporate-customer-portal,
+     corporate-invite-employee, corporate-seat-update, create-staff-invitation,
+     get-admin-analytics, ghs-webhook, insurance-self-upload,
+     reconcile-phantom-payments, send-org-welcome, sign-baa,
+     stripe-payout-diagnostic, sweep-phleb-owed-payouts.
+   * verify_jwt=true (no flag): attach-lab-order-to-appointment,
+     attach-lab-order-to-request, cancel-lab-request, claim-provider-portal,
+     create-lab-request, create-org-subscription-checkout,
+     create-provider-plan-checkout, create-stripe-portal-session,
+     generate-appointment-pay-token, invite-org-manager, invite-team-member,
+     provider-dashboard-data, provider-plan-manage,
+     reconcile-phleb-payouts-from-stripe, request-provider-claim,
+     resend-lab-request, send-manual-invoice-reminder, send-membership-offer,
+     training-ask-nico, training-search.
 3. **Apply phase 2** (`…_enforce.sql`). Stale tokens fall back to the live row via
    the helpers — no forced sign-out. Run V4 (persona matrix) and V5 (attack).
    The forged-claims persona must now see 0 rows.
