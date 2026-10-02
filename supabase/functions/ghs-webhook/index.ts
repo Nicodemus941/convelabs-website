@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.8.0';
+import { getTrustedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -154,7 +155,8 @@ async function handleReprocess(req: Request, supabase: any): Promise<Response> {
     });
   }
 
-  const userRole = (claimsData.claims as any).user_metadata?.role;
+  // JWT claims snapshot: app_metadata is service-role-only, user_metadata is not.
+  const userRole = getTrustedRole(claimsData.claims as any);
   if (!['super_admin', 'admin', 'owner'].includes(userRole)) {
     return new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,

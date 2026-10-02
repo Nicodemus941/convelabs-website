@@ -11,6 +11,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedOrgId } from '../_shared/authz.ts';
 import { stripe } from '../_shared/stripe.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -41,7 +42,7 @@ Deno.serve(async (req) => {
       });
     }
     const user = userData.user;
-    const orgId = (user.user_metadata?.org_id as string) || (user.app_metadata?.organization_id as string);
+    const orgId = getTrustedOrgId(user);
     if (!orgId) {
       return new Response(JSON.stringify({ error: 'no_org_scope' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },

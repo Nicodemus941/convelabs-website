@@ -21,6 +21,7 @@
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
+import { getTrustedRole } from '../_shared/authz.ts';
 import { getOrCreatePayToken } from '../_shared/pay-link.ts';
 
 const corsHeaders = {
@@ -58,7 +59,7 @@ Deno.serve(async (req) => {
       const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
       if (bearer) {
         const { data } = await admin.auth.getUser(bearer);
-        const role = String((data?.user?.user_metadata as any)?.role || (data?.user?.app_metadata as any)?.role || '').toLowerCase();
+        const role = getTrustedRole(data?.user as any);
         if (ADMIN_ROLES.has(role)) authed = true;
       }
     }

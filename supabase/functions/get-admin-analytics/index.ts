@@ -1,5 +1,6 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole } from '../_shared/authz.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 // Initialize Supabase client
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
   }
   
   // Check if user is super_admin
-  if (user.user_metadata?.role !== 'super_admin') {
+  if (getTrustedRole(user) !== 'super_admin') {
     return new Response(JSON.stringify({ error: 'Insufficient permissions' }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 403,
@@ -81,9 +82,9 @@ Deno.serve(async (req) => {
         
       // Get active phlebotomists count
       supabase
-        .from('auth.users')
+        .from('user_roles')
         .select('count')
-        .eq('user_metadata->>role', 'phlebotomist'),
+        .eq('role', 'phlebotomist'),
         
       // Get inventory items below threshold
       supabase

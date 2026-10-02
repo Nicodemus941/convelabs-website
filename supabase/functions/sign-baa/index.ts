@@ -11,6 +11,7 @@
 // captured server-side so the client can't fake them.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId } from '../_shared/authz.ts';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -38,7 +39,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401, headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
 
-    const role = String(user.user_metadata?.role || '').toLowerCase();
+    const role = getTrustedRole(user);
     if (!['provider', 'office_manager', 'super_admin', 'admin', 'owner'].includes(role)) {
       return new Response(JSON.stringify({ error: 'Only provider/staff accounts can sign the BAA' }), { status: 403, headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
@@ -82,7 +83,7 @@ Deno.serve(async (req) => {
 
     const ip_address = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('cf-connecting-ip') || null;
     const user_agent = req.headers.get('user-agent') || null;
-    const organization_id = user.user_metadata?.organization_id || user.user_metadata?.org_id || null;
+    const organization_id = getTrustedOrgId(user);
 
     const { data: inserted, error: insErr } = await supabase
       .from('baa_signatures')

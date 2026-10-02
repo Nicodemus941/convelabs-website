@@ -4,6 +4,7 @@ import PatientSearchList, { PatientListRow } from '@/components/shared/PatientSe
 import PatientDetailDrawer from '@/components/shared/PatientDetailDrawer';
 import { AlertCircle } from 'lucide-react';
 import { loginRouteForTarget } from '@/lib/appTarget';
+import { getTrustedRole } from '@/lib/authRole';
 
 /**
  * PatientsSection — read-only patient roster for the phleb.
@@ -27,7 +28,7 @@ const PatientsSection: React.FC = () => {
         // whether they're authenticated + as which role.
         const { data: sess } = await supabase.auth.getSession();
         const uid = sess?.session?.user?.id || 'no-session';
-        const role = (sess?.session?.user?.user_metadata as any)?.role || 'unknown';
+        const role = getTrustedRole(sess?.session?.user) || 'unknown';
         const { data, error } = await supabase.rpc('get_phleb_served_patients' as any);
         if (error) {
           // Supabase PostgrestError shape

@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { getRoutingRole } from '@/lib/authRole';
 
 const Login = () => {
   const { resetError, error: authError, user, isLoading } = useAuth();
@@ -40,7 +41,7 @@ const Login = () => {
         if (meta.hasPaid && !meta.onboarding_completed) {
           target = '/onboarding/post-payment';
         } else {
-          const role = meta.role || user.role || 'patient';
+          const role = getRoutingRole(data?.user) || user.role || 'patient';
           const honorRedirect = redirectPath && redirectPath !== '/dashboard'
             && !redirectPath.includes('/login') && !redirectPath.includes('/auth');
           target = honorRedirect ? redirectPath : `/dashboard/${role}`;

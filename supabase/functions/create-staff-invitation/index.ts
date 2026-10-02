@@ -7,6 +7,7 @@
 //         payRateCents?, startDate?, inviteType?, referredBy?, referralBountyCents? }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
     const { data: { user: caller }, error: callerErr } = await userClient.auth.getUser();
     if (callerErr || !caller) return json({ error: 'Invalid token' }, 401);
 
-    const callerRole = (caller.user_metadata?.role as string | undefined) || '';
+    const callerRole = getTrustedRole(caller);
     const callerIsSuper = callerRole === 'super_admin' || callerRole === 'admin' || callerRole === 'owner';
 
     // Resolve caller's role_level from staff_profiles → staff_role_definitions (if not super)

@@ -10,6 +10,7 @@
 // on a real auth user.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { getTrustedRole, getTrustedOrgId, roleAppMetadata, keepElevatedRole } from '../_shared/authz.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -74,6 +75,7 @@ Deno.serve(async (req) => {
           email_confirm: true,
           phone_confirm: true,
           user_metadata: userMetadata,
+          app_metadata: roleAppMetadata('provider', o.id),
         });
         if (createErr) {
           report.push({ org: o.name, email, action: 'create_failed', detail: createErr.message });
@@ -85,10 +87,10 @@ Deno.serve(async (req) => {
         const currentPhone = (existing as any).phone || '';
         const currentPhoneDigits = currentPhone.replace(/\D/g, '');
         const targetDigits = phone.replace(/\D/g, '');
-        const currentRole = (existing as any).user_metadata?.role;
+        const currentRole = getTrustedRole(existing as any);
 
         const phoneOK = currentPhoneDigits === targetDigits && (existing as any).phone_confirmed_at;
-        const roleOK = currentRole === 'provider';
+        const roleOK = currentRole === 'provider' && getTrustedOrgId(existing as any) === o.id;
 
         if (phoneOK && roleOK) {
           report.push({ org: o.name, email, action: 'already_linked' });
@@ -96,6 +98,7 @@ Deno.serve(async (req) => {
           const updatePayload: any = {
             // Merge existing metadata so we don't blow away other fields
             user_metadata: { ...(existing as any).user_metadata, ...userMetadata },
+            app_metadata: roleAppMetadata(keepElevatedRole(currentRole, 'provider'), o.id),
           };
           if (!phoneOK) {
             updatePayload.phone = phone;

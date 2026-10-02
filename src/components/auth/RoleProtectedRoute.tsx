@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from '@/integrations/supabase/client';
 import { loginRouteForTarget } from '@/lib/appTarget';
+import { getRoutingRole } from '@/lib/authRole';
 
 interface RoleProtectedRouteProps {
   children: React.ReactNode;
@@ -15,7 +16,7 @@ interface RoleProtectedRouteProps {
  * Guards a role-restricted route.
  *
  * IMPORTANT — loop safety. The app derives the routing role from the JWT's
- * `user_metadata.role` (see useAuthSession). If a signed-in user's token has no
+ * `app_metadata.role` (see useAuthSession / lib/authRole). If a signed-in user's token has no
  * role (a stale token issued before the role was stamped, or a brand-new staff
  * account not yet stamped), the old code bounced them to `/dashboard`, which
  * bounced elsewhere, producing an infinite `replaceState` loop that tripped the
@@ -81,7 +82,7 @@ export const RoleProtectedRoute: React.FC<RoleProtectedRouteProps> = ({
       .refreshSession()
       .then(({ data, error }) => {
         if (cancelled) return;
-        const newRole = data?.session?.user?.user_metadata?.role as string | undefined;
+        const newRole = getRoutingRole(data?.session?.user) ?? undefined;
         if (error || !newRole || !allowedRoles.includes(newRole)) {
           setHeal('failed');
         }

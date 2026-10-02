@@ -12,8 +12,8 @@ BEGIN
     SELECT 1 FROM auth.users
     WHERE id = auth.uid()
     AND (
-      raw_user_meta_data->>'role' = 'admin' OR
-      raw_user_meta_data->>'role' = 'super_admin'
+      raw_app_meta_data->>'role' = 'admin' OR
+      raw_app_meta_data->>'role' = 'super_admin'
     )
   )) THEN
     RAISE EXCEPTION 'Permission denied. Only admin users can access this function.';

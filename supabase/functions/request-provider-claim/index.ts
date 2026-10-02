@@ -17,6 +17,7 @@
 // → invite. Either way we send our branded email with a working link.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { roleAppMetadata } from '../_shared/authz.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -121,6 +122,7 @@ Deno.serve(async (req) => {
           email: normalized,
           email_confirm: true,
           user_metadata: { role: 'provider', org_id: orgByEmail.id, full_name: orgByEmail.contact_name || orgByEmail.name },
+          app_metadata: roleAppMetadata('provider', orgByEmail.id),
         });
         if (createErr) {
           const msg = String(createErr.message || '').toLowerCase();
