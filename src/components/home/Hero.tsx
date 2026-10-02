@@ -233,7 +233,7 @@ const Hero = ({
                 onClick={scrollToPricing}
                 size="lg"
                 variant="outline"
-                className="h-14 px-8 font-semibold text-sm uppercase tracking-[0.15em] rounded-lg border border-brand-gold/40 bg-transparent text-white hover:bg-brand-gold/10 hover:border-brand-gold/70 transition-all w-full sm:w-auto"
+                className="h-14 px-8 font-semibold text-sm uppercase tracking-[0.15em] rounded-lg border border-brand-gold/40 bg-transparent text-white hover:text-white hover:bg-brand-gold/10 hover:border-brand-gold/70 transition-all w-full sm:w-auto"
               >
                 <DollarSign className="mr-2 h-5 w-5" />
                 See Pricing
