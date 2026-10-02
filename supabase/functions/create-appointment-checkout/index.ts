@@ -934,21 +934,40 @@ Deno.serve(async (req) => {
     // and are unredeemed, then subtract from the amount + mark redeemed.
     let referralCreditApplied = 0;
     const referralCreditIdsToMark: string[] = [];
-    if (Array.isArray(redeemReferralCreditIds) && redeemReferralCreditIds.length > 0 && patientDetails?.email) {
+    // The booker's patient record. referral_codes.user_id / referral_credits
+    // .user_id hold EITHER tenant_patients.id (post-visit code generation
+    // passes appointments.patient_id, which is the tenant_patients id for
+    // ~94% of rows) OR the auth user id (portal-created codes). Every lookup
+    // below therefore matches on both ids — before this, credits earned by a
+    // tenant_patients-keyed code could never be found at checkout.
+    // 329 of 762 patients have no auth account at all (user_id null), so
+    // matching on auth id alone silently excluded them too.
+    let bookerTp: { id: string; user_id: string | null; phone: string | null } | null = null;
+    if (patientDetails?.email) {
       try {
         const { data: tp } = await supabaseClient
           .from('tenant_patients')
-          .select('user_id')
+          .select('id, user_id, phone')
           .ilike('email', patientDetails.email)
+          .limit(1)
           .maybeSingle();
-        const uid = (tp as any)?.user_id;
-        if (uid) {
+        bookerTp = (tp as any) || null;
+      } catch { /* non-blocking */ }
+    }
+    const bookerIds: string[] = [bookerTp?.id, bookerTp?.user_id, userId]
+      .filter((v): v is string => typeof v === 'string' && v.length > 0);
+    const REFERRAL_CREDIT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+    if (Array.isArray(redeemReferralCreditIds) && redeemReferralCreditIds.length > 0 && patientDetails?.email) {
+      try {
+        if (bookerIds.length > 0) {
           const { data: credits } = await supabaseClient
             .from('referral_credits')
-            .select('id, amount, user_id, redeemed')
+            .select('id, amount, user_id, redeemed, created_at')
             .in('id', redeemReferralCreditIds as string[])
-            .eq('user_id', uid)
-            .eq('redeemed', false);
+            .in('user_id', bookerIds)
+            .eq('redeemed', false)
+            // Credits expire 12 months after they were earned.
+            .gte('created_at', new Date(Date.now() - REFERRAL_CREDIT_TTL_MS).toISOString());
 
           for (const c of (credits || []) as any[]) {
             const cents = Math.round(Number(c.amount || 0) * 100);
@@ -1047,37 +1066,94 @@ Deno.serve(async (req) => {
     //
     // Now: validate the code server-side, subtract from amount before
     // checkout. Authoritative source of truth is the DB, not the client.
+    //
+    // The client no longer subtracts the discount itself (BookingFlow used
+    // to send amount = subtotal - $25 AND the code, so the patient got $50
+    // off). A rejected code now returns 400 instead of silently charging
+    // full price — the checkout UI already showed the patient "-$25".
     let appliedReferralDiscountCents = 0;
     let appliedReferralCode: string | null = null;
     if (referralCode && String(referralCode).trim()) {
+      const codeUpper = String(referralCode).trim().toUpperCase();
+      let rejectReason: string | null = null;
       try {
-        const codeUpper = String(referralCode).trim().toUpperCase();
         const { data: refRow } = await supabaseClient
           .from('referral_codes')
           .select('id, user_id, discount_amount, active, max_uses, uses')
           .eq('code', codeUpper)
           .eq('active', true)
           .maybeSingle();
-        if (refRow) {
-          // Self-referral guard: don't let the patient use their own code
-          const isSelfReferral = refRow.user_id && userId && String(refRow.user_id) === String(userId);
-          // Max-uses guard
-          const overCap = refRow.max_uses && (refRow.uses || 0) >= refRow.max_uses;
-          if (!isSelfReferral && !overCap) {
+        if (!refRow) {
+          rejectReason = 'not_found';
+        } else {
+          const bookerEmail = String(patientDetails?.email || '').trim().toLowerCase();
+          const digits = (p: unknown) => String(p || '').replace(/\D/g, '').slice(-10);
+          const bookerPhone = digits(patientDetails?.phone);
+
+          // Referrer identity — the code's user_id may be a tenant_patients id
+          // or an auth user id; resolve both ways.
+          let referrer: { id: string; user_id: string | null; email: string | null; phone: string | null } | null = null;
+          if (refRow.user_id) {
+            const { data: refTp } = await supabaseClient
+              .from('tenant_patients')
+              .select('id, user_id, email, phone')
+              .or(`id.eq.${refRow.user_id},user_id.eq.${refRow.user_id}`)
+              .limit(1)
+              .maybeSingle();
+            referrer = (refTp as any) || null;
+          }
+
+          // Self-referral: same account, same patient record, same email or
+          // same phone (a patient re-booking with a second email but their
+          // own phone is still themselves).
+          const referrerIds = [refRow.user_id, referrer?.id, referrer?.user_id].filter(Boolean).map(String);
+          const isSelfReferral =
+            referrerIds.some((id) => bookerIds.includes(id)) ||
+            (!!referrer?.email && referrer.email.trim().toLowerCase() === bookerEmail) ||
+            (!!bookerPhone && bookerPhone.length === 10 && digits(referrer?.phone) === bookerPhone);
+          const overCap = !!refRow.max_uses && (refRow.uses || 0) >= refRow.max_uses;
+
+          // One referral discount per friend, ever. A second code (or the
+          // same one on a later booking) is not a referral.
+          let alreadyReferred = false;
+          if (bookerEmail) {
+            const { data: prior } = await supabaseClient
+              .from('referral_redemptions')
+              .select('id')
+              .ilike('referred_email', bookerEmail)
+              .limit(1);
+            alreadyReferred = Array.isArray(prior) && prior.length > 0;
+          }
+
+          if (isSelfReferral) rejectReason = 'self_referral';
+          else if (overCap) rejectReason = 'max_uses_reached';
+          else if (alreadyReferred) rejectReason = 'already_referred';
+          else {
             const discountCents = Math.round((refRow.discount_amount || 25) * 100);
             const applyCents = Math.min(discountCents, amount);
             amount = Math.max(0, amount - applyCents);
             appliedReferralDiscountCents = applyCents;
             appliedReferralCode = codeUpper;
             console.log(`[referral] ${patientDetails?.email} used ${codeUpper}: -$${applyCents/100} (newAmount=$${amount/100})`);
-          } else {
-            console.log(`[referral] rejected ${codeUpper}: self_referral=${isSelfReferral} over_cap=${overCap}`);
           }
-        } else {
-          console.log(`[referral] code ${codeUpper} not found or inactive`);
         }
       } catch (e: any) {
+        // Lookup failure is not the patient's fault: fall through with no
+        // discount rather than blocking the booking.
         console.warn('[referral] validation threw (non-blocking):', e?.message);
+      }
+      if (rejectReason) {
+        console.log(`[referral] rejected ${codeUpper} for ${patientDetails?.email}: ${rejectReason}`);
+        const messages: Record<string, string> = {
+          not_found: `Referral code ${codeUpper} isn't valid. Remove it to continue, or double-check the code your friend sent.`,
+          self_referral: `Referral code ${codeUpper} is your own code — it works when a friend books, and you'll get $25 off your next visit. Remove it to continue.`,
+          max_uses_reached: `Referral code ${codeUpper} has reached its limit. Remove it to continue.`,
+          already_referred: `A referral discount has already been used on this account, so ${codeUpper} can't be applied again. Remove it to continue.`,
+        };
+        return new Response(
+          JSON.stringify({ error: 'invalid_referral_code', reason: rejectReason, message: messages[rejectReason] || messages.not_found }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
       }
     }
 
@@ -1292,16 +1368,18 @@ Deno.serve(async (req) => {
           metadata: { tier: serverTier, service_type: serviceType },
         });
       }
-      if (referralCode && referralDiscountCents > 0) {
+      // Log what the SERVER applied — the client's referralDiscountCents was
+      // never set by BookingFlow, so this event never fired before.
+      if (appliedReferralCode && appliedReferralDiscountCents > 0) {
         await supabaseClient.from('upgrade_events').insert({
           event_type: 'promo_applied',
           status: 'intent',
           patient_email: patientDetails?.email?.toLowerCase() || null,
           patient_name: `${patientDetails?.firstName || ''} ${patientDetails?.lastName || ''}`.trim() || null,
           patient_phone: patientDetails?.phone || null,
-          discount_cents: referralDiscountCents,
+          discount_cents: appliedReferralDiscountCents,
           potential_cents: amount,
-          metadata: { referral_code: referralCode, service_type: serviceType },
+          metadata: { referral_code: appliedReferralCode, service_type: serviceType },
         });
       }
     } catch (e) { console.warn('upgrade_events insert failed (non-blocking):', e); }

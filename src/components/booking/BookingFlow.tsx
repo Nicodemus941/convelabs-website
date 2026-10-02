@@ -649,8 +649,12 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
           `If patient legitimately wanted multiple companions through both UIs, this is a known limitation — admin can add via manual scheduling.`
         );
       }
+      // The referral discount is NOT subtracted here. create-appointment-
+      // checkout validates the code and subtracts it server-side; sending a
+      // pre-discounted amount AND the code gave the patient $50 off instead
+      // of $25. `referralDiscount` is kept for the itemized cart record.
       const finalSubtotal = Math.max(
-        breakdown.subtotal - referralDiscount + bundleExtra + safeFamilyMemberExtra,
+        breakdown.subtotal + bundleExtra + safeFamilyMemberExtra,
         0
       );
 
@@ -707,8 +711,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         bundle_extra: bundleExtra,
         bundle_count: bundleCount,
         subtotal: breakdown.subtotal,
-        final_subtotal: finalSubtotal,
-        total: parseFloat((finalSubtotal + tipAmount).toFixed(2)),
+        // Expected charge after the server applies the referral discount.
+        final_subtotal: Math.max(0, finalSubtotal - referralDiscount),
+        total: parseFloat((Math.max(0, finalSubtotal - referralDiscount) + tipAmount).toFixed(2)),
         location_city: locationCity,
         location_extended_area: isExtendedArea(locationCity, locationZip),
         captured_at: new Date().toISOString(),
