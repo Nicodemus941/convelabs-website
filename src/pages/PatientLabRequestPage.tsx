@@ -697,7 +697,7 @@ const PatientLabRequestPage: React.FC = () => {
                 {!orgCovers && slots.some(s => s.reason === 'tier_locked') && (
                   <div className="mt-2 bg-gradient-to-r from-amber-50 to-red-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-900 flex items-center gap-2">
                     <span>⚡</span>
-                    <span className="flex-1">Early morning slots unlock with a membership · tap any 🔒 slot to see the math · or join the waitlist for a 5 PM-prior alert.</span>
+                    <span className="flex-1">Weekend slots are held for VIP &amp; Concierge members and open to everyone 24 hours before each start · tap a held slot to see the math or join the waitlist.</span>
                   </div>
                 )}
                 {availableSlots.length > 0 && (
