@@ -115,9 +115,10 @@ const DrawOutcomeSheet: React.FC<Props> = ({
         ...(needsServiceType && chosenService ? { service_type: chosenService } : {}),
       };
       // Defense-in-depth (.select) so an RLS no-op can't look like success.
-      const { data, error } = await supabase
+      // types.ts predates draw_outcome & co, hence the cast.
+      const { data, error } = await (supabase as any)
         .from('appointments')
-        .update({ ...patch, updated_at: nowIso } as any)
+        .update({ ...patch, updated_at: nowIso })
         .eq('id', appointmentId)
         .select('id');
       if (error) throw error;
