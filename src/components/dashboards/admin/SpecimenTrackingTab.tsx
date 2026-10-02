@@ -832,6 +832,7 @@ const SpecimenTrackingTab: React.FC = () => {
           siblings={selected.kind === 'delivery' ? rows.filter(r => r.id !== selected.row.id && r.specimen_id.replace(/\s+/g, '').toUpperCase() === selected.row.specimen_id.replace(/\s+/g, '').toUpperCase()) : []}
           onClose={() => setSelected(null)}
           onSaveTracking={saveTracking}
+          canEditTracking={isSuperAdmin}
         />
       )}
     </div>
@@ -1269,7 +1270,9 @@ const SpecimenDetailDrawer: React.FC<{
   siblings: DeliveryRow[];
   onClose: () => void;
   onSaveTracking: (row: DeliveryRow, code: string) => Promise<boolean>;
-}> = ({ item, bucket, basePath, staffNames, siblings, onClose, onSaveTracking }) => {
+  /** Only platform admins may edit rows (RLS: admin_or_logger_updates_specimens). */
+  canEditTracking: boolean;
+}> = ({ item, bucket, basePath, staffNames, siblings, onClose, onSaveTracking, canEditTracking }) => {
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = `specimen-title-${item.id}`;
   const row = item.kind === 'delivery' ? item.row : null;
@@ -1280,7 +1283,7 @@ const SpecimenDetailDrawer: React.FC<{
 
   const [trackingDraft, setTrackingDraft] = useState<string>(() => row && !row.tracking_number && t ? t.code : '');
   const [saving, setSaving] = useState(false);
-  const showTrackingEditor = !!row && isShipping(row) && !row.tracking_number;
+  const showTrackingEditor = canEditTracking && !!row && isShipping(row) && !row.tracking_number;
 
   useEffect(() => {
     closeRef.current?.focus();

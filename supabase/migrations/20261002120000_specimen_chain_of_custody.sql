@@ -1,16 +1,12 @@
 -- ============================================================================
--- DRAFT — NOT YET APPLIED (2026-10-02)
+-- Reviewed with the owner 2026-10-02. Applied manually via the Supabase MCP
+-- (project yluyonhrxxtyuiyrdixl) after review; safe to re-run (idempotent).
 --
 -- Specimen chain-of-custody backend gaps surfaced by the admin
 -- "Specimen tracking" redesign (src/components/dashboards/admin/
--- SpecimenTrackingTab.tsx). The UI works WITHOUT this migration; nothing in
--- it is required for the screen to render. Apply only after the phleb app
--- (SpecimenDeliveryModal / AdditionalSpecimenDelivery) is updated to write
--- the new columns, otherwise collected_at stays NULL and in_transit is never
--- set and the migration is a no-op in practice.
---
--- Do NOT run with `supabase db push` / apply_migration until the owner
--- signs off. Review notes at the bottom.
+-- SpecimenTrackingTab.tsx). The phleb app (SpecimenDeliveryModal /
+-- AdditionalSpecimenDelivery) does not write collected_at / in_transit yet;
+-- until it does, the backfill below is the only source for those.
 --
 -- Verified live facts this addresses (specimen_deliveries, 414 rows):
 --   • collection_time == delivered_at on every row — it is NOT a draw time.
@@ -111,6 +107,10 @@ UPDATE public.specimen_deliveries
 ALTER TABLE public.specimen_deliveries
   ADD COLUMN IF NOT EXISTS delivered_by_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL;
 
+-- New rows record whoever logged them, without any app change.
+ALTER TABLE public.specimen_deliveries
+  ALTER COLUMN delivered_by_user_id SET DEFAULT auth.uid();
+
 -- Backfill from the appointment''s assigned phlebotomist (all live rows were
 -- logged by the assigned phleb).
 UPDATE public.specimen_deliveries d
@@ -136,35 +136,49 @@ CREATE INDEX IF NOT EXISTS appointments_completed_by_date_idx
   WHERE status = 'completed';
 
 -- ----------------------------------------------------------------------------
--- 6. RLS — tighten UPDATE. Today "Authenticated update specimens" lets ANY
---    authenticated user update any row (USING auth.role() = 'authenticated').
---    Restrict to platform admins + the phleb who logged it. The admin screen's
---    tracking-number edit relies on the admin branch.
+-- 6. RLS — tighten INSERT and UPDATE. Before this, "Authenticated insert
+--    specimens" / "Authenticated update specimens" let ANY authenticated user
+--    (patients included) create or edit any row.
+--
+--    office_manager is deliberately NOT here: today that role belongs to
+--    partner-clinic staff (scoped to their own org by
+--    org_staff_read_their_specimens), not ConveLabs staff.
+--
+--    NOTE: these checks read the role from user_metadata, like every other
+--    policy in this project. user_metadata is user-editable, so this is only
+--    as strong as the platform-wide role model — tracked separately.
 -- ----------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Authenticated insert specimens" ON public.specimen_deliveries;
+DROP POLICY IF EXISTS "phleb_or_admin_inserts_specimens" ON public.specimen_deliveries;
+CREATE POLICY "phleb_or_admin_inserts_specimens"
+ON public.specimen_deliveries FOR INSERT TO authenticated
+WITH CHECK (
+  lower(COALESCE(auth.jwt()->'user_metadata'->>'role','')) IN ('phlebotomist','super_admin','admin','owner')
+);
+
 DROP POLICY IF EXISTS "Authenticated update specimens" ON public.specimen_deliveries;
+DROP POLICY IF EXISTS "admin_or_logger_updates_specimens" ON public.specimen_deliveries;
 CREATE POLICY "admin_or_logger_updates_specimens"
 ON public.specimen_deliveries FOR UPDATE TO authenticated
 USING (
-  lower(COALESCE(auth.jwt()->'user_metadata'->>'role','')) IN ('super_admin','admin','owner','office_manager')
+  lower(COALESCE(auth.jwt()->'user_metadata'->>'role','')) IN ('super_admin','admin','owner')
   OR delivered_by_user_id = auth.uid()
 )
 WITH CHECK (
-  lower(COALESCE(auth.jwt()->'user_metadata'->>'role','')) IN ('super_admin','admin','owner','office_manager')
+  lower(COALESCE(auth.jwt()->'user_metadata'->>'role','')) IN ('super_admin','admin','owner')
   OR delivered_by_user_id = auth.uid()
 );
 
 COMMIT;
 
 -- ============================================================================
--- Review notes / follow-ups before applying
---   • Phleb app must set collected_at at draw confirmation and insert the
---     shipping leg as status='in_transit' (+ tracking_number) so the UI's
---     reserved bucket has data. Until then the backfill is the only source.
---   • A delivered-webhook (UPS/FedEx) or a daily cron should flip
---     in_transit → delivered; out of scope here.
---   • The 13 recent completed appointments with no delivery row are NOT
---     backfilled — they need a human to say where the specimen went.
---   • If office_manager should NOT be able to edit tracking numbers, drop it
---     from the policy above and hide the drawer editor behind super_admin in
---     SpecimenTrackingTab.tsx (one-line change: `showTrackingEditor`).
+-- Follow-ups (not in this migration)
+--   • Phleb app should set collected_at at draw confirmation and insert the
+--     shipping leg as status='in_transit' (+ tracking_number).
+--   • A carrier webhook or daily cron should flip in_transit → delivered.
+--   • Completed visits with no delivery row are NOT backfilled — a human has
+--     to say where the specimen went.
+--   • SpecimenDeliveryModal ignores the insert's {error}, so a failed save
+--     looks like success — likely cause of the missing records.
+--   • Roles live in user-editable user_metadata across all policies.
 -- ============================================================================
