@@ -1,6 +1,8 @@
 -- =============================================================================
--- DRAFT — NOT APPLIED. Do not run until the owner has reviewed it and is
--- following docs/plans/2026-10-02-roles-to-app-metadata.md (step 1).
+-- APPLIED 2026-10-02 to production (yluyonhrxxtyuiyrdixl) via the Supabase MCP,
+-- owner-approved. Result: role_migration_audit = 517 users, 0 downgrades,
+-- 0 users without app_metadata.role. Kept here verbatim as the record.
+-- See docs/plans/2026-10-02-roles-to-app-metadata.md (step 1).
 -- =============================================================================
 --
 -- Roles → app_metadata, PHASE 1 of 2: helpers + backfill + signup default.
