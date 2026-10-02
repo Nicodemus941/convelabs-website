@@ -26,11 +26,16 @@ Deno.serve(async (req) => {
     });
   }
 
+  // Declared outside the try so the sendSMS / sendEmail helpers below can log
+  // to sms_notifications / email_send_log. Inside the try it was out of their
+  // scope: every send went out but its audit insert threw "supabase is not
+  // defined" (non-blocking, so nothing was logged).
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') || '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+  );
+
   try {
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') || '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
-    );
 
     const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY');
     const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
