@@ -14,6 +14,10 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
+import { sendSMS } from '../_shared/twilio.ts';
+import { verifyRecipientPhone } from '../_shared/verify-recipient.ts';
+import { SMS, firstNameOf } from '../_shared/sms-copy.ts';
+import { formatApptDateShort, formatApptTime } from '../_shared/format-appt-date.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,7 +31,6 @@ const MAILGUN_API_KEY = Deno.env.get('MAILGUN_API_KEY') || '';
 const MAILGUN_DOMAIN = Deno.env.get('MAILGUN_DOMAIN') || 'mg.convelabs.com';
 const TWILIO_SID = Deno.env.get('TWILIO_ACCOUNT_SID') || '';
 const TWILIO_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN') || '';
-const TWILIO_FROM = Deno.env.get('TWILIO_PHONE_NUMBER') || '';
 
 function normPhone(p: string): string {
   const d = p.replace(/\D/g, '');
@@ -35,18 +38,32 @@ function normPhone(p: string): string {
   if (d.length === 11 && d.startsWith('1')) return `+${d}`;
   return p.startsWith('+') ? p : `+${d}`;
 }
+// "Fri, Oct 3 at 9:00 AM" — shared helper renders appointment_time as a
+// clock value (the old fmtAppt printed the raw "09:00:00").
 function fmtAppt(dateIso: string, time?: string | null): string {
-  const d = new Date(String(dateIso).substring(0, 10) + 'T12:00:00');
-  const day = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  return time ? `${day} at ${time}` : day;
+  const day = formatApptDateShort(dateIso);
+  return time ? `${day} at ${formatApptTime(time)}` : day;
 }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  // Global notification kill switch (was missing — this cron texted through
+  // backfills while every other sender was silenced).
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ ok: true, suspended: true }), {
+      status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
-    if (!shouldSendNow('post_visit')) {
-      return new Response(JSON.stringify({ ok: true, deferred: true, reason: 'quiet_hours' }), {
+    // BUG FIX: `if (!shouldSendNow(...))` tested the returned OBJECT, which
+    // is always truthy, so this hourly cron was never deferred — confirm
+    // texts could land at 2 AM. Gate on `.allow`, and class it as a
+    // reminder (it is one), not post_visit.
+    const gate = shouldSendNow('reminder');
+    if (!gate.allow) {
+      return new Response(JSON.stringify({ ok: true, deferred: true, reason: gate.reason, nextAllowedAt: gate.nextAllowedAt }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -76,26 +93,46 @@ Deno.serve(async (req) => {
       if (!a.view_token) continue; // can't send without the token
 
       const url = `${PUBLIC_SITE_URL}/appt/${a.view_token}/confirm`;
-      const firstName = String(a.patient_name || 'there').split(' ')[0];
+      const firstName = firstNameOf(a.patient_name);
       const apptShort = fmtAppt(String(a.appointment_date), a.appointment_time);
 
       let smsOk = false;
       let emailOk = false;
 
-      if (phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
+      if (phone && TWILIO_SID && TWILIO_TOKEN) {
+        const to = normPhone(phone);
+        // Branded copy (the old text never said "ConveLabs"), pinned From
+        // number + delivery-status callback via the shared sender, HIPAA
+        // recipient guard, and an sms_notifications row so the inbox and
+        // the audit can see it (this cron logged nothing before).
+        const body = SMS.confirmationRequest({ firstName, when: apptShort, url });
+        let sid: string | null = null;
+        let smsStatus = 'failed';
+        let smsErr: string | null = null;
         try {
-          const body = `Hi ${firstName} — quick confirm: see you ${apptShort}? Tap to confirm, reschedule, or cancel: ${url}`;
-          const fd = new URLSearchParams({ To: normPhone(phone), From: TWILIO_FROM, Body: body });
-          const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`,
-              'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: fd.toString(),
+          const guard = await verifyRecipientPhone(a.id, to, String(a.patient_name || ''));
+          if (!guard.safe) {
+            smsErr = `recipient_guard:${guard.reason}`;
+            console.warn(`[confirm-cron] HIPAA guard blocked ${to}: ${guard.reason}`);
+          } else {
+            const msg = await sendSMS(to, body);
+            sid = msg?.sid || null;
+            smsStatus = 'sent';
+            smsOk = true;
+          }
+        } catch (e: any) { smsErr = String(e?.message || e); console.warn('[confirm-cron] sms err:', smsErr); }
+        try {
+          await admin.from('sms_notifications').insert({
+            appointment_id: a.id,
+            notification_type: 'confirmation_request',
+            phone_number: to,
+            message_content: body.substring(0, 1500),
+            sent_at: new Date().toISOString(),
+            delivery_status: smsStatus,
+            twilio_message_sid: sid,
+            metadata: { source: 'send-confirmation-requests', ...(smsErr ? { error: smsErr.substring(0, 300) } : {}) },
           });
-          smsOk = r.ok;
-        } catch (e) { console.warn('[confirm-cron] sms err:', e); }
+        } catch (logErr) { console.warn('[confirm-cron] sms log failed (non-blocking):', logErr); }
       }
 
       if (email && MAILGUN_API_KEY) {

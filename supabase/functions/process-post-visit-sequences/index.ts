@@ -1,5 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { shouldSendNow } from '../_shared/quiet-hours.ts';
+import { sendSMS as twilioSend } from '../_shared/twilio.ts';
+import { SMS, firstNameOf } from '../_shared/sms-copy.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -168,7 +170,7 @@ Deno.serve(async (req) => {
           }
           case 'specimen_confirm': {
             if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
-              await sendSMS(seq.patient_phone, `Hi ${patientName}! Your ConveLabs specimens are on the way to the lab. We'll send you a confirmation with your lab-generated tracking ID once delivered. Thank you for choosing ConveLabs!`);
+              await sendSMS(seq.patient_phone, SMS.specimenConfirm({ firstName: firstNameOf(patientName) }), seq);
             }
             break;
           }
@@ -205,6 +207,15 @@ Deno.serve(async (req) => {
             break;
           }
           case 'review_request': {
+            // LEGACY (24h review ask). trigger-post-visit-sequence no longer
+            // seeds this step — the DB-seeded `google_review` (48h, 90-day
+            // per-patient dedupe, review_request_log) is the one review ask.
+            // Any leftover pending row is retired without sending so a patient
+            // never gets two review texts a day apart.
+            await supabase.from('post_visit_sequences').update({ status: 'skipped' }).eq('id', seq.id);
+            break;
+          }
+          case '__review_request_legacy': {
             // Franchise-safe: resolve review URL from org or business_metrics
             // default, never hardcode. Skip when neither configured. Mirrors
             // the H3 `google_review` step's resolution logic.
@@ -421,7 +432,8 @@ Deno.serve(async (req) => {
           }
           case 'referral_prompt': {
             if (TWILIO_ACCOUNT_SID && seq.patient_phone && referralCode) {
-              await sendSMS(seq.patient_phone, `Hi ${patientName}! Share ConveLabs with a friend — you both get $25 off your next visit. Your code: ${referralCode}. Share this link: convelabs.com/book-now?ref=${referralCode}`);
+              // Marketing-class → carries the opt-out line (TCPA).
+              await sendSMS(seq.patient_phone, SMS.referralPrompt({ firstName: firstNameOf(patientName), code: referralCode }), seq);
             }
             break;
           }
@@ -477,14 +489,13 @@ Deno.serve(async (req) => {
               }
             }
 
-            const smsText = `Hi ${patientName}, if your ConveLabs visit was a good experience, would you share a quick Google review? Takes 30 seconds: ${reviewUrl}`;
+            const smsText = SMS.googleReview({ firstName: firstNameOf(patientName), url: reviewUrl });
             let smsSent = false;
             let emailSent = false;
 
             if (TWILIO_ACCOUNT_SID && seq.patient_phone) {
               try {
-                await sendSMS(seq.patient_phone, smsText);
-                smsSent = true;
+                smsSent = await sendSMS(seq.patient_phone, smsText, seq);
               } catch (e) { console.warn(`[google_review] SMS failed:`, e); }
             }
 
@@ -578,39 +589,40 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Helper: send SMS
-  async function sendSMS(phone: string, body: string) {
-    const TWILIO_ACCOUNT_SID = Deno.env.get('TWILIO_ACCOUNT_SID')!;
-    const TWILIO_AUTH_TOKEN = Deno.env.get('TWILIO_AUTH_TOKEN')!;
-    const TWILIO_PHONE_NUMBER = Deno.env.get('TWILIO_PHONE_NUMBER')!;
-    const formattedPhone = phone.startsWith('+') ? phone : `+1${phone.replace(/\D/g, '')}`;
-    const formData = new URLSearchParams();
-    formData.append('To', formattedPhone);
-    formData.append('From', TWILIO_PHONE_NUMBER);
-    formData.append('Body', body);
+  // Helper: send SMS via the shared sender (pinned ConveLabs From number +
+  // delivery-status callback, so `delivered`/`undelivered` lands on the row
+  // below). Returns true when Twilio accepted the message.
+  async function sendSMS(phone: string, body: string, seq?: { id?: string; step?: string; appointment_id?: string | null }): Promise<boolean> {
+    const digits = phone.replace(/\D/g, '');
+    const formattedPhone = phone.startsWith('+') ? phone : (digits.length === 11 && digits.startsWith('1') ? `+${digits}` : `+1${digits}`);
     let smsStatus = 'failed';
     let smsSid: string | null = null;
+    let smsErr: string | null = null;
     try {
-      const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-        method: 'POST',
-        headers: { 'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formData,
-      });
-      if (r.ok) { smsStatus = 'sent'; try { smsSid = (await r.json())?.sid ?? null; } catch { /* body */ } }
-      else { console.warn('[post-visit] SMS failed', await r.text()); }
-    } catch (e) { console.warn('[post-visit] SMS error', e); }
-    // Log every post-visit SMS for the audit.
+      const msg = await twilioSend(formattedPhone, body);
+      smsSid = msg?.sid ?? null;
+      smsStatus = 'sent';
+    } catch (e: any) {
+      // 21610 = recipient replied STOP. Logged, never retried.
+      smsErr = String(e?.message || e);
+      console.warn('[post-visit] SMS failed', smsErr);
+    }
+    // Log every post-visit SMS for the audit — typed per step (post_visit_google_review,
+    // post_visit_referral_prompt, …) and tied to the appointment so the SMS inbox
+    // can link it to the visit.
     try {
       await supabase.from('sms_notifications').insert({
-        notification_type: 'post_visit_sequence',
+        appointment_id: seq?.appointment_id || null,
+        notification_type: seq?.step ? `post_visit_${seq.step}` : 'post_visit_sequence',
         phone_number: formattedPhone,
         message_content: String(body).substring(0, 1500),
         sent_at: new Date().toISOString(),
         delivery_status: smsStatus,
         twilio_message_sid: smsSid,
-        metadata: { source: 'process-post-visit-sequences' },
+        metadata: { source: 'process-post-visit-sequences', sequence_id: seq?.id || null, ...(smsErr ? { error: smsErr.substring(0, 300) } : {}) },
       });
     } catch (logErr) { console.warn('[post-visit] SMS log failed (non-blocking):', logErr); }
+    return smsStatus === 'sent';
   }
 
   // Helper: send email

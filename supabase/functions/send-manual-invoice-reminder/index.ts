@@ -20,6 +20,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import Stripe from 'https://esm.sh/stripe@14.7.0?target=deno';
 import { resolvePatientPayLink } from '../_shared/pay-link.ts';
+import { sendSMS as twilioSend } from '../_shared/twilio.ts';
+import { SMS, firstNameOf } from '../_shared/sms-copy.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,23 +54,19 @@ async function sendEmail(to: string, subject: string, html: string) {
   if (!r.ok) throw new Error(`mailgun ${r.status}: ${await r.text()}`);
 }
 
-async function sendSMS(to: string, message: string) {
+// Shared sender: pinned ConveLabs From number (this file used to prefer the
+// pooled messaging service → 717 E-Labus caller-ID leak), delivery-status
+// callback, and Twilio 21610 (opted-out) surfaces as a thrown error.
+async function sendSMS(to: string, message: string): Promise<string | null> {
   if (!TWILIO_SID || !TWILIO_TOKEN) throw new Error('twilio_not_configured');
   let normalized = to.replace(/\D/g, '');
   if (normalized.length === 10) normalized = `+1${normalized}`;
+  else if (normalized.length === 11 && normalized.startsWith('1')) normalized = `+${normalized}`;
   else if (!normalized.startsWith('+')) normalized = `+${normalized}`;
-  const form = new URLSearchParams();
-  form.append('To', normalized);
-  if (TWILIO_MESSAGING_SID) form.append('MessagingServiceSid', TWILIO_MESSAGING_SID);
-  else form.append('From', TWILIO_FROM);
-  form.append('Body', message);
-  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
-    method: 'POST',
-    headers: { 'Authorization': `Basic ${btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: form,
-  });
-  if (!r.ok) throw new Error(`twilio ${r.status}: ${await r.text()}`);
+  const msg = await twilioSend(normalized, message);
+  return msg?.sid || null;
 }
+void TWILIO_MESSAGING_SID; void TWILIO_FROM; // kept for env parity; sender pins From itself
 
 function emailWrapper(color: string, headline: string, body: string): string {
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1f2937;">
@@ -100,6 +98,10 @@ async function getPayLink(admin: any, appt: any): Promise<string | null> {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  // Global notification kill switch — every patient-facing sender honours it.
+  if (Deno.env.get('NOTIFICATIONS_SUSPENDED')) {
+    return new Response(JSON.stringify({ ok: false, suspended: true, error: 'notifications_suspended' }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   try {
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
     const authHeader = req.headers.get('Authorization') || '';
@@ -147,9 +149,8 @@ Deno.serve(async (req) => {
        <p style="margin-top:24px;">Looking forward to your visit,<br/>ConveLabs</p>`
     );
 
-    const sms = payLinkRaw
-      ? `Hi ${name}! Friendly reminder — your ConveLabs invoice (${amount}) is still open. Pay securely on our site (tip optional): ${payLink} — Looking forward to your visit!`
-      : `Hi ${name}! Friendly reminder about your ConveLabs invoice (${amount}). Reply here or call (941) 527-9169 and we'll send a fresh pay link — looking forward to your visit!`;
+    // Central copy (same wording the cascade's Phase-1 uses going forward).
+    const sms = SMS.invoiceReminder({ firstName: firstNameOf(appt.patient_name), amount, payUrl: payLinkRaw || null });
 
     const results: { email?: any; sms?: any } = {};
     if (channels.email && appt.patient_email) {
@@ -161,10 +162,28 @@ Deno.serve(async (req) => {
       results.email = { ok: false, error: 'no_patient_email' };
     }
     if (channels.sms && appt.patient_phone) {
+      let sid: string | null = null;
       try {
-        await sendSMS(appt.patient_phone, sms);
-        results.sms = { ok: true, to: appt.patient_phone };
+        sid = await sendSMS(appt.patient_phone, sms);
+        results.sms = { ok: true, to: appt.patient_phone, sid };
       } catch (e: any) { results.sms = { ok: false, error: e?.message }; }
+      // Log as `invoice_reminder` so process-invoice-reminders' 20h SMS
+      // dedupe (invoiceSmsSentRecently) and the admin SMS inbox can see
+      // this manual nudge. Before, it was invisible to both → same-day
+      // double texts.
+      try {
+        await admin.from('sms_notifications').insert({
+          appointment_id: appointmentId,
+          notification_type: 'invoice_reminder',
+          phone_number: appt.patient_phone,
+          message_content: sms.substring(0, 1500),
+          sent_at: new Date().toISOString(),
+          delivery_status: results.sms?.ok ? 'sent' : 'failed',
+          twilio_message_sid: sid,
+          created_by: user.id,
+          metadata: { source: 'send-manual-invoice-reminder', manual: true, ...(results.sms?.ok ? {} : { error: String(results.sms?.error || '').substring(0, 300) }) },
+        });
+      } catch { /* non-blocking */ }
     } else if (channels.sms) {
       results.sms = { ok: false, error: 'no_patient_phone' };
     }

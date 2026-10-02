@@ -1,0 +1,124 @@
+-- ============================================================================
+-- DRAFT — NOT APPLIED. The `.sql.DRAFT` suffix keeps the Supabase CLI from
+-- picking this up. Rename to `20261002210000_sms_pipeline_fixes.sql` and
+-- apply deliberately (owner-run) after reviewing the three changes below.
+-- Read-only audit 2026-10-02 (feat/sms-messaging-pipeline).
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Two-way SMS threading has been dead since the tables were created.
+--
+--    sms_conversations.patient_id is NOT NULL, but get_or_create_sms_conversation
+--    is called with p_patient_id = NULL whenever the phone doesn't match a
+--    tenant_patients row (owner alerts, brand-new leads, patients whose phone
+--    is stored in a different format). The INSERT violates the constraint, the
+--    RPC errors, and both send-sms-notification (outbound mirror) and
+--    twilio-inbound-sms (inbound persistence) swallow it as "non-blocking".
+--    Result: 4 rows in sms_messages, 0 inbound, nothing since 2026-07-21,
+--    while sms_notifications holds 1,204 outbound texts to 250 numbers.
+--
+--    Fix: allow a conversation that is only known by phone. patient_id is
+--    backfilled by the RPC's COALESCE the first time we do learn it.
+-- ----------------------------------------------------------------------------
+ALTER TABLE public.sms_conversations ALTER COLUMN patient_id DROP NOT NULL;
+
+-- Lookups by Twilio SID (status callback → sms_messages.status) and by phone.
+CREATE INDEX IF NOT EXISTS idx_sms_messages_twilio_sid ON public.sms_messages (twilio_message_sid);
+CREATE INDEX IF NOT EXISTS idx_sms_conversations_norm_phone ON public.sms_conversations (public.normalize_phone(patient_phone));
+
+-- ----------------------------------------------------------------------------
+-- 2. Stop seeding the disabled `results_checkin` step.
+--
+--    results_checkin was switched off 2026-05-03 (owner does not want to chase
+--    lab-result delivery) and process-post-visit-sequences marks any such row
+--    `skipped` — but this trigger kept inserting one per completed visit
+--    (16 pending + 39 skipped in the last 30 days). Same function body minus
+--    block #2; everything else unchanged. referral_prompt stays at 7d,
+--    membership_upsell 14d, rebooking_nudge 30d — the DB trigger is now the
+--    single seeder for those (trigger-post-visit-sequence only seeds
+--    specimen_confirm + survey).
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.auto_queue_google_review()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_has_contact boolean := (NEW.patient_email IS NOT NULL OR NEW.patient_phone IS NOT NULL);
+  v_is_recurring boolean := NEW.recurrence_group_id IS NOT NULL;
+  v_is_bundle boolean := NEW.visit_bundle_id IS NOT NULL;
+BEGIN
+  -- Only fire when transitioning INTO completed
+  IF NEW.status <> 'completed' OR (OLD.status IS NOT DISTINCT FROM 'completed') THEN
+    RETURN NEW;
+  END IF;
+
+  IF NOT v_has_contact THEN
+    RETURN NEW;
+  END IF;
+
+  -- 1. GOOGLE REVIEW — 48h post visit (the one review ask; the 24h
+  --    review_request step is retired in trigger-post-visit-sequence)
+  IF NEW.review_request_sent_at IS NULL THEN
+    INSERT INTO public.post_visit_sequences
+      (appointment_id, patient_id, patient_email, patient_phone, step, scheduled_at, status)
+    VALUES
+      (NEW.id, NEW.patient_id, NEW.patient_email, NEW.patient_phone,
+       'google_review', now() + interval '48 hours', 'pending')
+    ON CONFLICT (unique_key) DO NOTHING;
+  END IF;
+
+  -- 2. (removed) RESULTS CHECK-IN — disabled 2026-05-03, no longer seeded.
+
+  -- 3. REFERRAL PROMPT — 7 days post visit
+  INSERT INTO public.post_visit_sequences
+    (appointment_id, patient_id, patient_email, patient_phone, step, scheduled_at, status)
+  VALUES
+    (NEW.id, NEW.patient_id, NEW.patient_email, NEW.patient_phone,
+     'referral_prompt', now() + interval '7 days', 'pending')
+  ON CONFLICT (unique_key) DO NOTHING;
+
+  -- 4. MEMBERSHIP UPSELL — 14 days post visit (edge fn skips active members)
+  INSERT INTO public.post_visit_sequences
+    (appointment_id, patient_id, patient_email, patient_phone, step, scheduled_at, status)
+  VALUES
+    (NEW.id, NEW.patient_id, NEW.patient_email, NEW.patient_phone,
+     'membership_upsell', now() + interval '14 days', 'pending')
+  ON CONFLICT (unique_key) DO NOTHING;
+
+  -- 5. REBOOKING NUDGE — 30 days post visit (skip recurring/bundle visits)
+  IF NOT v_is_recurring AND NOT v_is_bundle THEN
+    INSERT INTO public.post_visit_sequences
+      (appointment_id, patient_id, patient_email, patient_phone, step, scheduled_at, status)
+    VALUES
+      (NEW.id, NEW.patient_id, NEW.patient_email, NEW.patient_phone,
+       'rebooking_nudge', now() + interval '30 days', 'pending')
+    ON CONFLICT (unique_key) DO NOTHING;
+  END IF;
+
+  RETURN NEW;
+END $function$;
+
+-- Retire already-queued results_checkin rows (the processor would skip them
+-- one batch at a time anyway; this clears the queue in one go).
+UPDATE public.post_visit_sequences
+   SET status = 'skipped'
+ WHERE step = 'results_checkin' AND status = 'pending';
+
+-- ----------------------------------------------------------------------------
+-- 3. Admin SMS inbox read-state (replaces per-browser localStorage so unread
+--    is shared across devices/staff). Keyed by normalized phone, one row per
+--    staff user. The inbox upserts on open.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.sms_thread_reads (
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  phone_key text NOT NULL,                 -- normalize_phone(patient_phone)
+  last_read_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, phone_key)
+);
+ALTER TABLE public.sms_thread_reads ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS sms_thread_reads_own ON public.sms_thread_reads;
+CREATE POLICY sms_thread_reads_own ON public.sms_thread_reads
+  FOR ALL TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
