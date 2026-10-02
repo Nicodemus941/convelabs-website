@@ -1,6 +1,25 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+/**
+ * AdminCalendar — the schedule as a calendar (month / week / day).
+ *
+ * Rendered for BOTH admin roles (super_admin + office_manager) via
+ * Dashboard.tsx SECTION_SCREENS["schedule/calendar"]. Shares its header,
+ * KPI tiles, chips, lane and pill language with EnhancedAppointmentsTab
+ * through ../dashboards/admin/enhanced/scheduleShared.
+ *
+ * Tiles partition every non-cancelled appointment by WHEN it happens
+ * (past due / today / this week / later / done); clicking one both filters
+ * the events drawn and jumps the calendar there. Status chips toggle which
+ * statuses are drawn (cancelled is off by default, as before). Search trims.
+ *
+ * Deep links: `?appointment=<id>` opens that visit and jumps to its date
+ * (LabOrdersTab / SpecimenTrackingTab / the appointments list link here);
+ * `?date=YYYY-MM-DD` just jumps.
+ */
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import FullCalendar from '@fullcalendar/react';
 import { blockedDays } from '@/lib/blockedDays';
+import { timeBlockAppliesOn } from '@/lib/timeBlocks';
 import { gridRange, regularSlots, toBusinessHours } from '@/lib/officeHours';
 import { useOfficeHours } from '@/hooks/useOfficeHours';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -8,28 +27,65 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Calendar, Clock, Plus, RefreshCw, Users, CalendarOff, Repeat } from 'lucide-react';
+import { Calendar, CalendarDays, Check, ChevronDown, Eye, Plus, RefreshCw, CalendarOff, Repeat, Search, Trash2, X, XCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import AppointmentDetailModal from './AppointmentDetailModal';
 import ScheduleAppointmentModal from './ScheduleAppointmentModal';
 import SeriesConflictModal, { type Resolution } from './SeriesConflictModal';
 import AddressAutocomplete from '@/components/ui/address-autocomplete';
 import { detectSeriesConflicts, type Conflict, type ProposedSlot } from '@/lib/seriesConflicts';
+import {
+  apptDateKey, CLOSED_STATUSES, ErrorCard, etDateKey, fmtDateKey, fmtTime12, isOpenStatus, LaneHeader, money,
+  patientNameOf, serviceLabel, shortServiceName, StatTiles, STATUS_META, statusMeta, StatusPill, weekBounds,
+} from '@/components/dashboards/admin/enhanced/scheduleShared';
 import './calendar-styles.css';
 
-const STATUS_COLORS: Record<string, string> = {
-  scheduled: '#2563eb',
-  confirmed: '#1d4ed8',
-  en_route: '#ea580c',
-  in_progress: '#0891b2',
-  completed: '#6b7280',
-  cancelled: '#fca5a5',
+// Generated Database types are stale for several tables (time_blocks,
+// activity_log, booking_audit_log) — one loose handle, same as LabOrdersTab.
+const db = supabase as any;
+
+// ──────────────────────────────────────────────────────────────────
+// Calendar buckets — ONE per non-cancelled row, by WHEN it happens. The
+// five tiles partition everything that is drawn by default.
+// ──────────────────────────────────────────────────────────────────
+type CalBucket = 'overdue' | 'today' | 'week' | 'later' | 'done' | 'cancelled';
+type CalFilterKey = 'all' | CalBucket;
+
+function calBucket(appt: any, todayKey: string, weekEnd: string): CalBucket {
+  if (CLOSED_STATUSES.has(appt.status) || appt.no_show) return 'cancelled';
+  const key = apptDateKey(appt);
+  if (!key) return 'later';
+  if (key < todayKey) return isOpenStatus(appt.status) ? 'overdue' : 'done';
+  if (key === todayKey) return 'today';
+  if (key <= weekEnd) return 'week';
+  return 'later';
+}
+
+const CAL_FILTERS: Array<{ key: CalFilterKey; label: string; desc: string }> = [
+  { key: 'all', label: 'All', desc: 'Everything on the calendar' },
+  { key: 'overdue', label: 'Past due', desc: 'Visit date has passed and it was never completed or cancelled' },
+  { key: 'today', label: 'Today', desc: "Today's visits (Eastern time)" },
+  { key: 'week', label: 'This week', desc: 'Later this week (Sunday–Saturday)' },
+  { key: 'later', label: 'Later', desc: 'After this week' },
+  { key: 'done', label: 'Done', desc: 'Completed or specimen delivered' },
+];
+const CAL_TILE_KEYS: CalFilterKey[] = ['overdue', 'today', 'week', 'later', 'done'];
+const CAL_TILE_STYLE: Record<string, string> = {
+  overdue: 'border-red-300 bg-red-50 text-red-800',
+  today: 'border-amber-300 bg-amber-50 text-amber-800',
+  week: 'border-blue-300 bg-blue-50 text-blue-800',
+  later: 'border-indigo-300 bg-indigo-50 text-indigo-800',
+  done: 'border-gray-300 bg-gray-100 text-gray-800',
 };
+
+/** Status chips, in pipeline order. Cancelled is drawn only when toggled on. */
+const CHIP_STATUSES = ['scheduled', 'confirmed', 'en_route', 'in_progress', 'completed', 'specimen_delivered', 'cancelled'];
 
 const AdminCalendar: React.FC = () => {
   // One editable source for the shaded window, the grid span and the time
@@ -47,7 +103,13 @@ const AdminCalendar: React.FC = () => {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleDefaultDate, setScheduleDefaultDate] = useState<string>('');
-  const [stats, setStats] = useState({ today: 0, thisWeek: 0, upcoming: 0 });
+  const [lastError, setLastError] = useState<string | null>(null);
+  // Tile filter (by when), status chips (which statuses are drawn), search.
+  const [filter, setFilter] = useState<CalFilterKey>('all');
+  const [hiddenStatuses, setHiddenStatuses] = useState<Set<string>>(() => new Set(['cancelled']));
+  const [search, setSearch] = useState('');
+  const [laneOpen, setLaneOpen] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [recurringModalOpen, setRecurringModalOpen] = useState(false);
   // startTime / endTime are optional. When both are blank, the block
@@ -296,29 +358,28 @@ const AdminCalendar: React.FC = () => {
 
   const fetchAppointments = useCallback(async () => {
     setLoading(true);
+    setLastError(null);
     try {
-      const { data, error } = await supabase
-        .from('appointments')
-        .select('*')
-        .order('appointment_date', { ascending: true })
-        .order('appointment_time', { ascending: true });
-
-      if (error) throw error;
-
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay());
-
-      const appts = data || [];
-      setAppointments(appts);
-      setStats({
-        today: appts.filter(a => a.appointment_date?.startsWith(todayStr) && a.status !== 'cancelled').length,
-        thisWeek: appts.filter(a => new Date(a.appointment_date) >= weekStart && a.status !== 'cancelled').length,
-        upcoming: appts.filter(a => ['scheduled', 'confirmed'].includes(a.status)).length,
-      });
-    } catch (err) {
+      // The default PostgREST page is 1000 rows; the table is past 500 and
+      // growing, so page explicitly like the appointments list does.
+      const all: any[] = [];
+      const page = 1000;
+      for (let from = 0, guard = 0; guard < 50; guard++, from += page) {
+        const { data, error } = await db
+          .from('appointments')
+          .select('*')
+          .order('appointment_date', { ascending: true })
+          .order('appointment_time', { ascending: true })
+          .range(from, from + page - 1);
+        if (error) throw error;
+        const chunk = (data as any[]) || [];
+        all.push(...chunk);
+        if (chunk.length < page) break;
+      }
+      setAppointments(all);
+    } catch (err: any) {
       console.error('Failed to fetch appointments:', err);
+      setLastError(err?.message || String(err));
     } finally {
       setLoading(false);
     }
@@ -327,18 +388,158 @@ const AdminCalendar: React.FC = () => {
   const [timeBlocks, setTimeBlocks] = useState<any[]>([]);
 
   const fetchTimeBlocks = useCallback(async () => {
-    const { data } = await supabase.from('time_blocks' as any).select('*').order('start_date');
+    const { data } = await db.from('time_blocks').select('*').order('start_date');
     setTimeBlocks(data || []);
   }, []);
 
   useEffect(() => { fetchAppointments(); fetchTimeBlocks(); }, [fetchAppointments, fetchTimeBlocks]);
 
-  const getPatientName = (appt: any): string => {
-    if (appt.patient_name) return appt.patient_name;
-    if (appt.notes?.match(/Patient:\s*([^|]+)/)) return appt.notes.match(/Patient:\s*([^|]+)/)[1].trim();
-    // Don't show raw email — show service name or generic label
-    return appt.service_name || 'Appointment';
+  // Realtime: a booking, a phleb status change or a cancellation shows up
+  // without a manual refresh.
+  useEffect(() => {
+    const ch = supabase.channel(`admin-calendar-${Math.random().toString(36).slice(2, 8)}`)
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'appointments' }, () => fetchAppointments())
+      .on('postgres_changes' as any, { event: '*', schema: 'public', table: 'time_blocks' }, () => fetchTimeBlocks())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [fetchAppointments, fetchTimeBlocks]);
+
+  // Keep the open detail in sync with refreshes.
+  useEffect(() => {
+    if (!selectedAppointment) return;
+    const fresh = appointments.find(a => a.id === selectedAppointment.id);
+    if (fresh && fresh !== selectedAppointment) setSelectedAppointment(fresh);
+  }, [appointments]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const gotoDate = useCallback((key: string, view?: string) => {
+    try {
+      const api = calendarRef.current?.getApi();
+      if (!api) return;
+      if (view && api.view.type !== view) api.changeView(view, key);
+      else api.gotoDate(key);
+    } catch (e) { console.warn('[calendar] navigate failed:', e); }
+  }, []);
+
+  // Deep links: ?appointment=<id> opens the visit and jumps to its date;
+  // ?date=YYYY-MM-DD just jumps. Consumed once, then stripped from the URL.
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current || loading) return;
+    const apptId = searchParams.get('appointment');
+    const date = searchParams.get('date');
+    if (!apptId && !date) return;
+    deepLinkDone.current = true;
+    if (apptId) {
+      const appt = appointments.find(a => a.id === apptId);
+      if (appt) {
+        const key = apptDateKey(appt);
+        if (key) setTimeout(() => gotoDate(key, 'timeGridDay'), 0);
+        if (CLOSED_STATUSES.has(appt.status)) setHiddenStatuses(prev => { const n = new Set(prev); n.delete('cancelled'); return n; });
+        setSelectedAppointment(appt);
+        setDetailModalOpen(true);
+      } else {
+        toast.error('That appointment is not on the calendar (it may have been deleted).');
+      }
+    } else if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setTimeout(() => gotoDate(date), 0);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('appointment'); next.delete('date');
+    setSearchParams(next, { replace: true });
+  }, [loading, appointments, searchParams, setSearchParams, gotoDate]);
+
+  const getPatientName = (appt: any): string => patientNameOf(appt);
+
+  // ── Buckets, counts, visibility ──────────────────────────────────
+  const todayKey = etDateKey();
+  const weekEnd = weekBounds(todayKey).end;
+  const bucketOf = useMemo(() => {
+    const m = new Map<string, CalBucket>();
+    for (const a of appointments) m.set(a.id, calBucket(a, todayKey, weekEnd));
+    return m;
+  }, [appointments, todayKey, weekEnd]);
+
+  const tileCounts = useMemo(() => {
+    const c: Record<string, number> = { all: 0, overdue: 0, today: 0, week: 0, later: 0, done: 0 };
+    for (const a of appointments) {
+      const b = bucketOf.get(a.id)!;
+      if (b === 'cancelled') continue;
+      c.all++; c[b]++;
+    }
+    return c;
+  }, [appointments, bucketOf]);
+
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const a of appointments) {
+      if (filter !== 'all' && bucketOf.get(a.id) !== filter) continue;
+      const s = a.status || 'unknown';
+      c[s] = (c[s] || 0) + 1;
+    }
+    return c;
+  }, [appointments, bucketOf, filter]);
+
+  const overdueRows = useMemo(() =>
+    appointments.filter(a => bucketOf.get(a.id) === 'overdue')
+      .sort((a, b) => apptDateKey(a).localeCompare(apptDateKey(b))),
+  [appointments, bucketOf]);
+
+  const upcomingBlocks = useMemo(() =>
+    timeBlocks.filter((b: any) => (b.end_date || b.start_date) >= todayKey)
+      .sort((a: any, b: any) => String(a.start_date).localeCompare(String(b.start_date))),
+  [timeBlocks, todayKey]);
+
+  const q = search.trim().toLowerCase();
+  const matchesSearch = (a: any) => q === '' ||
+    [patientNameOf(a), a.patient_email, a.patient_phone, a.address, a.service_name, a.service_type]
+      .some(h => (h || '').toString().toLowerCase().includes(q));
+
+  const pickTile = (k: string, isActive: boolean) => {
+    const next = isActive ? 'all' : (k as CalFilterKey);
+    setFilter(next);
+    if (next === 'all') return;
+    const first = appointments
+      .filter(a => bucketOf.get(a.id) === next && matchesSearch(a))
+      .map(apptDateKey).filter(Boolean).sort();
+    if (next === 'today') gotoDate(todayKey, 'timeGridDay');
+    else if (next === 'week') gotoDate(todayKey, 'timeGridWeek');
+    else if (next === 'overdue' || next === 'done') { if (first.length) gotoDate(first[first.length - 1], 'dayGridMonth'); }
+    else if (first.length) gotoDate(first[0], 'dayGridMonth');
   };
+
+  const toggleStatus = (s: string) => setHiddenStatuses(prev => {
+    const n = new Set(prev);
+    if (n.has(s)) n.delete(s); else n.add(s);
+    return n;
+  });
+
+  // Close out a past-due visit straight from the lane.
+  const closeOut = useCallback(async (appt: any, status: 'completed' | 'cancelled') => {
+    if (status === 'cancelled' && !window.confirm(`Cancel ${patientNameOf(appt)}'s visit from ${fmtDateKey(apptDateKey(appt))}?`)) return;
+    const patch: Record<string, any> = { status };
+    if (status === 'cancelled') patch.cancelled_at = new Date().toISOString();
+    else patch.completion_time = new Date().toISOString();
+    const { error } = await db.from('appointments').update(patch).eq('id', appt.id);
+    if (error) { toast.error(`Couldn't update: ${error.message}`); return; }
+    setAppointments(prev => prev.map(a => a.id === appt.id ? { ...a, ...patch } : a));
+    toast.success(`${patientNameOf(appt)} → ${statusMeta(status).label}`);
+  }, []);
+
+  const removeBlock = useCallback(async (blockId: string, title: string) => {
+    // Removing deletes the whole block row, i.e. EVERY date it covers —
+    // say so, rather than implying only the clicked day reopens.
+    const row: any = timeBlocks.find((b: any) => b.id === blockId);
+    const weekday = String(row?.recurring_day || '').replace(/^./, (c: string) => c.toUpperCase());
+    const scope = row?.recurring
+      ? `This removes the weekly block on every ${weekday}${row.end_date && row.end_date > row.start_date ? ` through ${row.end_date}` : ''}.`
+      : row?.end_date && row.end_date !== row.start_date
+        ? `This removes the block on every day from ${row.start_date} to ${row.end_date}.`
+        : 'Slots in this window will become bookable again.';
+    if (!window.confirm(`${title}\n\nRemove this block? ${scope}\n\nTo book one patient inside a block without removing it, use New appointment and tick "Override Availability".`)) return;
+    const { error } = await db.from('time_blocks').delete().eq('id', blockId);
+    if (error) toast.error(`Couldn't remove block: ${error.message}`);
+    else { toast.success('Block removed — slots reopened.'); fetchTimeBlocks(); }
+  }, [fetchTimeBlocks, timeBlocks]);
 
   // Parse appointment_time to 24h hours/minutes
   const parseTime = (timeStr: string): { h: number; m: number } => {
@@ -351,13 +552,6 @@ const AdminCalendar: React.FC = () => {
     }
     const parts = t.split(':').map(Number);
     return { h: parts[0] || 0, m: parts[1] || 0 };
-  };
-
-  // Format time for display (24h → 12h)
-  const formatTime12h = (h: number, m: number): string => {
-    const period = h >= 12 ? 'PM' : 'AM';
-    const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
-    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
   };
 
   // Custom event content renderer — Square-style compact cards
@@ -381,15 +575,7 @@ const AdminCalendar: React.FC = () => {
     }
 
     // Week/Day view — Square-style stacked layout
-    const serviceName = appt.service_name || appt.service_type || '';
-    // Shorten common service names
-    const shortService = serviceName
-      .replace('At-Home Blood Work (Seminole, Orange, & Volusia County)', 'At-Home Blood Work')
-      .replace('Mobile Blood Draw', 'At-Home Blood Work')
-      .replace('Specialty Collection Kit', 'Specialty Kit')
-      .replace('Therapeutic Phlebotomy', 'Therapeutic Blood Work')
-      .replace('Senior Blood Draw', 'Senior (65+)')
-      .replace("Patient's Pricing ONLY", "Patient's Pricing");
+    const shortService = appt.service_name ? shortServiceName(appt.service_name) : serviceLabel(appt);
 
     return (
       <div style={{ overflow: 'hidden', height: '100%' }}>
@@ -400,10 +586,15 @@ const AdminCalendar: React.FC = () => {
     );
   };
 
-  // Filter: always hide cancelled appointments from the calendar
+  // Visibility: status chips (cancelled off by default), the active tile and
+  // the search box all narrow what is drawn.
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const [currentView, setCurrentView] = useState(isMobile ? 'timeGridDay' : 'timeGridWeek');
-  const nonCancelled = appointments.filter(a => a.status !== 'cancelled');
+  const nonCancelled = appointments.filter(a =>
+    !hiddenStatuses.has(a.status) &&
+    (filter === 'all' || bucketOf.get(a.id) === filter) &&
+    matchesSearch(a),
+  );
 
   // Family-group dedupe: when a household books multiple patients in the
   // same visit, the modal creates one primary row + one row per companion
@@ -445,9 +636,6 @@ const AdminCalendar: React.FC = () => {
       ? `${dateOnly}T${String(endH).padStart(2,'0')}:${String(endM).padStart(2,'0')}:00`
       : undefined;
 
-    // Build rich title: "10:00a Patient Name" for month view
-    const timeLabel = formatTime12h(h, m).replace(':00', '').replace(' AM', 'a').replace(' PM', 'p').toLowerCase();
-
     return {
       id: appt.id,
       title: name,
@@ -455,7 +643,7 @@ const AdminCalendar: React.FC = () => {
       end: endStr,
       allDay: !appt.appointment_time,
       className: `fc-event-${appt.status}`,
-      backgroundColor: STATUS_COLORS[appt.status] || '#1e293b',
+      backgroundColor: statusMeta(appt.status).color,
       borderColor: 'transparent',
       extendedProps: { appointment: appt },
     };
@@ -484,6 +672,25 @@ const AdminCalendar: React.FC = () => {
   // Pre-fix bug (Tuesday 5/19 case): every block rendered allDay=true regardless
   // of times, so a 12:30 PM–8:00 PM block painted the entire day red and staff
   // had no idea why the morning was also greyed.
+  // Which dates a block actually lands on. One-off blocks: every day of the
+  // stored range. Recurring blocks: only their weekday (timeBlockAppliesOn,
+  // the same rule the booking engine uses), from start_date on. Before this,
+  // the five Mon–Fri 6:15–7:45 rows (one per weekday, same range) were each
+  // drawn on EVERY day of the range — five stacked bands on every date,
+  // Saturdays included — while bookings correctly honoured the weekday.
+  // A recurring row saved with end_date == start_date repeats open-ended, so
+  // walk a one-year horizon for it.
+  const blockDates = (block: any): string[] => {
+    if (!block.recurring) return blockedDays(block.start_date, block.end_date);
+    let end = block.end_date;
+    if (!end || end <= block.start_date) {
+      const d = new Date(`${block.start_date}T12:00:00`);
+      d.setDate(d.getDate() + 365);
+      end = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+    return blockedDays(block.start_date, end).filter((day) => timeBlockAppliesOn(block, day));
+  };
+
   const blockEvents = timeBlocks.flatMap((block: any) => {
     const start24 = time12to24(block.start_time);
     const end24 = time12to24(block.end_time);
@@ -507,7 +714,7 @@ const AdminCalendar: React.FC = () => {
       // Dates are walked at NOON LOCAL for the same reason the appointment
       // list does it: parsing 'YYYY-MM-DD' alone lands on UTC midnight, which
       // is the previous day for a US-East user.
-      const days = blockedDays(block.start_date, block.end_date);
+      const days = blockDates(block);
 
       return days.map(day => ({
         id: `block-${block.id}-${day}`,
@@ -521,6 +728,25 @@ const AdminCalendar: React.FC = () => {
         classNames: ['fc-blocked-date'],
         extendedProps: { isBlock: true, reason: block.reason, partial: true, start_time: block.start_time, end_time: block.end_time },
       }));
+    }
+
+    // Recurring full-day block (e.g. "closed every Sunday"): one all-day
+    // background + label per matching date, not one span over the range.
+    if (block.recurring) {
+      return blockDates(block).flatMap((day) => [
+        {
+          id: `block-${block.id}-${day}`,
+          title, start: day, allDay: true, display: 'background',
+          backgroundColor: '#fecaca', borderColor: '#ef4444', classNames: ['fc-blocked-date'],
+          extendedProps: { isBlock: true, reason: block.reason, partial: false },
+        },
+        {
+          id: `block-label-${block.id}-${day}`,
+          title, start: day, allDay: true,
+          backgroundColor: '#ef4444', borderColor: '#dc2626', textColor: '#ffffff',
+          extendedProps: { isBlock: true, reason: block.reason },
+        },
+      ]);
     }
 
     // Full-day block — covers the whole date as a background event + a
@@ -568,29 +794,10 @@ const AdminCalendar: React.FC = () => {
     if (info.event.extendedProps.isBlock) {
       const rawId = String(info.event.id || '');
       // Timed bands are drawn one per day with ids `block-<uuid>-YYYY-MM-DD`;
-      // the date suffix must go too, or the delete targets a malformed id
-      // and every timed block was impossible to remove from the calendar.
+      // strip both affixes or the delete targets a malformed id.
       const blockId = rawId.replace(/^block-(label-)?/, '').replace(/-\d{4}-\d{2}-\d{2}$/, '');
       if (!blockId) { toast.info(info.event.title); return; }
-      // Removing deletes the whole block row, i.e. EVERY date it covers —
-      // say so, rather than implying only the clicked day reopens.
-      const row: any = timeBlocks.find((b: any) => b.id === blockId);
-      const weekday = String(row?.recurring_day || '').replace(/^./, (c: string) => c.toUpperCase());
-      const scope = row?.recurring
-        ? `This removes the weekly block on every ${weekday}${row.end_date && row.end_date > row.start_date ? ` through ${row.end_date}` : ''}.`
-        : row?.end_date && row.end_date !== row.start_date
-          ? `This removes the block on every day from ${row.start_date} to ${row.end_date}.`
-          : 'Slots in this window will become bookable again.';
-      const ok = window.confirm(`${info.event.title}\n\nRemove this block? ${scope}\n\nTo book one patient inside a block without removing it, use New appointment and tick "Override Availability".`);
-      if (!ok) return;
-      supabase.from('time_blocks' as any).delete().eq('id', blockId).then(({ error }) => {
-        if (error) {
-          toast.error(`Couldn't remove block: ${error.message}`);
-        } else {
-          toast.success('Block removed — slots reopened.');
-          fetchTimeBlocks();
-        }
-      });
+      removeBlock(blockId, info.event.title);
       return;
     }
     const appt = info.event.extendedProps.appointment;
@@ -684,7 +891,7 @@ const AdminCalendar: React.FC = () => {
 
       // Log activity + booking audit trail (drag had zero audit trail before)
       try {
-        await supabase.from('activity_log' as any).insert({
+        await db.from('activity_log').insert({
           patient_id: appt.patient_id || null,
           activity_type: 'reschedule',
           description: `Appointment drag-rescheduled to ${newDateStr} at ${newTimeStr}${conflictsAt.length > 0 ? ` (overlapping ${conflictsAt.length} other)` : ''}`,
@@ -693,7 +900,7 @@ const AdminCalendar: React.FC = () => {
         });
       } catch { /* non-fatal */ }
       try {
-        await supabase.from('booking_audit_log' as any).insert({
+        await db.from('booking_audit_log').insert({
           stage: 'admin_drag_reschedule',
           patient_email: appt.patient_email || null,
           patient_phone: appt.patient_phone || null,
@@ -717,49 +924,159 @@ const AdminCalendar: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Header — compact like Square */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div className="flex items-center gap-4">
-          <h2 className="text-lg font-semibold">Calendar</h2>
-          <div className="hidden sm:flex items-center gap-3 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{stats.today}</span> today
-            <span className="text-muted-foreground/40">|</span>
-            <span className="font-medium text-foreground">{stats.upcoming}</span> upcoming
-          </div>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 text-gray-900">
+            <CalendarDays className="h-6 w-6 text-[#B91C1C]" aria-hidden="true" />
+            Calendar
+          </h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Drag to reschedule, click a day to book, click a visit to manage it — updates in real time.
+            {tileCounts.overdue > 0 && <span className="ml-1 font-medium text-red-700">{tileCounts.overdue} past due and never closed out.</span>}
+            {tileCounts.overdue === 0 && tileCounts.today > 0 && <span className="ml-1 font-medium text-amber-700">{tileCounts.today} today.</span>}
+          </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" size="sm" onClick={fetchAppointments} className="h-8 px-2">
-            <RefreshCw className="h-3.5 w-3.5" />
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => { fetchAppointments(); fetchTimeBlocks(); }} className="gap-1.5 text-xs h-10 sm:h-9 min-w-10 sm:min-w-9" disabled={loading} aria-label="Refresh">
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} aria-hidden="true" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setBlockModalOpen(true)}>
-            <CalendarOff className="h-3.5 w-3.5 mr-1" /> Block
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs h-10 sm:h-9" onClick={() => setBlockModalOpen(true)}>
+            <CalendarOff className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Block time</span>
+            {upcomingBlocks.length > 0 && <span className="rounded-full bg-red-100 text-red-800 px-1.5 text-[10px] font-bold">{upcomingBlocks.length}</span>}
           </Button>
-          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setRecurringModalOpen(true)}>
-            <Repeat className="h-3.5 w-3.5 mr-1" /> Recurring
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs h-10 sm:h-9" onClick={() => setRecurringModalOpen(true)}>
+            <Repeat className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Recurring series</span>
           </Button>
-          <Button size="sm" className="h-8 bg-[#1e293b] hover:bg-[#0f172a] text-white text-xs"
+          <Button size="sm" className="gap-1.5 text-xs h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white"
             onClick={() => { setScheduleDefaultDate(''); setScheduleModalOpen(true); }}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Create
+            <Plus className="h-4 w-4" aria-hidden="true" /> New appointment
           </Button>
         </div>
       </div>
 
-      {/* Status Legend — inline, subtle */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
-        {Object.entries(STATUS_COLORS).map(([status, color]) => (
-          <div key={status} className="flex items-center gap-1">
-            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: color, opacity: status === 'cancelled' ? 0.5 : 1 }} />
-            <span className="capitalize text-muted-foreground">{status.replace('_', ' ')}</span>
+      {/* Stat tiles — click to filter AND jump the calendar there. The five
+          tiles partition every non-cancelled appointment. */}
+      <StatTiles
+        keys={CAL_TILE_KEYS}
+        defs={CAL_FILTERS}
+        counts={tileCounts}
+        active={filter}
+        loading={loading && appointments.length === 0}
+        styles={CAL_TILE_STYLE}
+        hotKey="overdue"
+        onPick={pickTile}
+        ariaLabel="Appointment counts by when"
+        cols={5}
+      />
+
+      {lastError && <ErrorCard title="Couldn't load the calendar" message={lastError} onRetry={fetchAppointments} />}
+
+      {/* Needs action lane — past-due visits never closed out. */}
+      {overdueRows.length > 0 && (filter === 'all' || filter === 'overdue') && (
+        <section aria-labelledby="lane-overdue" className="rounded-lg border border-red-200 bg-red-50/40 p-3">
+          <div className="flex items-start gap-2">
+            <button type="button" onClick={() => setLaneOpen(o => !o)} aria-expanded={laneOpen} aria-controls="lane-overdue-list" aria-label={laneOpen ? 'Collapse' : 'Expand'} className="h-6 w-6 flex items-center justify-center rounded hover:bg-red-100 flex-shrink-0">
+              <ChevronDown className={cn('h-4 w-4 text-red-700 transition', !laneOpen && '-rotate-90')} aria-hidden="true" />
+            </button>
+            <div className="flex-1 min-w-0 [&>div]:mb-0">
+              <LaneHeader id="lane-overdue" title="Needs action" count={overdueRows.length} tone="red" hint="past-due visits still marked open — close them out so stats, payouts and reminders stay right" />
+            </div>
           </div>
-        ))}
+          {laneOpen && (
+            <ul id="lane-overdue-list" className="mt-2 space-y-1.5">
+              {overdueRows.slice(0, 8).map(a => (
+                <li key={a.id} className="rounded-md border border-gray-200 bg-white px-3 py-2 flex flex-wrap items-center gap-2 sm:gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-gray-800 truncate">{patientNameOf(a)}</p>
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {fmtDateKey(apptDateKey(a), { weekday: 'short', month: 'short', day: 'numeric' })}{fmtTime12(a.appointment_time) ? ` · ${fmtTime12(a.appointment_time)}` : ''} · {serviceLabel(a)} · {money(a.total_amount)}
+                    </p>
+                  </div>
+                  <StatusPill status={a.status} />
+                  <div className="flex items-center gap-1 w-full sm:w-auto">
+                    <Button size="sm" className="h-9 text-xs gap-1 bg-[#B91C1C] hover:bg-[#991B1B] text-white flex-1 sm:flex-none" onClick={() => closeOut(a, 'completed')}>
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" /> Completed
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-9 text-xs gap-1 text-red-700" onClick={() => closeOut(a, 'cancelled')}>
+                      <XCircle className="h-3.5 w-3.5" aria-hidden="true" /> Cancel
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-9 w-9 p-0" aria-label={`Open ${patientNameOf(a)}`} onClick={() => { setSelectedAppointment(a); setDetailModalOpen(true); }}>
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  </div>
+                </li>
+              ))}
+              {overdueRows.length > 8 && (
+                <li className="text-[11px] text-gray-500 px-1">
+                  {overdueRows.length - 8} more — use <button type="button" className="underline font-semibold" onClick={() => pickTile('overdue', false)}>Past due</button> or the All appointments list.
+                </li>
+              )}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {/* Search + status chips (toggle which statuses are drawn) */}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" aria-hidden="true" />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Find a patient on the calendar — name, phone, email, address…"
+            aria-label="Search calendar"
+            className="h-10 sm:h-9 pl-8 text-sm"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 flex items-center justify-center text-gray-400 hover:text-gray-700">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 pb-1 sm:flex-wrap" role="group" aria-label="Statuses shown">
+          <span className="text-[11px] text-gray-500 whitespace-nowrap mr-0.5">Show</span>
+          {CHIP_STATUSES.map(s => {
+            const on = !hiddenStatuses.has(s);
+            const meta = STATUS_META[s];
+            const n = statusCounts[s] || 0;
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => toggleStatus(s)}
+                aria-pressed={on}
+                title={on ? `Hide ${meta.label.toLowerCase()} visits` : `Show ${meta.label.toLowerCase()} visits`}
+                className={cn(
+                  'inline-flex items-center gap-1.5 h-9 px-3 rounded-full border text-xs font-medium whitespace-nowrap transition',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40',
+                  on ? 'bg-white text-gray-800 border-gray-300' : 'bg-gray-50 text-gray-400 border-gray-200 line-through decoration-gray-300',
+                )}
+              >
+                <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: meta.color, opacity: on ? 1 : 0.35 }} aria-hidden="true" />
+                {meta.label}
+                <span className={cn('tabular-nums', on ? 'text-gray-500' : 'text-gray-400')}>{n}</span>
+              </button>
+            );
+          })}
+          {(filter !== 'all' || search) && (
+            <button type="button" onClick={() => { setFilter('all'); setSearch(''); }} className="h-9 px-3 text-xs font-medium text-[#B91C1C] whitespace-nowrap">
+              Clear filter
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Calendar */}
       <Card className="border shadow-sm">
         <CardContent className="p-2 sm:p-3">
-          {loading ? (
-            <div className="flex justify-center items-center py-20">
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          {loading && appointments.length === 0 ? (
+            <div className="flex flex-col justify-center items-center py-20 gap-3" aria-busy="true" aria-label="Loading calendar">
+              <div className="w-8 h-8 border-2 border-[#B91C1C] border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs text-gray-500">Loading the calendar…</p>
             </div>
           ) : (
             <FullCalendar
@@ -806,6 +1123,17 @@ const AdminCalendar: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      <p className="text-[11px] text-gray-400">
+        Drawing {calendarEvents.length} of {appointments.length} appointment{appointments.length === 1 ? '' : 's'}
+        {filter !== 'all' ? ` · ${CAL_FILTERS.find(f => f.key === filter)?.label}` : ''}
+        {q ? ` · matching “${search.trim()}”` : ''}
+        {hiddenStatuses.size > 0 ? ` · hiding ${Array.from(hiddenStatuses).map(s => statusMeta(s).label.toLowerCase()).join(', ')}` : ''}
+        {' · '}{timeBlocks.length} block{timeBlocks.length === 1 ? '' : 's'} · times in Eastern
+        {!loading && appointments.length > 0 && calendarEvents.length === 0 && (
+          <> · <button type="button" className="underline text-[#B91C1C] font-semibold" onClick={() => { setFilter('all'); setSearch(''); setHiddenStatuses(new Set(['cancelled'])); }}>nothing matches — reset</button></>
+        )}
+      </p>
 
       {/* Modals */}
       <AppointmentDetailModal
@@ -960,7 +1288,7 @@ const AdminCalendar: React.FC = () => {
                     }
                   }
 
-                  const { error } = await supabase.from('time_blocks' as any).insert({
+                  const { error } = await db.from('time_blocks').insert({
                     start_date: blockForm.startDate, end_date: blockForm.endDate,
                     reason: blockForm.reason || 'Blocked', block_type: blockForm.blockType,
                     ...(useTimeWindow ? { start_time: startTime12, end_time: endTime12 } : {}),
@@ -981,6 +1309,38 @@ const AdminCalendar: React.FC = () => {
               }}>
               {isBlockSubmitting ? 'Blocking...' : 'Block Dates'}
             </Button>
+
+            {/* Upcoming blocks — the only other way to remove one was to find
+                and click its band on the calendar. */}
+            <div className="border-t border-gray-200 pt-3">
+              <p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
+                Upcoming blocks <span className="text-gray-400 font-normal normal-case tracking-normal">· {upcomingBlocks.length}</span>
+              </p>
+              {upcomingBlocks.length === 0 ? (
+                <p className="text-xs text-gray-500">Nothing blocked from today on.</p>
+              ) : (
+                <ul className="space-y-1 max-h-48 overflow-y-auto">
+                  {upcomingBlocks.map((b: any) => {
+                    const span = b.end_date && b.end_date !== b.start_date
+                      ? `${fmtDateKey(b.start_date, { month: 'short', day: 'numeric' })} – ${fmtDateKey(b.end_date, { month: 'short', day: 'numeric' })}`
+                      : fmtDateKey(b.start_date, { weekday: 'short', month: 'short', day: 'numeric' });
+                    const window_ = b.start_time && b.end_time ? `${b.start_time}–${b.end_time}` : 'all day';
+                    const title = `🚫 BLOCKED${b.reason ? `: ${b.reason}` : ''}${b.start_time && b.end_time ? ` (${window_})` : ''}`;
+                    return (
+                      <li key={b.id} className="flex items-center gap-2 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-gray-800 truncate">{span} <span className="text-gray-500 font-normal">· {window_}</span></p>
+                          <p className="text-[11px] text-gray-500 truncate">{b.reason || 'Blocked'}{b.block_type === 'time_off' ? ' · staff time off' : ''}</p>
+                        </div>
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-gray-500 hover:text-red-700" aria-label="Remove block" onClick={() => removeBlock(b.id, title)}>
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
           </div>
         </DialogContent>
       </Dialog>
