@@ -5,33 +5,21 @@
 // Hormozi frame: show the slots the non-member CAN'T have as LOCKED (not
 // hidden) so the upgrade math is visible in the moment of decision.
 
+import { evaluateSlot, type MemberTier } from './bookingWindows.ts';
+
 export type Tier = 'none' | 'regular_member' | 'vip' | 'concierge';
 
-// Access windows per tier (24h clock; fractional hours allowed for Sat 9/11)
-const TIER_WINDOWS: Record<Tier, {
-  weekday: { start: number; end: number } | null;
-  saturday: { start: number; end: number } | null;
-  sunday: boolean;
-}> = {
-  // Updated 2026-04-25: VIP-exclusive after-hours = 1:30 PM – 2:30 PM.
-  // Below 1:30 PM is open to everyone. AdventHealth destination overrides
-  // these windows entirely (6 AM – 6 PM Mon–Sun all tiers — handled in
-  // availability.ts via isAdventHealthDestination).
-  // The 5 PM-prior unlock cron opens 1:30-2:30 to all tiers if no VIP has
-  // booked tomorrow.
-  //
-  // Start is 5, not 6 (2026-10-01): these windows must never be what hides
-  // an early slot. The office hours in Settings bound the grid
-  // (availability.ts officeOpenMinutes); with a fixed 6 here, 5 AM office
-  // hours made every 5 AM slot read "Concierge only". Mirrors
-  // src/lib/bookingWindows.ts, which made the same change.
-  none:           { weekday: { start: 5, end: 13.5 }, saturday: { start: 5, end: 13.5 }, sunday: true },
-  regular_member: { weekday: { start: 5, end: 13.5 }, saturday: { start: 5, end: 13.5 }, sunday: true },
-  vip:            { weekday: { start: 5, end: 14.5 }, saturday: { start: 5, end: 14.5 }, sunday: true },
-  concierge:      { weekday: { start: 5, end: 14.5 }, saturday: { start: 5, end: 14.5 }, sunday: true },
-};
+// Access windows live in ./bookingWindows.ts (premium-hours model, 2026-10-02):
+// weekdays are open to every tier 5 AM – 3 PM (premium 5–7 / 1–3 priced, not
+// gated); the only tier-held inventory left is a weekend slot more than 24 h
+// out, which VIP / Concierge can book and everyone else sees labelled.
+// AdventHealth destination still bypasses gating in availability.ts.
 
 const TIER_ORDER: Tier[] = ['none', 'regular_member', 'vip', 'concierge'];
+
+const TO_MEMBER_TIER: Record<Tier, MemberTier> = {
+  none: 'none', regular_member: 'member', vip: 'vip', concierge: 'concierge',
+};
 
 // Membership pricing (cents) — matches lib/memberBenefits.ts
 export const TIER_ANNUAL_PRICE_CENTS: Record<Tier, number> = {
@@ -48,36 +36,20 @@ export const TIER_VISIT_PRICE_CENTS: Record<string, Record<Tier, number>> = {
   'in-office':{ none:  5500, regular_member:  4900, vip:  4500, concierge: 3900 },
 };
 
-function parseTime(t: string): { h: number; m: number } {
-  const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
-  if (!match) return { h: 0, m: 0 };
-  let h = parseInt(match[1], 10);
-  const m = parseInt(match[2], 10);
-  const period = match[3].toUpperCase();
-  if (period === 'PM' && h !== 12) h += 12;
-  if (period === 'AM' && h === 12) h = 0;
-  return { h, m };
-}
-
-function isSlotInTierWindow(tier: Tier, dateIso: string, time: string): boolean {
-  const date = new Date(dateIso + 'T12:00:00');
-  const dow = date.getDay();
-  const { h, m } = parseTime(time);
-  const hourFrac = h + m / 60;
-  const w = TIER_WINDOWS[tier];
-
-  if (dow === 0) return w.sunday;
-  if (dow === 6) return w.saturday != null && hourFrac >= w.saturday.start && hourFrac < w.saturday.end;
-  // weekday
-  return w.weekday != null && hourFrac >= w.weekday.start && hourFrac < w.weekday.end;
+function isSlotInTierWindow(tier: Tier, dateIso: string, time: string, now?: Date): boolean {
+  const rule = evaluateSlot({ tier: TO_MEMBER_TIER[tier], dateIso, time, isFasting: false, now });
+  // A held weekend slot is the only tier-specific "no"; closed windows are
+  // closed for everyone and the grid never offers them.
+  return rule.bookable || (!rule.vipHold && rule.window === 'closed');
 }
 
 /**
- * Minimum tier that can book this slot. Returns 'none' if anyone can book.
+ * Minimum tier that can book this slot right now. Returns 'none' if anyone
+ * can book (every weekday slot; weekend slots inside the 24 h release).
  */
-export function minTierForSlot(dateIso: string, time: string): Tier {
+export function minTierForSlot(dateIso: string, time: string, now?: Date): Tier {
   for (const tier of TIER_ORDER) {
-    if (isSlotInTierWindow(tier, dateIso, time)) return tier;
+    if (isSlotInTierWindow(tier, dateIso, time, now)) return tier;
   }
   return 'concierge';
 }

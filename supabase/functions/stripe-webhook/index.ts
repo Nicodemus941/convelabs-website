@@ -2115,6 +2115,10 @@ async function handleAppointmentPayment(session: any) {
     const appointmentTime = metadata.appointment_time || null;
     const servicePrice = parseInt(metadata.service_price || '0', 10); // cents
     const tipAmount = parseInt(metadata.tip_amount || '0', 10); // cents
+    // Premium-hours fee (cents) charged as its own line item. Business
+    // revenue: stored on premium_fee and subtracted by compute_phleb_take_v2
+    // before the phleb split, never folded into surcharge_amount.
+    const premiumFeeCents = parseInt(metadata.premium_fee_cents || '0', 10) || 0;
     const userId = metadata.user_id || null;
 
     // Build address string (include apt/unit if present)
@@ -2315,10 +2319,11 @@ async function handleAppointmentPayment(session: any) {
           metadata.instructions ? `Instructions: ${metadata.instructions}` : '',
           metadata.gate_code ? `Gate Code: ${metadata.gate_code}` : '',
         ].filter(Boolean).join(' | ') || null,
-        total_amount: (servicePrice + tipAmount) / 100, // convert cents to dollars
+        total_amount: (servicePrice + tipAmount + premiumFeeCents) / 100, // convert cents to dollars
         service_price: servicePrice / 100,
         tip_amount: tipAmount / 100,
         surcharge_amount: 0,
+        premium_fee: premiumFeeCents / 100,
         stripe_checkout_session_id: checkoutSessionId,
         stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
         // Honor client-supplied duration when present; the appointments_autofill

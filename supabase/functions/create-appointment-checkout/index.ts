@@ -3,6 +3,7 @@ import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { isSlotStillAvailable, getAvailableSlotsForDate, normalizeSlotTime } from '../_shared/availability.ts';
 import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow, visitMinutesForBlocks } from '../_shared/timeBlocks.ts';
+import { evaluateSlot, premiumFeeCents, todayIsoET, normalizeTime as normalizeHHMM, VIP_HOLD_LABEL } from '../_shared/bookingWindows.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -81,6 +82,11 @@ async function verifyMemberTier(email: string | undefined): Promise<MemberTier> 
  * tier + founding_member flag. Replaces the older verifyMemberTier so
  * downstream code can also enforce founding-perk free family slot.
  */
+/** Membership signups reuse this endpoint — no appointment, no slot rules. */
+function isMembershipPurchaseType(serviceType: unknown): boolean {
+  return String(serviceType || '').toLowerCase() === 'membership';
+}
+
 async function verifyMembership(email: string | undefined): Promise<{ tier: MemberTier; isFounding: boolean }> {
   if (!email) return { tier: 'none', isFounding: false };
   try {
@@ -1164,6 +1170,70 @@ Deno.serve(async (req) => {
     // checkouts. Flag is captured here for the post-session block.
     const willUseMemberBenefit = serverTier !== 'none' && priceCorrection > 0;
 
+    // ─── PREMIUM HOURS: access rules + fee, from the shared rules module ──
+    // _shared/bookingWindows.ts is byte-identical to src/lib/bookingWindows.ts,
+    // so the grid and this check agree by construction. Enforced here:
+    //   • weekend slot still held for VIP/Concierge (outside the 24 h
+    //     release) and the verified tier isn't VIP/Concierge → 409
+    //   • fasting visit starting at/after noon → 409
+    //   • premium fee (+$10 non-members, $0 for every paid member incl. a
+    //     membership bundled into THIS checkout) charged as its own line
+    //     item below — never trusted from the client, and never stacked on
+    //     the same-day fee or the after-hours surcharge.
+    // Left alone on purpose: the AdventHealth destination override (access
+    // bypass, fee still priced by time of day) and the after-hours set.
+    let premiumFeeCentsServer = 0;
+    let premiumWindowServer: string = 'n/a';
+    if (!isMembershipPurchaseType(serviceType) && appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+      const hhmm = normalizeHHMM(String(appointmentTime));
+      const isAdvent = /advent/i.test(String(labDestination || ''));
+      const isFastingVisit = String(serviceDetails?.selectedService || '').toLowerCase() === 'fasting-blood-draw'
+        || serviceDetails?.fasting === true;
+      // After-hours boundary from Settings > Office Hours (same row the grid
+      // reads); default 5:30 PM when nothing is saved.
+      let afterHoursFromMin = 17 * 60 + 30;
+      try {
+        const { data: oh } = await supabaseClient.from('system_settings').select('value').eq('key', 'office_hours').maybeSingle();
+        const raw = String((oh as any)?.value?.afterHoursFrom || '');
+        const m = /^(\d{1,2}):(\d{2})$/.exec(raw);
+        if (m) afterHoursFromMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+      } catch { /* default */ }
+      const slotMin = hhmm ? parseInt(hhmm.slice(0, 2), 10) * 60 + parseInt(hhmm.slice(3, 5), 10) : -1;
+      const isAfterHoursSlot = slotMin >= afterHoursFromMin;
+      const isSameDayVisit = dateOnly === todayIsoET();
+
+      if (hhmm && !isAdvent && !isAfterHoursSlot) {
+        const rule = evaluateSlot({ tier: effectiveTier, dateIso: dateOnly, time: hhmm, isFasting: isFastingVisit });
+        if (rule.vipHold) {
+          console.warn(`[premium-hours] ${patientDetails?.email} tier=${effectiveTier} tried held weekend slot ${dateOnly} ${hhmm} (releases ${rule.releaseAt})`);
+          return new Response(JSON.stringify({
+            error: 'slot_vip_hold',
+            message: `${VIP_HOLD_LABEL}. This slot opens to everyone 24 hours before it starts — join the waitlist or become a member to book it now.`,
+            release_at: rule.releaseAt,
+          }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        if (!rule.bookable && isFastingVisit) {
+          return new Response(JSON.stringify({
+            error: 'fasting_after_noon',
+            message: rule.reason || 'Fasting visits start before noon. Please pick an earlier time.',
+          }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        premiumWindowServer = rule.window;
+      }
+      if (hhmm) {
+        premiumFeeCentsServer = premiumFeeCents({
+          tier: effectiveTier,
+          dateIso: dateOnly,
+          time: hhmm,
+          sameDayFeeApplies: isSameDayVisit,
+          afterHoursFeeApplies: isAfterHoursSlot,
+        });
+      }
+      if (premiumFeeCentsServer > 0) {
+        console.log(`[premium-hours] ${patientDetails?.email} tier=${effectiveTier} ${dateOnly} ${hhmm} window=${premiumWindowServer} fee=$${premiumFeeCentsServer / 100}`);
+      }
+    }
+
     // Determine the origin for success/cancel URLs
     const origin = req.headers.get('origin') || 'https://convelabs-website.vercel.app';
 
@@ -1207,7 +1277,7 @@ Deno.serve(async (req) => {
     // YYYY-MM-DD" description is wrong — there's no appointment, just an
     // annual subscription. Show the membership cadence instead so the Stripe
     // Checkout line item makes sense and doesn't erode trust at pay time.
-    const isMembershipPurchase = String(serviceType || '').toLowerCase() === 'membership';
+    const isMembershipPurchase = isMembershipPurchaseType(serviceType);
     const lineDescription = isMembershipPurchase
       ? 'Annual membership — discounts apply immediately. Cancel anytime.'
       : `Appointment on ${appointmentDate}`;
@@ -1220,6 +1290,23 @@ Deno.serve(async (req) => {
             description: lineDescription,
           },
           unit_amount: amount,
+        },
+        quantity: 1,
+      });
+    }
+
+    // Premium-hours fee — its own line so the receipt reads the way the slot
+    // grid and checkout page did ("Premium hours"). Goes to the business:
+    // it's outside `amount`, so the Connect transfer math below never sees it.
+    if (premiumFeeCentsServer > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Premium hours',
+            description: 'Early-morning, early-afternoon or released weekend slot. Free for members.',
+          },
+          unit_amount: premiumFeeCentsServer,
         },
         quantity: 1,
       });
@@ -1263,6 +1350,9 @@ Deno.serve(async (req) => {
       service_name: serviceName || '',
       service_price: String(amount),
       tip_amount: String(safeTipCents),
+      // Premium-hours fee charged on this session (cents). Webhook / verify
+      // write it to appointments.premium_fee; business revenue, not phleb.
+      premium_fee_cents: String(premiumFeeCentsServer),
       appointment_date: appointmentDate,
       appointment_time: appointmentTime || '',
       // UUID format check — only carry through valid UUIDs so we don't pollute
@@ -1391,7 +1481,7 @@ Deno.serve(async (req) => {
     // session can go through. The promo is still applied — visit fee is
     // zero; only the tip is collected.
     const willHaveSubscriptionLineItem = !!(subscribeToMembership && subscribeToMembership.annualPriceCents);
-    if (!willHaveSubscriptionLineItem && amount + safeTipCents < 50) {
+    if (!willHaveSubscriptionLineItem && amount + safeTipCents + premiumFeeCentsServer < 50) {
       return new Response(
         JSON.stringify({
           error: 'total_too_low',
@@ -1683,7 +1773,8 @@ Deno.serve(async (req) => {
         const enriched = {
           ...pricingBreakdown,
           stripe_session_id: session.id,
-          server_amount_charged_cents: amount + safeTipCents,
+          server_amount_charged_cents: amount + safeTipCents + premiumFeeCentsServer,
+          server_premium_fee_cents: premiumFeeCentsServer,
           server_apology_credit_cents_applied: apologyCreditApplied,
           server_promo_code_applied_cents: promoCodeApplied?.applied_cents || 0,
           server_referral_discount_cents: appliedReferralDiscountCents,

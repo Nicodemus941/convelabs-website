@@ -217,6 +217,8 @@ Deno.serve(async (req) => {
           total_amount: (session.amount_total || 0) / 100,
           tip_amount: parseInt(metadata.tip_amount || '0') / 100,
           service_price: parseInt(metadata.service_price || '0') / 100,
+          // Premium-hours fee (business revenue; excluded from the phleb split)
+          premium_fee: (parseInt(metadata.premium_fee_cents || '0') || 0) / 100,
           address: fullAddress || 'Pending',
           zipcode: metadata.zip_code || '32801',
           stripe_checkout_session_id: session_id,
