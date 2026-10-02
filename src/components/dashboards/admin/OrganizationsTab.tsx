@@ -1,4 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
+/**
+ * OrganizationsTab — every partner organization (organizations table) in the
+ * shared admin list language (see adminListKit + LabOrdersTab for the
+ * reference), plus the Discovered-leads queue and the bulk Outreach composer.
+ *
+ * Rendered via Dashboard.tsx SECTION_SCREENS["partners/organizations"] for
+ * BOTH admin roles. Outreach / dunning / discovered-lead actions / merge gate
+ * on `super_admin` inside this file — the office_manager accounts are
+ * partner-clinic staff.
+ *
+ * Directory: every org maps to exactly ONE bucket (deriveOrgBucket) so the
+ * stat tiles, the filter chips and the list always agree:
+ *
+ *   discovered → OCR-captured lead that hasn't signed / declined / merged
+ *   inactive   → is_active = false
+ *   welcomed   → welcome email sent (welcomed_at)
+ *   cold       → active, has a contact email, never welcomed   (needs action)
+ *   no_email   → active, no contact email, never welcomed      (needs action)
+ *
+ * Discovered: open leads partitioned into hot / untouched / in progress /
+ * unreachable (no email) so the beacon, tiles and list agree.
+ *
+ * Clicking an org opens the full org console (Overview / Patients / Staff /
+ * Services / Invoices / Notes / Emails) — it replaces the list rather than
+ * opening a drawer because the sub-tabs are full screens of their own.
+ */
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,17 +36,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import {
-  Building2, Plus, Search, RefreshCw, Send, DollarSign, Mail,
-  Phone, User, Users, FileText, Loader2, Download, Pencil, Power,
-  Megaphone, Eye, Sparkles, CheckCircle2, AlertCircle, X,
-  TrendingUp, FlaskConical, StickyNote, Activity,
+  Building2, Plus, Search, Send, Mail,
+  Phone, User, Users, FileText, Loader2, Pencil,
+  Eye, Sparkles, CheckCircle2, AlertCircle, X,
+  TrendingUp, FlaskConical, StickyNote, MoreHorizontal, Copy, ChevronRight,
+  Globe, Flame, PhoneCall, Link2, ArrowLeft, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  ago, copyText, rowKeyHandler, plural, TH, TH_STICKY, TD_STICKY, ROW_FOCUS, CARD_FOCUS,
+  PageHeader, RefreshButton, StatTiles, FilterChips, SearchBox, SegmentedControl, LaneHeader, LoadingRows,
+  EmptyState, ErrorCard, ListFooter, Pill, Notice,
+  type TileDef, type ChipDef,
+} from './adminListKit';
 import OrgRoiCard from './OrgRoiCard';
-import OrgSubscriptionTierCard from './OrgSubscriptionTierCard';
 import OrgPatientsTab from '@/components/admin/OrgPatientsTab';
 import OrgNotesTab from '@/components/admin/OrgNotesTab';
 import OrgStaffList from '@/components/admin/OrgStaffList';
@@ -49,7 +88,7 @@ interface Org {
   first_discovered_at?: string | null;
   last_referral_at?: string | null;
   referral_count?: number | null;
-  outreach_status?: 'untouched' | 'emailed' | 'called' | 'signed' | 'declined' | 'merged' | null;
+  outreach_status?: 'untouched' | 'emailed' | 'called' | 'welcomed' | 'unreachable_no_email' | 'signed' | 'declined' | 'merged' | null;
   outreached_at?: string | null;
   outreach_note?: string | null;
   npi?: string | null;
@@ -74,10 +113,143 @@ interface OrgInvoice {
   dunning_stage?: number | null; last_dunning_at?: string | null; dunning_paused?: boolean | null;
 }
 
+// Untyped table access — organizations has many columns the generated
+// Database type doesn't know about.
+const db = supabase as any;
+
+// ──────────────────────────────────────────────────────────────────
+// Directory buckets — ONE per org.
+// ──────────────────────────────────────────────────────────────────
+const OPEN_LEAD = (o: Org) =>
+  o.source === 'discovered_from_ocr' && o.outreach_status !== 'signed' && o.outreach_status !== 'declined' && o.outreach_status !== 'merged';
+
+export type OrgBucket = 'discovered' | 'inactive' | 'welcomed' | 'cold' | 'no_email';
+
+export function deriveOrgBucket(o: Org): OrgBucket {
+  if (OPEN_LEAD(o)) return 'discovered';
+  if (!o.is_active) return 'inactive';
+  if (o.welcomed_at) return 'welcomed';
+  if (o.contact_email) return 'cold';
+  return 'no_email';
+}
+
+const ORG_NEEDS_ACTION: ReadonlySet<OrgBucket> = new Set<OrgBucket>(['cold', 'no_email']);
+
+interface BucketMeta { label: string; desc: string; pill: string; tile: string; dot: string }
+
+const ORG_META: Record<OrgBucket, BucketMeta> = {
+  cold: {
+    label: 'Cold', desc: 'Active with a contact email but never sent the welcome',
+    pill: 'bg-amber-100 text-amber-800 border-amber-200', tile: 'border-amber-300 bg-amber-50 text-amber-800', dot: 'bg-amber-500',
+  },
+  no_email: {
+    label: 'No email', desc: 'Active but no contact email on file — cannot be welcomed',
+    pill: 'bg-red-100 text-red-800 border-red-200', tile: 'border-red-300 bg-red-50 text-red-800', dot: 'bg-red-500',
+  },
+  welcomed: {
+    label: 'Welcomed', desc: 'Welcome email sent — portal activation link delivered',
+    pill: 'bg-emerald-100 text-emerald-800 border-emerald-200', tile: 'border-emerald-300 bg-emerald-50 text-emerald-800', dot: 'bg-emerald-500',
+  },
+  discovered: {
+    label: 'Discovered lead', desc: 'Auto-captured from a lab order — worked from the Discovered view',
+    pill: 'bg-purple-100 text-purple-800 border-purple-200', tile: 'border-purple-300 bg-purple-50 text-purple-800', dot: 'bg-purple-500',
+  },
+  inactive: {
+    label: 'Inactive', desc: 'Switched off — hidden from most views',
+    pill: 'bg-white text-gray-500 border-gray-300', tile: 'border-gray-300 bg-gray-50 text-gray-700', dot: 'bg-gray-300',
+  },
+};
+
+type OrgFilterKey = 'all' | 'needs_action' | OrgBucket;
+
+const ORG_FILTERS: Array<ChipDef<OrgFilterKey> & { match: (b: OrgBucket) => boolean }> = [
+  { key: 'all', label: 'All', desc: 'Every organization on file', match: () => true },
+  { key: 'needs_action', label: 'Needs action', desc: 'Active partners that still need a welcome or an email', match: b => ORG_NEEDS_ACTION.has(b) },
+  { key: 'cold', label: 'Cold', desc: ORG_META.cold.desc, dot: ORG_META.cold.dot, match: b => b === 'cold' },
+  { key: 'no_email', label: 'No email', desc: ORG_META.no_email.desc, dot: ORG_META.no_email.dot, match: b => b === 'no_email' },
+  { key: 'welcomed', label: 'Welcomed', desc: ORG_META.welcomed.desc, dot: ORG_META.welcomed.dot, match: b => b === 'welcomed' },
+  { key: 'discovered', label: 'Discovered', desc: ORG_META.discovered.desc, dot: ORG_META.discovered.dot, match: b => b === 'discovered' },
+  { key: 'inactive', label: 'Inactive', desc: ORG_META.inactive.desc, dot: ORG_META.inactive.dot, match: b => b === 'inactive' },
+];
+
+/** Four tiles that partition every org (needs_action = cold + no_email). */
+const ORG_TILES: TileDef<OrgFilterKey>[] = [
+  { key: 'needs_action', label: 'Needs action', desc: ORG_FILTERS[1].desc, style: 'border-red-300 bg-red-50 text-red-800', alert: true },
+  { key: 'welcomed', label: 'Welcomed', desc: ORG_META.welcomed.desc, style: ORG_META.welcomed.tile },
+  { key: 'discovered', label: 'Discovered leads', desc: ORG_META.discovered.desc, style: ORG_META.discovered.tile },
+  { key: 'inactive', label: 'Inactive', desc: ORG_META.inactive.desc, style: ORG_META.inactive.tile },
+];
+
+// ──────────────────────────────────────────────────────────────────
+// Discovered-lead buckets — ONE per open lead.
+// ──────────────────────────────────────────────────────────────────
+export type LeadBucket = 'hot' | 'untouched' | 'in_progress' | 'unreachable';
+
+const HOURS_48 = 48 * 3600 * 1000;
+
+export function deriveLeadBucket(o: Org, now: number): LeadBucket {
+  const status = o.outreach_status || 'untouched';
+  if (status === 'untouched') {
+    const hot = (o.referral_count || 0) >= 3;
+    const fresh = !!o.last_referral_at && now - new Date(o.last_referral_at).getTime() < HOURS_48;
+    return hot || fresh ? 'hot' : 'untouched';
+  }
+  if (status === 'unreachable_no_email') return 'unreachable';
+  return 'in_progress';
+}
+
+const LEAD_NEEDS_ACTION: ReadonlySet<LeadBucket> = new Set<LeadBucket>(['hot', 'untouched']);
+
+const LEAD_META: Record<LeadBucket, BucketMeta> = {
+  hot: {
+    label: 'Hot lead', desc: '3+ patient referrals (or one in the last 48h) and nobody has reached out',
+    pill: 'bg-red-100 text-red-800 border-red-200', tile: 'border-red-300 bg-red-50 text-red-800', dot: 'bg-red-500',
+  },
+  untouched: {
+    label: 'Untouched', desc: 'Captured from a lab order — no outreach yet',
+    pill: 'bg-amber-100 text-amber-800 border-amber-200', tile: 'border-amber-300 bg-amber-50 text-amber-800', dot: 'bg-amber-500',
+  },
+  in_progress: {
+    label: 'In progress', desc: 'Emailed, called or welcomed — waiting on the practice',
+    pill: 'bg-blue-100 text-blue-800 border-blue-200', tile: 'border-blue-300 bg-blue-50 text-blue-800', dot: 'bg-blue-500',
+  },
+  unreachable: {
+    label: 'No email', desc: 'Marked unreachable — no practice email could be found',
+    pill: 'bg-gray-100 text-gray-700 border-gray-200', tile: 'border-gray-300 bg-gray-100 text-gray-800', dot: 'bg-gray-400',
+  },
+};
+
+type LeadFilterKey = 'all' | 'needs_action' | LeadBucket;
+
+const LEAD_FILTERS: Array<ChipDef<LeadFilterKey> & { match: (b: LeadBucket) => boolean }> = [
+  { key: 'all', label: 'All leads', desc: 'Every open discovered practice', match: () => true },
+  { key: 'needs_action', label: 'Needs action', desc: 'Hot or untouched — reach out', match: b => LEAD_NEEDS_ACTION.has(b) },
+  { key: 'hot', label: 'Hot', desc: LEAD_META.hot.desc, dot: LEAD_META.hot.dot, match: b => b === 'hot' },
+  { key: 'untouched', label: 'Untouched', desc: LEAD_META.untouched.desc, dot: LEAD_META.untouched.dot, match: b => b === 'untouched' },
+  { key: 'in_progress', label: 'In progress', desc: LEAD_META.in_progress.desc, dot: LEAD_META.in_progress.dot, match: b => b === 'in_progress' },
+  { key: 'unreachable', label: 'No email', desc: LEAD_META.unreachable.desc, dot: LEAD_META.unreachable.dot, match: b => b === 'unreachable' },
+];
+
+const LEAD_TILES: TileDef<LeadFilterKey>[] = [
+  { key: 'hot', label: 'Hot leads', desc: LEAD_META.hot.desc, style: LEAD_META.hot.tile, alert: true },
+  { key: 'untouched', label: 'Untouched', desc: LEAD_META.untouched.desc, style: LEAD_META.untouched.tile },
+  { key: 'in_progress', label: 'In progress', desc: LEAD_META.in_progress.desc, style: LEAD_META.in_progress.tile },
+  { key: 'unreachable', label: 'No email', desc: LEAD_META.unreachable.desc, style: LEAD_META.unreachable.tile },
+];
+
+const humanStatus = (s: string | null | undefined) => (s || 'untouched').replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+const orgAddress = (o: Org) => [o.address_street, o.address_city, o.address_state, o.address_zip].filter(Boolean).join(', ');
+const lastActivityOf = (o: Org) => (o as any).updated_at || o.welcomed_at || o.last_referral_at || o.created_at;
+
 const OrganizationsTab: React.FC = () => {
+  const { user } = useAuth();
+  // Outreach emails, dunning sweeps, lead actions and merges are admin-only.
+  const canManage = user?.role === 'super_admin';
+
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [invoices, setInvoices] = useState<OrgInvoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [lastError, setLastError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrg, setSelectedOrg] = useState<Org | null>(null);
   const [showAddOrg, setShowAddOrg] = useState(false);
@@ -178,8 +350,8 @@ const OrganizationsTab: React.FC = () => {
         org_invoice_price_cents: editForm.orgInvoicePriceDollars ? Math.round(parseFloat(editForm.orgInvoicePriceDollars) * 100) : null,
         member_stacking_rule: editForm.memberStackingRule,
       };
-      const { data, error } = await supabase
-        .from('organizations' as any)
+      const { data, error } = await db
+        .from('organizations')
         .update(payload)
         .eq('id', selectedOrg.id)
         .select('*')
@@ -198,13 +370,22 @@ const OrganizationsTab: React.FC = () => {
 
   const fetchOrgs = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('organizations' as any).select('*').order('name');
-    setOrgs((data as unknown as Org[]) || []);
-    setLoading(false);
+    setLastError(null);
+    try {
+      const { data, error } = await db.from('organizations').select('*').order('name');
+      if (error) throw error;
+      setOrgs((data as Org[]) || []);
+    } catch (err: any) {
+      console.error('[OrganizationsTab] load failed:', err);
+      setLastError(err?.message || String(err));
+      setOrgs([]);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   const fetchInvoices = useCallback(async (orgId: string) => {
-    const { data } = await supabase.from('org_invoices' as any).select('*').eq('org_id', orgId).order('created_at', { ascending: false });
+    const { data } = await db.from('org_invoices').select('*').eq('org_id', orgId).order('created_at', { ascending: false });
     setInvoices((data as unknown as OrgInvoice[]) || []);
   }, []);
 
@@ -225,7 +406,7 @@ const OrganizationsTab: React.FC = () => {
           .filter(e => e && e.includes('@') && e !== orgForm.contactEmail.trim().toLowerCase())
       ));
 
-      const { data: newOrg, error } = await supabase.from('organizations' as any).insert({
+      const { data: newOrg, error } = await db.from('organizations').insert({
         name: orgForm.name, contact_name: orgForm.contactName || null,
         contact_email: orgForm.contactEmail || null, contact_phone: orgForm.contactPhone || null,
         billing_email: orgForm.billingEmail || null, billing_address: orgForm.billingAddress || null,
@@ -275,7 +456,7 @@ const OrganizationsTab: React.FC = () => {
     if (!invoiceForm.amount || !selectedOrg) { toast.error('Amount required'); return; }
     setSaving(true);
     try {
-      const { error } = await supabase.from('org_invoices' as any).insert({
+      const { error } = await db.from('org_invoices').insert({
         org_id: selectedOrg.id,
         patient_name: invoiceForm.patientName || null,
         service_type: invoiceForm.serviceType || null,
@@ -319,7 +500,7 @@ const OrganizationsTab: React.FC = () => {
           </div>`,
         },
       });
-      await supabase.from('org_invoices' as any).update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', invoice.id);
+      await db.from('org_invoices').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', invoice.id);
       toast.success(`Invoice sent to ${selectedOrg.billing_email}`);
       fetchInvoices(selectedOrg.id);
     } catch (err: any) { toast.error(err.message || 'Failed to send'); }
@@ -340,74 +521,110 @@ const OrganizationsTab: React.FC = () => {
   };
 
   const handleMarkPaid = async (invoiceId: string) => {
-    await supabase.from('org_invoices' as any).update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', invoiceId);
+    await db.from('org_invoices').update({ status: 'paid', paid_at: new Date().toISOString() }).eq('id', invoiceId);
     toast.success('Marked as paid');
     if (selectedOrg) fetchInvoices(selectedOrg.id);
   };
 
-  // Directory excludes unconfirmed discovered rows — those live in the
-  // Discovered tab until the admin approves/signs them.
-  const [listFilter, setListFilter] = useState<'all' | 'welcomed' | 'cold' | 'inactive'>('all');
+  // ── Directory: bucket every org once; tiles / chips / list derive from
+  //    the same map so they can never disagree. Every org is listed —
+  //    including OCR-discovered leads that haven't signed yet — so the
+  //    operator never asks "where's {discovered org}?". The state is tagged.
+  const [listFilter, setListFilter] = useState<OrgFilterKey>('all');
   const [sortBy, setSortBy] = useState<'recent' | 'name' | 'welcomed_first'>('recent');
 
-  // Show ALL orgs in the directory — including OCR-discovered ones that
-  // haven't signed yet. Previously these were hidden so the Organizations
-  // page only listed "real" partners, but admins kept asking "where's
-  // {discovered org}?" when trying to link / promote / contact them.
-  // Hormozi rule: never hide rows the operator is searching for; tag the
-  // state instead. Discovered orgs get a "Discovered" badge in the row.
-  const directoryBase = orgs;
+  const orgBucketOf = useMemo(() => {
+    const m = new Map<string, OrgBucket>();
+    for (const o of orgs) m.set(o.id, deriveOrgBucket(o));
+    return m;
+  }, [orgs]);
 
-  // KPI counts for the strip (based on directoryBase — everything in the directory)
-  const kpi = {
-    total: directoryBase.length,
-    active: directoryBase.filter(o => o.is_active).length,
-    welcomed: directoryBase.filter(o => !!(o as any).welcomed_at).length,
-    cold: directoryBase.filter(o => !(o as any).welcomed_at && !!o.contact_email && o.is_active).length,
-  };
-
-  const filtered = directoryBase.filter(o => {
-    // Chip filter
-    if (listFilter === 'welcomed' && !(o as any).welcomed_at) return false;
-    if (listFilter === 'cold') {
-      if ((o as any).welcomed_at) return false;
-      if (!o.contact_email) return false;
-      if (!o.is_active) return false;
+  const orgCounts = useMemo(() => {
+    const c = Object.fromEntries(ORG_FILTERS.map(f => [f.key, 0])) as Record<OrgFilterKey, number>;
+    for (const o of orgs) {
+      const b = orgBucketOf.get(o.id)!;
+      for (const f of ORG_FILTERS) if (f.match(b)) c[f.key]++;
     }
-    if (listFilter === 'inactive' && o.is_active) return false;
-    // Search
-    if (searchQuery && !o.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  }).sort((a, b) => {
-    if (sortBy === 'name') return a.name.localeCompare(b.name);
-    if (sortBy === 'welcomed_first') {
-      const aw = (a as any).welcomed_at ? 1 : 0;
-      const bw = (b as any).welcomed_at ? 1 : 0;
-      if (aw !== bw) return bw - aw;
-    }
-    // Default: most-recently-updated first
-    const ad = new Date((a as any).updated_at || (a as any).created_at || 0).getTime();
-    const bd = new Date((b as any).updated_at || (b as any).created_at || 0).getTime();
-    return bd - ad;
-  });
+    return c;
+  }, [orgs, orgBucketOf]);
 
-  // ── Organizations list view tabs: Directory / Discovered / Outreach.
-  //    Detail view (when an org is clicked) bypasses tabs entirely.
+  const filtered = useMemo(() => {
+    const def = ORG_FILTERS.find(f => f.key === listFilter)!;
+    const q = searchQuery.trim().toLowerCase();
+    const digits = q.replace(/\D/g, '');
+    return orgs.filter(o => def.match(orgBucketOf.get(o.id)!) && (q === '' ||
+      o.name.toLowerCase().includes(q) ||
+      (o.contact_name || '').toLowerCase().includes(q) ||
+      (o.contact_email || '').toLowerCase().includes(q) ||
+      (o.billing_email || '').toLowerCase().includes(q) ||
+      (o.ordering_physician || '').toLowerCase().includes(q) ||
+      (o.address_city || '').toLowerCase().includes(q) ||
+      (o.npi || '').includes(q) ||
+      (digits.length >= 3 && ((o.contact_phone || '') + (o.office_phone || '')).replace(/\D/g, '').includes(digits))
+    )).sort((a, b) => {
+      if (sortBy === 'name') return a.name.localeCompare(b.name);
+      if (sortBy === 'welcomed_first') {
+        const aw = a.welcomed_at ? 1 : 0;
+        const bw = b.welcomed_at ? 1 : 0;
+        if (aw !== bw) return bw - aw;
+      }
+      // Default: most-recently-updated first
+      return new Date(lastActivityOf(b) || 0).getTime() - new Date(lastActivityOf(a) || 0).getTime();
+    });
+  }, [orgs, listFilter, searchQuery, sortBy, orgBucketOf]);
+
+  const orgLanes = useMemo(() => {
+    if (listFilter !== 'all') return null;
+    const action = filtered.filter(o => ORG_NEEDS_ACTION.has(orgBucketOf.get(o.id)!));
+    if (action.length === 0) return null;
+    return { action, rest: filtered.filter(o => !ORG_NEEDS_ACTION.has(orgBucketOf.get(o.id)!)) };
+  }, [filtered, listFilter, orgBucketOf]);
+
+  // ── Organizations list views: Directory / Discovered / Outreach.
+  //    Detail view (when an org is clicked) bypasses views entirely.
   const [activeTab, setActiveTab] = useState<'directory' | 'discovered' | 'outreach'>('directory');
+  const [leadFilter, setLeadFilter] = useState<LeadFilterKey>('all');
+  const [leadSearch, setLeadSearch] = useState('');
 
   // Discovered = auto-created from lab order OCR. Still needs admin to
   // reach out → confirm → activate → promote to real partner.
-  const discoveredOrgs = orgs.filter(o =>
-    o.source === 'discovered_from_ocr' && o.outreach_status !== 'signed' && o.outreach_status !== 'declined' && o.outreach_status !== 'merged'
-  );
-  // Beacon: red if any discovered org has ≥3 referrals still untouched
-  // OR any untouched org with a referral within the last 48h.
   const nowMs = Date.now();
-  const hotBeacon = discoveredOrgs.some(o => {
-    const isHot = (o.referral_count || 0) >= 3 && o.outreach_status === 'untouched';
-    const isFresh = o.last_referral_at && (nowMs - new Date(o.last_referral_at).getTime()) < 48 * 3600 * 1000 && o.outreach_status === 'untouched';
-    return isHot || isFresh;
-  });
+  const discoveredOrgs = useMemo(() => orgs.filter(OPEN_LEAD), [orgs]);
+  const leadBucketOf = useMemo(() => {
+    const m = new Map<string, LeadBucket>();
+    for (const o of discoveredOrgs) m.set(o.id, deriveLeadBucket(o, nowMs));
+    return m;
+  }, [discoveredOrgs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const leadCounts = useMemo(() => {
+    const c = Object.fromEntries(LEAD_FILTERS.map(f => [f.key, 0])) as Record<LeadFilterKey, number>;
+    for (const o of discoveredOrgs) {
+      const b = leadBucketOf.get(o.id)!;
+      for (const f of LEAD_FILTERS) if (f.match(b)) c[f.key]++;
+    }
+    return c;
+  }, [discoveredOrgs, leadBucketOf]);
+  const filteredLeads = useMemo(() => {
+    const def = LEAD_FILTERS.find(f => f.key === leadFilter)!;
+    const q = leadSearch.trim().toLowerCase();
+    return discoveredOrgs
+      .filter(o => def.match(leadBucketOf.get(o.id)!) && (q === '' ||
+        o.name.toLowerCase().includes(q) ||
+        (o.ordering_physician || '').toLowerCase().includes(q) ||
+        (o.address_city || '').toLowerCase().includes(q) ||
+        (o.npi || '').includes(q) ||
+        (o.npi_taxonomy || '').toLowerCase().includes(q) ||
+        (o.contact_email || '').toLowerCase().includes(q)
+      ))
+      .sort((a, b) => (b.referral_count || 0) - (a.referral_count || 0));
+  }, [discoveredOrgs, leadFilter, leadSearch, leadBucketOf]);
+  const leadLanes = useMemo(() => {
+    if (leadFilter !== 'all') return null;
+    const action = filteredLeads.filter(o => LEAD_NEEDS_ACTION.has(leadBucketOf.get(o.id)!));
+    if (action.length === 0) return null;
+    return { action, rest: filteredLeads.filter(o => !LEAD_NEEDS_ACTION.has(leadBucketOf.get(o.id)!)) };
+  }, [filteredLeads, leadFilter, leadBucketOf]);
+  // Beacon: red if any lead is hot (≥3 referrals untouched, or a referral in the last 48h).
+  const hotBeacon = leadCounts.hot > 0;
 
   // Outreach modal state for a single discovered org
   const [outreachOrg, setOutreachOrg] = useState<Org | null>(null);
@@ -423,8 +640,8 @@ const OrganizationsTab: React.FC = () => {
     if (discoveredOrgs.length === 0) { setDiscoveredPatientsMap({}); return; }
     (async () => {
       const ids = discoveredOrgs.map(o => o.id);
-      const { data } = await supabase
-        .from('appointment_organizations' as any)
+      const { data } = await db
+        .from('appointment_organizations')
         .select('organization_id, appointment_id')
         .in('organization_id', ids);
       if (!data) return;
@@ -491,7 +708,7 @@ ConveLabs · (941) 527-9169`
         },
       });
       if (emailErr) throw emailErr;
-      await supabase.from('organizations' as any).update({
+      await db.from('organizations').update({
         outreach_status: 'emailed',
         outreached_at: new Date().toISOString(),
         outreach_note: `Sent to ${recipient} · subject: ${outreachDraftSubject}`,
@@ -509,7 +726,7 @@ ConveLabs · (941) 527-9169`
   const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
 
   const markDiscoveredStatus = async (org: Org, status: 'declined' | 'called' | 'signed') => {
-    await supabase.from('organizations' as any).update({
+    await db.from('organizations').update({
       outreach_status: status,
       ...(status === 'signed' ? { is_active: true } : {}),
     }).eq('id', org.id);
@@ -535,8 +752,8 @@ ConveLabs · (941) 527-9169`
     if (activeTab !== 'outreach') return;
     (async () => {
       setLoadingInquiries(true);
-      const { data } = await supabase
-        .from('provider_partnership_inquiries' as any)
+      const { data } = await db
+        .from('provider_partnership_inquiries')
         .select('id, practice_name, contact_name, contact_email, status, created_at')
         .in('status', ['new', 'contacted'])
         .order('created_at', { ascending: false })
@@ -614,55 +831,57 @@ ConveLabs · (941) 527-9169`
     const totalOutstanding = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + i.amount, 0);
 
     return (
-      <div className="space-y-4 sm:space-y-6">
-        {/* Top row: back button — always visible, always alone on mobile */}
-        <Button variant="ghost" size="sm" onClick={() => setSelectedOrg(null)} className="gap-1 -ml-2">
-          ← Back
+      <div className="space-y-4">
+        {/* Back — always visible, always alone on mobile */}
+        <Button variant="ghost" size="sm" onClick={() => setSelectedOrg(null)} className="gap-1.5 -ml-2 h-10 sm:h-9 text-xs">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" /> All organizations
         </Button>
 
-        {/* Identity + actions: stacks vertically below 640px, side-by-side above */}
-        <div className="flex flex-col sm:flex-row sm:items-start gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl font-bold leading-tight break-words">{selectedOrg.name}</h1>
-              {selectedOrg.portal_enabled && <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 text-[10px]">Portal enabled</Badge>}
-              {!selectedOrg.is_active && <Badge className="bg-gray-200 text-gray-600 hover:bg-gray-200 text-[10px]">Inactive</Badge>}
-              {(selectedOrg as any).welcomed_at && <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]">✓ Welcomed</Badge>}
+        {/* Hero — same chrome as the shared detail drawer, inline because the
+            org console is a full screen of sub-tabs rather than a dialog. */}
+        <div className="rounded-lg bg-gradient-to-br from-[#B91C1C] to-[#7F1D1D] text-white p-4 sm:p-5 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] uppercase tracking-wider opacity-90">{OPEN_LEAD(selectedOrg) ? 'Discovered lead' : 'Partner organization'}</p>
+              <h1 className="text-lg sm:text-xl font-bold mt-0.5 leading-tight break-words">{selectedOrg.name}</h1>
+              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <OrgStatusPill o={selectedOrg} bucket={deriveOrgBucket(selectedOrg)} className="bg-white/95" />
+                {selectedOrg.portal_enabled && <Pill className="bg-white/15 text-white border-white/30"><Globe className="h-3 w-3" aria-hidden="true" /> Portal enabled</Pill>}
+                <span className="text-sm opacity-95 min-w-0 truncate">
+                  {selectedOrg.contact_name ? `${selectedOrg.contact_name} · ` : ''}
+                  {selectedOrg.contact_email || 'No email'}
+                  {selectedOrg.contact_phone && ` · ${selectedOrg.contact_phone}`}
+                </span>
+              </div>
             </div>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1 break-words">
-              {selectedOrg.contact_name ? `${selectedOrg.contact_name} · ` : ''}
-              {selectedOrg.contact_email || 'No email'}
-              {selectedOrg.contact_phone && <span> · {selectedOrg.contact_phone}</span>}
-            </p>
-          </div>
-
-          {/* Actions — full-width on mobile, right-aligned on desktop */}
-          <div className="flex gap-2 flex-shrink-0 flex-col xs:flex-row sm:flex-row w-full sm:w-auto">
-            {selectedOrg.contact_email && (
-              <Button
-                size="sm"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const alreadyWelcomed = !!(selectedOrg as any).welcomed_at;
-                  // eslint-disable-next-line no-console
-                  console.log('[send-welcome click]', { orgId: selectedOrg.id, recipient: selectedOrg.contact_email, resend: alreadyWelcomed });
-                  handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, alreadyWelcomed);
-                }}
-                className={`gap-1.5 w-full sm:w-auto ${(selectedOrg as any).welcomed_at
-                  ? 'bg-white hover:bg-gray-50 border border-gray-300 text-gray-700'
-                  : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white shadow-sm'}`}
-                title={(selectedOrg as any).welcomed_at ? 'Resend the welcome email' : 'Send the branded welcome email now'}
-              >
-                <Send className="h-3.5 w-3.5" />
-                {(selectedOrg as any).welcomed_at ? 'Resend welcome' : 'Send welcome'}
+            <div className="flex gap-2 flex-shrink-0 flex-col xs:flex-row sm:flex-row w-full sm:w-auto">
+              {selectedOrg.contact_email && (
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const alreadyWelcomed = !!selectedOrg.welcomed_at;
+                    handleSendWelcome(selectedOrg.id, selectedOrg.contact_email, alreadyWelcomed);
+                  }}
+                  className={cn('gap-1.5 w-full sm:w-auto h-10 sm:h-9 text-xs', selectedOrg.welcomed_at
+                    ? 'bg-white/10 hover:bg-white/20 border border-white/30 text-white'
+                    : 'bg-white hover:bg-gray-100 text-[#B91C1C] shadow-sm')}
+                  title={selectedOrg.welcomed_at ? 'Resend the welcome email' : 'Send the branded welcome email now'}
+                >
+                  <Send className="h-3.5 w-3.5" aria-hidden="true" />
+                  {selectedOrg.welcomed_at ? 'Resend welcome' : 'Send welcome'}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5 w-full sm:w-auto h-10 sm:h-9 text-xs text-white hover:bg-white/10 border border-white/30">
+                <Pencil className="h-3.5 w-3.5" aria-hidden="true" /> Edit
               </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={() => openEditModal(selectedOrg)} className="gap-1.5 w-full sm:w-auto">
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </Button>
+            </div>
           </div>
         </div>
+        {!selectedOrg.contact_email && selectedOrg.is_active && (
+          <Notice tone="red" icon={AlertTriangle}><p>No contact email on file — the welcome email and portal activation can't be sent. Add one with <strong>Edit</strong>.</p></Notice>
+        )}
 
         <Tabs defaultValue="overview">
           {/* Horizontally scrollable tab rail on mobile — swipe to reveal
@@ -995,304 +1214,190 @@ ConveLabs · (941) 527-9169`
   // Organization list
   const orgsWithEmail = orgs.filter(o => o.contact_email && o.is_active);
   const selectedCount = Object.keys(selectedRecipients).length;
+  const activeOrgFilter = ORG_FILTERS.find(f => f.key === listFilter)!;
+  const activeLeadFilter = LEAD_FILTERS.find(f => f.key === leadFilter)!;
+
+  const orgHandlers: OrgRowHandlers = {
+    onOpen: (o) => setSelectedOrg(o),
+    onEdit: (o) => { setSelectedOrg(o); openEditModal(o); },
+    onSendWelcome: (o) => handleSendWelcome(o.id, o.contact_email, !!o.welcomed_at),
+  };
+  const leadHandlers: LeadRowHandlers = {
+    canManage,
+    onReachOut: openOutreachModal,
+    onMark: markDiscoveredStatus,
+    onOpen: (o) => setSelectedOrg(o),
+    patientsOf: (o) => discoveredPatientsMap[o.id] || [],
+  };
+
+  const viewOptions: Array<{ key: 'directory' | 'discovered' | 'outreach'; label: string }> = [
+    { key: 'directory', label: 'Directory' },
+    { key: 'discovered', label: discoveredOrgs.length > 0 ? `Discovered · ${discoveredOrgs.length}` : 'Discovered' },
+    ...(canManage ? [{ key: 'outreach' as const, label: 'Outreach' }] : []),
+  ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Building2 className="h-6 w-6 text-[#B91C1C]" /> Organizations</h1>
-          <p className="text-sm text-muted-foreground">Manage partner organizations, billing, and outreach</p>
-        </div>
-        <div className="flex gap-2 flex-wrap w-full sm:w-auto">
-          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1 flex-1 sm:flex-none" onClick={() => setShowAddOrg(true)}>
-            <Plus className="h-4 w-4" /> <span className="sm:inline">Add</span><span className="hidden sm:inline"> Organization</span>
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleRunDunning} className="flex-1 sm:flex-none" title="Send 7/14/30-day reminders for all unpaid sent invoices">
-            <Send className="h-4 w-4 mr-1" /> <span>Dunning</span>
-          </Button>
-          <Button variant="outline" size="sm" onClick={fetchOrgs}><RefreshCw className="h-4 w-4" /></Button>
-        </div>
-      </div>
-
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
-        <TabsList className="w-full overflow-x-auto justify-start sm:justify-center sm:w-auto">
-          <TabsTrigger value="directory" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3"><Building2 className="h-3.5 w-3.5" /> Directory</TabsTrigger>
-          <TabsTrigger value="discovered" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3 relative">
-            <Sparkles className="h-3.5 w-3.5" /> Discovered
-            {discoveredOrgs.length > 0 && (
-              <span className={`ml-1 inline-flex items-center justify-center rounded-full text-[10px] font-bold leading-none min-w-[18px] h-[18px] px-1 ${hotBeacon ? 'bg-red-500 text-white animate-pulse' : 'bg-amber-100 text-amber-800'}`}>
-                {discoveredOrgs.length}
-              </span>
+    <TooltipProvider delayDuration={300}>
+    <div className="space-y-4">
+      <PageHeader
+        icon={Building2}
+        title="Organizations"
+        subtitle={
+          <>
+            Partner practices, discovered leads, billing and outreach.
+            {!loading && orgCounts.needs_action > 0 && <span className="ml-1 font-medium text-red-700">{orgCounts.needs_action} need a welcome or an email.</span>}
+            {!loading && hotBeacon && <span className="ml-1 font-medium text-red-700">{plural(leadCounts.hot, 'hot lead')}.</span>}
+          </>
+        }
+        actions={
+          <>
+            <SegmentedControl options={viewOptions} value={activeTab} onChange={(v) => setActiveTab(v)} ariaLabel="Organizations view" />
+            <RefreshButton onClick={fetchOrgs} loading={loading} />
+            {canManage && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="sm" onClick={handleRunDunning} className="gap-1.5 text-xs h-10 sm:h-9">
+                    <Send className="h-4 w-4" aria-hidden="true" /> <span className="hidden sm:inline">Run dunning</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Send 7/14/30-day reminders for every unpaid sent invoice</TooltipContent>
+              </Tooltip>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="outreach" className="gap-1 sm:gap-1.5 text-xs sm:text-sm px-2 sm:px-3"><Megaphone className="h-3.5 w-3.5" /> Outreach</TabsTrigger>
-        </TabsList>
+            <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white gap-1.5 text-xs h-10 sm:h-9" onClick={() => setShowAddOrg(true)}>
+              <Plus className="h-4 w-4" aria-hidden="true" /> <span className="hidden sm:inline">Add organization</span><span className="sm:hidden">Add</span>
+            </Button>
+          </>
+        }
+      />
 
-        {/* ─── DIRECTORY TAB (existing content) ─────────────────── */}
-        <TabsContent value="directory" className="space-y-4 mt-4">
-          {/* KPI strip — at-a-glance org health */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-gray-900">{kpi.total}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Total orgs</p></CardContent></Card>
-            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-emerald-600">{kpi.active}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Active</p></CardContent></Card>
-            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-[#B91C1C]">{kpi.welcomed}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Welcomed</p></CardContent></Card>
-            <Card className="shadow-sm"><CardContent className="p-3 text-center"><p className="text-xl font-bold text-amber-600">{kpi.cold}</p><p className="text-[10px] uppercase tracking-wider text-gray-500 font-semibold">Cold</p></CardContent></Card>
-          </div>
+      {lastError && <ErrorCard what="organizations" message={lastError} onRetry={fetchOrgs} />}
 
-          {/* Search + sort row */}
-          <div className="flex gap-2 items-center flex-wrap">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search organizations..." className="pl-9" />
-            </div>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="h-10 text-sm border border-gray-200 rounded-md px-3 bg-white focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/30"
-              title="Sort"
-            >
-              <option value="recent">Most recent</option>
-              <option value="name">Name A–Z</option>
-              <option value="welcomed_first">Welcomed first</option>
-            </select>
-          </div>
+      {/* ─── DIRECTORY ─────────────────────────────────────────── */}
+      {activeTab === 'directory' && (
+        <>
+          <StatTiles tiles={ORG_TILES} counts={orgCounts} active={listFilter} onSelect={k => setListFilter(k)} loading={loading} ariaLabel="Organization counts" />
 
-          {/* Filter chips */}
-          <div className="flex gap-2 flex-wrap">
-            {([
-              { v: 'all', label: 'All', n: kpi.total },
-              { v: 'welcomed', label: '✓ Welcomed', n: kpi.welcomed },
-              { v: 'cold', label: 'Cold (no welcome sent)', n: kpi.cold },
-              { v: 'inactive', label: 'Inactive', n: kpi.total - kpi.active },
-            ] as const).map(c => (
-              <button
-                key={c.v}
-                type="button"
-                onClick={() => setListFilter(c.v as any)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                  listFilter === c.v ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:border-gray-400'
-                }`}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <SearchBox value={searchQuery} onChange={setSearchQuery} placeholder="Search name, contact, email, phone, physician, city, NPI…" ariaLabel="Search organizations" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as any)}
+                className="h-10 sm:h-9 text-xs font-medium border border-gray-200 rounded-md px-2 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#B91C1C]/40"
+                aria-label="Sort organizations"
               >
-                {c.label}
-                <span className={`px-1.5 rounded-full text-[10px] ${listFilter === c.v ? 'bg-white/20' : 'bg-gray-100 text-gray-600'}`}>{c.n}</span>
-              </button>
-            ))}
+                <option value="recent">Most recent</option>
+                <option value="name">Name A–Z</option>
+                <option value="welcomed_first">Welcomed first</option>
+              </select>
+            </div>
+            <FilterChips filters={ORG_FILTERS} counts={orgCounts} active={listFilter} onSelect={k => setListFilter(k)} ariaLabel="Organization filter" />
           </div>
 
-          {loading ? (
-            <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-[#B91C1C]" /></div>
+          {loading && orgs.length === 0 ? (
+            <LoadingRows label="Loading organizations" />
           ) : filtered.length === 0 ? (
-            <Card className="shadow-sm border-dashed"><CardContent className="p-12 text-center"><Building2 className="h-12 w-12 text-gray-300 mx-auto mb-3" /><p className="font-semibold">No organizations</p><p className="text-sm text-muted-foreground">Add an organization to start billing.</p></CardContent></Card>
-          ) : (
-            <div className="grid gap-3">
-              {filtered.map(org => {
-                const welcomed = !!(org as any).welcomed_at;
-                return (
-                  <Card key={org.id} className="shadow-sm hover:shadow-md transition">
-                    <CardContent className="p-4 flex items-center gap-4">
-                      <div
-                        className="flex items-center gap-4 flex-1 cursor-pointer min-w-0"
-                        onClick={() => setSelectedOrg(org)}
-                      >
-                        <div className="w-11 h-11 rounded-lg bg-[#B91C1C]/10 flex items-center justify-center flex-shrink-0"><Building2 className="h-5 w-5 text-[#B91C1C]" /></div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="font-semibold truncate">{org.name}</p>
-                            {welcomed && (
-                              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] flex-shrink-0">
-                                ✓ Welcomed
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex gap-3 text-xs text-muted-foreground flex-wrap">
-                            {org.contact_name && <span><User className="h-3 w-3 inline mr-1" />{org.contact_name}</span>}
-                            {org.contact_email && <span><Mail className="h-3 w-3 inline mr-1" />{org.contact_email}</span>}
-                            {org.contact_phone && <span><Phone className="h-3 w-3 inline mr-1" />{org.contact_phone}</span>}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Send welcome CTA — manual trigger so admin controls timing.
-                          Shows "Send welcome" if never sent, "Resend" if already welcomed. */}
-                      {org.contact_email && (
-                        <Button
-                          size="sm"
-                          variant={welcomed ? 'outline' : 'default'}
-                          onClick={(e) => { e.stopPropagation(); handleSendWelcome(org.id, org.contact_email, welcomed); }}
-                          className={welcomed ? 'text-xs flex-shrink-0' : 'bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs flex-shrink-0'}
-                          title={welcomed ? 'Resend Hormozi welcome email' : 'Send Hormozi welcome email'}
-                        >
-                          <Send className="h-3 w-3 mr-1" />
-                          {welcomed ? 'Resend' : 'Send welcome'}
-                        </Button>
-                      )}
-
-                      <Badge variant="outline" className={org.is_active ? 'bg-emerald-50 text-emerald-700 flex-shrink-0' : 'bg-gray-50 text-gray-500 flex-shrink-0'}>{org.is_active ? 'Active' : 'Inactive'}</Badge>
-                      {org.source === 'discovered_from_ocr' && org.outreach_status !== 'signed' && (
-                        <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 flex-shrink-0" title={`Auto-discovered from a lab order. Outreach: ${org.outreach_status || 'untouched'}`}>
-                          Discovered
-                        </Badge>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+            <EmptyState
+              icon={Building2}
+              emptyTitle="No organizations yet."
+              emptyHint="Add a partner practice, or let lab-order OCR discover one for you."
+              filterLabel={activeOrgFilter.label}
+              filterDesc={activeOrgFilter.desc}
+              hasSearch={searchQuery.trim() !== ''}
+              searchHint="Try a practice name, contact, email, phone, physician, city or NPI."
+              total={orgs.length}
+              noun="organizations"
+              onReset={() => { setListFilter('all'); setSearchQuery(''); }}
+            />
+          ) : orgLanes ? (
+            <div className="space-y-5">
+              <section aria-labelledby="lane-action">
+                <LaneHeader id="lane-action" title="Needs action" count={orgLanes.action.length} tone="red" />
+                <OrgRows rows={orgLanes.action} bucketOf={orgBucketOf} handlers={orgHandlers} />
+              </section>
+              {orgLanes.rest.length > 0 && (
+                <section aria-labelledby="lane-rest">
+                  <LaneHeader id="lane-rest" title="Everything else" count={orgLanes.rest.length} tone="gray" />
+                  <OrgRows rows={orgLanes.rest} bucketOf={orgBucketOf} handlers={orgHandlers} />
+                </section>
+              )}
             </div>
+          ) : (
+            <OrgRows rows={filtered} bucketOf={orgBucketOf} handlers={orgHandlers} />
           )}
-        </TabsContent>
 
-        {/* ─── DISCOVERED TAB ──────────────────────────────────────
-              Every lab order's ordering-provider block is parsed via
-              extractProviderBlock() in ocr-lab-order, then routed into
-              `organizations` via discover_or_link_provider_org RPC.
-              Hormozi beacon: untouched rows with ≥3 referrals pulse red. */}
-        <TabsContent value="discovered" className="space-y-4 mt-4">
-          <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white">
-            <CardContent className="p-3 sm:p-4">
-              <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap">
-                <Sparkles className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm">Partnership leads from lab orders</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Every lab order uploaded by a patient includes their ordering practice. We auto-extract it and surface it here so you can convert referral signal into partnership revenue.
-                  </p>
-                </div>
-                <Button size="sm" variant="outline" className="text-xs w-full sm:w-auto flex-shrink-0" onClick={() => setMergeDialogOpen(true)}>
-                  🔗 Find duplicates
-                </Button>
+          <ListFooter shown={filtered.length} total={orgs.length} noun="organization" />
+        </>
+      )}
+
+      {/* ─── DISCOVERED ────────────────────────────────────────────
+            Every lab order's ordering-provider block is parsed via
+            extractProviderBlock() in ocr-lab-order, then routed into
+            `organizations` via discover_or_link_provider_org RPC. */}
+      {activeTab === 'discovered' && (
+        <>
+          <StatTiles tiles={LEAD_TILES} counts={leadCounts} active={leadFilter} onSelect={k => setLeadFilter(k)} loading={loading} ariaLabel="Discovered lead counts" />
+
+          <Notice tone="amber" icon={Sparkles}>
+            <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap">
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold">Partnership leads from lab orders</p>
+                <p className="mt-0.5">Every uploaded lab order names the ordering practice. We auto-extract it here so referral signal turns into partnership revenue.</p>
               </div>
-            </CardContent>
-          </Card>
+              {canManage && (
+                <Button size="sm" variant="outline" className="text-xs h-9 w-full sm:w-auto flex-shrink-0 gap-1.5" onClick={() => setMergeDialogOpen(true)}>
+                  <Link2 className="h-3.5 w-3.5" aria-hidden="true" /> Find duplicates
+                </Button>
+              )}
+            </div>
+          </Notice>
 
           <DiscoveredZipClusters />
 
-          {discoveredOrgs.length === 0 ? (
-            <Card className="shadow-sm border-dashed">
-              <CardContent className="p-12 text-center">
-                <Sparkles className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="font-semibold">No discovered practices yet</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  The moment a patient uploads a lab order, the ordering practice gets auto-captured here. Keep booking.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-3">
-              {discoveredOrgs
-                .sort((a, b) => (b.referral_count || 0) - (a.referral_count || 0))
-                .map(org => {
-                  const linkedNames = discoveredPatientsMap[org.id] || [];
-                  const lastRefDays = org.last_referral_at
-                    ? Math.floor((nowMs - new Date(org.last_referral_at).getTime()) / (1000 * 3600 * 24))
-                    : null;
-                  const isHot = (org.referral_count || 0) >= 3 && org.outreach_status === 'untouched';
-                  const statusColor = org.outreach_status === 'emailed' ? 'bg-blue-50 text-blue-700 border-blue-200'
-                    : org.outreach_status === 'called' ? 'bg-purple-50 text-purple-700 border-purple-200'
-                    : 'bg-amber-50 text-amber-700 border-amber-200';
-                  return (
-                    <Card key={org.id} className={`shadow-sm transition ${isHot ? 'ring-2 ring-red-400 border-red-200' : ''}`}>
-                      <CardContent className="p-3 sm:p-4">
-                        <div className="flex items-start gap-3 sm:gap-4">
-                          <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-lg flex items-center justify-center flex-shrink-0 ${isHot ? 'bg-red-100' : 'bg-amber-100'}`}>
-                            <Building2 className={`h-4 w-4 sm:h-5 sm:w-5 ${isHot ? 'text-red-600' : 'text-amber-600'}`} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-semibold">{org.name}</p>
-                              <Badge variant="outline" className={`text-[10px] ${statusColor}`}>
-                                {(org.outreach_status || 'untouched').toUpperCase()}
-                              </Badge>
-                              {isHot && (
-                                <Badge variant="outline" className="text-[10px] bg-red-500 text-white border-red-500 animate-pulse">
-                                  🔥 HOT LEAD
-                                </Badge>
-                              )}
-                            </div>
-                            {org.ordering_physician && (
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                <User className="h-3 w-3 inline mr-1" />{org.ordering_physician}
-                                {org.npi && <span className="ml-2 text-gray-400">NPI {org.npi}</span>}
-                              </p>
-                            )}
-                            {org.npi_taxonomy && (
-                              <p className="text-[11px] mt-0.5">
-                                <span className="inline-block px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">
-                                  {org.npi_taxonomy}
-                                </span>
-                                {org.npi_registered_date && (
-                                  <span className="ml-2 text-gray-500">
-                                    practicing since {new Date(org.npi_registered_date).getFullYear()}
-                                  </span>
-                                )}
-                              </p>
-                            )}
-                            {org.followup_count && org.followup_count > 0 && (
-                              <p className="text-[11px] text-blue-700 mt-0.5">
-                                🔁 {org.followup_count} follow-up{org.followup_count > 1 ? 's' : ''} sent
-                                {org.last_followup_at && ` · last ${Math.floor((nowMs - new Date(org.last_followup_at).getTime()) / (1000 * 3600 * 24))}d ago`}
-                              </p>
-                            )}
-                            {(org.address_street || org.address_city) && (
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {[org.address_street, org.address_city, org.address_state, org.address_zip].filter(Boolean).join(', ')}
-                              </p>
-                            )}
-                            {org.office_phone && (
-                              <p className="text-xs mt-0.5">
-                                <a href={`tel:${org.office_phone}`} className="text-[#B91C1C] hover:underline"><Phone className="h-3 w-3 inline mr-1" />{org.office_phone}</a>
-                              </p>
-                            )}
-                            <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                              <span className="font-semibold text-gray-900">{org.referral_count || 0} patient{(org.referral_count || 0) !== 1 ? 's' : ''}</span>
-                              {lastRefDays !== null && (
-                                <span>last referral {lastRefDays === 0 ? 'today' : lastRefDays === 1 ? 'yesterday' : `${lastRefDays}d ago`}</span>
-                              )}
-                            </div>
-                            {linkedNames.length > 0 && (
-                              <p className="text-[11px] text-gray-500 mt-1">Linked: {linkedNames.slice(0, 3).join(', ')}{linkedNames.length > 3 ? ` +${linkedNames.length - 3}` : ''}</p>
-                            )}
-                          </div>
-                          {/* Actions — right rail on desktop, wrapped row on mobile.
-                              Stack-vs-grid switch at sm breakpoint (640px). */}
-                          <div className="hidden sm:flex flex-col gap-1.5 flex-shrink-0">
-                            <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-8 text-xs" onClick={() => openOutreachModal(org)}>
-                              <Mail className="h-3.5 w-3.5 mr-1" /> Reach out
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => markDiscoveredStatus(org, 'called')}>
-                              <Phone className="h-3.5 w-3.5 mr-1" /> Logged call
-                            </Button>
-                            <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-700 border-emerald-300" onClick={() => markDiscoveredStatus(org, 'signed')}>
-                              <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Signed
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 text-[11px] text-gray-500" onClick={() => markDiscoveredStatus(org, 'declined')}>
-                              Not interested
-                            </Button>
-                          </div>
-                        </div>
-                        {/* Mobile actions row — full width under the card content */}
-                        <div className="grid grid-cols-2 gap-1.5 mt-3 sm:hidden">
-                          <Button size="sm" className="bg-[#B91C1C] hover:bg-[#991B1B] text-white h-9 text-xs col-span-2" onClick={() => openOutreachModal(org)}>
-                            <Mail className="h-3.5 w-3.5 mr-1" /> Reach out
-                          </Button>
-                          <Button size="sm" variant="outline" className="h-8 text-[11px]" onClick={() => markDiscoveredStatus(org, 'called')}>
-                            <Phone className="h-3 w-3 mr-1" /> Logged call
-                          </Button>
-                          <Button size="sm" variant="outline" className="h-8 text-[11px] text-emerald-700 border-emerald-300" onClick={() => markDiscoveredStatus(org, 'signed')}>
-                            <CheckCircle2 className="h-3 w-3 mr-1" /> Signed
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-7 text-[11px] text-gray-500 col-span-2" onClick={() => markDiscoveredStatus(org, 'declined')}>
-                            Not interested
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
+          <div className="space-y-2">
+            <SearchBox value={leadSearch} onChange={setLeadSearch} placeholder="Search practice, physician, city, NPI, specialty…" ariaLabel="Search discovered leads" />
+            <FilterChips filters={LEAD_FILTERS} counts={leadCounts} active={leadFilter} onSelect={k => setLeadFilter(k)} ariaLabel="Discovered lead filter" />
+          </div>
+
+          {loading && orgs.length === 0 ? (
+            <LoadingRows label="Loading discovered leads" />
+          ) : filteredLeads.length === 0 ? (
+            <EmptyState
+              icon={Sparkles}
+              emptyTitle="No discovered practices yet."
+              emptyHint="The moment a patient uploads a lab order, the ordering practice gets auto-captured here. Keep booking."
+              filterLabel={activeLeadFilter.label}
+              filterDesc={activeLeadFilter.desc}
+              hasSearch={leadSearch.trim() !== ''}
+              searchHint="Try a practice name, physician, city, NPI or specialty."
+              total={discoveredOrgs.length}
+              noun="leads"
+              onReset={() => { setLeadFilter('all'); setLeadSearch(''); }}
+            />
+          ) : leadLanes ? (
+            <div className="space-y-5">
+              <section aria-labelledby="lead-lane-action">
+                <LaneHeader id="lead-lane-action" title="Needs action" count={leadLanes.action.length} tone="red" />
+                <LeadRows rows={leadLanes.action} bucketOf={leadBucketOf} handlers={leadHandlers} now={nowMs} />
+              </section>
+              {leadLanes.rest.length > 0 && (
+                <section aria-labelledby="lead-lane-rest">
+                  <LaneHeader id="lead-lane-rest" title="Everything else" count={leadLanes.rest.length} tone="gray" />
+                  <LeadRows rows={leadLanes.rest} bucketOf={leadBucketOf} handlers={leadHandlers} now={nowMs} />
+                </section>
+              )}
             </div>
+          ) : (
+            <LeadRows rows={filteredLeads} bucketOf={leadBucketOf} handlers={leadHandlers} now={nowMs} />
           )}
-        </TabsContent>
+
+          <ListFooter shown={filteredLeads.length} total={discoveredOrgs.length} noun="open lead" />
+        </>
+      )}
 
         {/* ─── OUTREACH TAB ─────────────────────────────────────── */}
-        <TabsContent value="outreach" className="space-y-5 mt-4">
+      {activeTab === 'outreach' && canManage && (
+        <div className="space-y-5">
           <Card className="border-conve-red/20 bg-gradient-to-br from-conve-red/5 to-rose-50">
             <CardContent className="p-5">
               <div className="flex items-start gap-3">
@@ -1478,8 +1583,8 @@ ConveLabs · (941) 527-9169`
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       <MergeDuplicatesDialog open={mergeDialogOpen} onClose={() => setMergeDialogOpen(false)} onMerged={fetchOrgs} />
 
@@ -1530,7 +1635,7 @@ ConveLabs · (941) 527-9169`
               onClick={async () => {
                 // If admin typed in a new email above, save it to the org first
                 if (outreachOrg && outreachOrg.contact_email) {
-                  await supabase.from('organizations' as any)
+                  await db.from('organizations')
                     .update({ contact_email: outreachOrg.contact_email })
                     .eq('id', outreachOrg.id);
                 }
@@ -1802,6 +1907,415 @@ ConveLabs · (941) 527-9169`
         </DialogContent>
       </Dialog>
     </div>
+    </TooltipProvider>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────
+// Directory rows — table on ≥md, cards below.
+// ──────────────────────────────────────────────────────────────────
+interface OrgRowHandlers {
+  onOpen: (o: Org) => void;
+  onEdit: (o: Org) => void;
+  onSendWelcome: (o: Org) => void;
+}
+
+const OrgStatusPill: React.FC<{ o: Org; bucket: OrgBucket; className?: string }> = ({ o, bucket, className }) => {
+  const meta = ORG_META[bucket];
+  let text: React.ReactNode = meta.label;
+  if (bucket === 'discovered') text = `Lead · ${humanStatus(o.outreach_status).toLowerCase()}`;
+  return <Pill className={cn(meta.pill, className)} dot={meta.dot} title={meta.desc}>{text}</Pill>;
+};
+
+const BillingCell: React.FC<{ o: Org }> = ({ o }) => {
+  const parts: string[] = [];
+  parts.push(o.default_billed_to === 'org' ? 'Org pays' : 'Patient pays');
+  if (o.locked_price_cents != null) parts.push(`$${(o.locked_price_cents / 100).toFixed(0)} locked`);
+  else if (o.org_invoice_price_cents != null) parts.push(`$${(o.org_invoice_price_cents / 100).toFixed(0)}/visit`);
+  return (
+    <>
+      <span className="block">{parts[0]}</span>
+      {parts[1] && <span className="block text-[11px] text-gray-500">{parts[1]}</span>}
+    </>
+  );
+};
+
+const OrgPrimaryAction: React.FC<{ o: Org; bucket: OrgBucket; h: OrgRowHandlers; className?: string }> = ({ o, bucket, h, className }) => {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  if (bucket === 'cold') {
+    return (
+      <Button size="sm" className={cn('bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5', className)} onClick={(e) => { stop(e); h.onSendWelcome(o); }}>
+        <Send className="h-3.5 w-3.5" aria-hidden="true" /> Send welcome
+      </Button>
+    );
+  }
+  if (bucket === 'no_email') {
+    return (
+      <Button size="sm" variant="outline" className={cn('text-xs gap-1.5 border-red-300 text-red-800 hover:bg-red-50', className)} onClick={(e) => { stop(e); h.onEdit(o); }}>
+        <Mail className="h-3.5 w-3.5" aria-hidden="true" /> Add email
+      </Button>
+    );
+  }
+  return (
+    <Button size="sm" variant="outline" className={cn('text-xs gap-1.5', className)} onClick={(e) => { stop(e); h.onOpen(o); }}>
+      Open
+    </Button>
+  );
+};
+
+const OrgRowMenu: React.FC<{ o: Org; h: OrgRowHandlers; className?: string }> = ({ o, h, className }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="sm" className={cn('h-9 w-9 p-0', className)} aria-label={`More actions for ${o.name}`} onClick={(e) => e.stopPropagation()}>
+        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenuItem onSelect={() => h.onOpen(o)}><Building2 className="h-4 w-4 mr-2" aria-hidden="true" /> Open organization</DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => h.onEdit(o)}><Pencil className="h-4 w-4 mr-2" aria-hidden="true" /> Edit details</DropdownMenuItem>
+      {o.contact_email && (
+        <DropdownMenuItem onSelect={() => h.onSendWelcome(o)}>
+          <Send className="h-4 w-4 mr-2" aria-hidden="true" /> {o.welcomed_at ? 'Resend welcome' : 'Send welcome'}
+        </DropdownMenuItem>
+      )}
+      {(o.contact_phone || o.office_phone || o.contact_email) && <DropdownMenuSeparator />}
+      {(o.contact_phone || o.office_phone) && (
+        <DropdownMenuItem asChild><a href={`tel:${o.contact_phone || o.office_phone}`}><Phone className="h-4 w-4 mr-2" aria-hidden="true" /> Call {o.contact_phone || o.office_phone}</a></DropdownMenuItem>
+      )}
+      {o.contact_email && (
+        <DropdownMenuItem asChild><a href={`mailto:${o.contact_email}`}><Mail className="h-4 w-4 mr-2" aria-hidden="true" /> Email contact</a></DropdownMenuItem>
+      )}
+      {o.contact_email && <DropdownMenuItem onSelect={() => copyText(o.contact_email!, 'Email')}><Copy className="h-4 w-4 mr-2" aria-hidden="true" /> Copy email</DropdownMenuItem>}
+      <DropdownMenuItem onSelect={() => copyText(o.id, 'Organization ID')}><Copy className="h-4 w-4 mr-2" aria-hidden="true" /> Copy organization ID</DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
+const OrgRows: React.FC<{ rows: Org[]; bucketOf: Map<string, OrgBucket>; handlers: OrgRowHandlers }> = ({ rows, bucketOf, handlers }) => {
+  const bucket = (o: Org) => bucketOf.get(o.id) || deriveOrgBucket(o);
+  const accent = (b: OrgBucket) => b === 'no_email' ? 'border-l-4 border-l-red-500' : b === 'cold' ? 'border-l-4 border-l-amber-500' : '';
+  return (
+    <>
+      <div className="hidden md:block overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gray-50/80 hover:bg-gray-50/80">
+              <TableHead className={cn(TH, 'pl-4')}>Organization</TableHead>
+              <TableHead className={TH}>Contact</TableHead>
+              <TableHead className={TH}>Portal</TableHead>
+              <TableHead className={TH}>Billing</TableHead>
+              <TableHead className={TH}>Status</TableHead>
+              <TableHead className={cn('hidden xl:table-cell', TH, 'whitespace-nowrap')}>Last activity</TableHead>
+              <TableHead className={TH_STICKY}>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(o => {
+              const b = bucket(o);
+              const open = () => handlers.onOpen(o);
+              const last = lastActivityOf(o);
+              return (
+                <TableRow
+                  key={o.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={rowKeyHandler(open)}
+                  aria-label={`${o.name}, ${ORG_META[b].label}. Open organization`}
+                  className={cn(ROW_FOCUS, 'bg-white', accent(b))}
+                >
+                  <TableCell className="py-2.5 pl-4 align-top">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-[#B91C1C]/10 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                        <Building2 className="h-4 w-4 text-[#B91C1C]" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-gray-800 truncate block">{o.name}</span>
+                        <p className="text-[11px] text-gray-500 truncate">
+                          {o.contact_name || o.ordering_physician || (o.address_city ? o.address_city : <span className="text-gray-400">No contact name</span>)}
+                        </p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top text-xs text-gray-700 max-w-[220px]">
+                    <span className="block truncate">{o.contact_email || <span className="text-gray-400">No email</span>}</span>
+                    <span className="block text-[11px] text-gray-500">{o.contact_phone || o.office_phone || <span className="text-gray-400">No phone</span>}</span>
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top text-xs whitespace-nowrap">
+                    {o.portal_enabled
+                      ? <span className="text-emerald-700 inline-flex items-center gap-1"><Globe className="h-3 w-3" aria-hidden="true" /> Enabled</span>
+                      : <span className="text-gray-400">Off</span>}
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top text-xs text-gray-700 whitespace-nowrap"><BillingCell o={o} /></TableCell>
+                  <TableCell className="py-2.5 align-top"><OrgStatusPill o={o} bucket={b} /></TableCell>
+                  <TableCell className="hidden xl:table-cell py-2.5 align-top text-xs text-gray-600 whitespace-nowrap">
+                    {last ? (
+                      <>
+                        <span className="block">{o.welcomed_at && last === o.welcomed_at ? 'Welcomed' : o.last_referral_at && last === o.last_referral_at ? 'Referral' : 'Updated'}</span>
+                        <span className="block text-[11px] text-gray-400">{ago(last)}</span>
+                      </>
+                    ) : <span className="text-gray-400">—</span>}
+                  </TableCell>
+                  <TableCell className={TD_STICKY}>
+                    <div className="flex items-center justify-end gap-1">
+                      <OrgPrimaryAction o={o} bucket={b} h={handlers} className="h-9" />
+                      {b === 'welcomed' && o.contact_email && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" aria-label={`Resend welcome to ${o.name}`} onClick={(e) => { e.stopPropagation(); handlers.onSendWelcome(o); }}>
+                              <Send className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Resend welcome email</TooltipContent>
+                        </Tooltip>
+                      )}
+                      <OrgRowMenu o={o} h={handlers} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="md:hidden space-y-2">
+        {rows.map(o => {
+          const b = bucket(o);
+          const open = () => handlers.onOpen(o);
+          return (
+            <Card
+              key={o.id}
+              role="button"
+              tabIndex={0}
+              onClick={open}
+              onKeyDown={rowKeyHandler(open)}
+              aria-label={`${o.name}, ${ORG_META[b].label}. Open organization`}
+              className={cn(CARD_FOCUS, accent(b))}
+            >
+              <CardContent className="p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-semibold text-gray-800 block truncate">{o.name}</span>
+                    <p className="text-[11px] text-gray-500 truncate">{o.contact_email || o.contact_phone || o.office_phone || 'No contact on file'}</p>
+                  </div>
+                  <OrgStatusPill o={o} bucket={b} />
+                </div>
+                <div className="text-xs text-gray-600 flex flex-wrap gap-x-2 gap-y-0.5">
+                  <span>{o.portal_enabled ? 'Portal on' : 'Portal off'}</span>
+                  <span className="text-gray-300">·</span>
+                  <span>{o.default_billed_to === 'org' ? 'Org pays' : 'Patient pays'}</span>
+                  {lastActivityOf(o) && <><span className="text-gray-300">·</span><span className="text-gray-500">{ago(lastActivityOf(o))}</span></>}
+                </div>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <OrgPrimaryAction o={o} bucket={b} h={handlers} className="h-11 flex-1 justify-center" />
+                  <OrgRowMenu o={o} h={handlers} className="h-11 w-11 flex-shrink-0 border border-gray-200" />
+                  <ChevronRight className="h-5 w-5 text-gray-300 flex-shrink-0" aria-hidden="true" />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </>
+  );
+};
+
+// ──────────────────────────────────────────────────────────────────
+// Discovered-lead rows
+// ──────────────────────────────────────────────────────────────────
+interface LeadRowHandlers {
+  canManage: boolean;
+  onReachOut: (o: Org) => void;
+  onMark: (o: Org, status: 'declined' | 'called' | 'signed') => void;
+  onOpen: (o: Org) => void;
+  patientsOf: (o: Org) => string[];
+}
+
+const LeadStatusPill: React.FC<{ o: Org; bucket: LeadBucket; className?: string }> = ({ o, bucket, className }) => {
+  const meta = LEAD_META[bucket];
+  const text = bucket === 'in_progress' ? humanStatus(o.outreach_status) : meta.label;
+  return (
+    <Pill className={cn(meta.pill, className)} dot={meta.dot} title={meta.desc}>
+      {bucket === 'hot' && <Flame className="h-3 w-3" aria-hidden="true" />}{text}
+    </Pill>
+  );
+};
+
+const LeadPrimaryAction: React.FC<{ o: Org; bucket: LeadBucket; h: LeadRowHandlers; className?: string }> = ({ o, bucket, h, className }) => {
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  if (!h.canManage) {
+    return (
+      <Button size="sm" variant="outline" className={cn('text-xs gap-1.5', className)} onClick={(e) => { stop(e); h.onOpen(o); }}>Open</Button>
+    );
+  }
+  if (bucket === 'unreachable' && o.office_phone) {
+    return (
+      <Button size="sm" variant="outline" className={cn('text-xs gap-1.5', className)} asChild onClick={stop}>
+        <a href={`tel:${o.office_phone}`}><PhoneCall className="h-3.5 w-3.5" aria-hidden="true" /> Call office</a>
+      </Button>
+    );
+  }
+  return (
+    <Button size="sm" className={cn('bg-[#B91C1C] hover:bg-[#991B1B] text-white text-xs gap-1.5', className)} onClick={(e) => { stop(e); h.onReachOut(o); }}>
+      <Mail className="h-3.5 w-3.5" aria-hidden="true" /> Reach out
+    </Button>
+  );
+};
+
+const LeadRowMenu: React.FC<{ o: Org; h: LeadRowHandlers; className?: string }> = ({ o, h, className }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button variant="ghost" size="sm" className={cn('h-9 w-9 p-0', className)} aria-label={`More actions for ${o.name}`} onClick={(e) => e.stopPropagation()}>
+        <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenuItem onSelect={() => h.onOpen(o)}><Building2 className="h-4 w-4 mr-2" aria-hidden="true" /> Open organization</DropdownMenuItem>
+      {h.canManage && (
+        <>
+          <DropdownMenuItem onSelect={() => h.onReachOut(o)}><Mail className="h-4 w-4 mr-2" aria-hidden="true" /> Reach out by email</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => h.onMark(o, 'called')}><PhoneCall className="h-4 w-4 mr-2" aria-hidden="true" /> Log a call</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => h.onMark(o, 'signed')}><CheckCircle2 className="h-4 w-4 mr-2" aria-hidden="true" /> Mark signed · activate</DropdownMenuItem>
+          <DropdownMenuItem className="text-red-700 focus:text-red-700" onSelect={() => h.onMark(o, 'declined')}><X className="h-4 w-4 mr-2" aria-hidden="true" /> Not interested</DropdownMenuItem>
+        </>
+      )}
+      {(o.office_phone || o.contact_email) && <DropdownMenuSeparator />}
+      {o.office_phone && <DropdownMenuItem asChild><a href={`tel:${o.office_phone}`}><Phone className="h-4 w-4 mr-2" aria-hidden="true" /> Call {o.office_phone}</a></DropdownMenuItem>}
+      {o.contact_email && <DropdownMenuItem asChild><a href={`mailto:${o.contact_email}`}><Mail className="h-4 w-4 mr-2" aria-hidden="true" /> Email {o.contact_email}</a></DropdownMenuItem>}
+      {o.npi && <DropdownMenuItem onSelect={() => copyText(o.npi!, 'NPI')}><Copy className="h-4 w-4 mr-2" aria-hidden="true" /> Copy NPI {o.npi}</DropdownMenuItem>}
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
+
+const LeadRows: React.FC<{ rows: Org[]; bucketOf: Map<string, LeadBucket>; handlers: LeadRowHandlers; now: number }> = ({ rows, bucketOf, handlers, now }) => {
+  const bucket = (o: Org) => bucketOf.get(o.id) || deriveLeadBucket(o, now);
+  const accent = (b: LeadBucket) => b === 'hot' ? 'border-l-4 border-l-red-500' : b === 'untouched' ? 'border-l-4 border-l-amber-500' : '';
+  const lastRef = (o: Org) => {
+    if (!o.last_referral_at) return null;
+    const d = Math.floor((now - new Date(o.last_referral_at).getTime()) / (1000 * 3600 * 24));
+    return d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d}d ago`;
+  };
+  return (
+    <>
+      <div className="hidden md:block overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-gray-50/80 hover:bg-gray-50/80">
+              <TableHead className={cn(TH, 'pl-4')}>Practice</TableHead>
+              <TableHead className={TH}>Physician</TableHead>
+              <TableHead className={cn(TH, 'text-right whitespace-nowrap')}>Referrals</TableHead>
+              <TableHead className={TH}>Contact</TableHead>
+              <TableHead className={TH}>Status</TableHead>
+              <TableHead className={cn('hidden xl:table-cell', TH, 'whitespace-nowrap')}>Follow-ups</TableHead>
+              <TableHead className={TH_STICKY}>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map(o => {
+              const b = bucket(o);
+              const open = () => handlers.onOpen(o);
+              const names = handlers.patientsOf(o);
+              return (
+                <TableRow
+                  key={o.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={open}
+                  onKeyDown={rowKeyHandler(open)}
+                  aria-label={`${o.name}, ${LEAD_META[b].label}. Open organization`}
+                  className={cn(ROW_FOCUS, 'bg-white', accent(b))}
+                >
+                  <TableCell className="py-2.5 pl-4 align-top">
+                    <div className="min-w-0">
+                      <span className="text-sm font-semibold text-gray-800 truncate block">{o.name}</span>
+                      <p className="text-[11px] text-gray-500 truncate">{orgAddress(o) || (o.npi_taxonomy ? o.npi_taxonomy : <span className="text-gray-400">No address</span>)}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top text-xs text-gray-700 max-w-[200px]">
+                    <span className="block truncate">{o.ordering_physician || <span className="text-gray-400">—</span>}</span>
+                    <span className="block text-[11px] text-gray-500 truncate">{o.npi ? `NPI ${o.npi}` : ''}{o.npi && o.npi_taxonomy ? ' · ' : ''}{o.npi_taxonomy || ''}</span>
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top text-right whitespace-nowrap">
+                    <span className="text-sm font-medium tabular-nums block">{o.referral_count || 0}</span>
+                    <span className="text-[11px] text-gray-400 block">{lastRef(o) ? `last ${lastRef(o)}` : ''}</span>
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top text-xs text-gray-700 max-w-[200px]">
+                    <span className="block truncate">{o.contact_email || <span className="text-amber-700">No email</span>}</span>
+                    <span className="block text-[11px] text-gray-500">{o.office_phone || <span className="text-gray-400">No phone</span>}</span>
+                  </TableCell>
+                  <TableCell className="py-2.5 align-top"><LeadStatusPill o={o} bucket={b} /></TableCell>
+                  <TableCell className="hidden xl:table-cell py-2.5 align-top text-xs text-gray-600 whitespace-nowrap">
+                    {o.followup_count ? (
+                      <>
+                        <span className="block">{plural(o.followup_count, 'follow-up')}</span>
+                        <span className="block text-[11px] text-gray-400">{o.last_followup_at ? ago(o.last_followup_at) : ''}</span>
+                      </>
+                    ) : o.outreached_at ? (
+                      <><span className="block">Outreach</span><span className="block text-[11px] text-gray-400">{ago(o.outreached_at)}</span></>
+                    ) : <span className="text-gray-400">None</span>}
+                  </TableCell>
+                  <TableCell className={TD_STICKY}>
+                    <div className="flex items-center justify-end gap-1">
+                      <LeadPrimaryAction o={o} bucket={b} h={handlers} className="h-9" />
+                      {handlers.canManage && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="ghost" className="h-9 w-9 p-0" aria-label={`Log a call with ${o.name}`} onClick={(e) => { e.stopPropagation(); handlers.onMark(o, 'called'); }}>
+                              <PhoneCall className="h-4 w-4" aria-hidden="true" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Log a call{names.length > 0 ? ` · patients: ${names.slice(0, 3).join(', ')}${names.length > 3 ? ` +${names.length - 3}` : ''}` : ''}</TooltipContent>
+                        </Tooltip>
+                      )}
+                      <LeadRowMenu o={o} h={handlers} />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="md:hidden space-y-2">
+        {rows.map(o => {
+          const b = bucket(o);
+          const open = () => handlers.onOpen(o);
+          return (
+            <Card
+              key={o.id}
+              role="button"
+              tabIndex={0}
+              onClick={open}
+              onKeyDown={rowKeyHandler(open)}
+              aria-label={`${o.name}, ${LEAD_META[b].label}. Open organization`}
+              className={cn(CARD_FOCUS, accent(b))}
+            >
+              <CardContent className="p-3 space-y-2">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-semibold text-gray-800 block truncate">{o.name}</span>
+                    <p className="text-[11px] text-gray-500 truncate">{o.ordering_physician || orgAddress(o) || 'No details'}</p>
+                  </div>
+                  <LeadStatusPill o={o} bucket={b} />
+                </div>
+                <div className="text-xs text-gray-600 flex flex-wrap gap-x-2 gap-y-0.5">
+                  <span className="font-medium text-gray-900">{plural(o.referral_count || 0, 'patient')}</span>
+                  {lastRef(o) && <><span className="text-gray-300">·</span><span className="text-gray-500">last {lastRef(o)}</span></>}
+                  {o.office_phone && <><span className="text-gray-300">·</span><a href={`tel:${o.office_phone}`} onClick={(e) => e.stopPropagation()} className="text-[#B91C1C]">{o.office_phone}</a></>}
+                </div>
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <LeadPrimaryAction o={o} bucket={b} h={handlers} className="h-11 flex-1 justify-center" />
+                  <LeadRowMenu o={o} h={handlers} className="h-11 w-11 flex-shrink-0 border border-gray-200" />
+                  <ChevronRight className="h-5 w-5 text-gray-300 flex-shrink-0" aria-hidden="true" />
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </>
   );
 };
 
