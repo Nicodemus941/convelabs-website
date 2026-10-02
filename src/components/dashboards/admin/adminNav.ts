@@ -148,6 +148,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
       { id: 'hormozi', label: 'Growth model' },
       { id: 'frank', label: 'Frank (CFO)' },
       { id: 'upgrades', label: 'Upgrades & ROI' },
+      { id: 'referrals', label: 'Referrals' },
     ],
   },
   {
@@ -198,6 +199,7 @@ export const LEGACY_TAB_REDIRECTS: Record<string, string> = {
   hormozi: 'owner/hormozi',
   frank: 'owner/frank',
   upgrades: 'owner/upgrades',
+  referrals: 'owner/referrals',
   settings: 'system/settings',
   operations: 'system/operations',
   'ai-assistant': 'system/ai-assistant',
