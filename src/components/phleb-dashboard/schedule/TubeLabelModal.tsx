@@ -127,23 +127,21 @@ const TubeLabelModal: React.FC<Props> = ({
       // capture the chain-of-custody location in the BACKGROUND and patch it
       // onto the row when (if) it resolves.
       //
-      // N1 fix 2026-05-25: also flip status to 'specimen_delivered' so the
-      // visit stops appearing as "in_progress" forever. Phlebs were tapping
-      // Mark Collection then forgetting to flip status separately, leaving
-      // 10+ stale-status rows visible across dashboards. Single-step
-      // collection now closes the workflow loop.
-      //
-      // We use 'specimen_delivered' (not 'completed') so the visit still
-      // shows in the phleb's day view until they confirm specimen handoff.
+      // 2026-10-03 (draw-outcome tracking): this stamps collection_at ONLY.
+      // It used to also flip status → 'specimen_delivered' (N1 fix 2026-05-25),
+      // which merged "collected" with "delivered" and made it impossible to
+      // prove every sample reached the lab. Delivery now happens only through
+      // SpecimenDeliveryModal (which writes the canonical specimen_deliveries
+      // row); the visit stays in_progress until then, and "Draw done" records
+      // the outcome. If a collection stamp already exists, keep the earliest.
       const updates: Record<string, any> = {
-        collection_at: stampAt.toISOString(),
-        status: 'specimen_delivered',
+        collection_at: existingCollectionAt || stampAt.toISOString(),
         updated_at: stampAt.toISOString(),
       };
       const { error } = await supabase.from('appointments').update(updates).eq('id', appointmentId);
       if (error) throw error;
-      setMarkedAt(stampAt);
-      toast.success(`Collection stamped: ${displayTime(stampAt)} · Status → Specimen Delivered`);
+      setMarkedAt(existingCollectionAt ? new Date(existingCollectionAt) : stampAt);
+      toast.success(`Collection stamped: ${displayTime(stampAt)} · tap "Draw done" to record the outcome`);
       onMarked?.();
 
       // Background, best-effort chain-of-custody location. Non-blocking: the

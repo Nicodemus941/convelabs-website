@@ -28,6 +28,78 @@ const NON_DELIVERY_SERVICES = new Set([
   'partner-aristotle-education',
 ]);
 
+// Services whose draw never produces a specimen WE drop at a lab:
+//   • NON_DELIVERY_SERVICES — drawn and left on site (in-office / partner-*)
+//   • therapeutic           — blood removed for treatment and discarded
+//   • specialty-kit*        — ships via UPS/FedEx, not a lab drop
+//   • invoice / dev-testing — not visits
+const NOT_LAB_BOUND_EXACT = new Set([...NON_DELIVERY_SERVICES, 'therapeutic', 'invoice', 'dev-testing']);
+
+/**
+ * TRUE when a visit is expected to end with a `specimen_deliveries` row
+ * (the delivery gate + "Delivery pending" flag + quality metrics all key off
+ * this). Blank service_type is lab-bound — so are couples-wellness-stack and
+ * specimen-collection-stool-urine. MUST stay in sync with the SQL mirror
+ * `is_lab_bound_service()` in DRAFT_20261003_draw_outcome_tracking.sql.
+ */
+export function isLabBound(serviceType: string | null | undefined): boolean {
+  const t = (serviceType || '').trim();
+  if (NOT_LAB_BOUND_EXACT.has(t)) return false;
+  if (t.startsWith('specialty-kit')) return false;
+  return true;
+}
+
+export const QUALITY_TRACKING_FALLBACK_SINCE = '2026-10-03';
+export const QUALITY_TRACKING_LABEL = 'Tracking since Oct 3, 2026';
+/** Hours after collection/completion before a missing delivery row is flagged. */
+export const DELIVERY_PENDING_HOURS = 6;
+
+export type DrawOutcome = 'success_first_stick' | 'success_after_second_stick' | 'partial' | 'unsuccessful';
+export type DrawFailureReason = 'difficult_veins' | 'patient_declined' | 'fainted' | 'other';
+
+export const DRAW_OUTCOME_LABELS: Record<DrawOutcome, string> = {
+  success_first_stick: 'Success — first stick',
+  success_after_second_stick: 'Success — second stick',
+  partial: 'Partial draw',
+  unsuccessful: 'Unsuccessful',
+};
+
+export const DRAW_FAILURE_LABELS: Record<DrawFailureReason, string> = {
+  difficult_veins: 'Difficult veins',
+  patient_declined: 'Patient declined',
+  fainted: 'Patient fainted',
+  other: 'Other',
+};
+
+/**
+ * Client-side "Delivery pending" check for one appointment row — the same
+ * rule the DB RPC get_delivery_gaps() applies (lab-bound, collected or
+ * completed, no delivery, older than DELIVERY_PENDING_HOURS). `delivered_at`
+ * is the row-level proxy for the canonical specimen_deliveries row: the
+ * SpecimenDeliveryModal writes both in one flow.
+ */
+export function isDeliveryPending(a: {
+  service_type?: string | null;
+  status?: string | null;
+  collection_at?: string | null;
+  completion_time?: string | null;
+  delivered_at?: string | null;
+  draw_outcome?: string | null;
+  appointment_date?: string | null;
+}, sinceDate: string = QUALITY_TRACKING_FALLBACK_SINCE, now: number = Date.now()): boolean {
+  if (!isLabBound(a.service_type)) return false;
+  if (a.delivered_at) return false;
+  if (a.draw_outcome === 'unsuccessful') return false;
+  if (!['in_progress', 'specimen_delivered', 'completed'].includes(a.status || '')) return false;
+  const day = (a.appointment_date || '').slice(0, 10);
+  if (day && day < sinceDate) return false;
+  const stamp = a.collection_at || a.completion_time || null;
+  if (!stamp) return false;
+  const t = new Date(stamp).getTime();
+  if (isNaN(t)) return false;
+  return now - t > DELIVERY_PENDING_HOURS * 60 * 60 * 1000;
+}
+
 export function computeReadiness(appointment: {
   service_type: string;
   lab_order_file_path?: string | null;
