@@ -4,6 +4,7 @@ import Footer from '@/components/home/Footer';
 import { Shield, Clock, Award, Heart, CheckCircle2, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
+import { COLLECTIONS_COUNT } from '@/content/trustClaims';
 
 const guarantees = [
   {
@@ -77,7 +78,7 @@ const Guarantee = () => {
                 'HIPAA Compliant',
                 'Hospital-Grade Equipment',
                 'CLIA-Certified Labs',
-                '500+ Patients Served',
+                `${COLLECTIONS_COUNT}+ Collections`,
                 '5-Star Google Rating',
                 'Same-Day Appointments',
               ].map(item => (

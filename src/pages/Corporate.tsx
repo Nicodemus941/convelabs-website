@@ -77,7 +77,7 @@ const Corporate: React.FC = () => {
     {
       organization: "Professional Sports Teams",
       type: "Athletic Organizations", 
-      employees: "500+ staff & athletes",
+      employees: "Staff & athletes",
       result: "40% faster injury recovery"
     },
     {
@@ -835,7 +835,7 @@ const Corporate: React.FC = () => {
             Transform Your <span className="text-conve-gold">Corporate Wellness Program</span> Today
           </h2>
           <p className="text-xl md:text-2xl mb-12 opacity-95 max-w-3xl mx-auto leading-relaxed">
-            Join 500+ companies that have revolutionized their employee wellness approach. 
+            Join the companies that have revolutionized their employee wellness approach. 
             Reduce costs, improve productivity, and show your team you care.
           </p>
           

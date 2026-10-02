@@ -12,8 +12,8 @@ const WhyChooseUs = () => {
     },
     {
       icon: <Syringe className="h-10 w-10 text-conve-red" />,
-      title: "99% First-Stick Success",
-      description: "Our experienced professionals achieve successful blood draws on the first attempt, virtually painless."
+      title: "Most Draws Under 10 Minutes",
+      description: "Our experienced, licensed phlebotomists keep it gentle and efficient. Most draws take under 10 minutes."
     },
     {
       icon: <ShieldCheck className="h-10 w-10 text-conve-red" />,
@@ -22,7 +22,7 @@ const WhyChooseUs = () => {
     },
     {
       icon: <Timer className="h-10 w-10 text-conve-red" />,
-      title: "Quick 5-7 Minute Service",
+      title: "Quick, Efficient Service",
       description: "We respect your time with efficient service that takes just minutes, not hours in a waiting room."
     },
     {

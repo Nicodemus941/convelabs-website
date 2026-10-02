@@ -396,7 +396,7 @@ export const generateCorporateWellnessGuide = () => {
   addTitle('Getting Started', 22);
   
   addSectionTitle('Ready to Transform Your Corporate Wellness?');
-  addParagraph('Join 500+ companies that have revolutionized their employee wellness programs with ConveLabs. Our team is ready to help you implement a program that delivers real results.');
+  addParagraph('Join the companies that have revolutionized their employee wellness programs with ConveLabs. Our team is ready to help you implement a program that delivers real results.');
   
   addSectionTitle('Next Steps:');
   addBulletPoint('Schedule a corporate demo to see our platform in action');

@@ -137,7 +137,7 @@ const ServicesPricingModal: React.FC<Props> = ({
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <Badge className="bg-white/20 text-white border-white/30 text-[11px] hover:bg-white/20 gap-1">
-              <Star className="h-3 w-3 fill-amber-300 text-amber-300" /> 4.9 · 1,500+ patients
+              <Star className="h-3 w-3 fill-amber-300 text-amber-300" /> 5.0 · 164 reviews
             </Badge>
             <Badge className="bg-white/15 text-white border-white/20 text-[11px] hover:bg-white/15">CLIA-certified phlebs</Badge>
             <Badge className="bg-white/15 text-white border-white/20 text-[11px] hover:bg-white/15">HIPAA-compliant</Badge>

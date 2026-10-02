@@ -299,7 +299,7 @@ const FunnelStep5Recommendation = ({ data, onPrev }: FunnelStep5RecommendationPr
                     </Button>
                     
                     <p className="text-sm text-gray-500 font-medium">
-                      ✓ 99% first-stick success • ✓ 0% lost samples • ✓ On-time guarantee
+                      ✓ Most draws under 10 minutes • ✓ Every sample tracked • ✓ On-time guarantee
                     </p>
                   </div>
                 </div>

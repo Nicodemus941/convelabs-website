@@ -10,7 +10,7 @@ interface FunnelStep1WelcomeProps {
 
 const FunnelStep1Welcome = ({ onNext }: FunnelStep1WelcomeProps) => {
   const trustIndicators = [
-    { icon: <CheckCircle className="h-5 w-5" />, text: "99% First-Stick Success" },
+    { icon: <CheckCircle className="h-5 w-5" />, text: "Most Draws Under 10 Minutes" },
     { icon: <Clock className="h-5 w-5" />, text: "Same-Day Scheduling" },
     { icon: <Star className="h-5 w-5" />, text: "5-Star Service" },
     { icon: <Shield className="h-5 w-5" />, text: "100% Secure & Private" }
@@ -20,7 +20,7 @@ const FunnelStep1Welcome = ({ onNext }: FunnelStep1WelcomeProps) => {
     "Personalized plan recommendations based on your unique needs",
     "Save up to 64% compared to traditional lab testing",
     "Convenient at-home or office blood collection",
-    "Expert phlebotomists with 99% first-stick success rate"
+    "Licensed phlebotomists — most draws take under 10 minutes"
   ];
 
   return (

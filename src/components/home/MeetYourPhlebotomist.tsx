@@ -1,6 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Shield, Award, Users, CheckCircle2 } from 'lucide-react';
+import { COLLECTIONS_COUNT } from '@/content/trustClaims';
 
 /**
  * MEET YOUR PHLEBOTOMIST — Founder Credibility Card
@@ -81,14 +82,14 @@ const MeetYourPhlebotomist: React.FC = () => {
                 <div className="flex items-start gap-2.5">
                   <CheckCircle2 className="h-4 w-4 text-brand-gold-deep mt-0.5 flex-shrink-0" />
                   <p className="text-sm text-brand-charcoal">
-                    <span className="font-semibold">500+ successful home visits</span> across Central Florida
+                    <span className="font-semibold">{COLLECTIONS_COUNT}+ collections</span> across Central Florida
                   </p>
                 </div>
                 <div className="flex items-start gap-2.5">
                   <Shield className="h-4 w-4 text-brand-gold-deep mt-0.5 flex-shrink-0" />
                   <p className="text-sm text-brand-charcoal">
                     <span className="font-semibold">HIPAA-compliant.</span>{' '}
-                    Licensed phlebotomist. One-try draws on the first attempt.
+                    Licensed phlebotomist. Gentle, experienced, and most draws take under 10 minutes.
                   </p>
                 </div>
               </div>

@@ -5,7 +5,7 @@ export const SocialProofStats = () => {
   const stats = [
     {
       icon: <Users className="h-8 w-8" />,
-      value: "500+ Executives & 50+ Companies",
+      value: "Executives & Companies",
       label: "Elite Clients Served",
       color: "text-blue-600",
     },

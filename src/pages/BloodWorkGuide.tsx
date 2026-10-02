@@ -47,7 +47,7 @@ const BloodWorkGuide: React.FC = () => {
               <p className="text-sm text-gray-700 mb-0">
                 <strong>Written by Nico Jean-Baptiste</strong>, Licensed Phlebotomist & Founder of ConveLabs —
                 the mobile blood draw service trusted by NFL athletes, fitness
-                influencers, and 500+ Central Florida patients.
+                influencers, and Central Florida patients.
               </p>
             </div>
 
@@ -152,7 +152,7 @@ const BloodWorkGuide: React.FC = () => {
                 Skip the lab — we come to you.
               </h3>
               <p className="text-gray-700 mb-5">
-                One-try blood draws at your home in 60 minutes. On-time or your visit is free.
+                Blood draws at your home — most take under 10 minutes. On-time or your visit is free.
                 Use code <strong className="font-mono bg-white px-2 py-0.5 rounded border border-gray-200">WELCOME10</strong> for $15 off.
               </p>
               <Link to="/?ref=WELCOME10">

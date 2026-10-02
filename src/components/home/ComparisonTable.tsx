@@ -26,12 +26,12 @@ interface Row {
 }
 
 const ROWS: Row[] = [
-  { label: 'Time at the blood draw',     lab: '2+ hours (w/ wait)',  us: '10 minutes or less', labBad: true, usGood: true },
-  { label: 'First-try draw success',     lab: '60% (3–4 sticks)',    us: '99% (one try)',      labBad: true, usGood: true },
-  { label: 'Same-day appointments',      lab: 'Rarely',              us: 'Always',             labBad: true, usGood: true },
+  { label: 'Time at the blood draw',     lab: '2+ hours (w/ wait)',  us: 'Most under 10 min',   labBad: true, usGood: true },
+  { label: 'Where your sample goes',      lab: 'You hope it gets there', us: 'Tracked to Quest, Labcorp or AdventHealth', labBad: true, usGood: true },
+  { label: 'Same-day appointments',      lab: 'Rarely',              us: 'Often available',   labBad: true, usGood: true },
   { label: 'Privacy & setting',          lab: 'Public waiting room', us: 'Your home',          labBad: true, usGood: true },
   { label: 'Pediatric & elderly care',   lab: 'Stressful',           us: 'Calm, no tears',     labBad: true, usGood: true },
-  { label: 'Results turnaround',         lab: '3–5 days',            us: '48 hours',           labBad: true, usGood: true },
+  { label: 'Updates on your sample',      lab: 'None',                us: 'You + your doctor notified', labBad: true, usGood: true },
   { label: 'If they arrive late',        lab: 'You wait',            us: 'Your visit is FREE', labBad: true, usGood: true },
   { label: 'Insurance handling',         lab: 'Your problem',        us: 'We send info to lab', labBad: true, usGood: true },
   { label: 'NFL-trusted phlebotomist',   lab: 'No',                  us: 'Yes',                labBad: true, usGood: true },
