@@ -1,0 +1,97 @@
+-- ============================================================================
+-- DRAFT — NOT APPLIED
+-- Billing section redesign (feat/redesign-billing) — backend follow-ups.
+--
+-- This file lives in supabase/drafts/ on purpose so `supabase db push` and
+-- the migrations folder never pick it up. Move it to supabase/migrations/
+-- with a fresh timestamp ONLY after the owner has reviewed every statement.
+-- The redesigned UI works without any of this; each block just removes a
+-- class of data bug the UI currently has to flag.
+--
+-- Found during the 2026-10-02 audit (read-only queries against prod):
+--   * 19 invoices are invoice_status IN ('sent','reminded','final_warning')
+--     while payment_status = 'completed' (sum $2,290.00). The trigger
+--     trg_clear_invoice_status_when_paid only reacts to payment_status IN
+--     ('paid','succeeded'); the app writes 'completed' (177 of 230 invoiced
+--     rows), so it never fires. Reminders keep going to patients who paid.
+--   * invoice_status has no CHECK; the UI used to assume 5 values, the edge
+--     functions write 8 (pending_send, missing_email, sent, reminded,
+--     final_warning, paid, voided, cancelled).
+--   * company_expenses: active recurring rows with a past end_date still
+--     count toward burn in expense_monthly_dollars (0 today, but the UI
+--     now surfaces them as "Ended").
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 1. Make the "paid clears the invoice" trigger match what the app writes.
+--    Keep 'paid'/'succeeded' for the Stripe webhook paths; add 'completed'.
+-- ----------------------------------------------------------------------------
+-- CREATE OR REPLACE FUNCTION public.clear_invoice_status_when_paid()
+-- RETURNS trigger LANGUAGE plpgsql AS $$
+-- BEGIN
+--   IF NEW.payment_status IN ('paid', 'succeeded', 'completed')
+--      AND (OLD.payment_status IS DISTINCT FROM NEW.payment_status)
+--      AND NEW.invoice_status IN ('sent', 'reminded', 'final_warning') THEN
+--     NEW.invoice_status := 'paid';
+--   END IF;
+--   RETURN NEW;
+-- END;
+-- $$;
+
+-- ----------------------------------------------------------------------------
+-- 2. One-time backfill for the 19 rows already stuck. REVIEW THE LIST FIRST:
+--    the UI's "Card paid · invoice open" flag lists them. If any of these
+--    were actually paid *through* the Stripe invoice, the webhook would have
+--    set invoice_status='paid' itself — so a 'completed' here almost always
+--    means the appointment was charged by card and the invoice is a dup.
+--    Alternative per row: void the Stripe invoice instead (UI → Void).
+-- ----------------------------------------------------------------------------
+-- UPDATE public.appointments
+--    SET invoice_status = 'paid'
+--  WHERE invoice_status IN ('sent', 'reminded', 'final_warning')
+--    AND payment_status = 'completed';
+-- -- expected: 19 rows (as of 2026-10-02)
+
+-- ----------------------------------------------------------------------------
+-- 3. Lock the invoice_status vocabulary so the UI buckets can't drift again.
+--    NOT VALID so existing rows aren't re-checked at apply time; validate
+--    separately once you've confirmed no legacy value is lurking:
+--      SELECT invoice_status, count(*) FROM appointments GROUP BY 1;
+-- ----------------------------------------------------------------------------
+-- ALTER TABLE public.appointments
+--   ADD CONSTRAINT appointments_invoice_status_check
+--   CHECK (invoice_status IS NULL OR invoice_status IN (
+--     'not_required', 'pending_send', 'missing_email', 'sent', 'reminded',
+--     'final_warning', 'paid', 'paid_pending_verify', 'voided', 'cancelled'
+--   )) NOT VALID;
+-- -- ALTER TABLE public.appointments VALIDATE CONSTRAINT appointments_invoice_status_check;
+
+-- ----------------------------------------------------------------------------
+-- 4. The Invoices screen scans appointments WHERE invoice_status IS NOT NULL
+--    AND invoice_status <> 'not_required' ordered by invoice_sent_at. A
+--    partial index keeps that cheap as appointments grows.
+-- ----------------------------------------------------------------------------
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS appointments_invoiced_idx
+--   ON public.appointments (invoice_sent_at DESC NULLS LAST)
+--   WHERE invoice_status IS NOT NULL AND invoice_status <> 'not_required';
+
+-- ----------------------------------------------------------------------------
+-- 5. Expenses: stop counting a recurring expense after its end_date.
+--    expense_monthly_dollars / frank_cfo_expenses currently ignore end_date
+--    (mirrored by MONTHLY_FACTOR in ExpensesManager.tsx). The UI flags these
+--    as "Ended" but still includes them in burn so numbers match Frank.
+--    Change both together, or neither:
+--      - in expense_monthly_dollars(): AND (end_date IS NULL OR end_date >= current_date)
+--      - in ExpensesManager.tsx activeRecurring: same predicate
+-- ----------------------------------------------------------------------------
+-- (no statement — RPC body not reproduced here; edit in place after review)
+
+-- ----------------------------------------------------------------------------
+-- 6. Services: the catalog stores base_price / tier_pricing in integer cents
+--    (ServiceForm converts dollars → cents). A CHECK keeps a stray dollar
+--    write (e.g. 150 instead of 15000) from silently underpricing checkout.
+--    Lowest legitimate price today is 3500 ($35 add-on).
+-- ----------------------------------------------------------------------------
+-- ALTER TABLE public.services_enhanced
+--   ADD CONSTRAINT services_enhanced_base_price_cents_check
+--   CHECK (base_price = 0 OR base_price >= 1000) NOT VALID;
