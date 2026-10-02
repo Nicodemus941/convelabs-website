@@ -140,7 +140,7 @@ const BookNow: React.FC = () => {
     <>
       <Helmet>
         <title>Book Your Home Visit | ConveLabs — Trusted by NFL Athletes</title>
-        <meta name="description" content='"Better than what I got in the NFL." — Licensed phlebotomist at your door in 60 minutes. One-try blood draws. On-time or your visit is free. Same-day appointments across Central Florida.' />
+        <meta name="description" content='"Better than what I got in the NFL." — A licensed phlebotomist comes to you. Most draws take under 10 minutes. On-time or your visit is free. Same-day appointments across Central Florida.' />
       </Helmet>
 
       <Header />
@@ -154,7 +154,7 @@ const BookNow: React.FC = () => {
                 <div className="flex items-center justify-center gap-3 mb-3">
                   <span className="h-px w-8 bg-brand-gold/50" />
                   <p className="text-xs font-medium tracking-[0.24em] uppercase text-brand-gold-deep">
-                    One-Try Blood Draws · Results in 48 Hours
+                    Most Draws Under 10 Minutes · Delivered to Quest, Labcorp &amp; AdventHealth
                   </p>
                   <span className="h-px w-8 bg-brand-gold/50" />
                 </div>
@@ -162,7 +162,7 @@ const BookNow: React.FC = () => {
                   Book your <span className="italic text-brand-gold-deep">home visit.</span>
                 </h1>
                 <p className="text-brand-gray-warm mt-3 max-w-lg mx-auto">
-                  Licensed phlebotomist at your door in 60 minutes. Same-day appointments available across Central Florida.
+                  A licensed phlebotomist comes to your home or office. Same-day appointments available across Central Florida.
                 </p>
               </div>
 

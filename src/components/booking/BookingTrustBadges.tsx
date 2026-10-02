@@ -1,11 +1,12 @@
 import React from 'react';
 import { Shield, Award, Lock, Users } from 'lucide-react';
+import { COLLECTIONS_COUNT } from '@/content/trustClaims';
 
 const BADGES = [
   { icon: Shield, label: 'HIPAA Compliant' },
   { icon: Award, label: 'Licensed Phlebotomists' },
   { icon: Lock, label: 'Secure Checkout' },
-  { icon: Users, label: '500+ Patients Served' },
+  { icon: Users, label: `${COLLECTIONS_COUNT}+ Collections` },
 ];
 
 const BookingTrustBadges: React.FC = () => {
