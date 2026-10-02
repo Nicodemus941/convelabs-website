@@ -3545,10 +3545,15 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
       if (staff?.first_name) phlebName = `${staff.first_name} ${staff.last_name || ''}`.trim();
     }
 
-    // Fallback: notify owner phone directly (Nico)
+    // The owner already got the early "💰 New Booking!" revenue text (see
+    // [owner-sms-early] in the checkout handler). When the assigned phleb IS the
+    // owner (new visits default to Nico), skip this copy so he gets one text per
+    // booking, not two. Other phlebotomists still get theirs.
     const OWNER_PHONE = Deno.env.get('OWNER_PHONE') || '9415279169';
+    const digits = (p: string) => p.replace(/\D/g, '').slice(-10);
+    const phlebIsOwner = !!phlebPhone && digits(phlebPhone) === digits(OWNER_PHONE);
 
-    if (phlebPhone && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+    if (phlebPhone && !phlebIsOwner && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
       const phlebSms = `New Booking!\n\nPatient: ${patientName}\nService: ${serviceName}\nDate: ${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\nLocation: ${address || 'TBD'}\nAmount: $${totalAmount.toFixed(2)}\n\nView in your dashboard: https://convelabs.com/dashboard`;
 
       const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
@@ -3569,31 +3574,12 @@ async function sendAppointmentConfirmation(appointment: any, metadata: any) {
         body: twilioBody.toString(),
       });
       console.log(`Phlebotomist notification sent to ${phlebPhone}`);
+    } else if (phlebIsOwner) {
+      console.log('Phleb is the owner — skipped duplicate phleb text (owner got the early revenue text).');
     }
 
-    // 4. Notify OWNER of revenue via SMS
-    if (OWNER_PHONE && TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-      const ownerSms = `💰 New Booking!\n\nPatient: ${patientName}\nService: ${serviceName}\nRevenue: $${totalAmount.toFixed(2)}${appointment.tip_amount ? ` (incl. $${appointment.tip_amount.toFixed(2)} tip)` : ''}\nDate: ${displayDate}${appointmentTime ? ` at ${appointmentTime}` : ''}\nSource: ${appointment.booking_source || 'online'}`;
-
-      const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-      const twilioBody = new URLSearchParams({
-        To: OWNER_PHONE.startsWith('+') ? OWNER_PHONE : `+1${OWNER_PHONE.replace(/\D/g, '')}`,
-        Body: ownerSms,
-        ...(TWILIO_MESSAGING_SERVICE_SID
-          ? { MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID }
-          : { From: TWILIO_PHONE_NUMBER || '+14074104939' }),
-      });
-
-      await fetch(twilioUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`)}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: twilioBody.toString(),
-      });
-      console.log(`Owner revenue notification sent to ${OWNER_PHONE}`);
-    }
+    // (Removed 2026-10-02) A second owner "💰 New Booking!" text used to be sent
+    // here; the early [owner-sms-early] block already covers it.
   } catch (notifErr) {
     console.error('Staff/owner notification error (non-fatal):', notifErr);
   }
