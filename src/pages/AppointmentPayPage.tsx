@@ -390,7 +390,8 @@ const AppointmentPayPage: React.FC = () => {
 
       {/* Visit summary */}
       <Card className="p-4 mb-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Your visit</h2>
+        {/* <p> not <h2>: the site's global heading styles (serif, large) would override the utility classes. */}
+        <p role="heading" aria-level={2} className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Your visit</p>
         <ul className="text-sm space-y-1.5">
           {a?.appointment_date && (
             <li className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-gray-400 shrink-0" aria-hidden="true" /><span className="font-medium">{fmtDate(a.appointment_date)}</span></li>
