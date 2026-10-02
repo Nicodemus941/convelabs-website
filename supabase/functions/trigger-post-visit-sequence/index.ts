@@ -1,3 +1,31 @@
+/**
+ * TRIGGER-POST-VISIT-SEQUENCE — seeds the steps the DB trigger does NOT.
+ *
+ * Two seeders used to overlap (2026-10-02 audit):
+ *   • DB trigger `auto_queue_google_review` (on appointments → completed)
+ *     seeds google_review (48h), results_checkin (5d — disabled, see
+ *     migration DRAFT), referral_prompt (7d), membership_upsell (14d),
+ *     rebooking_nudge (30d) with ON CONFLICT (unique_key) DO NOTHING.
+ *   • This function (called by the phleb app on "complete") inserted
+ *     specimen_confirm, survey, review_request (24h), membership_upsell,
+ *     referral_prompt (14d), rebooking_nudge (21/45d) with a PLAIN insert.
+ *
+ * Because the DB trigger fires first inside the same status UPDATE, this
+ * function's insert collided on `appointment_id::step` for the shared
+ * steps and the whole batch failed — so specimen_confirm and survey were
+ * never seeded either (only 5 specimen_confirm rows in 30 days), while a
+ * patient who got through received BOTH a 24h review_request and a 48h
+ * google_review.
+ *
+ * Contract now:
+ *   DB trigger owns: google_review, referral_prompt, membership_upsell,
+ *                    rebooking_nudge  (+ results_checkin until the
+ *                    migration lands; the processor skips it).
+ *   This function owns: specimen_confirm (now), survey (2h, first visit),
+ *                    and the referral code for first-timers.
+ *   Inserts are upserts on unique_key with ignoreDuplicates, so running
+ *   twice — or running after the trigger — is harmless.
+ */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 
 const corsHeaders = {
@@ -25,7 +53,6 @@ Deno.serve(async (req) => {
 
     const now = new Date();
     let isFirstVisit = true;
-    let hasRecentReview = false;
 
     // Check visit count by email
     if (patientEmail) {
@@ -38,53 +65,31 @@ Deno.serve(async (req) => {
       } catch (_e) { /* ignore */ }
     }
 
-    // Check review history
-    if (patientEmail) {
-      try {
-        const cutoff = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
-        const r = await supabase.from('post_visit_sequences')
-          .select('id')
-          .eq('patient_email', patientEmail)
-          .eq('step', 'review_request')
-          .gte('scheduled_at', cutoff)
-          .limit(1);
-        hasRecentReview = (r.data || []).length > 0;
-      } catch (_e) { /* ignore */ }
-    }
-
-    // Build smart sequence
-    const steps = [];
+    // Steps this function owns (see header). Review / referral / upsell /
+    // rebooking are seeded by the DB trigger.
+    const steps: Array<{ step: string; delay: number }> = [];
     steps.push({ step: 'specimen_confirm', delay: 0 });
     if (isFirstVisit) steps.push({ step: 'survey', delay: 120 });
-    if (!hasRecentReview) steps.push({ step: 'review_request', delay: 1440 });
-    // Disabled 2026-05-03 — owner doesn't want to be responsible for
-    // chasing lab-result delivery. Lab portal handoff is the lab's
-    // accountability, not ConveLabs's. Keep the step type registered
-    // in process-post-visit-sequences for backward compat; just stop
-    // seeding new ones.
-    // steps.push({ step: 'results_checkin', delay: 4320 });
-    if (isFirstVisit) steps.push({ step: 'membership_upsell', delay: 10080 });
-    if (isFirstVisit) steps.push({ step: 'referral_prompt', delay: 20160 });
-    // 45 days for first-timers, 21 days for returning patients
-    steps.push({ step: 'rebooking_nudge', delay: isFirstVisit ? 64800 : 30240 });
 
-    const records = [];
-    for (const s of steps) {
-      records.push({
-        appointment_id: appointmentId,
-        patient_id: patientId,
-        patient_email: patientEmail,
-        patient_phone: patientPhone,
-        step: s.step,
-        scheduled_at: new Date(now.getTime() + s.delay * 60000).toISOString(),
-        status: 'pending',
-      });
-    }
+    const records = steps.map(s => ({
+      appointment_id: appointmentId,
+      patient_id: patientId,
+      patient_email: patientEmail,
+      patient_phone: patientPhone,
+      step: s.step,
+      scheduled_at: new Date(now.getTime() + s.delay * 60000).toISOString(),
+      status: 'pending',
+    }));
 
-    const insertRes = await supabase.from('post_visit_sequences').insert(records);
+    // unique_key is a generated column (appointment_id::step) backing
+    // uniq_pvs_appointment_step — ignoreDuplicates makes this idempotent.
+    const insertRes = await supabase
+      .from('post_visit_sequences')
+      .upsert(records, { onConflict: 'unique_key', ignoreDuplicates: true });
     if (insertRes.error) throw insertRes.error;
 
-    // Generate referral code for first-timers. patientId is
+    // Generate referral code for first-timers (the DB-seeded referral_prompt
+    // step only sends when a code exists). patientId is
     // appointments.patient_id (a tenant_patients id for ~94% of rows); every
     // consumer resolves referral_codes.user_id on both tenant_patients.id and
     // tenant_patients.user_id, so either key works downstream.
@@ -114,7 +119,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ success: true, stepsScheduled: records.length, isFirstVisit: isFirstVisit }),
+      JSON.stringify({ success: true, stepsScheduled: records.length, isFirstVisit: isFirstVisit, seededBy: 'edge:specimen_confirm,survey · db-trigger:google_review,referral_prompt,membership_upsell,rebooking_nudge' }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (err) {

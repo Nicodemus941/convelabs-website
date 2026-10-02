@@ -196,11 +196,15 @@ serve(async (req) => {
 
     const formData = new URLSearchParams()
     formData.append('To', normalizedPhone)
-    // Use Messaging Service if available, otherwise use phone number
-    if (TWILIO_MESSAGING_SERVICE_SID) {
-      formData.append('MessagingServiceSid', TWILIO_MESSAGING_SERVICE_SID)
+    // ConveLabs sends ONLY from its own 407 number. The shared messaging
+    // service pools the E-Labus 717 number too, so preferring it here let
+    // ConveLabs texts leave on the wrong caller ID (see _shared/twilio.ts and
+    // the leak detector in twilio-status-callback). Pin From; fall back to
+    // the service only when no number is configured at all.
+    if (TWILIO_PHONE_NUMBER) {
+      formData.append('From', TWILIO_PHONE_NUMBER)
     } else {
-      formData.append('From', TWILIO_PHONE_NUMBER!)
+      formData.append('MessagingServiceSid', TWILIO_MESSAGING_SERVICE_SID!)
     }
     formData.append('Body', message)
     // Delivery-status callback → real carrier outcome surfaces (catches A2P 30034 bounces)

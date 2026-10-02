@@ -58,6 +58,13 @@ Deno.serve(async (req) => {
         .eq('id', (row as any).id);
     }
 
+    // Mirror the carrier outcome onto the threaded copy (sms_messages) so the
+    // admin SMS inbox shows delivered / undelivered per bubble. Best-effort:
+    // most sends are only in sms_notifications today, so a miss is normal.
+    try {
+      await admin.from('sms_messages').update({ status }).eq('twilio_message_sid', sid);
+    } catch { /* non-blocking */ }
+
     const alreadyAlerted = !!(row as any)?.metadata?.owner_alerted_at;
     const isOwnerAlert = (row as any)?.notification_type === 'owner_alert';
 
@@ -67,7 +74,12 @@ Deno.serve(async (req) => {
         await admin.from('error_logs').insert({
           error_type: 'sms_wrong_sender_number',
           error_message: `ConveLabs SMS ${sid} went out on ${from} (expected ${CONVELABS_NUMBER}). To: ${to}`,
-          context: { sid, from, to, status },
+          // error_logs' jsonb column is `payload` (not `context`) — the old
+          // name made every insert here fail silently, so no leak/failure
+          // was ever recorded in error_logs (0 rows of either type as of
+          // 2026-10-02 despite 35 failed/undelivered texts in 30 days).
+          component: 'twilio-status-callback',
+          payload: { sid, from, to, status },
         } as any);
       } catch { /* */ }
       if (!isOwnerAlert) {
@@ -84,7 +96,8 @@ Deno.serve(async (req) => {
         await admin.from('error_logs').insert({
           error_type: 'sms_delivery_failed',
           error_message: `SMS ${status} ${detail} [${(row as any)?.notification_type || 'unknown'}]`,
-          context: { sid, to, status, error_code: errorCode, notification_type: (row as any)?.notification_type },
+          component: 'twilio-status-callback',
+          payload: { sid, to, status, error_code: errorCode, notification_type: (row as any)?.notification_type },
         } as any);
       } catch { /* */ }
       if (!isOwnerAlert) {

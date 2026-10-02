@@ -81,6 +81,19 @@ serve(async (req: Request) => {
     const results = [];
     for (const appointment of appointments || []) {
       try {
+        // DEDUPE (2026-10-02 audit): the live pg_cron for this function is
+        // `*/15 * * * *` (jobid 81, named process-appointment-reminders), not
+        // the once-daily schedule the comment above assumes. Nothing here
+        // marked an appointment as reminded, so on a day with visits tomorrow
+        // every 15-minute tick re-sent the same email from 8 AM to 9 PM ET.
+        // Skip if a reminder email for this appointment already went out in
+        // the last 20h — via this function (email_logs.metadata.appointmentId)
+        // or via send-appointment-reminders (email_send_log.appointment_id).
+        // Manual single-appointment calls (`{appointmentId}`) bypass this.
+        if (await reminderAlreadySent(appointment.id, supabaseClient)) {
+          results.push({ appointmentId: appointment.id, success: true, skipped: 'already_reminded_20h' });
+          continue;
+        }
         const result = await processSingleAppointment(appointment.id, supabaseClient);
         const resultData = await result.json();
         results.push({
@@ -121,6 +134,33 @@ serve(async (req: Request) => {
     );
   }
 });
+
+/** True if an appointment_reminder email for this appointment was logged in the last `hours`. */
+async function reminderAlreadySent(appointmentId: string, supabaseClient: any, hours = 20): Promise<boolean> {
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  try {
+    const { data: a } = await supabaseClient
+      .from('email_send_log')
+      .select('id')
+      .eq('appointment_id', appointmentId)
+      .eq('email_type', 'appointment_reminder')
+      .gte('sent_at', since)
+      .limit(1);
+    if (a && a.length > 0) return true;
+  } catch { /* fall through */ }
+  try {
+    const { data: b } = await supabaseClient
+      .from('email_logs')
+      .select('id')
+      .eq('metadata->>appointmentId', appointmentId)
+      .eq('metadata->>templateName', 'appointment_reminder')
+      .eq('status', 'sent')
+      .gte('sent_at', since)
+      .limit(1);
+    if (b && b.length > 0) return true;
+  } catch { /* fall through */ }
+  return false;
+}
 
 // Helper function to process a single appointment reminder
 async function processSingleAppointment(appointmentId: string, supabaseClient: any) {

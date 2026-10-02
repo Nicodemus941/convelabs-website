@@ -71,7 +71,8 @@ Deno.serve(async (req) => {
 
     let smsSent = false, emailSent = false;
     if (lr.patient_phone && TWILIO_SID && TWILIO_TOKEN && TWILIO_FROM) {
-      const body = `Hi ${firstName} — ConveLabs.${orgLine}.${coverLine}${drawLine} Your booking link: ${url}`;
+      // Was `ConveLabs.${orgLine}.` → rendered "ConveLabs.Elite Medical ordered…"
+      const body = `Hi ${firstName} — ConveLabs here.${orgLine ? ` ${orgLine.trim()}.` : ''}${coverLine}${drawLine} Your booking link: ${url}`;
       const fd = new URLSearchParams({ To: normPhone(lr.patient_phone), From: TWILIO_FROM, Body: body });
       const tw = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_SID}/Messages.json`, {
         method: 'POST',
