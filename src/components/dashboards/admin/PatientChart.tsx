@@ -39,15 +39,15 @@ import FamilyHouseholdCard from '@/components/admin/FamilyHouseholdCard';
 import AppointmentDetailModal from '@/components/calendar/AppointmentDetailModal';
 import SendRescheduleLinkButton from '@/components/appointments/SendRescheduleLinkButton';
 import {
-  APPT_STATUS_PILL, CLOSED_STATUSES, DONE_STATUSES, LIVE_STATUSES, PATIENT_PAID, SETTLED_PAYMENT,
-  type MemberTier, type PatientRow, apptDay, fmtDay, fullName, openMessageThread, serviceLabel,
-  stashAdminPrefill, tierBadgeClass, todayKey, toPrefilledPatient,
+  APPT_STATUS_PILL, CLOSED_STATUSES, DONE_STATUSES, DUP_REASON_LABEL, LIVE_STATUSES, PATIENT_PAID, SETTLED_PAYMENT,
+  type DuplicateHit, type MemberTier, type PatientRow, apptDay, dataQualityIssues, dobIssue, fmtDay, fullName, looksLikeOrganization,
+  openMessageThread, serviceLabel, stashAdminPrefill, tierBadgeClass, todayKey, toPrefilledPatient, validatePatientFields,
 } from './patientDirectory';
 import {
   ConfirmDialog, InlineError, ModalTitle, QuietHoursNotice, ReviewList, ReviewRow, patientContextLine,
 } from './chartModalKit';
 import { Textarea } from '@/components/ui/textarea';
-import { Trash2, Link as LinkIcon } from 'lucide-react';
+import { Trash2, Link as LinkIcon, Building2, ChevronRight } from 'lucide-react';
 import { getTrustedRole } from '@/lib/authRole';
 
 // Untyped table access — several columns used here (patient_notes, billed_to,
@@ -70,6 +70,8 @@ interface Props {
   onOpenPatient: (p: any) => void;
   /** Re-pull the directory (counts/buckets) after anything that changes visits. */
   refreshDirectory: () => void;
+  /** Other records sharing email / phone / name+DOB (from buildDuplicateIndex). Optional. */
+  duplicates?: DuplicateHit[];
 }
 
 const EMPTY_EDIT = {
@@ -90,6 +92,7 @@ const EMPTY_INVOICE = {
 
 const PatientChart: React.FC<Props> = ({
   patient: p, memberTier, isProtected, canDelete, canRefund = canDelete, onBack, onPatientSaved, onPatientDeleted, onOpenPatient, refreshDirectory,
+  duplicates,
 }) => {
   const [loading, setLoading] = useState(true);
   const [appointments, setAppointments] = useState<any[]>([]);
@@ -128,6 +131,23 @@ const PatientChart: React.FC<Props> = ({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // Open Stripe invoices still addressed to the OLD email after an email change.
   const [reissuePrompt, setReissuePrompt] = useState<{ list: any[]; oldEmail: string; newEmail: string; newName: string } | null>(null);
+  // Unsaved edits → ask before closing the Edit modal.
+  const [discardOpen, setDiscardOpen] = useState(false);
+  // Data quality: record reads like a clinic → look up the matching organization (read-only).
+  const [matchedOrg, setMatchedOrg] = useState<{ id: string; name: string; contact_email: string | null } | null>(null);
+  const [qualityDismissed, setQualityDismissed] = useState(false);
+
+  const qualityIssues = useMemo(() => dataQualityIssues(p, duplicates), [p, duplicates]);
+  const isOrgLike = looksLikeOrganization(p);
+
+  useEffect(() => {
+    if (!isOrgLike) { setMatchedOrg(null); return; }
+    const name = fullName(p);
+    let cancelled = false;
+    db.from('organizations').select('id, name, contact_email').ilike('name', `%${name.replace(/[%_,()]/g, ' ').trim()}%`).limit(1)
+      .then(({ data }: any) => { if (!cancelled) setMatchedOrg(data?.[0] || null); });
+    return () => { cancelled = true; };
+  }, [isOrgLike, p.id, p.first_name, p.last_name]);
 
   // Orgs for the invoice modal's "bill a partner practice" picker.
   useEffect(() => {
@@ -218,15 +238,30 @@ const PatientChart: React.FC<Props> = ({
   }, [appointments, today]);
 
   // ── Actions ────────────────────────────────────────────────────
+  const editFormFromPatient = useCallback(() => ({
+    firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '',
+    dob: p.date_of_birth || '', address: p.address || '', city: p.city || '', state: p.state || '', zipcode: p.zipcode || '',
+    gateCode: p.gate_code || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '',
+    insuranceGroup: p.insurance_group_number || '', patientNotes: p.patient_notes || '',
+  }), [p]);
   const openEdit = () => {
-    setEditForm({
-      firstName: p.first_name || '', lastName: p.last_name || '', email: p.email || '', phone: p.phone || '',
-      dob: p.date_of_birth || '', address: p.address || '', city: p.city || '', state: p.state || '', zipcode: p.zipcode || '',
-      gateCode: p.gate_code || '', insuranceProvider: p.insurance_provider || '', insuranceMemberId: p.insurance_member_id || '',
-      insuranceGroup: p.insurance_group_number || '', patientNotes: p.patient_notes || '',
-    });
+    setEditForm(editFormFromPatient());
     setEditError(null);
     setEditModalOpen(true);
+  };
+  const editDirty = useMemo(() => {
+    if (!editModalOpen) return false;
+    const base = editFormFromPatient();
+    return (Object.keys(base) as Array<keyof typeof base>).some(k => (base[k] || '') !== (editForm[k] || ''));
+  }, [editModalOpen, editForm, editFormFromPatient]);
+  const editErrors = useMemo(() => validatePatientFields(editForm), [editForm]);
+  const editDobWarn = useMemo(() => { const i = dobIssue(editForm.dob || null); return i && i.severity === 'warn' ? i : null; }, [editForm.dob]);
+  const editValid = Object.keys(editErrors).length === 0;
+  const requestCloseEdit = (v: boolean) => {
+    if (v) { setEditModalOpen(true); return; }
+    if (savingPatient) return;
+    if (editDirty) { setDiscardOpen(true); return; }
+    setEditModalOpen(false);
   };
 
   const openSchedule = () => {
@@ -237,7 +272,7 @@ const PatientChart: React.FC<Props> = ({
   };
 
   const message = () => {
-    if (!p.phone && !p.email) { toast.error('No phone or email on file'); return; }
+    if (!p.phone && !p.email) { toast.error('No phone or email on file — add one first'); openEdit(); return; }
     setMessageOpen(true);
   };
 
@@ -350,6 +385,7 @@ const PatientChart: React.FC<Props> = ({
 
   const savePatient = async () => {
     if (savingPatient) return;
+    if (!editValid) { setEditError(Object.values(editErrors).join(' ')); return; }
     setSavingPatient(true);
     setEditError(null);
     try {
@@ -362,8 +398,8 @@ const PatientChart: React.FC<Props> = ({
         return;
       }
       const updatePayload: any = {
-        first_name: editForm.firstName, last_name: editForm.lastName,
-        email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
+        first_name: editForm.firstName.trim(), last_name: editForm.lastName.trim(),
+        email: editForm.email.trim() || null, phone: editForm.phone.trim() || null, date_of_birth: editForm.dob || null,
         address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null,
         gate_code: editForm.gateCode || null,
         insurance_provider: editForm.insuranceProvider || null,
@@ -432,8 +468,8 @@ const PatientChart: React.FC<Props> = ({
 
       onPatientSaved({
         ...p,
-        first_name: editForm.firstName, last_name: editForm.lastName,
-        email: editForm.email, phone: editForm.phone, date_of_birth: editForm.dob || null,
+        first_name: editForm.firstName.trim(), last_name: editForm.lastName.trim(),
+        email: editForm.email.trim() || null, phone: editForm.phone.trim() || null, date_of_birth: editForm.dob || null,
         address: editForm.address || null, city: editForm.city || null, state: editForm.state || null, zipcode: editForm.zipcode || null,
         gate_code: editForm.gateCode || null,
         insurance_provider: editForm.insuranceProvider || null, insurance_member_id: editForm.insuranceMemberId || null,
@@ -591,31 +627,34 @@ const PatientChart: React.FC<Props> = ({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap pl-8 sm:pl-0">
-          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9" onClick={openEdit}>
+        {/* Action bar — one scrolling row on phones (same pattern as the lab-order drawer), wraps on desktop. */}
+        <div className="w-full sm:w-auto flex sm:flex-wrap items-center gap-2 overflow-x-auto sm:overflow-visible -mx-4 sm:mx-0 px-4 sm:px-0 pb-1 sm:pb-0 snap-x" role="toolbar" aria-label="Patient actions">
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start" onClick={openEdit}>
             <Edit3 className="h-3.5 w-3.5" aria-hidden="true" /> Edit info
           </Button>
-          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9" onClick={openSchedule}>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start" onClick={openSchedule}>
             <CalendarPlus className="h-3.5 w-3.5" aria-hidden="true" /> Schedule
           </Button>
-          {(p.email || p.phone) && (
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 border-amber-300 text-amber-800 hover:bg-amber-50" onClick={() => setSendLinkModalOpen(true)}>
+          {(p.email || p.phone) ? (
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start border-amber-300 text-amber-800 hover:bg-amber-50" onClick={() => setSendLinkModalOpen(true)}>
+              <Zap className="h-3.5 w-3.5" aria-hidden="true" /> Send booking link
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start text-gray-400" title="Add a phone or email first" onClick={() => { toast.error('No phone or email on file — add one first'); openEdit(); }}>
               <Zap className="h-3.5 w-3.5" aria-hidden="true" /> Send booking link
             </Button>
           )}
-          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9" onClick={() => { setInvoiceForm(EMPTY_INVOICE); setInvoiceStep('form'); setInvoiceError(null); setInvoiceModalOpen(true); }}>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start" onClick={() => { setInvoiceForm(EMPTY_INVOICE); setInvoiceStep('form'); setInvoiceError(null); setInvoiceModalOpen(true); }}>
             <Receipt className="h-3.5 w-3.5" aria-hidden="true" /> Invoice
           </Button>
-          {(p.phone || p.email) && (
-            <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9" onClick={message}>
-              <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /> Message
-            </Button>
-          )}
+          <Button size="sm" variant="outline" className={cn('gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start', !(p.phone || p.email) && 'text-gray-400')} onClick={message} title={!(p.phone || p.email) ? 'Add a phone or email first' : undefined}>
+            <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" /> Message
+          </Button>
           {/* Never stop selling the next tier up; hides only at Concierge. */}
           {p.email && membershipLabel && (
             <Button
               size="sm"
-              className="gap-1.5 text-xs h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white"
+              className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start bg-[#B91C1C] hover:bg-[#991B1B] text-white"
               onClick={() => setShowMembershipModal(true)}
               title={currentTier ? `${p.first_name || 'Patient'} is currently ${currentTier.toUpperCase()} — send a one-tier-up offer` : 'Send a membership offer to this patient'}
             >
@@ -624,6 +663,55 @@ const PatientChart: React.FC<Props> = ({
           )}
         </div>
       </div>
+
+      {/* Data quality — read-only guidance; nothing here edits or deletes. */}
+      {qualityIssues.length > 0 && !qualityDismissed && (
+        <div className={cn('rounded-lg border p-3 text-xs flex items-start gap-2', qualityIssues.some(i => i.severity === 'error') ? 'border-amber-400 bg-amber-50 text-amber-950' : 'border-amber-200 bg-amber-50/60 text-amber-900')} role="status" aria-label="Data quality">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="font-semibold">Data check — {qualityIssues.length === 1 ? qualityIssues[0].label : `${qualityIssues.length} things to confirm`}</p>
+            <ul className="space-y-1.5">
+              {qualityIssues.map(i => (
+                <li key={i.key} className="flex items-start gap-1.5">
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" aria-hidden="true" />
+                  <span className="min-w-0">
+                    {i.detail}
+                    {i.key === 'org_name' && (
+                      <span className="block mt-1 text-amber-900/90">
+                        <span className="font-semibold">This is a clinic, not a patient.</span> Don't delete it — the {appointments.length} visit{appointments.length === 1 ? '' : 's'} on it are real. The fix is data-side: re-point each visit to the person who was actually drawn (create them as patients if needed), set the visit's organization to the practice, then retire this record.
+                        {matchedOrg ? (
+                          <span className="inline-flex items-center gap-1 ml-1 px-1.5 h-5 rounded-full border border-emerald-300 bg-emerald-50 text-emerald-800 font-semibold align-middle"><Building2 className="h-3 w-3" aria-hidden="true" /> Already under Organizations as “{matchedOrg.name}”</span>
+                        ) : (
+                          <span className="block mt-0.5">No organization with this name was found — add the practice under Organizations first.</span>
+                        )}
+                      </span>
+                    )}
+                    {(i.key === 'dob_future' || i.key === 'dob_recent' || i.key === 'dob_placeholder' || i.key === 'dob_implausible') && (
+                      <button type="button" className="ml-1 underline font-medium" onClick={openEdit}>Fix DOB</button>
+                    )}
+                    {(i.key === 'bad_email' || i.key === 'bad_phone' || i.key === 'missing_name') && (
+                      <button type="button" className="ml-1 underline font-medium" onClick={openEdit}>Edit info</button>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {duplicates && duplicates.length > 0 && (
+              <div className="rounded-md border border-fuchsia-200 bg-white/70 p-2 space-y-1">
+                <p className="text-[11px] font-semibold text-fuchsia-900">Other records that may be the same person</p>
+                {duplicates.slice(0, 5).map(d => (
+                  <button key={d.other.id} type="button" onClick={() => onOpenPatient(d.other)} className="w-full flex items-center justify-between gap-2 text-left text-[11px] text-gray-800 hover:text-[#B91C1C]">
+                    <span className="min-w-0 truncate"><span className="font-medium">{fullName(d.other)}</span> · {DUP_REASON_LABEL[d.reason]}{d.other.date_of_birth ? ` · DOB ${fmtDay(d.other.date_of_birth)}` : ''}</span>
+                    <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                  </button>
+                ))}
+                <p className="text-[10px] text-gray-500">There is no merge tool yet — keep the record with visits, move anything useful onto it, then delete the empty one (reason logged).</p>
+              </div>
+            )}
+          </div>
+          <button type="button" className="text-[11px] underline text-amber-800 flex-shrink-0" onClick={() => setQualityDismissed(true)}>Hide</button>
+        </div>
+      )}
 
       {/* Needs-action notices */}
       {!loading && money.outstanding > 0 && (
@@ -916,74 +1004,102 @@ const PatientChart: React.FC<Props> = ({
         onUpdate={reloadAll}
       />
 
-      {/* Edit patient */}
-      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto">
-          <ModalTitle icon={Edit3} title="Edit patient" context={patientContextLine(p)} />
-          <div className="divide-y">
-            <EditRow label="First name"><Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} className="h-9" /></EditRow>
-            <EditRow label="Last name"><Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} className="h-9" /></EditRow>
-            <EditRow label="Date of birth"><Input type="date" value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} className="h-9" /></EditRow>
-            <EditRow label="Address" top>
-              <div className="space-y-2">
-                <AddressAutocomplete
-                  value={editForm.address}
-                  onChange={v => setEditForm(pr => ({ ...pr, address: v }))}
-                  onPlaceSelected={(place) => {
-                    setEditForm(pr => ({ ...pr, address: place.street || place.address, city: place.city || pr.city, state: place.state || pr.state, zipcode: place.zipCode || pr.zipcode }));
-                  }}
-                  placeholder="Start typing address — Google suggestions"
-                  className="h-9"
-                />
-                <Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} placeholder="City" className="h-9" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value }))} placeholder="State" maxLength={2} className="h-9" />
-                  <Input value={editForm.zipcode} onChange={e => setEditForm(pr => ({ ...pr, zipcode: e.target.value }))} placeholder="ZIP" className="h-9" />
-                </div>
-              </div>
-            </EditRow>
-            <EditRow label="Gate code"><Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Gate code / access notes" className="h-9" /></EditRow>
-            <EditRow label="Phone"><Input type="tel" value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} className="h-9" /></EditRow>
-            <EditRow label="Email"><Input type="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} className="h-9" /></EditRow>
-            <EditRow label="Insurance" top>
-              <div className="space-y-2">
-                <Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="Insurance provider" className="h-9 text-sm" />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} placeholder="Member ID" className="h-9" />
-                  <Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} placeholder="Group #" className="h-9" />
-                </div>
-              </div>
-            </EditRow>
-            <EditRow label="Notes" top>
-              <textarea
-                value={editForm.patientNotes}
-                onChange={e => setEditForm(pr => ({ ...pr, patientNotes: e.target.value }))}
-                rows={3}
-                placeholder="Internal notes — hard stick, prefers mornings, dog at the door…"
-                className="w-full text-sm border rounded-md px-3 py-2 bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-[#B91C1C]/40"
-              />
-            </EditRow>
+      {/* Edit patient — header + footer pinned, body scrolls. The label/input
+          grid uses minmax(0,1fr) so a wide input (date, address) can never
+          push the column past the dialog edge (2026-10-02 overflow bug). */}
+      <Dialog open={editModalOpen} onOpenChange={requestCloseEdit}>
+        <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[92vh] p-0 gap-0 flex flex-col overflow-hidden">
+          <div className="px-4 sm:px-6 pt-4 sm:pt-6 pb-3 border-b flex-shrink-0">
+            <ModalTitle icon={Edit3} title="Edit patient" context={patientContextLine(p)} />
           </div>
-          {editError && (
-            <div className="rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-xs text-red-900 whitespace-pre-wrap" role="alert">
-              <strong>Save failed:</strong> {editError}
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 sm:px-6">
+            <div className="divide-y">
+              <EditRow label="First name" error={editErrors.firstName}><Input value={editForm.firstName} onChange={e => setEditForm(pr => ({ ...pr, firstName: e.target.value }))} className="h-10 sm:h-9" autoComplete="off" /></EditRow>
+              <EditRow label="Last name" error={editErrors.lastName}><Input value={editForm.lastName} onChange={e => setEditForm(pr => ({ ...pr, lastName: e.target.value }))} className="h-10 sm:h-9" autoComplete="off" /></EditRow>
+              {looksLikeOrganization({ first_name: editForm.firstName, last_name: editForm.lastName }) && (
+                <div className="py-2">
+                  <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 flex items-start gap-2"><AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" aria-hidden="true" /> This name reads like a clinic. A patient record should be the person who gets drawn; practices live under Organizations.</p>
+                </div>
+              )}
+              <EditRow label="Date of birth" error={editErrors.dob} warn={editDobWarn?.detail} hint="labs need it on the requisition">
+                <Input type="date" max={todayKey()} value={editForm.dob} onChange={e => setEditForm(pr => ({ ...pr, dob: e.target.value }))} className="h-10 sm:h-9 w-full max-w-[220px]" />
+              </EditRow>
+              <EditRow label="Phone" error={editErrors.phone}><Input type="tel" inputMode="tel" value={editForm.phone} onChange={e => setEditForm(pr => ({ ...pr, phone: e.target.value }))} placeholder="(407) 123-4567" className="h-10 sm:h-9" autoComplete="off" /></EditRow>
+              <EditRow label="Email" error={editErrors.email}><Input type="email" inputMode="email" value={editForm.email} onChange={e => setEditForm(pr => ({ ...pr, email: e.target.value }))} placeholder="name@email.com" className="h-10 sm:h-9" autoComplete="off" /></EditRow>
+              <EditRow label="Address" top hint="where we draw">
+                <div className="space-y-2 min-w-0">
+                  <div className="min-w-0">
+                    <AddressAutocomplete
+                      value={editForm.address}
+                      onChange={v => setEditForm(pr => ({ ...pr, address: v }))}
+                      onPlaceSelected={(place) => {
+                        setEditForm(pr => ({ ...pr, address: place.street || place.address, city: place.city || pr.city, state: place.state || pr.state, zipcode: place.zipCode || pr.zipcode }));
+                      }}
+                      placeholder="Start typing — Google suggests"
+                      className="h-10 sm:h-9"
+                    />
+                  </div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_56px_88px] gap-2">
+                    <Input value={editForm.city} onChange={e => setEditForm(pr => ({ ...pr, city: e.target.value }))} placeholder="City" aria-label="City" className="h-10 sm:h-9 min-w-0" />
+                    <Input value={editForm.state} onChange={e => setEditForm(pr => ({ ...pr, state: e.target.value.toUpperCase() }))} placeholder="FL" aria-label="State" maxLength={2} className="h-10 sm:h-9 min-w-0 uppercase px-2" />
+                    <Input value={editForm.zipcode} inputMode="numeric" onChange={e => setEditForm(pr => ({ ...pr, zipcode: e.target.value }))} placeholder="ZIP" aria-label="ZIP" className="h-10 sm:h-9 min-w-0" />
+                  </div>
+                </div>
+              </EditRow>
+              <EditRow label="Gate code" hint="shown to the phlebotomist"><Input value={editForm.gateCode} onChange={e => setEditForm(pr => ({ ...pr, gateCode: e.target.value }))} placeholder="Gate code / access notes" className="h-10 sm:h-9" /></EditRow>
+              <EditRow label="Insurance" top hint="blank = self-pay">
+                <div className="space-y-2 min-w-0">
+                  <Input value={editForm.insuranceProvider} onChange={e => setEditForm(pr => ({ ...pr, insuranceProvider: e.target.value }))} placeholder="Insurance provider" aria-label="Insurance provider" className="h-10 sm:h-9 text-sm" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input value={editForm.insuranceMemberId} onChange={e => setEditForm(pr => ({ ...pr, insuranceMemberId: e.target.value }))} placeholder="Member ID" aria-label="Member ID" className="h-10 sm:h-9 min-w-0" />
+                    <Input value={editForm.insuranceGroup} onChange={e => setEditForm(pr => ({ ...pr, insuranceGroup: e.target.value }))} placeholder="Group #" aria-label="Group number" className="h-10 sm:h-9 min-w-0" />
+                  </div>
+                </div>
+              </EditRow>
+              <EditRow label="Notes" top hint="internal only">
+                <Textarea
+                  value={editForm.patientNotes}
+                  onChange={e => setEditForm(pr => ({ ...pr, patientNotes: e.target.value }))}
+                  rows={3}
+                  placeholder="Hard stick, prefers mornings, dog at the door…"
+                  className="w-full text-sm min-h-[72px]"
+                />
+              </EditRow>
             </div>
-          )}
-          <div className="flex justify-between items-center gap-3 pt-3 border-t">
+            <div className="py-3">
+              <InlineError message={editError ? `Save failed: ${editError}` : null} />
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-between items-center gap-2 px-4 sm:px-6 py-3 border-t bg-white flex-shrink-0">
             {canDelete ? (
-              <Button variant="outline" disabled={deleting || savingPatient} className="h-10 px-4 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 gap-1.5" onClick={() => { setDeleteReason(''); setDeleteError(null); setDeleteOpen(true); }}>
-                <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete patient
+              <Button variant="outline" size="sm" disabled={deleting || savingPatient} className="h-10 sm:h-9 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 gap-1.5 text-xs" onClick={() => { setDeleteReason(''); setDeleteError(null); setDeleteOpen(true); }}>
+                <Trash2 className="h-4 w-4" aria-hidden="true" /> Delete
               </Button>
             ) : <span />}
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setEditModalOpen(false)} className="h-10 px-5">Cancel</Button>
-              <Button type="button" disabled={savingPatient} className="h-10 px-5 bg-[#B91C1C] hover:bg-[#991B1B] text-white font-semibold disabled:opacity-60" onClick={savePatient}>
-                {savingPatient ? 'Saving…' : 'Save changes'}
+            <div className="flex gap-2 ml-auto">
+              <Button variant="outline" onClick={() => requestCloseEdit(false)} className="h-10 sm:h-9" disabled={savingPatient}>Cancel</Button>
+              <Button type="button" disabled={savingPatient || !editValid || !editDirty} title={!editDirty ? 'No changes yet' : !editValid ? 'Fix the highlighted fields first' : undefined} className="h-10 sm:h-9 bg-[#B91C1C] hover:bg-[#991B1B] text-white font-semibold disabled:opacity-60 gap-1.5" onClick={savePatient}>
+                {savingPatient ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Saving…</> : 'Save changes'}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Unsaved edits guard */}
+      <ConfirmDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        icon={AlertTriangle}
+        tone="danger"
+        title="Discard unsaved changes?"
+        context={patientContextLine(p)}
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        onConfirm={() => { setDiscardOpen(false); setEditModalOpen(false); setEditError(null); }}
+      >
+        <p className="text-sm text-gray-700">You changed something in this patient's record that hasn't been saved.</p>
+      </ConfirmDialog>
 
       {/* Generate invoice — attach to a visit or standalone; patient or org. */}
       <Dialog open={invoiceModalOpen} onOpenChange={(v) => { if (!sendingInvoice) setInvoiceModalOpen(v); }}>
@@ -1072,7 +1188,7 @@ const PatientChart: React.FC<Props> = ({
             )}
 
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs">Amount ($) *</Label><Input type="number" min="0" step="0.01" value={invoiceForm.amount} onChange={e => setInvoiceForm(pr => ({ ...pr, amount: e.target.value }))} placeholder="150.00" /></div>
+              <div><Label className="text-xs">Amount ($) *</Label><Input type="number" inputMode="decimal" min="0" step="0.01" value={invoiceForm.amount} onChange={e => setInvoiceForm(pr => ({ ...pr, amount: e.target.value }))} placeholder="150.00" /></div>
               <div><Label className="text-xs">Service</Label><Input value={invoiceForm.description} onChange={e => setInvoiceForm(pr => ({ ...pr, description: e.target.value }))} placeholder="Blood Draw" /></div>
             </div>
             <div><Label className="text-xs">Memo</Label><Input value={invoiceForm.memo} onChange={e => setInvoiceForm(pr => ({ ...pr, memo: e.target.value }))} placeholder="Optional notes" /></div>
@@ -1144,6 +1260,7 @@ const PatientChart: React.FC<Props> = ({
             <ReviewRow label="Visit">{fmtDay(apptDay(pendingPayLink))} · {serviceLabel(pendingPayLink)}</ReviewRow>
             <ReviewRow label="Amount" tone="strong">${(Number(pendingPayLink.total_amount) || 0).toFixed(2)}</ReviewRow>
             <ReviewRow label="Emailed to" tone={(pendingPayLink.patient_email || p.email) ? 'default' : 'warn'}>{pendingPayLink.patient_email || p.email || 'No email on file — the link is only copied to your clipboard'}</ReviewRow>
+            <ReviewRow label="They see">A ConveLabs pay page (/pay) with the visit summary — they can add a tip before paying.</ReviewRow>
             <ReviewRow label="Also">The link is copied to your clipboard so you can text it yourself.</ReviewRow>
           </ReviewList>
         )}
@@ -1199,6 +1316,8 @@ const PatientChart: React.FC<Props> = ({
           <ReviewRow label="With visits">Soft-deleted — hidden from the directory but kept for the HIPAA audit trail.</ReviewRow>
           <ReviewRow label="No visits">Removed permanently. This cannot be undone.</ReviewRow>
           <ReviewRow label="On file">{appointments.length} visit{appointments.length === 1 ? '' : 's'} · {specimens.length} specimen{specimens.length === 1 ? '' : 's'}</ReviewRow>
+          {isOrgLike && <ReviewRow label="Heads up" tone="warn">This record looks like a clinic. Deleting it hides its visits from the directory — re-point the visits to real patients first.</ReviewRow>}
+          {duplicates && duplicates.length > 0 && <ReviewRow label="Duplicate?" tone="warn">Keep the record that has the visits. If this one is the empty copy, it is safe to delete; otherwise delete the other.</ReviewRow>}
         </ReviewList>
         <div className="space-y-1.5">
           <Label htmlFor="delete-reason" className="text-xs font-semibold">Reason <span className="font-normal text-gray-400">(required, logged)</span></Label>
@@ -1259,10 +1378,19 @@ const Row: React.FC<{ label: string; value: React.ReactNode; valueClass?: string
   <div className="flex justify-between gap-3"><span className="text-gray-500">{label}</span><span className={cn('font-medium text-right tabular-nums', valueClass)}>{value}</span></div>
 );
 
-const EditRow: React.FC<{ label: string; top?: boolean; children: React.ReactNode }> = ({ label, top, children }) => (
-  <div className={cn('grid grid-cols-1 sm:grid-cols-[140px_1fr] py-3 gap-1 sm:gap-3', top ? 'items-start' : 'items-start sm:items-center')}>
-    <Label className={cn('text-sm font-semibold text-gray-600', top && 'sm:mt-2')}>{label}</Label>
-    {children}
+/** Label | control row. `minmax(0,1fr)` (not bare `1fr`) so the control column
+ *  can shrink below its intrinsic width — a `1fr` track is minmax(auto,1fr)
+ *  and let the date/address inputs overflow the dialog horizontally. */
+const EditRow: React.FC<{ label: string; top?: boolean; hint?: string; error?: string; warn?: string; children: React.ReactNode }> = ({ label, top, hint, error, warn, children }) => (
+  <div className={cn('grid grid-cols-1 sm:grid-cols-[128px_minmax(0,1fr)] py-3 gap-1 sm:gap-3 min-w-0', top ? 'items-start' : 'items-start sm:items-center')}>
+    <Label className={cn('text-xs sm:text-sm font-semibold text-gray-600 min-w-0', top && 'sm:mt-2')}>
+      {label}
+      {hint && <span className="block text-[10px] font-normal text-gray-400 leading-tight">{hint}</span>}
+    </Label>
+    <div className="min-w-0 space-y-1">
+      {children}
+      {error ? <p className="text-[11px] text-red-600">{error}</p> : warn ? <p className="text-[11px] text-amber-700">{warn}</p> : null}
+    </div>
   </div>
 );
 
