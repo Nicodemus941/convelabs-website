@@ -9,6 +9,9 @@ import { analytics } from '@/utils/analytics';
 import { trackFunnelEvent } from '@/lib/funnelPixel';
 import { useServiceCatalog } from '@/hooks/useServiceCatalog';
 import { getServicePrice } from '@/services/pricing/pricingService';
+import ReasonPicker from '@/components/booking/ReasonPicker';
+import { VISIT_REASONS, VisitReasonId, getVisitReason } from '@/lib/visitReason';
+import { TRUST_CLAIMS, HERO_TRUST_ROW, SAMPLE_HANDLING_POINTS } from '@/content/trustClaims';
 
 /**
  * META ADS LANDING PAGE — /mobile-lab-draws (alias /lp/mobile)
@@ -40,6 +43,8 @@ const PHONE_DISPLAY = '(941) 527-9169';
 const PHONE_TEL = '+19415279169';
 
 const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'fbclid'] as const;
+
+type GuaranteeItem = { icon: React.ComponentType<{ className?: string }>; text: string; wide?: boolean };
 
 type VisitOption = {
   id: 'mobile' | 'senior' | 'in-office';
@@ -103,7 +108,11 @@ const FAQS: { q: string; a: string }[] = [
   },
   {
     q: 'Where do my results go?',
-    a: 'Your sample is delivered to the lab on your order (Quest, Labcorp, or a specialty lab) and results are reported to the doctor who ordered them, just like a draw done at the lab.',
+    a: `${TRUST_CLAIMS.deliveredTo} Results are reported to the doctor who ordered them, just like a draw done at the lab. ${TRUST_CLAIMS.doctorNotified}`,
+  },
+  {
+    q: "Can't find your results?",
+    a: `${TRUST_CLAIMS.resultsRetrieval} ${TRUST_CLAIMS.patientNotified} Call or text ${PHONE_DISPLAY} and we'll track them down.`,
   },
 ];
 
@@ -130,16 +139,18 @@ function readForwardedParams(): URLSearchParams {
   return out;
 }
 
-function buildBookingUrl(visitType: string, forwarded: URLSearchParams): string {
+function buildBookingUrl(visitType: string, forwarded: URLSearchParams, reason: VisitReasonId | null): string {
   const qs = new URLSearchParams(forwarded);
   qs.set('visit', visitType);
   qs.set('source', 'meta_lp');
+  if (reason) qs.set('reason', reason);
   return `/book-now?${qs.toString()}`;
 }
 
 const MobileLabDrawsLanding: React.FC = () => {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<VisitOption['id']>('mobile');
+  const [reason, setReason] = useState<VisitReasonId | null>(() => getVisitReason());
   const [openFaq, setOpenFaq] = useState<number | null>(0);
   const optionsRef = useRef<HTMLDivElement>(null);
   const forwarded = useMemo(() => readForwardedParams(), []);
@@ -177,9 +188,14 @@ const MobileLabDrawsLanding: React.FC = () => {
     analytics.trackFunnelStage('lp_option_selected', 1, { visitType: id, ...utmData });
   };
 
+  const selectReason = (next: VisitReasonId | null) => {
+    setReason(next);
+    analytics.trackFunnelStage('lp_reason_selected', 1, { reason: next, ...utmData });
+  };
+
   const goToBooking = (cta: 'card' | 'hero' | 'sticky', visitType: VisitOption['id'] = selected) => {
-    analytics.trackFunnelStage('lp_cta_clicked', 2, { visitType, cta, ...utmData });
-    navigate(buildBookingUrl(visitType, forwarded));
+    analytics.trackFunnelStage('lp_cta_clicked', 2, { visitType, cta, reason, ...utmData });
+    navigate(buildBookingUrl(visitType, forwarded, reason));
   };
 
   const trackContact = (channel: 'call' | 'text') => {
@@ -239,10 +255,27 @@ const MobileLabDrawsLanding: React.FC = () => {
               A licensed phlebotomist draws your labs <span className="italic text-brand-gold-deep">at home.</span>
             </h1>
             <p className="mt-3 text-base sm:text-lg text-brand-gray-warm max-w-xl">
-              Skip the waiting room. We come to you anywhere in Orlando and Central Florida, same-day when available, and your results still go to your doctor.
+              {reason ? (
+                <>
+                  <span className="text-conve-black font-medium">{VISIT_REASONS[reason].echo}</span>{' '}
+                  Anywhere in Orlando and Central Florida, same-day when available, and your results still go to your doctor.
+                </>
+              ) : (
+                <>Skip the waiting room. We come to you anywhere in Orlando and Central Florida, same-day when available, and your results still go to your doctor.</>
+              )}
             </p>
 
-            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-brand-gray-warm">
+            {/* Compact owner-claims row: draw time · collections count · labs we deliver to (trustClaims.ts) */}
+            <ul className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-medium text-conve-black" aria-label="Key facts">
+              {HERO_TRUST_ROW.map((item, i) => (
+                <li key={item} className="inline-flex items-center gap-2">
+                  {i > 0 && <span className="text-brand-gold-deep" aria-hidden="true">&middot;</span>}
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-brand-gray-warm">
               <span className="inline-flex items-center gap-1">
                 <span className="flex gap-px" aria-hidden="true">
                   {[1, 2, 3, 4, 5].map(i => <Star key={i} className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />)}
@@ -256,6 +289,8 @@ const MobileLabDrawsLanding: React.FC = () => {
 
             {/* STEP 1, answered here */}
             <div ref={optionsRef} className="mt-7 scroll-mt-4">
+              <ReasonPicker className="mb-6" onSelect={selectReason} />
+
               <h2 className="text-lg font-semibold text-conve-black">Where should we draw your labs?</h2>
               <p className="text-sm text-brand-gray-warm mt-0.5">Pick one — you choose a time next.</p>
 
@@ -324,8 +359,8 @@ const MobileLabDrawsLanding: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    analytics.trackFunnelStage('lp_cta_clicked', 2, { visitType: 'specialty-kit', cta: 'kit_link', ...utmData });
-                    navigate(buildBookingUrl('specialty-kit', forwarded));
+                    analytics.trackFunnelStage('lp_cta_clicked', 2, { visitType: 'specialty-kit', cta: 'kit_link', reason, ...utmData });
+                    navigate(buildBookingUrl('specialty-kit', forwarded, reason));
                   }}
                   className="underline font-medium text-conve-black"
                 >
@@ -335,21 +370,39 @@ const MobileLabDrawsLanding: React.FC = () => {
             </div>
           </section>
 
-          {/* TRUST — claims already made on the site */}
+          {/* SAMPLE HANDLING — owner claims (src/content/trustClaims.ts). Plain
+              lab names only: we deliver to them; no logos, no partnership. */}
           <section className="bg-white border-y border-brand-cream-warm">
+            <div className="max-w-3xl mx-auto px-4 py-7">
+              <h2 className="font-playfair text-2xl font-medium text-conve-black">Your samples, handled end to end</h2>
+              <p className="text-sm text-brand-gray-warm mt-1">{TRUST_CLAIMS.deliveredTo}</p>
+              <ul className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {SAMPLE_HANDLING_POINTS.map((p) => (
+                  <li key={p.title} className="rounded-xl bg-brand-cream p-3.5">
+                    <p className="font-semibold text-sm text-conve-black">{p.title}</p>
+                    <p className="text-xs text-brand-gray-warm mt-1 leading-relaxed">{p.body}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+
+          {/* TRUST — claims already made on the site */}
+          <section className="bg-brand-cream-soft border-b border-brand-cream-warm">
             <div className="max-w-3xl mx-auto px-4 py-6">
               <blockquote className="rounded-xl bg-gradient-to-br from-gray-900 to-gray-800 text-white p-4">
                 <p className="text-sm font-semibold leading-snug">"Better than what I got in the NFL."</p>
                 <footer className="text-xs text-gray-300 mt-1">— Deiontrez Mount, NFL Linebacker (Titans · Colts · Broncos)</footer>
               </blockquote>
               <ul className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                {[
+                {([
                   { icon: ShieldCheck, text: 'On-time or your visit is free' },
                   { icon: Award, text: 'Licensed, certified, background-checked phlebotomists' },
                   { icon: FileText, text: 'Results go to your doctor and lab, as usual' },
                   { icon: Shield, text: 'HIPAA-compliant handling of your order and sample' },
-                ].map(({ icon: I, text }) => (
-                  <li key={text} className="flex items-start gap-2">
+                  { icon: ShieldCheck, text: `${TRUST_CLAIMS.sampleTracked}. ${TRUST_CLAIMS.lostSamplePromise}`, wide: true },
+                ] as GuaranteeItem[]).map(({ icon: I, text, wide }) => (
+                  <li key={text} className={`flex items-start gap-2 ${wide ? 'col-span-2' : ''}`}>
                     <I className="h-4 w-4 text-conve-red flex-shrink-0 mt-0.5" />
                     <span className="text-brand-charcoal leading-snug">{text}</span>
                   </li>

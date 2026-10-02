@@ -26,6 +26,11 @@ import BookingChatAssistant from './BookingChatAssistant';
 import PriceEstimateBadge from './PriceEstimateBadge';
 import BookingTrustBadges from './BookingTrustBadges';
 import SlotConflictModal from './SlotConflictModal';
+import ReasonPicker from './ReasonPicker';
+import StepReassurance, { BookingStageKey } from './StepReassurance';
+import VisitSummaryCard from './VisitSummaryCard';
+import { readVisitReasonFromUrl, setVisitReason, getVisitReason } from '@/lib/visitReason';
+import { slotBucket, resolveFastingIntent } from '@/lib/slotGuidance';
 import { analytics } from '@/utils/analytics';
 
 interface BookingFlowProps {
@@ -52,6 +57,14 @@ enum BookingStep {
 // Visit types that skip ServiceSelectionStep (specialty-kit / in-office /
 // therapeutic) jump from display 0 to display 2 directly.
 const STEP_LABELS = ['Visit Type', 'Service', 'Date & Time', 'Patient Info', 'Address', 'Lab Order', 'Checkout'];
+
+/** 'Date & Time' → 'date_time' — the key used in funnel stage names and StepReassurance. */
+function toStageKey(displayStep: number): BookingStageKey {
+  return STEP_LABELS[displayStep]
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '') as BookingStageKey;
+}
 
 /**
  * Compute the display marker index (0..6) from the internal step state.
@@ -109,6 +122,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   // funnel records booking_service_viewed / booking_date_time_viewed on
   // mount and never a phantom booking_visit_type_viewed.
   const [preselectedVisitType] = useState<string | null>(() => readPreselectedVisitType());
+  // `?reason=` from the landing page ("What brings you here?"). Persisted to
+  // sessionStorage so StepReassurance / VisitSummaryCard can echo it; when
+  // present we don't ask again on the first step.
+  const [reasonFromUrl] = useState(() => {
+    const r = readVisitReasonFromUrl();
+    if (r) setVisitReason(r);
+    return r;
+  });
 
   // Patient lands at the beginning of the wizard (VisitTypeSelector) unless
   // a visit type was preselected upstream.
@@ -1098,6 +1119,15 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       visitType: methods.getValues('serviceDetails.visitType') || null,
       selectedService: methods.getValues('serviceDetails.selectedService') || null,
       hasPrefill: prefillFastPath,
+      // Fasting-aware slot guidance: which bucket the chosen time falls in
+      // (null until a time is picked), so later stages show whether
+      // afternoons fill. See src/lib/slotGuidance.ts.
+      slotBucket: slotBucket(methods.getValues('time')),
+      fasting: resolveFastingIntent({
+        selectedService: methods.getValues('serviceDetails.selectedService'),
+        fastingField: methods.getValues('serviceDetails.fasting'),
+        reason: getVisitReason(),
+      }),
     });
   }, [displayStep, bookingSource, methods, prefillFastPath]);
 
@@ -1164,7 +1194,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   })();
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 md:px-0">
+    <div className="w-full max-w-4xl lg:max-w-6xl mx-auto px-3 sm:px-4 md:px-0">
       <FormProvider {...methods}>
         {rescheduleFrom && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 flex items-start gap-2.5">
@@ -1239,6 +1269,17 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             <BookingTrustBadges />
           </>
         )}
+        {/* Step content + "Your visit" summary. Mobile: compact summary bar
+            above the step; desktop (lg+): side card. Both live in
+            VisitSummaryCard / StepReassurance — this is only the mount. */}
+        <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_288px] lg:gap-6 lg:items-start">
+        {currentStep < BookingStep.Confirmation && currentStep > BookingStep.VisitType && (
+          <VisitSummaryCard className="mt-4 lg:mt-4 lg:order-2 lg:sticky lg:top-24" />
+        )}
+        <div className="lg:order-1 min-w-0">
+        {currentStep < BookingStep.Confirmation && currentStep > BookingStep.VisitType && (
+          <StepReassurance stepKey={toStageKey(displayStep)} className="mt-3" />
+        )}
         <form onSubmit={(e) => e.preventDefault()} className="mt-4">
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
@@ -1252,7 +1293,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             >
               {/* Step 1: Visit Type */}
               {currentStep === BookingStep.VisitType && (
-                <VisitTypeSelector onNext={handleNext} />
+                <>
+                  {!reasonFromUrl && (
+                    <ReasonPicker
+                      compact
+                      className="mb-6"
+                      onSelect={(reason) =>
+                        analytics.trackFunnelStage('booking_reason_selected', 1, { reason, source: bookingSource })
+                      }
+                    />
+                  )}
+                  <VisitTypeSelector onNext={handleNext} />
+                </>
               )}
 
               {/* Step 2: Service & Date (combined) */}
@@ -1380,6 +1432,8 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
             </motion.div>
           </AnimatePresence>
         </form>
+        </div>
+        </div>
       </FormProvider>
 
       {/* Floating AI chat */}
