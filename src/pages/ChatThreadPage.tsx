@@ -114,7 +114,7 @@ const ChatThreadPage: React.FC = () => {
         </div>
         <div className="border-t p-3">
           <Link
-            to="/dashboard/super_admin/chatbot"
+            to={`/dashboard/super_admin/inbox/chat${conv?.id ? `?c=${conv.id}` : ''}`}
             className="flex items-center justify-center gap-2 w-full bg-gray-900 hover:bg-black text-white text-sm rounded-lg px-3 py-2.5"
           >
             <Inbox className="h-4 w-4" /> Open full Chat Inbox
