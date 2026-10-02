@@ -67,6 +67,33 @@ export function normalizeEmail(e: string | null | undefined): string | null {
 }
 
 /**
+ * Per-phone cap: at most ONE open draft that can receive texts per phone
+ * number. Returns the id of the other open, SMS-consented draft for this
+ * phone (excluding `exceptId`), or null when the phone is free.
+ */
+export async function otherOpenSmsDraftForPhone(supabase: any, phone: string | null, exceptId?: string | null): Promise<string | null> {
+  const p = normalizePhone(phone);
+  if (!p) return null;
+  try {
+    let q = supabase
+      .from('abandoned_bookings')
+      .select('id')
+      .eq('phone', p)
+      .eq('sms_consent', true)
+      .is('stopped_at', null)
+      .is('recovered_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (exceptId) q = q.neq('id', exceptId);
+    const { data } = await q;
+    return data && data[0] ? String(data[0].id) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Called after an appointment row exists. Marks every open draft for the same
  * person (session, else email, else phone) as recovered and stops the
  * sequence. Never throws — recovery bookkeeping must not break a paid booking.

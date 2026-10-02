@@ -13,7 +13,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2, CalendarCheck, CalendarX, CheckCircle, Phone, ArrowRight, Clock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import Header from '@/components/home/Header';
-import { resolveBookingDraft, stashResume, type ResolvedDraft } from '@/lib/bookingDraft';
+import { resolveBookingDraft, stashResume, TRUST_CLAIMS, type ResolvedDraft } from '@/lib/bookingDraft';
 import { analytics } from '@/utils/analytics';
 
 const SUPPORT_TEL = 'tel:+19415279169';
@@ -112,7 +112,7 @@ const BookResume: React.FC = () => {
                 <h1 className="font-playfair text-2xl md:text-3xl text-conve-black">
                   Welcome back{first ? `, ${first}` : ''}.
                 </h1>
-                <p className="text-brand-gray-warm mt-2">Your details are saved. Blood draws take 10 minutes or less once we arrive.</p>
+                <p className="text-brand-gray-warm mt-2">Your details are saved. {TRUST_CLAIMS.duration}</p>
               </div>
 
               {result.slot?.available && requested ? (
@@ -180,7 +180,7 @@ const BookResume: React.FC = () => {
               </div>
 
               <p className="text-[11px] text-center text-muted-foreground">
-                Questions? Call or text <a href={SUPPORT_TEL} className="underline">(941) 527-9169</a>. 99.9% success rate · 100% no-samples-lost guarantee.
+                Questions? Call or text <a href={SUPPORT_TEL} className="underline">(941) 527-9169</a>. {TRUST_CLAIMS.tracked} {TRUST_CLAIMS.redraw}
               </p>
             </div>
           )}

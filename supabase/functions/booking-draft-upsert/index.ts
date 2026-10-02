@@ -22,7 +22,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { corsHeaders } from '../_shared/cors.ts';
-import { hashResumeToken, mintResumeToken, normalizeEmail, normalizePhone } from '../_shared/booking-draft.ts';
+import { hashResumeToken, mintResumeToken, normalizeEmail, normalizePhone, otherOpenSmsDraftForPhone } from '../_shared/booking-draft.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     resumeState = body.resume_state;
   }
 
-  const smsConsent = body?.sms_consent === true && !!phone;
+  let smsConsent = body?.sms_consent === true && !!phone;
   const now = new Date();
   const nowIso = now.toISOString();
 
@@ -95,6 +95,15 @@ Deno.serve(async (req) => {
       .eq('session_id', sessionId)
       .maybeSingle();
 
+    // Per-phone cap: one open text-capable draft per number. A second tab /
+    // device (or a bot) for the same phone is saved email-only; the
+    // processor re-checks at send time as well.
+    let smsCapped = false;
+    if (smsConsent) {
+      const other = await otherOpenSmsDraftForPhone(admin, phone, (existing as any)?.id || null);
+      if (other) { smsConsent = false; smsCapped = true; fields.sms_consent = false; }
+    }
+
     if (existing) {
       if ((existing as any).recovered || (existing as any).stopped_at) {
         // Booked (or opted out / expired). Don't resurrect; the client starts
@@ -117,7 +126,7 @@ Deno.serve(async (req) => {
       }
       const { error } = await admin.from('abandoned_bookings').update(update).eq('id', (existing as any).id);
       if (error) throw error;
-      return json({ ok: true, id: (existing as any).id });
+      return json({ ok: true, id: (existing as any).id, sms_capped: smsCapped || undefined });
     }
 
     const id = crypto.randomUUID();
@@ -146,7 +155,7 @@ Deno.serve(async (req) => {
       if (String(error.code) === '23505') return json({ ok: true, raced: true });
       throw error;
     }
-    return json({ ok: true, id });
+    return json({ ok: true, id, sms_capped: smsCapped || undefined });
   } catch (e: any) {
     console.error('[booking-draft-upsert]', e?.message || e);
     return json({ error: 'upsert_failed', message: e?.message || String(e) }, 500);

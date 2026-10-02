@@ -30,7 +30,8 @@ import { sendSMS } from '../_shared/twilio.ts';
 import { logOrgEmail } from '../_shared/email-log.ts';
 import { brandedEmailWrapper } from '../_shared/branded-email.ts';
 import { OPT_OUT_TAIL, SUPPORT_PHONE } from '../_shared/sms-copy.ts';
-import { normalizePhone, resumeLinkFor } from '../_shared/booking-draft.ts';
+import { normalizePhone, resumeLinkFor, otherOpenSmsDraftForPhone } from '../_shared/booking-draft.ts';
+import { TRUST_CLAIMS as TRUST, midSentence } from '../_shared/trust-claims.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -91,14 +92,8 @@ function whenLabel(d: Draft): string | null {
 const daysLeft = (d: Draft) => Math.max(1, Math.ceil((new Date(d.expires_at).getTime() - Date.now()) / 86400_000));
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// Owner-approved trust facts (2026-10-02). Used verbatim; don't invent more.
-const TRUST = {
-  tenMin: 'Blood draws take 10 minutes or less.',
-  labs: 'We deliver to Quest Diagnostics, Labcorp and AdventHealth.',
-  notified: "You and your doctor are notified when samples are collected and delivered.",
-  success: '99.9% success rate · 100% no-samples-lost guarantee.',
-};
-const TRUST_LINE_HTML = `<p style="font-size:13px;color:#6B5E54;margin-top:18px;">${TRUST.tenMin} ${TRUST.labs} ${TRUST.notified} ${TRUST.success}</p>`;
+// Every claim string lives in _shared/trust-claims.ts (owner-reviewed). Never inline one here.
+const TRUST_LINE_HTML = `<p style="font-size:13px;color:#6B5E54;margin-top:18px;">${TRUST.duration} ${TRUST.labs} ${TRUST.notified} ${TRUST.tracked} ${TRUST.redraw}</p>`;
 
 /** The one thing most likely holding them back, from what the flow knows. */
 function worry(d: Draft): { key: string; sms: string; html: string } {
@@ -109,23 +104,23 @@ function worry(d: Draft): { key: string; sms: string; html: string } {
   // "What brings you here?" from the landing page wins when we have it.
   switch (d.visit_reason) {
     case 'waiting_room':
-      return { key: 'reason_waiting_room', sms: `Still want to skip the lab waiting room ${dayWord}? We come to you — ${TRUST.tenMin}`,
-        html: `<p><strong>Still want to skip the lab waiting room ${esc(dayWord)}?</strong> We come to you, and ${TRUST.tenMin.charAt(0).toLowerCase()}${TRUST.tenMin.slice(1)} ${TRUST.labs}</p>` };
+      return { key: 'reason_waiting_room', sms: `Still want to skip the lab waiting room ${dayWord}? We come to you — ${midSentence(TRUST.duration)}`,
+        html: `<p><strong>Still want to skip the lab waiting room ${esc(dayWord)}?</strong> We come to you, and ${midSentence(TRUST.duration)} ${TRUST.labs}</p>` };
     case 'fasting':
       return { key: 'reason_fasting', sms: 'Fasting draw? We have early-morning slots so you can eat right after we leave.',
-        html: `<p><strong>Fasting?</strong> We keep early-morning slots open so you can eat the moment we leave. ${TRUST.tenMin}</p>` };
+        html: `<p><strong>Fasting?</strong> We keep early-morning slots open so you can eat the moment we leave. ${TRUST.duration}</p>` };
     case 'loved_one':
       return { key: 'reason_loved_one', sms: 'Booking for someone you care for? We come to their door, and you can add them in one tap when you finish.',
-        html: `<p><strong>Booking for someone you care for?</strong> We come to their door, their draw takes 10 minutes or less, and ${TRUST.notified.charAt(0).toLowerCase()}${TRUST.notified.slice(1)}</p>` };
+        html: `<p><strong>Booking for someone you care for?</strong> We come to their door, ${midSentence(TRUST.duration)} And ${midSentence(TRUST.notified)}</p>` };
     case 'needles':
-      return { key: 'reason_needles', sms: `Nervous about needles? Our phlebotomists are one-try specialists — ${TRUST.success}`,
-        html: `<p><strong>Nervous about needles?</strong> Our phlebotomists are one-try specialists — ${TRUST.success} You're on your own couch, and it's over in minutes.</p>` };
+      return { key: 'reason_needles', sms: TRUST.needles,
+        html: `<p><strong>${TRUST.needles}</strong> You're on your own couch the whole time.</p>` };
     case 'kids':
       return { key: 'reason_kids', sms: "Draw for a child? At home, with you right there — no waiting room. We're gentle and quick.",
-        html: `<p><strong>Draw for a child?</strong> At home, with you right there, no waiting room. Our phlebotomists are gentle and quick — ${TRUST.tenMin.charAt(0).toLowerCase()}${TRUST.tenMin.slice(1)}</p>` };
+        html: `<p><strong>Draw for a child?</strong> At home, with you right there, no waiting room. Our phlebotomists are gentle and quick — ${midSentence(TRUST.duration)}</p>` };
     case 'busy':
-      return { key: 'reason_busy', sms: `No time for the lab? Pick a slot that fits your day — ${TRUST.tenMin}`,
-        html: `<p><strong>No time for the lab?</strong> Pick a slot that fits your day — early morning, lunch, or after work. ${TRUST.tenMin} ${TRUST.notified}</p>` };
+      return { key: 'reason_busy', sms: `No time for the lab? Pick a slot that fits your day — ${midSentence(TRUST.duration)}`,
+        html: `<p><strong>No time for the lab?</strong> Pick a slot that fits your day — early morning, lunch, or after work. ${TRUST.duration} ${TRUST.notified}</p>` };
     default: break;
   }
 
@@ -172,7 +167,7 @@ function buildTouch(n: number, d: Draft, link: string) {
         bodyHtml: `<p>You were a couple of taps from booking your ${esc(label)}${when ? ` for <strong>${esc(when)}</strong>` : ''}. We're holding that time for a little while — pick up right where you left off.</p>${d.lab_order_status === 'skipped' || d.lab_order_status === 'pending' ? `<p style="font-size:14px;color:#6B5E54;">No lab order yet? That's fine — we can get it from your doctor.</p>` : ''}`,
         ctaLabel: 'Finish my booking',
         ctaHref: link,
-        trustCloser: TRUST.tenMin,
+        trustCloser: TRUST.duration,
       }),
       worry: w.key,
     };
@@ -187,7 +182,7 @@ function buildTouch(n: number, d: Draft, link: string) {
         bodyHtml: `${w.html}<p>Your booking link still works${when ? ` and your <strong>${esc(when)}</strong> time is first in line if it's still open` : ''}. If the day changed, pick any other time on the same page.</p><p style="font-size:14px;color:#6B5E54;">Prefer to text? Message us at ${SUPPORT_PHONE} and we'll finish it with you.</p>${TRUST_LINE_HTML}`,
         ctaLabel: 'Finish my booking',
         ctaHref: link,
-        trustCloser: TRUST.success,
+        trustCloser: TRUST.tracked,
       }),
       worry: w.key,
     };
@@ -325,7 +320,16 @@ Deno.serve(async (req) => {
 
       const link = await resumeLinkFor(d.id);
       const copy = buildTouch(n, d, link);
-      const wantSms = !!d.sms_consent && !!normalizePhone(d.phone);
+      // Per-phone cap at send time too: if an older open draft already owns
+      // texting for this number, this one goes email-only.
+      let wantSms = !!d.sms_consent && !!normalizePhone(d.phone);
+      if (wantSms) {
+        const other = await otherOpenSmsDraftForPhone(admin, d.phone, d.id);
+        if (other) {
+          const { data: mine } = await admin.from('abandoned_bookings').select('created_at').eq('id', other).maybeSingle();
+          if (mine && new Date((mine as any).created_at).getTime() < new Date(d.created_at).getTime()) wantSms = false;
+        }
+      }
       const wantEmail = !!d.email && (n > 1 || !wantSms);
 
       let sms: string | null = null, email: string | null = null;

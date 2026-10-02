@@ -24,6 +24,17 @@ const RESUME_KEY = 'cl_booking_resume';
 export const SMS_CONSENT_TEXT =
   'Text me a link to finish booking if I get interrupted. Up to 3 texts from ConveLabs; msg & data rates may apply; reply STOP to opt out.';
 
+/**
+ * Patient-facing trust claims used on the resume page. MIRROR of
+ * supabase/functions/_shared/trust-claims.ts (owner-reviewed 2026-10-02) —
+ * edit both. No unmeasured claims (no "99.9%", "one-try", "guarantee").
+ */
+export const TRUST_CLAIMS = {
+  duration: 'Most draws take under 10 minutes.',
+  tracked: 'Every sample tracked from your arm to the lab.',
+  redraw: 'If we ever lose a sample, your redraw is free.',
+} as const;
+
 /** Form field (outside the zod schema, like labOrder.uploadedPaths) the consent checkbox writes. */
 export const SMS_CONSENT_FIELD = 'draftSmsConsent';
 
