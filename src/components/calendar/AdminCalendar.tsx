@@ -526,11 +526,20 @@ const AdminCalendar: React.FC = () => {
   }, []);
 
   const removeBlock = useCallback(async (blockId: string, title: string) => {
-    if (!window.confirm(`${title}\n\nRemove this block? Slots in this window will become bookable again.`)) return;
+    // Removing deletes the whole block row, i.e. EVERY date it covers —
+    // say so, rather than implying only the clicked day reopens.
+    const row: any = timeBlocks.find((b: any) => b.id === blockId);
+    const weekday = String(row?.recurring_day || '').replace(/^./, (c: string) => c.toUpperCase());
+    const scope = row?.recurring
+      ? `This removes the weekly block on every ${weekday}${row.end_date && row.end_date > row.start_date ? ` through ${row.end_date}` : ''}.`
+      : row?.end_date && row.end_date !== row.start_date
+        ? `This removes the block on every day from ${row.start_date} to ${row.end_date}.`
+        : 'Slots in this window will become bookable again.';
+    if (!window.confirm(`${title}\n\nRemove this block? ${scope}\n\nTo book one patient inside a block without removing it, use New appointment and tick "Override Availability".`)) return;
     const { error } = await db.from('time_blocks').delete().eq('id', blockId);
     if (error) toast.error(`Couldn't remove block: ${error.message}`);
     else { toast.success('Block removed — slots reopened.'); fetchTimeBlocks(); }
-  }, [fetchTimeBlocks]);
+  }, [fetchTimeBlocks, timeBlocks]);
 
   // Parse appointment_time to 24h hours/minutes
   const parseTime = (timeStr: string): { h: number; m: number } => {
@@ -784,7 +793,8 @@ const AdminCalendar: React.FC = () => {
     // way to delete it).
     if (info.event.extendedProps.isBlock) {
       const rawId = String(info.event.id || '');
-      // Partial-day bands are "block-<id>-<YYYY-MM-DD>"; strip both affixes.
+      // Timed bands are drawn one per day with ids `block-<uuid>-YYYY-MM-DD`;
+      // strip both affixes or the delete targets a malformed id.
       const blockId = rawId.replace(/^block-(label-)?/, '').replace(/-\d{4}-\d{2}-\d{2}$/, '');
       if (!blockId) { toast.info(info.event.title); return; }
       removeBlock(blockId, info.event.title);
