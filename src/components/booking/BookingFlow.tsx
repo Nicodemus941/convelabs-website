@@ -1063,9 +1063,24 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
     });
   }, [displayStep, bookingSource, methods, prefillFastPath]);
 
+  // `pagehide` AND `beforeunload` both fire on a normal tab close/navigation,
+  // so every abandonment used to be recorded twice (941 events for 775
+  // sessions in the last 30 days), inflating the abandon rate in reporting.
+  // Send once per page lifetime; re-arm if the page is restored from bfcache.
+  const abandonSentRef = useRef(false);
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) abandonSentRef.current = false;
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
+
   useEffect(() => {
     const handlePageExit = () => {
       if (bookingComplete || redirectingToCheckoutRef.current) return;
+      if (abandonSentRef.current) return;
+      abandonSentRef.current = true;
 
       const stageKey = STEP_LABELS[displayStep]
         .toLowerCase()
