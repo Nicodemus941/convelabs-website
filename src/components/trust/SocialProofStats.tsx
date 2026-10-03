@@ -37,7 +37,7 @@ export const SocialProofStats = () => {
             The #1 Choice for Orlando's Elite Professionals & Leading Corporations
           </h2>
           <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            From Fortune 500 executives to professional athletes and corporate wellness programs, ConveLabs is the trusted partner for structured luxury lab services and enterprise health solutions
+            From executives to professional athletes, sports teams and television crews, ConveLabs is the trusted partner for structured luxury lab services and enterprise health solutions
           </p>
         </div>
 

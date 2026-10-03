@@ -69,9 +69,9 @@ const Corporate: React.FC = () => {
 
   const socialProof = [
     {
-      organization: "Major Television Networks",
+      organization: "Television Networks",
       type: "Entertainment & Media",
-      employees: "1,000+ employees",
+      employees: "Network staff",
       result: "On-site screenings for staff"
     },
     {
@@ -79,12 +79,6 @@ const Corporate: React.FC = () => {
       type: "Athletic Organizations", 
       employees: "Staff & athletes",
       result: "Mobile draws for busy schedules"
-    },
-    {
-      organization: "Fortune 500 Corporations",
-      type: "Enterprise Clients",
-      employees: "5,000+ employees",
-      result: "Workforce screening programs"
     }
   ];
 
@@ -128,27 +122,6 @@ const Corporate: React.FC = () => {
       metric: "Absence Tracking",
       value: "Monthly",
       description: "Monthly reporting to support your wellness program"
-    }
-  ];
-
-  const testimonials = [
-    {
-      company: "Orlando Tech Solutions",
-      logo: "💼",
-      quote: "The mobile service eliminated the need for employees to take time off for routine health screenings.",
-      author: "Sarah Chen, HR Director"
-    },
-    {
-      company: "Central Florida Bank", 
-      logo: "🏢",
-      quote: "The monthly reports helped us identify health trends early. Preventive screenings have been a valuable part of our wellness program.",
-      author: "Michael Rodriguez, Benefits Manager"
-    },
-    {
-      company: "Premier Manufacturing",
-      logo: "🏭", 
-      quote: "Employee satisfaction with our benefits package increased dramatically. The convenience factor cannot be overstated.",
-      author: "Lisa Johnson, CEO"
     }
   ];
 
@@ -208,7 +181,7 @@ const Corporate: React.FC = () => {
         <div className="relative max-w-6xl mx-auto px-4 text-center text-white">
           <Badge className="mb-8 bg-white/20 backdrop-blur-sm text-white border-white/30 px-4 py-2 text-sm font-medium">
             <Award className="w-4 h-4 mr-2" />
-            Trusted by Fortune 500 Companies
+            Trusted by Television Networks &amp; Sports Teams
           </Badge>
           
           <h1 className="font-playfair text-4xl md:text-6xl lg:text-7xl font-bold mb-8 leading-tight">
@@ -217,7 +190,7 @@ const Corporate: React.FC = () => {
           </h1>
           
           <p className="text-xl md:text-2xl mb-12 opacity-95 max-w-4xl mx-auto leading-relaxed">
-            Join television networks, sports teams, and Fortune 500 corporations who trust ConveLabs 
+            Join the television networks and sports teams who trust ConveLabs 
             to deliver enterprise-grade workforce health solutions with measurable ROI.
           </p>
           
@@ -286,11 +259,11 @@ const Corporate: React.FC = () => {
               Trusted by Industry Leaders
             </h2>
             <p className="text-gray-600 max-w-2xl mx-auto">
-              ConveLabs has been selected by professional organizations across multiple industries for our enterprise-grade reliability and proven results.
+              ConveLabs has provided on-site and mobile draws for television networks and professional sports teams.
             </p>
           </div>
           
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
             {socialProof.map((client, index) => (
               <Card key={index} className="luxury-card p-6 text-center border-2 border-conve-red/10">
                 <CardContent className="p-0">
@@ -388,7 +361,7 @@ const Corporate: React.FC = () => {
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="font-playfair text-4xl md:text-5xl font-bold mb-6 luxury-heading">
-              Why Fortune 500s Choose <span className="text-conve-red">ConveLabs</span>
+              Why Employers Choose <span className="text-conve-red">ConveLabs</span>
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
               Enterprise clients demand solutions that deliver measurable ROI without disrupting operations. 
@@ -416,7 +389,7 @@ const Corporate: React.FC = () => {
             <Card className="luxury-card border-2 border-green-200">
               <CardHeader className="bg-green-50 text-center">
                 <CardTitle className="text-green-700 font-playfair text-2xl">ConveLabs Enterprise Platform</CardTitle>
-                <CardDescription className="text-green-600">Fortune 500-trusted solution</CardDescription>
+                <CardDescription className="text-green-600">Trusted by networks &amp; sports teams</CardDescription>
               </CardHeader>
               <CardContent className="p-8 space-y-4">
                 <div className="text-gray-600 flex items-center gap-3">
@@ -727,38 +700,6 @@ const Corporate: React.FC = () => {
               <h3 className="font-playfair text-2xl font-bold mb-4 text-gray-900">Track & Report</h3>
               <p className="text-gray-600 leading-relaxed">View monthly analytics and optimize your wellness program for maximum ROI</p>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Success Stories */}
-      <section className="luxury-section bg-white">
-        <div className="max-w-6xl mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="font-playfair text-4xl md:text-5xl font-bold mb-6 luxury-heading">
-              <span className="text-conve-red">Success Stories</span> from Our Corporate Clients
-            </h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-              Real results from companies that transformed their workplace wellness programs
-            </p>
-          </div>
-          
-          <div className="grid md:grid-cols-3 gap-8">
-            {testimonials.map((testimonial, index) => (
-              <Card key={index} className="luxury-card p-8 animate-luxury-fade-in" style={{ animationDelay: `${index * 0.2}s` }}>
-                <CardContent className="p-0">
-                  <div className="text-center mb-6">
-                    <div className="text-4xl mb-3">{testimonial.logo}</div>
-                    <Badge variant="secondary" className="mb-2 bg-conve-red/10 text-conve-red">{testimonial.company.includes('Tech') ? 'Technology Company' : testimonial.company.includes('Bank') ? 'Financial Services' : 'Manufacturing'}</Badge>
-                    <h3 className="font-semibold text-lg font-playfair">{testimonial.company.includes('250') ? '250 Employees' : testimonial.company.includes('150') ? '150 Employees' : '400 Employees'}</h3>
-                  </div>
-                  <blockquote className="text-gray-600 mb-6 italic leading-relaxed">
-                    "{testimonial.quote}"
-                  </blockquote>
-                  <div className="text-sm text-conve-red font-medium">- {testimonial.author}</div>
-                </CardContent>
-              </Card>
-            ))}
           </div>
         </div>
       </section>

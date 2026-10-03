@@ -245,7 +245,7 @@ const ExecutiveHealthOrlando: React.FC = () => {
             <h2 className="text-4xl font-bold mb-6">Invest in Your Executive Performance</h2>
             <p className="text-xl mb-8 max-w-3xl mx-auto">
               Orlando's top executives trust ConveLabs for convenient, comprehensive health screening that fits their demanding schedules. 
-              Join leaders from Fortune 500 companies, startups, and professional services who prioritize their health.
+              Join the executives, founders and professionals who make their health a priority.
             </p>
             <div className="flex flex-col sm:flex-row gap-6 justify-center mb-6">
               <BookNowButton 

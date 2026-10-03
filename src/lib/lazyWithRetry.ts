@@ -36,7 +36,7 @@ import { lazy, type ComponentType } from 'react';
 
 const RETRY_KEY_PREFIX = 'cl_lazy_retry_';
 
-function isChunkLoadError(err: any): boolean {
+export function isChunkLoadError(err: any): boolean {
   if (!err) return false;
   const msg = String(err?.message || err);
   return (
