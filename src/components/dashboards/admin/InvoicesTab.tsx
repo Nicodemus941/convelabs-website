@@ -58,6 +58,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { copyOnsitePayLink } from '@/lib/payLink';
+import { INVOICE_ONLY_ADDRESS, isAttachableVisit, pickDefaultVisit } from '@/lib/invoiceAttach';
 import {
   SectionHeader, StatTiles, FilterChips, SearchBox, LaneHeader, LoadingRows, EmptyState, ErrorBanner,
   DetailDrawer, Field, FieldGroup, Pill, fmtMoney, fmtMoneyShort, TH, TH_STICKY, TD_STICKY, rowKeyHandler, downloadCsv,
@@ -233,6 +234,8 @@ const freshGenForm = () => ({
   serviceType: 'mobile', customAmount: '', customDescription: '',
   dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
   memo: '',
+  // Visit this invoice bills for ('' = standalone invoice-only row).
+  attachAppointmentId: '',
 });
 
 // ──────────────────────────────────────────────────────────────────
@@ -255,6 +258,8 @@ const InvoicesTab: React.FC = () => {
   const [patientSearchResults, setPatientSearchResults] = useState<any[]>([]);
   const [orgSearchResults, setOrgSearchResults] = useState<any[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  // The patient's recent/upcoming visits an invoice can attach to.
+  const [visitOptions, setVisitOptions] = useState<any[]>([]);
 
   // Edit-invoice modal — voids the old Stripe invoice + reissues fresh
   // (Stripe forbids editing sent invoices). Calls reissue-stripe-invoice.
@@ -271,6 +276,36 @@ const InvoicesTab: React.FC = () => {
     : SERVICE_PRICES[genForm.serviceType]?.price || 150;
   const invoiceRecipientName = genForm.recipientType === 'organization' ? genForm.orgName : genForm.patientName;
   const invoiceRecipientEmail = genForm.recipientType === 'organization' ? genForm.orgEmail : genForm.patientEmail;
+
+  // Load the patient's visits once an email is entered and pre-select the one
+  // this invoice is most likely for, so a visit charge lands on the visit
+  // instead of becoming a second appointment.
+  useEffect(() => {
+    const email = genForm.patientEmail.trim().toLowerCase();
+    if (!generateOpen || genForm.recipientType !== 'patient' || !/^\S+@\S+\.\S+$/.test(email)) {
+      setVisitOptions([]);
+      setGenForm(p => (p.attachAppointmentId ? { ...p, attachAppointmentId: '' } : p));
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const from = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+      const to = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+      const { data } = await db.from('appointments')
+        .select('id, appointment_date, appointment_time, status, service_type, service_name, total_amount, payment_status, address')
+        .ilike('patient_email', email)
+        .gte('appointment_date', from).lte('appointment_date', to)
+        .neq('status', 'cancelled')
+        .order('appointment_date', { ascending: false })
+        .limit(20);
+      if (cancelled) return;
+      const options = ((data as any[]) || []).filter(isAttachableVisit);
+      setVisitOptions(options);
+      const pick = pickDefaultVisit(options);
+      setGenForm(p => ({ ...p, attachAppointmentId: pick?.id || '' }));
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [generateOpen, genForm.recipientType, genForm.patientEmail]);
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true);
@@ -502,17 +537,44 @@ const InvoicesTab: React.FC = () => {
     setIsGenerating(true);
     try {
       const svcLabel = genForm.serviceType === 'custom' ? (genForm.customDescription || 'Custom Service') : SERVICE_PRICES[genForm.serviceType]?.label || 'Service';
+      const dueAt = genForm.dueDate ? new Date(genForm.dueDate + 'T23:59:59').toISOString() : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      const attachId = genForm.recipientType === 'patient' ? genForm.attachAppointmentId : '';
+
+      // Attached: bill on the visit itself (same columns PatientChart's
+      // attach path sets), so the payment, payout and status stay on one row.
+      if (attachId) {
+        const { error: upErr } = await db.from('appointments').update({
+          total_amount: invoiceAmount, service_price: invoiceAmount,
+          invoice_status: 'sent', invoice_sent_at: new Date().toISOString(), invoice_due_at: dueAt,
+          payment_status: 'pending', billed_to: 'patient',
+          ...(genForm.memo ? { notes: genForm.memo } : {}),
+        }).eq('id', attachId);
+        if (upErr) throw upErr;
+        await supabase.functions.invoke('send-appointment-invoice', {
+          body: {
+            appointmentId: attachId, patientName: invoiceRecipientName,
+            patientEmail: invoiceRecipientEmail, serviceName: svcLabel,
+            servicePrice: invoiceAmount, memo: genForm.memo,
+          },
+        });
+        toast.success(`Invoice for ${fmtMoney(invoiceAmount)} sent to ${invoiceRecipientEmail} · attached to the visit`);
+        setGenForm(freshGenForm());
+        setGenerateOpen(false);
+        fetchInvoices();
+        return;
+      }
+
       const { data: appt, error: apptErr } = await db.from('appointments').insert([{
         appointment_date: new Date().toISOString(),
         patient_name: invoiceRecipientName,
         patient_email: invoiceRecipientEmail,
         service_type: genForm.serviceType === 'custom' ? 'invoice' : genForm.serviceType,
         service_name: svcLabel,
-        status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
+        status: 'scheduled', address: INVOICE_ONLY_ADDRESS, zipcode: '32801',
         total_amount: invoiceAmount, service_price: invoiceAmount,
         booking_source: 'manual', invoice_status: 'sent',
         invoice_sent_at: new Date().toISOString(),
-        invoice_due_at: genForm.dueDate ? new Date(genForm.dueDate + 'T23:59:59').toISOString() : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        invoice_due_at: dueAt,
         payment_status: 'pending',
         notes: [genForm.memo, genForm.recipientType === 'organization' ? `Org: ${genForm.orgName}` : ''].filter(Boolean).join(' | ') || null,
       }]).select().single();
@@ -786,6 +848,29 @@ const InvoicesTab: React.FC = () => {
                   )}
                 </div>
                 <div><Label>Email *</Label><Input type="email" value={genForm.patientEmail} onChange={e => setGenForm(p => ({ ...p, patientEmail: e.target.value }))} /></div>
+                {visitOptions.length > 0 && (
+                  <div>
+                    <Label>Bill for visit</Label>
+                    <select
+                      value={genForm.attachAppointmentId}
+                      onChange={e => setGenForm(p => ({ ...p, attachAppointmentId: e.target.value }))}
+                      className="mt-1 w-full h-10 sm:h-9 text-sm border rounded-md px-2 bg-white"
+                      aria-label="Visit this invoice is for"
+                    >
+                      {visitOptions.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {String(v.appointment_date).slice(0, 10)}{v.appointment_time ? ` ${String(v.appointment_time).slice(0, 5)}` : ''} · {v.service_name || v.service_type || 'Visit'} · {v.status} · ${Number(v.total_amount || 0).toFixed(2)}
+                        </option>
+                      ))}
+                      <option value="">Not for a visit — standalone invoice</option>
+                    </select>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {genForm.attachAppointmentId
+                        ? 'The invoice is added to this visit — no new appointment is created.'
+                        : 'Creates an invoice-only record. Use this only when the charge is not for a visit.'}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

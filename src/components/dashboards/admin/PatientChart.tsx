@@ -20,6 +20,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { supabase } from '@/integrations/supabase/client';
+import { INVOICE_ONLY_ADDRESS, isAttachableVisit, pickDefaultVisit } from '@/lib/invoiceAttach';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
@@ -519,7 +520,8 @@ const PatientChart: React.FC<Props> = ({
           payment_status: 'pending',
           billed_to: invoiceForm.recipient === 'organization' ? 'org' : 'patient',
           ...(invoiceForm.recipient === 'organization' && invoiceForm.orgId ? { organization_id: invoiceForm.orgId } : {}),
-          notes: invoiceForm.memo || null,
+          // Attaching to a real visit: don't wipe its notes when there's no memo.
+          ...(invoiceForm.memo ? { notes: invoiceForm.memo } : {}),
         }).eq('id', appointmentId);
         if (updateErr) throw updateErr;
       } else {
@@ -528,7 +530,7 @@ const PatientChart: React.FC<Props> = ({
           appointment_date: new Date().toISOString(), patient_id: p.id,
           patient_name: fullName(p), patient_email: p.email || null,
           service_type: 'invoice', service_name: invoiceForm.description || 'Invoice',
-          status: 'scheduled', address: 'Invoice Only', zipcode: '32801',
+          status: 'scheduled', address: INVOICE_ONLY_ADDRESS, zipcode: '32801',
           total_amount: amount, service_price: amount, booking_source: 'manual',
           invoice_status: 'sent', invoice_sent_at: new Date().toISOString(),
           invoice_due_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
@@ -644,7 +646,21 @@ const PatientChart: React.FC<Props> = ({
               <Zap className="h-3.5 w-3.5" aria-hidden="true" /> Send booking link
             </Button>
           )}
-          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start" onClick={() => { setInvoiceForm(EMPTY_INVOICE); setInvoiceStep('form'); setInvoiceError(null); setInvoiceModalOpen(true); }}>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start" onClick={() => {
+            // Pre-select the visit this invoice is most likely for (a $0
+            // reschedule included), so it bills the visit instead of
+            // creating a second appointment.
+            const pick = pickDefaultVisit(appointments);
+            setInvoiceForm(pick ? {
+              ...EMPTY_INVOICE,
+              attachAppointmentId: pick.id,
+              amount: Number(pick.total_amount || 0) > 0 ? String(pick.total_amount) : EMPTY_INVOICE.amount,
+              description: pick.service_name || pick.service_type || EMPTY_INVOICE.description,
+              recipient: pick.organization_id ? 'organization' : EMPTY_INVOICE.recipient,
+              orgId: pick.organization_id || EMPTY_INVOICE.orgId,
+            } : EMPTY_INVOICE);
+            setInvoiceStep('form'); setInvoiceError(null); setInvoiceModalOpen(true);
+          }}>
             <Receipt className="h-3.5 w-3.5" aria-hidden="true" /> Invoice
           </Button>
           <Button size="sm" variant="outline" className={cn('gap-1.5 text-xs h-10 sm:h-9 flex-shrink-0 snap-start', !(p.phone || p.email) && 'text-gray-400')} onClick={message} title={!(p.phone || p.email) ? 'Add a phone or email first' : undefined}>
@@ -1142,7 +1158,7 @@ const PatientChart: React.FC<Props> = ({
                   setInvoiceForm(pr => ({
                     ...pr,
                     attachAppointmentId: apptId,
-                    amount: appt ? String(appt.total_amount || appt.service_price || '') : pr.amount,
+                    amount: appt && Number(appt.total_amount || appt.service_price || 0) > 0 ? String(appt.total_amount || appt.service_price) : pr.amount,
                     description: appt ? (appt.service_name || appt.service_type || '') : pr.description,
                     recipient: appt?.organization_id ? 'organization' : pr.recipient,
                     orgId: appt?.organization_id || pr.orgId,
@@ -1151,7 +1167,7 @@ const PatientChart: React.FC<Props> = ({
                 className="mt-1 w-full h-9 text-sm border rounded-md px-2 bg-white"
               >
                 <option value="">— Create new / standalone invoice —</option>
-                {appointments.filter(a => a.payment_status !== 'completed').map(a => (
+                {appointments.filter(isAttachableVisit).map(a => (
                   <option key={a.id} value={a.id}>
                     {a.appointment_date?.substring(0, 10)} · {a.service_name || a.service_type} · ${Number(a.total_amount || 0).toFixed(2)} · {a.payment_status || 'unpaid'}
                   </option>
