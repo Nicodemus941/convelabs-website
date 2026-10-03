@@ -6,6 +6,7 @@ import { TenantProvider } from './contexts/tenant/TenantContext';
 import { NotificationsProvider } from './contexts/NotificationsContext';
 import { BookingModalProvider } from './contexts/BookingModalContext';
 import { HelmetProvider } from 'react-helmet-async';
+import { isChunkLoadError } from './lib/lazyWithRetry';
 
 // Import route files (they now use lazy-loaded components internally)
 import { routes as publicRoutes } from './routes/PublicRoutes';
@@ -37,11 +38,40 @@ class RootErrorBoundary extends React.Component<
     return { error };
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    // Stale bundle: a tab opened before the last deploy asks for a chunk that
+    // no longer exists (Vercel answers with index.html). Most routes use plain
+    // React.lazy, so this landed here as "Failed to fetch dynamically imported
+    // module" (owner report 2026-10-02, /login). Reload once per missing
+    // chunk to pick up the current index.html; a second failure for the same
+    // chunk is real and shows the screen below.
+    if (isChunkLoadError(error)) {
+      const key = 'cl_stale_chunk_reload:' + String(error?.message || '').slice(-120);
+      let tried = false;
+      try { tried = !!sessionStorage.getItem(key); sessionStorage.setItem(key, '1'); } catch { /* private mode */ }
+      if (!tried) {
+        // eslint-disable-next-line no-console
+        console.warn('[RootErrorBoundary] stale chunk after a deploy — reloading once');
+        window.location.reload();
+        return;
+      }
+    }
     // eslint-disable-next-line no-console
     console.error('[RootErrorBoundary]', error, info);
   }
   render() {
     if (this.state.error) {
+      if (isChunkLoadError(this.state.error)) {
+        // Reloading (componentDidCatch) or the retry already failed — either
+        // way say so in plain words instead of the raw module error.
+        return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-background p-6 text-center">
+            <p className="text-sm text-muted-foreground mb-4">ConveLabs was just updated. Loading the latest version…</p>
+            <button onClick={() => window.location.reload()} className="bg-conve-red text-white px-5 py-2.5 rounded-xl font-semibold">
+              Reload
+            </button>
+          </div>
+        );
+      }
       return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-conve-red text-white p-6 text-center pt-safe pb-safe">
           <h1 className="text-2xl font-bold mb-1">ConveLabs Pro</h1>
