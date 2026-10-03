@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow } from './timeBlocks.ts';
+import type { OfficeDay } from './bookingWindows.ts';
 
 export interface TimeWindowRule {
   dayOfWeek: number[]; // 0 = Sun, 6 = Sat
@@ -251,7 +252,7 @@ export function slotsAllowedForDate(dateIso: string, timeWindowRules: any): stri
 export interface AvailableSlot {
   time: string;
   available: boolean;
-  reason?: 'past' | 'booked' | 'blocked' | 'outside_window';
+  reason?: 'past' | 'booked' | 'blocked' | 'outside_window' | 'office_closed' | 'same_day_cutoff';
   // Tier-gating (populated when caller passes tier info):
   //   requires_tier: minimum membership tier needed to book this slot
   //   unlock_price_cents: annual cost to upgrade
@@ -285,26 +286,57 @@ const VISIT_DURATIONS: Record<string, number> = {
 };
 
 /**
- * Minutes after midnight when the office opens on this date's weekday, from
- * the saved office hours. Never throws: anything missing or malformed falls
- * back to 6:00 AM, the long-standing default.
+ * The saved office hours for one date, from system_settings 'office_hours'
+ * (the same row src/hooks/useOfficeHours reads). Shape, verified live
+ * 2026-10-02:
+ *   { days: [{open:'HH:MM', close:'HH:MM', closed:boolean} x7, index 0 = Sunday],
+ *     slotMinutes: 15, afterHoursFrom: 'HH:MM' }
+ * Never throws. With no row, Sunday is closed and every other day runs
+ * 06:00-20:00 (the client's DEFAULT_OFFICE_HOURS), so both sides agree even
+ * before anything is saved.
  */
-async function officeOpenMinutes(supabase: SupabaseClient, dateIso: string): Promise<number> {
+export interface OfficeDayInfo {
+  day: OfficeDay;
+  openMin: number;
+  closeMin: number;
+  afterHoursFromMin: number;
+}
+
+const DEFAULT_AFTER_HOURS_FROM_MIN = 17 * 60 + 30;
+
+function hhmmToMin(v: unknown): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ''));
+  if (!m) return null;
+  const min = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  return min >= 0 && min < 24 * 60 ? min : null;
+}
+
+export async function loadOfficeDay(supabase: SupabaseClient, dateIso: string): Promise<OfficeDayInfo> {
+  const dow = new Date(dateIso + 'T12:00:00').getDay();
+  const fallback: OfficeDayInfo = {
+    day: { open: '06:00', close: '20:00', closed: dow === 0 },
+    openMin: FALLBACK_OPEN_MIN,
+    closeMin: 20 * 60,
+    afterHoursFromMin: DEFAULT_AFTER_HOURS_FROM_MIN,
+  };
   try {
     const { data } = await supabase
       .from('system_settings')
       .select('value')
       .eq('key', 'office_hours')
       .maybeSingle();
-    const days = (data as any)?.value?.days;
-    const dow = new Date(dateIso + 'T12:00:00').getDay();
-    const open = Array.isArray(days) ? String(days[dow]?.open || '') : '';
-    const m = /^(\d{1,2}):(\d{2})$/.exec(open);
-    if (!m) return FALLBACK_OPEN_MIN;
-    const min = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-    return min >= DEFAULT_GRID_START * 60 && min < 24 * 60 ? min : FALLBACK_OPEN_MIN;
+    const value = (data as any)?.value;
+    if (!value) return fallback;
+    const days = Array.isArray(value.days) ? value.days : [];
+    const d = days[dow] || {};
+    const openMin = hhmmToMin(d.open) ?? fallback.openMin;
+    const closeMin = hhmmToMin(d.close) ?? fallback.closeMin;
+    const closed = typeof d.closed === 'boolean' ? d.closed : fallback.day.closed;
+    const afterHoursFromMin = hhmmToMin(value.afterHoursFrom) ?? DEFAULT_AFTER_HOURS_FROM_MIN;
+    const pad = (n: number) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+    return { day: { open: pad(openMin), close: pad(closeMin), closed }, openMin, closeMin, afterHoursFromMin };
   } catch {
-    return FALLBACK_OPEN_MIN;
+    return fallback;
   }
 }
 
@@ -321,10 +353,20 @@ export async function getAvailableSlotsForDate(
   // accepts specimens 24/7 so patient-side hours can run wide.
   const isAdvent = isAdventHealthDestination(labDestination);
   const gridEnd = isAdvent ? ADVENT_HEALTH_GRID_END : DEFAULT_GRID_END;
-  const openMin = await officeOpenMinutes(supabase, dateIso);
-  const localGrid = baseGrid(gridEnd).filter((t) => {
+  // Office hours are per day and win over everything, the AdventHealth
+  // override included: a day switched off in Settings has no online slots,
+  // and an open day offers only its own open-close (the closing time is when
+  // the last visit ends, so it is not offered as a start).
+  const office = await loadOfficeDay(supabase, dateIso);
+  const openMin = office.openMin >= DEFAULT_GRID_START * 60 ? office.openMin : FALLBACK_OPEN_MIN;
+  const fullGrid = baseGrid(gridEnd);
+  if (office.day.closed) {
+    return fullGrid.map(t => ({ time: t, available: false, reason: 'office_closed' }));
+  }
+  const localGrid = fullGrid.filter((t) => {
     const { h, m } = parseTime(t);
-    return h * 60 + m >= openMin;
+    const min = h * 60 + m;
+    return min >= openMin && min < office.closeMin;
   });
   const allowed = isAdvent ? localGrid : slotsAllowedForDate(dateIso, timeWindowRules);
   if (allowed.length === 0) {

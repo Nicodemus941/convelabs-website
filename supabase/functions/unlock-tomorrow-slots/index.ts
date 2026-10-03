@@ -22,6 +22,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { WEEKEND_WINDOWS, isWeekendDate } from '../_shared/bookingWindows.ts';
+import { loadOfficeDay } from '../_shared/availability.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -172,6 +173,15 @@ Deno.serve(async (req) => {
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
+    // Closed in Settings > Office Hours = closed for online booking: nothing
+    // is released and nobody is messaged.
+    const office = await loadOfficeDay(admin, dateIso);
+    if (office.day.closed) {
+      return new Response(JSON.stringify({
+        ok: true, date: dateIso, skipped: true, reason: 'office_closed',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // Tomorrow's bookings → which 6–11 AM weekend starts are still open.
     const { data: appts } = await admin
       .from('appointments')
@@ -192,7 +202,8 @@ Deno.serve(async (req) => {
 
     const tierLockedOpen = weekendGrid().filter(t => {
       const { h, m } = parseTime(t);
-      return !bookedMinutes.has(h * 60 + m);
+      const min = h * 60 + m;
+      return min >= office.openMin && min < office.closeMin && !bookedMinutes.has(min);
     });
 
     if (tierLockedOpen.length === 0) {

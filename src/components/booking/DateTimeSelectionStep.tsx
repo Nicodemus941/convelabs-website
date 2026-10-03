@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { afterHoursSlots, regularSlots } from '@/lib/officeHours';
+import { isAfterHours as isAfterHoursTime, slotsForDay } from '@/lib/officeHours';
 import { useOfficeHours } from '@/hooks/useOfficeHours';
 import { format, addDays, subDays } from 'date-fns';
 import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Sparkles, X, Crown, AlertTriangle } from 'lucide-react';
@@ -196,14 +196,36 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   // top of it.
   const { hours: officeHours } = useOfficeHours();
 
-  // Regular, unsurcharged starts. This stops where the surcharge begins, so
-  // 5:30 PM onward is reachable only through the gated after-hours set below
-  // -- previously the grid ran past that line and any patient could take an
-  // evening slot without passing the tier or toggle check.
-  const allDayWindows = useMemo(() => toWindows(regularSlots(officeHours), true), [officeHours]);
+  const methods = useFormContext<BookingFormValues>();
+  const selectedDate = methods.watch("date");
+  const selectedTime = methods.watch("time");
+  const patientEmail = methods.watch("patientDetails.email");
+
+  // Office hours are PER DAY (Settings > Office Hours, system_settings
+  // 'office_hours'): a day switched off there has no online slots, and an
+  // open day only offers its own open–close. The grid used to take the
+  // union of every day's hours, which is how a Saturday turned off in
+  // Settings kept showing weekday times.
+  const selectedDow = selectedDate ? selectedDate.getDay() : null;
+  const officeDay = selectedDow === null ? null : officeHours.days[selectedDow];
+  const daySlots = useMemo(
+    () => (selectedDow === null ? [] : slotsForDay(officeHours, selectedDow)),
+    [officeHours, selectedDow],
+  );
+
+  // Regular, unsurcharged starts for the chosen day. This stops where the
+  // surcharge begins, so 5:30 PM onward is reachable only through the gated
+  // after-hours set below.
+  const allDayWindows = useMemo(
+    () => toWindows(daySlots.filter((t) => !isAfterHoursTime(officeHours, t)), true),
+    [daySlots, officeHours],
+  );
 
   // Surcharged starts, shown only when includeAfterHours is true.
-  const afterHoursWindows = useMemo(() => toWindows(afterHoursSlots(officeHours), false), [officeHours]);
+  const afterHoursWindows = useMemo(
+    () => toWindows(daySlots.filter((t) => isAfterHoursTime(officeHours, t)), false),
+    [daySlots, officeHours],
+  );
 
   // Weekday grid for every service and tier: 05:00 (if office hours open
   // that early) through 15:00 — premium 5–7 AM and 1–3 PM, standard between.
@@ -228,10 +250,6 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     [allDayWindows],
   );
 
-  const methods = useFormContext<BookingFormValues>();
-  const selectedDate = methods.watch("date");
-  const selectedTime = methods.watch("time");
-  const patientEmail = methods.watch("patientDetails.email");
   const [calendarOpen, setCalendarOpen] = useState(false);
   // Tier detection — queries user_memberships when email changes.
   // Default 'none' (non-member rules) for unknown patients.
@@ -596,8 +614,12 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     // server. Never on a same-day or after-hours slot — those fees win and
     // the premium fee is not stacked (calculateSurcharges enforces it too).
     const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    // AdventHealth visits never carry the premium fee; pricingService also
+    // drops it whenever a higher-precedence timing fee (same-day, after-hours,
+    // weekend) is on the visit.
     const premiumHours = !!selectedTime && !isAfterHours && !stillBookableSameDay
-      && evaluateSlot({ tier: patientTier, dateIso, time: selectedTime, isFasting: false }).premiumEligible;
+      && (methods.getValues('labOrder.labDestination' as any) as string | undefined) !== 'adventhealth'
+      && evaluateSlot({ tier: patientTier, dateIso, time: selectedTime, isFasting: false, officeDay }).premiumEligible;
     methods.setValue('serviceDetails.premiumHours', premiumHours);
 
     // If switching to today, clear time if it's now past the lead time
@@ -693,14 +715,19 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   const selectedDateIso = selectedDate
     ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
     : null;
+  // Closed in Settings = closed for online booking: date picker, prev/next
+  // buttons and the grid all read the same per-day flag.
+  const isOfficeClosedOn = (d: Date): boolean => !!officeHours.days[d.getDay()]?.closed;
   // Rule per rendered window. After-hours slots (5:30 PM+) keep their own
   // surcharge path; AdventHealth bypasses access rules; both get no rule.
   const ruleFor = (time: string): SlotRule | null => {
     if (!selectedDateIso || isAdventHealth) return null;
     if (afterHoursWindows.some(w => w.time === time)) return null;
-    return evaluateSlot({ tier: patientTier, dateIso: selectedDateIso, time, isFasting: isFastingForRules });
+    return evaluateSlot({ tier: patientTier, dateIso: selectedDateIso, time, isFasting: isFastingForRules, officeDay });
   };
-  const anyPremiumVisible = patientTier === 'none' && !isSameDay
+  // One timing fee per visit: on a weekend the $75 weekend fee outranks the
+  // premium fee, and AdventHealth visits never carry it (ruleFor is null there).
+  const anyPremiumVisible = patientTier === 'none' && !isSameDay && !isWeekend
     && baseWindows.some(w => { const r = ruleFor(w.time); return !!r && r.premiumEligible && !r.vipHold; });
   const anyVipHoldVisible = baseWindows.some(w => !!ruleFor(w.time)?.vipHold);
   const slotGuidance = useMemo(
@@ -744,7 +771,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const found = await findNextAvailable(
           selectedDate,
           activeWindows.map(w => w.time),
-          { daysToScan: 14, newApptFootprintMin: 60, maxPerSlot: 1 },
+          { daysToScan: 14, newApptFootprintMin: 60, maxPerSlot: 1, skipDay: isOfficeClosedOn },
         );
         if (!cancelled) setNextAvailable(found);
       } catch (e) {
@@ -853,7 +880,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let prev = subDays(field.value, 1);
-                            while (prev >= today && (isHoliday(prev) || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
+                            while (prev >= today && (isHoliday(prev) || isOfficeClosedOn(prev) || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
                             if (prev >= today) field.onChange(prev);
                           }
                         }}
@@ -899,7 +926,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             && date.getMonth() === today.getMonth()
                             && date.getDate() === today.getDate()
                             && today.getHours() >= cutoffHour;
-                          return isPast || isTooFar || isHoliday(date) || isBlockedByAdmin(date, blockedDates) || isTodayPastCutoff;
+                          return isPast || isTooFar || isHoliday(date) || isOfficeClosedOn(date) || isBlockedByAdmin(date, blockedDates) || isTodayPastCutoff;
                         }}
                         initialFocus
                         className="p-3 pointer-events-auto"
@@ -915,7 +942,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let next = addDays(field.value, 1);
-                            while (isHoliday(next) || next.getDay() === 0 || isBlockedByAdmin(next, blockedDates)) next = addDays(next, 1);
+                            while (isHoliday(next) || isOfficeClosedOn(next) || isBlockedByAdmin(next, blockedDates)) next = addDays(next, 1);
                             // Mirror the advance-booking cap from disabled() above
                             const maxDate = patientTier === 'concierge'
                               ? (() => { const d = new Date(today); d.setDate(d.getDate() + 60); return d; })()
@@ -1118,7 +1145,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center space-y-2">
                       <p className="text-sm font-semibold text-gray-800">No available times for this day.</p>
                       <p className="text-xs text-gray-600">
-                        {isAdventHealth
+                        {officeDay?.closed
+                          ? `We're closed on ${selectedDate ? format(selectedDate, 'EEEE') : 'this day'}s — pick another day.`
+                          : isAdventHealth
                           ? 'Try a different date.'
                           : isWeekend
                           ? 'We have limited weekend hours — try a weekday or pick AdventHealth as your lab (open 7 days).'
