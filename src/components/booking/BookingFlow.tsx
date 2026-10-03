@@ -1273,7 +1273,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                 </div>
               ))}
               <div className="ml-2 lg:ml-4 flex-shrink-0">
-                <PriceEstimateBadge />
+                <PriceEstimateBadge memberTier={memberTier} isFoundingMember={isFoundingMember} />
               </div>
             </div>
 
@@ -1283,7 +1283,7 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
                 <span className="text-sm font-medium">
                   Step {displayStep + 1} of {totalSteps}: {STEP_LABELS[displayStep]}
                 </span>
-                <PriceEstimateBadge />
+                <PriceEstimateBadge memberTier={memberTier} isFoundingMember={isFoundingMember} />
               </div>
               <div className="w-full bg-muted rounded-full h-1.5">
                 <div
