@@ -205,7 +205,12 @@ async function smokeTestAppointmentCheckout(): Promise<CheckResult[]> {
   // bookable slot, then use that slot for the checkout test. Only HTTP
   // 200 + a Stripe Checkout URL counts as success. Slot conflicts are
   // surfaced as real failures (something blocked every slot we tried).
-  const farFuture = new Date(Date.now() + 365 * 86400000 + 14 * 86400000).toISOString().split('T')[0];
+  // Office hours now close days for online booking (409 office_closed), so
+  // roll forward to a weekday — weekends are closed in the live settings and
+  // a weekend date would fail every run that lands on one.
+  const farDate = new Date(Date.now() + 365 * 86400000 + 14 * 86400000);
+  while (farDate.getUTCDay() === 0 || farDate.getUTCDay() === 6) farDate.setUTCDate(farDate.getUTCDate() + 1);
+  const farFuture = farDate.toISOString().split('T')[0];
 
   let appointmentTime = '11:00 AM';
   try {
