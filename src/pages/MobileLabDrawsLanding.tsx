@@ -83,10 +83,17 @@ const VISIT_OPTIONS: VisitOption[] = [
   },
 ];
 
-const SERVICE_AREAS = [
-  'Orlando', 'Windermere', 'Winter Garden', 'Dr. Phillips', 'Bay Hill', 'Golden Oak',
-  'Lake Mary', 'Heathrow', 'Winter Park', 'Lake Nona', 'Celebration', 'Kissimmee',
-  'Altamonte Springs', 'Sanford', 'Oviedo', 'Maitland', 'Clermont',
+// slug → /locations/<slug> (src/data/locations.ts). No slug = no city page yet.
+const SERVICE_AREAS: { name: string; slug?: string }[] = [
+  { name: 'Orlando', slug: 'orlando' }, { name: 'Windermere', slug: 'windermere' },
+  { name: 'Winter Garden' }, { name: 'Dr. Phillips', slug: 'doctor-phillips' },
+  { name: 'Bay Hill', slug: 'bay-hill' }, { name: 'Golden Oak', slug: 'golden-oak' },
+  { name: 'Lake Mary', slug: 'lake-mary' }, { name: 'Heathrow', slug: 'heathrow-golf' },
+  { name: 'Winter Park', slug: 'winter-park' }, { name: 'Lake Nona', slug: 'lake-nona' },
+  { name: 'Celebration', slug: 'celebration' }, { name: 'Kissimmee', slug: 'kissimmee' },
+  { name: 'Altamonte Springs', slug: 'altamonte-springs' }, { name: 'Sanford', slug: 'sanford' },
+  { name: 'Oviedo', slug: 'oviedo' }, { name: 'Maitland', slug: 'maitland' },
+  { name: 'Clermont', slug: 'clermont' },
 ];
 
 const FAQS: { q: string; a: string }[] = [
@@ -447,7 +454,18 @@ const MobileLabDrawsLanding: React.FC = () => {
               <p className="text-sm text-brand-gray-warm mt-1">Orlando and the surrounding Central Florida communities, including:</p>
               <ul className="mt-3 flex flex-wrap gap-2">
                 {SERVICE_AREAS.map(city => (
-                  <li key={city} className="px-3 py-1.5 rounded-full bg-brand-cream text-sm text-brand-charcoal">{city}</li>
+                  <li key={city.name}>
+                    {city.slug ? (
+                      <Link
+                        to={`/locations/${city.slug}`}
+                        className="inline-block px-3 py-1.5 rounded-full bg-brand-cream text-sm text-brand-charcoal underline-offset-2 hover:bg-brand-cream-warm hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-conve-red/40"
+                      >
+                        {city.name}
+                      </Link>
+                    ) : (
+                      <span className="inline-block px-3 py-1.5 rounded-full bg-brand-cream text-sm text-brand-charcoal">{city.name}</span>
+                    )}
+                  </li>
                 ))}
               </ul>
               <p className="text-xs text-brand-gray-warm mt-3">Outside the core area (Lake, Volusia, Polk counties)? We still come — a travel fee is shown before you pay.</p>

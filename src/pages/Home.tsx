@@ -17,6 +17,7 @@ import CallToAction from "@/components/home/CallToAction";
 import LeadCapture from "@/components/home/LeadCapture";
 import Footer from "@/components/home/Footer";
 import PricingTransparency from "@/components/home/PricingTransparency";
+import ServiceAreasMap from "@/components/home/ServiceAreasMap";
 import { PageTransition } from "@/components/ui/page-transition";
 import { VisitorOptimizationProvider } from "@/components/optimization/VisitorOptimizationProvider";
 import { FAQSchema } from "@/components/seo/FAQSchema";
@@ -272,6 +273,9 @@ const Home = () => {
             <MeetYourPhlebotomist />
             <GuaranteeBanner />
             <MembershipCTA />
+            {/* #service-areas — target of the header "Service Areas" and mobile
+                "Locations" links; it had dropped off the page, so both went nowhere. */}
+            <ServiceAreasMap />
             <FAQSection />
             <LeadCapture />
             <CallToAction />
