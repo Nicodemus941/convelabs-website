@@ -8,6 +8,7 @@ import {
   XCircle, Calendar, ChevronRight, ArrowRight,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { isInvoicePlaceholder } from '@/lib/invoiceAttach';
 import { format, startOfMonth } from 'date-fns';
 import { toast } from 'sonner';
 import { useAdminBadgeCounts } from './useAdminBadges';
@@ -109,7 +110,9 @@ const TodayExecutionView: React.FC<TodayExecutionViewProps> = ({ basePath }) => 
       .gte('appointment_date', todayStr)
       .lt('appointment_date', tomorrowStr)
       .order('appointment_time', { ascending: true });
-    setAppts((data || []) as Appt[]);
+    // Invoice-only rows aren't visits — keep them out of today's counts,
+    // Needs attention and the list.
+    setAppts(((data || []) as any[]).filter(a => !isInvoicePlaceholder(a)) as Appt[]);
     setLoading(false);
   }, [todayStr]);
 
