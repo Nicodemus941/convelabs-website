@@ -116,7 +116,11 @@ async function blockedKeysFor(
 export async function findNextAvailable(
   startDate: Date,
   candidateTimes: string[],
-  opts?: { daysToScan?: number; newApptFootprintMin?: number; maxPerSlot?: number; skipWeekends?: boolean },
+  opts?: {
+    daysToScan?: number; newApptFootprintMin?: number; maxPerSlot?: number; skipWeekends?: boolean;
+    /** Days the office is closed (Settings > Office Hours) are never offered. */
+    skipDay?: (d: Date) => boolean;
+  },
 ): Promise<NextAvailable | null> {
   const daysToScan = opts?.daysToScan ?? 14;
   const footprint = opts?.newApptFootprintMin ?? 60;
@@ -136,6 +140,7 @@ export async function findNextAvailable(
     probe.setDate(probe.getDate() + i);
     const dow = probe.getDay();
     if (skipWeekends && (dow === 0 || dow === 6)) continue;
+    if (opts?.skipDay && opts.skipDay(probe)) continue;
 
     try {
       const blocked = await blockedKeysFor(ymd(probe), footprint, maxPerSlot);

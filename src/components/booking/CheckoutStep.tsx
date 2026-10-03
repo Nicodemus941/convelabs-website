@@ -11,7 +11,7 @@ import { ChevronLeft, Loader2, CreditCard, AlertTriangle } from 'lucide-react';
 import { FormField, FormItem, FormControl, FormLabel, FormMessage } from '@/components/ui/form';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { BookingFormValues } from '@/types/appointmentTypes';
-import { calculateTotal, getServiceById, isExtendedArea, type SpecialtyKitBundle } from '@/services/pricing/pricingService';
+import { calculateTotal, getServiceById, isExtendedArea, PREMIUM_HOURS_LABEL, type SpecialtyKitBundle } from '@/services/pricing/pricingService';
 import SpecialtyKitBundleCard from './SpecialtyKitBundleCard';
 import { supabase } from '@/integrations/supabase/client';
 import TipSelector from './TipSelector';
@@ -378,6 +378,9 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const breakdown = calculateTotal(serviceId, {
     sameDay: serviceDetails?.sameDay,
     weekend: serviceDetails?.weekend,
+    extendedHours: serviceDetails?.extendedHours,
+    premiumHours: serviceDetails?.premiumHours,
+    adventHealth: String(getValues('labOrder.labDestination') || '').toLowerCase() === 'adventhealth',
     extendedArea,
     ...(isSpecialtyKit && specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
   }, tipAmount, isSpecialtyKit ? 0 : additionalPatients.length, memberTier, isFoundingMember);
@@ -694,7 +697,12 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
 
             {breakdown.surcharges.map((surcharge) => (
               <div key={surcharge.label} className="flex justify-between text-muted-foreground">
-                <span>{surcharge.label}</span>
+                <span>
+                  {surcharge.label}
+                  {surcharge.label === PREMIUM_HOURS_LABEL && memberTier === 'none' && (
+                    <span className="ml-1.5 text-[11px] text-amber-700">· Free for members</span>
+                  )}
+                </span>
                 <span>+${surcharge.amount.toFixed(2)}</span>
               </div>
             ))}

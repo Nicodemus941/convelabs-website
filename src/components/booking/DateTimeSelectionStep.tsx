@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { afterHoursSlots, regularSlots } from '@/lib/officeHours';
+import { isAfterHours as isAfterHoursTime, slotsForDay } from '@/lib/officeHours';
 import { useOfficeHours } from '@/hooks/useOfficeHours';
 import { format, addDays, subDays } from 'date-fns';
-import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Lock, Sparkles, X, Crown, AlertTriangle } from 'lucide-react';
+import { CalendarIcon, Clock, ChevronLeft, ChevronRight, Sparkles, X, Crown, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import MemberOtpUnlockButton from './MemberOtpUnlockButton';
 import JoinWaitlistButton from './JoinWaitlistButton';
@@ -26,7 +26,17 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { isBookingAllowed, normalizeTime, type MemberTier } from '@/lib/bookingWindows';
+import {
+  evaluateSlot,
+  premiumBadge,
+  FASTING_LAST_START,
+  PREMIUM_FEE_DOLLARS,
+  VIP_HOLD_LABEL,
+  WEEKDAY_WINDOWS,
+  WEEKEND_WINDOWS,
+  type MemberTier,
+  type SlotRule,
+} from '@/lib/bookingWindows';
 import { getMemberTier } from '@/lib/memberBenefits';
 import { analytics } from '@/utils/analytics';
 import { buildSlotGuidance, slotBucket } from '@/lib/slotGuidance';
@@ -154,6 +164,12 @@ function toWindows(times: string[], tidyTopOfHour: boolean): { time: string; lab
   });
 }
 
+// "13:00" → "1:00 PM" (the grid's display format)
+function to12h(hhmm: string): string {
+  const [h, m] = hhmm.split(':').map(Number);
+  return fmt(h, m);
+}
+
 // Helper: parse "9:15 AM" → 24h-minutes-of-day (e.g. 555)
 function timeToMinOfDay(t: string): number {
   const m = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
@@ -165,10 +181,10 @@ function timeToMinOfDay(t: string): number {
   return h * 60 + mm;
 }
 
-// Services that use routine hours (9am-1:30pm) — FORCES isFasting=false at the slot level
+// Services that are never fasting — FORCES isFasting=false at the slot level
 const ROUTINE_SERVICES = ['routine-blood-draw'];
 // Services that require fasting — FORCES isFasting=true at the slot level,
-// so slot-gating uses fastingRanges instead of the pre-9am heuristic
+// so the noon fasting cutoff applies regardless of the intent heuristic
 const FASTING_SERVICES = ['fasting-blood-draw'];
 // Services that skip time selection (STAT/same-day)
 const STAT_SERVICES = ['stat-blood-draw'];
@@ -180,38 +196,60 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   // top of it.
   const { hours: officeHours } = useOfficeHours();
 
-  // Regular, unsurcharged starts. This stops where the surcharge begins, so
-  // 5:30 PM onward is reachable only through the gated after-hours set below
-  // -- previously the grid ran past that line and any patient could take an
-  // evening slot without passing the tier or toggle check.
-  const allDayWindows = useMemo(() => toWindows(regularSlots(officeHours), true), [officeHours]);
-
-  // Surcharged starts, shown only when includeAfterHours is true.
-  const afterHoursWindows = useMemo(() => toWindows(afterHoursSlots(officeHours), false), [officeHours]);
-
-  // Routine blood draws — non-fasting non-member window (9am-1:30pm).
-  // Filters by minutes-of-day, so it holds at any step size.
-  const routineWindows = useMemo(
-    () => allDayWindows.filter(w => {
-      const min = timeToMinOfDay(w.time);
-      return min >= 9 * 60 && min <= 13 * 60 + 30;  // 9:00 ... 1:30 PM
-    }),
-    [allDayWindows],
-  );
-
-  // Saturday — VIP 6am-11am, Regular 6-9am. Show up to 10:45 start (11am end).
-  const weekendWindows = useMemo(
-    () => allDayWindows.filter(w => {
-      const min = timeToMinOfDay(w.time);
-      return min >= 6 * 60 && min < 11 * 60;
-    }),
-    [allDayWindows],
-  );
-
   const methods = useFormContext<BookingFormValues>();
   const selectedDate = methods.watch("date");
   const selectedTime = methods.watch("time");
   const patientEmail = methods.watch("patientDetails.email");
+
+  // Office hours are PER DAY (Settings > Office Hours, system_settings
+  // 'office_hours'): a day switched off there has no online slots, and an
+  // open day only offers its own open–close. The grid used to take the
+  // union of every day's hours, which is how a Saturday turned off in
+  // Settings kept showing weekday times.
+  const selectedDow = selectedDate ? selectedDate.getDay() : null;
+  const officeDay = selectedDow === null ? null : officeHours.days[selectedDow];
+  const daySlots = useMemo(
+    () => (selectedDow === null ? [] : slotsForDay(officeHours, selectedDow)),
+    [officeHours, selectedDow],
+  );
+
+  // Regular, unsurcharged starts for the chosen day. This stops where the
+  // surcharge begins, so 5:30 PM onward is reachable only through the gated
+  // after-hours set below.
+  const allDayWindows = useMemo(
+    () => toWindows(daySlots.filter((t) => !isAfterHoursTime(officeHours, t)), true),
+    [daySlots, officeHours],
+  );
+
+  // Surcharged starts, shown only when includeAfterHours is true.
+  const afterHoursWindows = useMemo(
+    () => toWindows(daySlots.filter((t) => isAfterHoursTime(officeHours, t)), false),
+    [daySlots, officeHours],
+  );
+
+  // Weekday grid for every service and tier: 05:00 (if office hours open
+  // that early) through 15:00 — premium 5–7 AM and 1–3 PM, standard between.
+  // Fasting starts are trimmed to before noon further down. The old
+  // routine-only 9 AM–1:30 PM window is gone: non-fasting draws take any
+  // start in this range. Filters by minutes-of-day, so it holds at any step.
+  const weekdayWindows = useMemo(
+    () => allDayWindows.filter(w => {
+      const min = timeToMinOfDay(w.time);
+      return min >= timeToMinOfDay(to12h(WEEKDAY_WINDOWS.open)) && min < timeToMinOfDay(to12h(WEEKDAY_WINDOWS.close));
+    }),
+    [allDayWindows],
+  );
+
+  // Weekend — 6 AM–11 AM, VIP & Concierge until 24 h before each slot, then
+  // everyone (see bookingWindows.ts). Show up to the 10:45 start (11 AM end).
+  const weekendWindows = useMemo(
+    () => allDayWindows.filter(w => {
+      const min = timeToMinOfDay(w.time);
+      return min >= timeToMinOfDay(to12h(WEEKEND_WINDOWS.open)) && min < timeToMinOfDay(to12h(WEEKEND_WINDOWS.close));
+    }),
+    [allDayWindows],
+  );
+
   const [calendarOpen, setCalendarOpen] = useState(false);
   // Tier detection — queries user_memberships when email changes.
   // Default 'none' (non-member rules) for unknown patients.
@@ -256,10 +294,11 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     return () => { cancelled = true; };
   }, [selectedDate]);
   const [holdId, setHoldId] = useState<string | null>(null);
-  // Tier-unlock dialog state. Clicking a tier-locked slot opens this with
-  // the required tier + upgrade CTA, instead of silently greying the slot out.
-  // Hormozi: every "no" is a revenue conversation if framed right.
-  const [unlockSlot, setUnlockSlot] = useState<{ time: string; requiredTier?: MemberTier; reason?: string } | null>(null);
+  // Weekend-hold dialog state. Clicking a VIP-held weekend slot opens this
+  // with the release time, the upgrade CTA, member sign-in and the waitlist,
+  // instead of a dead-end padlock. Hormozi: every "no" is a revenue
+  // conversation if framed right.
+  const [unlockSlot, setUnlockSlot] = useState<{ time: string; requiredTier?: MemberTier; reason?: string; releaseAt?: string } | null>(null);
   const [heldSlots, setHeldSlots] = useState<Set<string>>(new Set());
   // Real "next available" for the sold-out empty state. Offering a bare
   // "try tomorrow" sent patients into a click-loop when tomorrow was also
@@ -570,6 +609,18 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
       ? afterHoursWindows.some(w => w.time === selectedTime)
       : false;
     methods.setValue('serviceDetails.extendedHours', isAfterHours);
+    // Premium hours (+$10 for non-members, waived for every paid member).
+    // Flagged from the slot rules, priced by pricingService, charged by the
+    // server. Never on a same-day or after-hours slot — those fees win and
+    // the premium fee is not stacked (calculateSurcharges enforces it too).
+    const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+    // AdventHealth visits never carry the premium fee; pricingService also
+    // drops it whenever a higher-precedence timing fee (same-day, after-hours,
+    // weekend) is on the visit.
+    const premiumHours = !!selectedTime && !isAfterHours && !stillBookableSameDay
+      && (methods.getValues('labOrder.labDestination' as any) as string | undefined) !== 'adventhealth'
+      && evaluateSlot({ tier: patientTier, dateIso, time: selectedTime, isFasting: false, officeDay }).premiumEligible;
+    methods.setValue('serviceDetails.premiumHours', premiumHours);
 
     // If switching to today, clear time if it's now past the lead time
     if (isToday && selectedTime) {
@@ -579,7 +630,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         methods.setValue('time', '');
       }
     }
-  }, [selectedDate, selectedTime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, selectedTime, patientTier]);
 
   // Lab destination — synced bidirectionally with form's labOrder.labDestination
   // (the same field set on step 6's LabDestinationSelector). Pre-asking it here
@@ -600,9 +652,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
     ? allDayWindows
     : isWeekend
     ? weekendWindows
-    : isRoutine
-    ? routineWindows
-    : allDayWindows;
+    : weekdayWindows;
 
   // Filter to lab-cutoff for LabCorp / Quest
   if (isLabCorp || isQuest) {
@@ -652,6 +702,34 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
   // activeWindows, bookedSlots, heldSlots, cutoffs and tier gating are
   // untouched — every window is still rendered, nothing is hidden.
   const fastingIntent = useFastingIntent();
+  // Fasting for the slot rules: the service choice is explicit and wins,
+  // otherwise the booking's fasting intent. Fasting starts end at noon, so
+  // those windows are dropped from the grid rather than shown disabled —
+  // nothing a patient can't do gets a padlock. AdventHealth keeps its own
+  // 6 AM–6 PM override and is left alone.
+  const isFastingForRules = isFastingService ? true : isRoutine ? false : fastingIntent === 'fasting';
+  if (isFastingForRules && !isAdventHealth) {
+    const cutoff = timeToMinOfDay(to12h(FASTING_LAST_START));
+    baseWindows = baseWindows.filter(w => timeToMinOfDay(w.time) < cutoff);
+  }
+  const selectedDateIso = selectedDate
+    ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+    : null;
+  // Closed in Settings = closed for online booking: date picker, prev/next
+  // buttons and the grid all read the same per-day flag.
+  const isOfficeClosedOn = (d: Date): boolean => !!officeHours.days[d.getDay()]?.closed;
+  // Rule per rendered window. After-hours slots (5:30 PM+) keep their own
+  // surcharge path; AdventHealth bypasses access rules; both get no rule.
+  const ruleFor = (time: string): SlotRule | null => {
+    if (!selectedDateIso || isAdventHealth) return null;
+    if (afterHoursWindows.some(w => w.time === time)) return null;
+    return evaluateSlot({ tier: patientTier, dateIso: selectedDateIso, time, isFasting: isFastingForRules, officeDay });
+  };
+  // One timing fee per visit: on a weekend the $75 weekend fee outranks the
+  // premium fee, and AdventHealth visits never carry it (ruleFor is null there).
+  const anyPremiumVisible = patientTier === 'none' && !isSameDay && !isWeekend
+    && baseWindows.some(w => { const r = ruleFor(w.time); return !!r && r.premiumEligible && !r.vipHold; });
+  const anyVipHoldVisible = baseWindows.some(w => !!ruleFor(w.time)?.vipHold);
   const slotGuidance = useMemo(
     () => buildSlotGuidance(activeWindows, fastingIntent, (t) => !bookedSlots.has(t) && !heldSlots.has(t)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -693,7 +771,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
         const found = await findNextAvailable(
           selectedDate,
           activeWindows.map(w => w.time),
-          { daysToScan: 14, newApptFootprintMin: 60, maxPerSlot: 1 },
+          { daysToScan: 14, newApptFootprintMin: 60, maxPerSlot: 1, skipDay: isOfficeClosedOn },
         );
         if (!cancelled) setNextAvailable(found);
       } catch (e) {
@@ -802,7 +880,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let prev = subDays(field.value, 1);
-                            while (prev >= today && (isHoliday(prev) || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
+                            while (prev >= today && (isHoliday(prev) || isOfficeClosedOn(prev) || isBlockedByAdmin(prev, blockedDates))) prev = subDays(prev, 1);
                             if (prev >= today) field.onChange(prev);
                           }
                         }}
@@ -848,7 +926,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             && date.getMonth() === today.getMonth()
                             && date.getDate() === today.getDate()
                             && today.getHours() >= cutoffHour;
-                          return isPast || isTooFar || isHoliday(date) || isBlockedByAdmin(date, blockedDates) || isTodayPastCutoff;
+                          return isPast || isTooFar || isHoliday(date) || isOfficeClosedOn(date) || isBlockedByAdmin(date, blockedDates) || isTodayPastCutoff;
                         }}
                         initialFocus
                         className="p-3 pointer-events-auto"
@@ -864,7 +942,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         onClick={() => {
                           if (field.value) {
                             let next = addDays(field.value, 1);
-                            while (isHoliday(next) || next.getDay() === 0 || isBlockedByAdmin(next, blockedDates)) next = addDays(next, 1);
+                            while (isHoliday(next) || isOfficeClosedOn(next) || isBlockedByAdmin(next, blockedDates)) next = addDays(next, 1);
                             // Mirror the advance-booking cap from disabled() above
                             const maxDate = patientTier === 'concierge'
                               ? (() => { const d = new Date(today); d.setDate(d.getDate() + 60); return d; })()
@@ -1067,7 +1145,9 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                     <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center space-y-2">
                       <p className="text-sm font-semibold text-gray-800">No available times for this day.</p>
                       <p className="text-xs text-gray-600">
-                        {isAdventHealth
+                        {officeDay?.closed
+                          ? `We're closed on ${selectedDate ? format(selectedDate, 'EEEE') : 'this day'}s — pick another day.`
+                          : isAdventHealth
                           ? 'Try a different date.'
                           : isWeekend
                           ? 'We have limited weekend hours — try a weekday or pick AdventHealth as your lab (open 7 days).'
@@ -1109,55 +1189,32 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                         const slotMinutes = timeToMinutes(window.time);
                         const isPastOrTooSoon = isSameDay && slotMinutes < nowMinutes + SAME_DAY_LEAD_MINUTES;
 
-                        // Tier-aware window enforcement: does this slot fit the
-                        // patient's tier rules for the selected date? Uses the
-                        // same server-side rules (bookingWindows.ts).
-                        // Tier-locked slots render differently from "booked" or
-                        // "past" — they're CLICKABLE and open an unlock dialog,
-                        // because they represent revenue upside (membership upsell).
-                        let tierLocked = false;
-                        let tierReason: string | undefined;
-                        let tierUnlockTier: MemberTier | undefined;
-                        // AdventHealth bypasses tier gating — the lab is 24/7
-                        // and the destination handles operational routing.
-                        if (selectedDate && !isAdventHealth) {
-                          const hhmm = normalizeTime(window.time);
-                          if (hhmm) {
-                            const dateIso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-                            const isFasting = isFastingService
-                              ? true
-                              : isRoutine
-                              ? false
-                              : hhmm < '09:00';
-                            const check = isBookingAllowed({ tier: patientTier, dateIso, time: window.time, isFasting });
-                            if (!check.allowed) {
-                              tierLocked = true;
-                              tierReason = check.upgradeCTA?.message || check.reason || 'Not available in your tier';
-                              tierUnlockTier = check.upgradeCTA?.toTier;
-                            }
-                          }
-                        }
-                        // isUnavailable = truly disabled (booked/held/past). Tier-locked is a SEPARATE state.
+                        // Slot rules (src/lib/bookingWindows.ts, mirrored on
+                        // the server). Three outcomes, none of them a padlock:
+                        //   • bookable, standard   → plain slot
+                        //   • bookable, premium    → "+$10 · Free for members"
+                        //     badge for non-members, "Premium hours" for members
+                        //   • weekend VIP hold     → labelled "VIP & Concierge —
+                        //     opens to everyone 24 hrs before"; CLICKABLE and
+                        //     opens the join / sign-in / waitlist dialog.
+                        // AdventHealth bypasses access rules (6 AM–6 PM, all
+                        // tiers); after-hours slots keep their own surcharge.
+                        const rule = ruleFor(window.time);
+                        const vipHold = !!rule?.vipHold;
+                        const slotBadge = rule && !isSameDay && !isAfterHours ? premiumBadge(rule, patientTier) : null;
+                        // isUnavailable = truly disabled (booked/held/past). VIP hold is a SEPARATE state.
                         const isUnavailable = isBooked || isHeldByOther || isPastOrTooSoon;
-
-                        // Tier-locked tier-specific styling
-                        const lockColor = tierUnlockTier === 'concierge' ? 'purple' : tierUnlockTier === 'vip' ? 'red' : 'amber';
-                        const lockClasses = lockColor === 'purple'
-                          ? 'bg-purple-50 text-purple-900 border-purple-300 hover:bg-purple-100 hover:border-purple-400'
-                          : lockColor === 'red'
-                          ? 'bg-red-50 text-red-900 border-red-300 hover:bg-red-100 hover:border-red-400'
-                          : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 hover:border-amber-400';
 
                         return (
                           <button
                             key={window.time}
                             type="button"
-                            title={tierLocked ? (tierReason || `Unlock with ${(tierUnlockTier || '').toUpperCase()}`) : isBooked ? 'Already booked' : isHeldByOther ? 'Being booked by someone else' : isPastOrTooSoon ? 'Too soon for same-day' : ''}
+                            title={vipHold ? VIP_HOLD_LABEL : isBooked ? 'Already booked' : isHeldByOther ? 'Being booked by someone else' : isPastOrTooSoon ? 'Too soon for same-day' : slotBadge || ''}
                             className={`rounded-lg border text-center py-3 px-1 text-sm font-medium transition-all min-h-[48px] active:scale-95 ${
                               isUnavailable
                                 ? 'bg-gray-50 text-gray-300 line-through cursor-not-allowed border-gray-100'
-                                : tierLocked
-                                ? `${lockClasses} cursor-pointer`
+                                : vipHold
+                                ? 'bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100 hover:border-purple-400 cursor-pointer'
                                 : isSelected
                                 ? 'bg-[#B91C1C] text-white border-[#B91C1C] shadow-md scale-[1.02]'
                                 : isAfterHours
@@ -1166,8 +1223,8 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             }`}
                             onClick={async () => {
                               if (isUnavailable) return;
-                              if (tierLocked) {
-                                setUnlockSlot({ time: window.time, requiredTier: tierUnlockTier, reason: tierReason });
+                              if (vipHold) {
+                                setUnlockSlot({ time: window.time, requiredTier: 'vip', reason: VIP_HOLD_LABEL, releaseAt: rule?.releaseAt });
                                 return;
                               }
 
@@ -1186,30 +1243,51 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                             }}
                             disabled={isUnavailable}
                           >
-                            {tierLocked && (
-                              <Lock className="inline h-3 w-3 mr-1 mb-0.5" />
+                            {vipHold && (
+                              <Crown className="inline h-3 w-3 mr-1 mb-0.5 text-purple-700" aria-hidden="true" />
                             )}
                             <span>{window.time}</span>
-                            {guidanceBadge && !isUnavailable && !tierLocked && (
+                            {guidanceBadge && !isUnavailable && !vipHold && (
                               <span className={`block text-[9px] font-semibold uppercase tracking-wider mt-0.5 ${isSelected ? 'text-white/90' : 'text-emerald-700'}`}>
                                 {guidanceBadge}
                               </span>
                             )}
-                            {tierLocked && tierUnlockTier && (
-                              <span className="block text-[9px] font-semibold uppercase tracking-wider mt-0.5">
-                                {tierUnlockTier === 'vip' ? 'VIP' : tierUnlockTier === 'concierge' ? 'Concierge' : 'Member'} only
+                            {vipHold && (
+                              <span className="block text-[9px] font-semibold leading-tight mt-0.5">
+                                VIP &amp; Concierge · opens to all 24 hrs before
                               </span>
                             )}
-                            {isAfterHours && !isUnavailable && !tierLocked && (
+                            {slotBadge && !isUnavailable && !vipHold && (
+                              <span className={`block text-[9px] font-semibold leading-tight mt-0.5 ${isSelected ? 'text-white/90' : 'text-amber-700'}`}>
+                                {slotBadge}
+                              </span>
+                            )}
+                            {isAfterHours && !isUnavailable && !vipHold && (
                               <span className="block text-[9px] opacity-70 mt-0.5">+$50</span>
                             )}
-                            {isSameDay && !isAfterHours && !isUnavailable && !tierLocked && (
+                            {isSameDay && !isAfterHours && !isUnavailable && !vipHold && (
                               <span className="block text-[9px] opacity-70 mt-0.5">+$100</span>
                             )}
                           </button>
                         );
                       })}
                     </div>
+                    {/* Premium-hours explainer + membership upsell, only when a
+                        premium slot is on screen for a non-member. */}
+                    {anyPremiumVisible && (
+                      <p className="mt-2 text-[11px] text-gray-600 leading-snug" role="note">
+                        Premium hours (5–7 AM, 1–3 PM, released weekend slots) add ${PREMIUM_FEE_DOLLARS} for non-members.{' '}
+                        <a href="/pricing?tier=member" className="font-semibold text-[#B91C1C] underline underline-offset-2">
+                          Become a member — skip premium fees →
+                        </a>
+                      </p>
+                    )}
+                    {anyVipHoldVisible && (
+                      <p className="mt-2 text-[11px] text-purple-800 leading-snug" role="note">
+                        Weekend slots are held for VIP &amp; Concierge members and open to everyone 24 hours before each start.
+                        Tap one to join the waitlist or become a member.
+                      </p>
+                    )}
                     </>
                   )}
                   {loadingSlots && (
@@ -1242,9 +1320,11 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                       ? "Next available within operating hours (+$100)"
                       : isSameDay
                       ? "Same-day booking (+$100 surcharge) · 90-min lead time"
-                      : isRoutine
-                      ? "Routine non-fasting hours: 9 AM – 1:30 PM (extended to 6 PM if AdventHealth is your destination)"
-                      : "Open Mon–Sun · 6 AM – 1:30 PM (everyone) · 1:30–2:30 PM (VIP) · 1:30 PM – 6 PM (anyone, AdventHealth deliveries)"}
+                      : isWeekend
+                      ? "Weekends 6 – 11 AM · VIP & Concierge, opening to everyone 24 hrs before each slot"
+                      : isFastingForRules
+                      ? `Fasting visits start before noon · 7 AM – noon standard · 5 – 7 AM premium (+$${PREMIUM_FEE_DOLLARS} non-members, free for members)`
+                      : `Mon–Fri 7 AM – 1 PM standard · 5 – 7 AM and 1 – 3 PM premium (+$${PREMIUM_FEE_DOLLARS} non-members, free for members) · to 6 PM with AdventHealth deliveries`}
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
@@ -1305,9 +1385,16 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
               <h3 className="text-lg font-bold text-gray-900 mb-1">
                 The <span className={colorAccent}>{unlockSlot.time}</span> slot opens up as a {tierName}
               </h3>
-              <p className="text-sm text-gray-700 mb-4">
+              <p className="text-sm text-gray-700 mb-1">
                 {unlockSlot.reason || `${tierName} members book times outside the standard non-member window.`}
               </p>
+              {unlockSlot.releaseAt && (
+                <p className="text-xs text-gray-600 mb-4">
+                  Not a member? It opens to everyone on{' '}
+                  <strong>{new Date(unlockSlot.releaseAt).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</strong>
+                  {' '}(Regular members: no fee · non-members: +${PREMIUM_FEE_DOLLARS}). Join the waitlist and we'll text you.
+                </p>
+              )}
 
               <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4">
                 <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">The math</p>
@@ -1357,7 +1444,7 @@ const DateTimeSelectionStep: React.FC<DateTimeSelectionStepProps> = ({ onNext, o
                 </a>
 
                 {/* Hormozi: don't lose the lead just because they won't upgrade.
-                    The waitlist captures them for the 5 PM next-day unlock. */}
+                    The waitlist captures them for the 24-hour weekend release. */}
                 {selectedDate && (
                   <JoinWaitlistButton
                     dateIso={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}

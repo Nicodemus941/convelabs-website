@@ -2,7 +2,7 @@ import React from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Clock, Truck, BellRing, Sparkles, Sun } from 'lucide-react';
 import { BookingFormValues } from '@/types/appointmentTypes';
-import { getServiceById, getServicePrice } from '@/services/pricing/pricingService';
+import { getServiceById, getServicePrice, SURCHARGES } from '@/services/pricing/pricingService';
 import { TRUST_CLAIMS } from '@/content/trustClaims';
 import { VISIT_REASONS, getVisitReason } from '@/lib/visitReason';
 import { SLOT_GUIDANCE_SUMMARY } from '@/lib/slotGuidance';
@@ -41,10 +41,21 @@ const LINES = [
 const VisitSummaryCard: React.FC<{ className?: string }> = ({ className = '' }) => {
   const { watch } = useFormContext<BookingFormValues>();
   const visitType = watch('serviceDetails.visitType') || '';
+  // Premium-hours slot picked (set by DateTimeSelectionStep). The card prices
+  // the non-member visit, so the fee line reads the same way: shown with its
+  // member waiver. Same-day / after-hours slots never set this flag.
+  const premiumHours = !!watch('serviceDetails.premiumHours');
+  const afterHours = !!watch('serviceDetails.extendedHours');
   const fastingLine = SLOT_GUIDANCE_SUMMARY[useFastingIntent()];
   if (!visitType) return null;
 
   const price = getServicePrice(visitType, 'none');
+  // One timing fee per visit: after-hours outranks premium (bookingWindows.ts).
+  const premiumLine = afterHours
+    ? `After hours +$${SURCHARGES.extendedHours.amount}`
+    : premiumHours
+    ? `Premium hours +$${SURCHARGES.premiumHours.amount} · Free for members`
+    : null;
   const name = visitName(visitType);
   const reason = getVisitReason();
   const echo = reason ? VISIT_REASONS[reason].echo : null;
@@ -64,6 +75,7 @@ const VisitSummaryCard: React.FC<{ className?: string }> = ({ className = '' }) 
           {TRUST_CLAIMS.drawTimeCard}{' · '}{TRUST_CLAIMS.deliveredToShort}
         </p>
         {fastingLine && <p className="mt-0.5 text-xs font-medium text-conve-black">{fastingLine}</p>}
+        {premiumLine && <p className="mt-0.5 text-xs font-medium text-amber-800">{premiumLine}</p>}
         {echo && <p className="mt-0.5 text-xs text-conve-black leading-snug">{echo}</p>}
       </div>
 
@@ -76,6 +88,9 @@ const VisitSummaryCard: React.FC<{ className?: string }> = ({ className = '' }) 
           <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-brand-cream px-2.5 py-1 text-xs font-medium text-conve-black">
             <Sun className="h-3.5 w-3.5 text-brand-gold-deep" aria-hidden="true" />{fastingLine}
           </p>
+        )}
+        {premiumLine && (
+          <p className="mt-2 text-xs font-medium text-amber-800">{premiumLine}</p>
         )}
         <ul className="mt-4 space-y-2.5">
           {LINES.map(({ icon: I, text }) => (

@@ -1,4 +1,5 @@
 import { isTravelFeeZip } from '@/data/serviceZipCodes';
+import { resolveTimingFee } from '@/lib/bookingWindows';
 
 export interface ServiceOption {
   id: string;
@@ -11,6 +12,15 @@ export interface SurchargeOptions {
   sameDay?: boolean;
   weekend?: boolean;
   extendedHours?: boolean;
+  /**
+   * Slot is in a premium-hours window (weekday 5–7 AM / 1–3 PM, or a weekend
+   * slot released to everyone inside 24 h). +$10 for non-members only, and
+   * never stacked on top of the same-day fee or the after-hours surcharge —
+   * see src/lib/bookingWindows.ts.
+   */
+  premiumHours?: boolean;
+  /** Specimen goes to AdventHealth — the premium fee is never charged. */
+  adventHealth?: boolean;
   extendedArea?: boolean;
   isGenovaKit?: boolean;
   additionalGenovaKits?: number;
@@ -46,6 +56,18 @@ export interface PriceBreakdown {
   subtotal: number;
   tip: number;
   total: number;
+  /**
+   * Premium-hours fee (dollars) included in `subtotal`. The server computes
+   * and charges this itself as its own Stripe line item, so BookingFlow
+   * subtracts it from the `amount` it sends to create-appointment-checkout.
+   */
+  premiumFee: number;
+  /**
+   * After-hours surcharge (dollars) included in `subtotal`. Same treatment:
+   * server-computed from the slot time + office hours, its own line item,
+   * excluded from the client `amount`. Paid 100% to the phleb (surcharge_amount).
+   */
+  afterHoursFee: number;
   /**
    * Specialty-kit bundle "save vs unbundled" amount, in dollars. Only set
    * when calculateSpecialtyKitBundle() ran. Surface this as a chip
@@ -147,7 +169,13 @@ export const SURCHARGES = {
   weekend: { label: 'Weekend Service', amount: 75 },
   extendedHours: { label: 'Extended Hours', amount: 50 },
   extendedArea: { label: 'Extended Service Area', amount: 75 },
+  // Must equal PREMIUM_FEE_CENTS / 100 in src/lib/bookingWindows.ts (the
+  // server charges from its own copy of that constant).
+  premiumHours: { label: 'Premium hours', amount: 10 },
 };
+
+export const PREMIUM_HOURS_LABEL = SURCHARGES.premiumHours.label;
+export const AFTER_HOURS_LABEL = SURCHARGES.extendedHours.label;
 
 // Additional patient pricing by tier
 function getAdditionalPatientPrice(visitType: string, tier: MembershipTier = 'none'): number {
@@ -355,17 +383,8 @@ export function calculateBasePrice(serviceId: string): number {
  *     • Concierge: also waived
  *     • Member tier: still pays (not promised at member tier)
  */
-function isSameDayWaived(tier: MembershipTier, isFoundingMember: boolean): boolean {
-  if (tier === 'concierge') return true;
-  if (tier === 'vip' && isFoundingMember) return true;
-  return false;
-}
-
-function isWeekendWaived(tier: MembershipTier): boolean {
-  // Saturday access is a STANDARD VIP perk per the public pricing card —
-  // not just a Founding-50 bonus. Every VIP gets Saturday at no surcharge.
-  return tier === 'vip' || tier === 'concierge';
-}
+// Waivers live in src/lib/bookingWindows.ts (resolveTimingFee), which the
+// server mirrors — so what the UI shows is what checkout charges.
 
 export function calculateSurcharges(
   options: SurchargeOptions,
@@ -373,9 +392,22 @@ export function calculateSurcharges(
   isFoundingMember: boolean = false,
 ): { label: string; amount: number }[] {
   const items: { label: string; amount: number }[] = [];
-  if (options.sameDay && !isSameDayWaived(tier, isFoundingMember)) items.push(SURCHARGES.sameDay);
-  if (options.weekend && !isWeekendWaived(tier)) items.push(SURCHARGES.weekend);
-  if (options.extendedHours) items.push(SURCHARGES.extendedHours);
+  // ONE timing fee per visit (owner, 2026-10-02):
+  //   same-day $100 > after-hours $50 > weekend $75 > premium hours $10.
+  // The first fee the tier actually owes wins; the rest are not added.
+  const timing = resolveTimingFee({
+    tier,
+    isFoundingMember,
+    sameDay: !!options.sameDay,
+    afterHours: !!options.extendedHours,
+    weekend: !!options.weekend,
+    premiumEligible: !!options.premiumHours,
+    adventHealth: !!options.adventHealth,
+  });
+  if (timing?.kind === 'same_day') items.push(SURCHARGES.sameDay);
+  else if (timing?.kind === 'after_hours') items.push(SURCHARGES.extendedHours);
+  else if (timing?.kind === 'weekend') items.push(SURCHARGES.weekend);
+  else if (timing?.kind === 'premium') items.push(SURCHARGES.premiumHours);
   if (options.extendedArea) items.push(SURCHARGES.extendedArea);
 
   if (options.additionalGenovaKits && options.additionalGenovaKits > 0) {
@@ -477,7 +509,24 @@ export function calculateTotal(
     subtotal,
     tip: tipAmount,
     total: parseFloat((subtotal + tipAmount).toFixed(2)),
+    premiumFee: premiumFeeIn(surcharges),
+    afterHoursFee: afterHoursFeeIn(surcharges),
   };
+}
+
+/** Dollars of premium-hours fee present in a surcharge list (0 when absent). */
+export function premiumFeeIn(surcharges: { label: string; amount: number }[]): number {
+  return surcharges.find(s => s.label === PREMIUM_HOURS_LABEL)?.amount || 0;
+}
+
+/** Dollars of after-hours surcharge present in a surcharge list (0 when absent). */
+export function afterHoursFeeIn(surcharges: { label: string; amount: number }[]): number {
+  return surcharges.find(s => s.label === AFTER_HOURS_LABEL)?.amount || 0;
+}
+
+/** The fees the server charges as its own line items — kept OUT of the client `amount`. */
+export function serverChargedFeesIn(breakdown: { premiumFee?: number; afterHoursFee?: number }): number {
+  return (breakdown.premiumFee || 0) + (breakdown.afterHoursFee || 0);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -599,12 +648,14 @@ export function calculateSpecialtyKitBundle(
   }
 
   // Other (non-specialty-kit) surcharges still apply: same-day, weekend, etc.
+  // Tier passed through so member waivers (weekend, premium hours) hold on
+  // bundle checkouts too.
   const stdSurcharges = calculateSurcharges({
     ...options,
     additionalGenovaKits: 0,
     additionalSpecialtyKits: 0,
     specialtyKitBundle: undefined,
-  });
+  }, tier);
   for (const s of stdSurcharges) {
     surcharges.push(s);
     bundleTotal += s.amount;
@@ -628,6 +679,8 @@ export function calculateSpecialtyKitBundle(
     subtotal,
     tip: tipAmount,
     total: parseFloat((subtotal + tipAmount).toFixed(2)),
+    premiumFee: premiumFeeIn(surcharges),
+    afterHoursFee: afterHoursFeeIn(surcharges),
     bundleSavings: showSavings ? savings : undefined,
     bundleLabel: showSavings ? bundleLabel(bundle, savings) : undefined,
   };

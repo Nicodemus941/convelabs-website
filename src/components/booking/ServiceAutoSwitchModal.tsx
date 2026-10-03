@@ -114,7 +114,7 @@ const ServiceAutoSwitchModal: React.FC<Props> = ({
             <div className="text-xs text-amber-800 leading-relaxed">
               <span className="font-semibold">Please pick a new time slot.</span>{' '}
               {toService === 'fasting-blood-draw'
-                ? 'Fasting draws have different windows (members unlock more). Click below to choose.'
+                ? 'Fasting draws start before noon. Click below to choose.'
                 : 'Routine draws use the standard scheduling window. Click below to choose.'}
             </div>
           </div>

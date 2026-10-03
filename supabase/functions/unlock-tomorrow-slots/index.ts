@@ -1,19 +1,28 @@
 /**
  * UNLOCK-TOMORROW-SLOTS
  *
- * Daily 5 PM ET cron. For tomorrow's date:
- *   1. Compute open inventory (slots not booked, not in time-blocks, in grid).
- *   2. If ANY tier-locked slots (2 PM+ weekday) are still open, stamp
- *      slot_unlocks(tomorrow) so getAvailableSlotsForDate drops tier gating.
- *   3. Notify everyone on slot_waitlist for that date FIRST (email + SMS) with
- *      a one-tap booking link — they get a head start before public traffic.
+ * Daily cron (pg_cron jobid 44, 21:00 UTC = 5 PM ET). Premium-hours model
+ * (2026-10-02): the only tier-held inventory is a WEEKEND slot more than 24 h
+ * out. The release itself is time-based and evaluated live by
+ * _shared/bookingWindows.ts (slot start − now ≤ 24 h) on the grid and at
+ * checkout, so this job no longer gates anything. It keeps two duties:
+ *   1. When tomorrow is Sat/Sun and open 6–11 AM slots remain, stamp
+ *      slot_unlocks(tomorrow) (legacy readers: isDateUnlocked in the
+ *      lab-request slot endpoints) with reason 'weekend_24h_release'.
+ *   2. Notify everyone on slot_waitlist for that date (email + SMS) with a
+ *      one-tap booking link — by 5 PM every slot of tomorrow is inside the
+ *      24 h window, so the waitlist hears first while the release is fresh.
+ * Weekdays have no held windows any more → skipped, nobody is messaged.
  *
- * Idempotent: re-running for the same date returns ok without re-stamping.
+ * Idempotent: re-running for the same date returns ok without re-stamping
+ * or re-notifying (waitlist rows flip to 'notified').
  *
  * Body: { date?: 'YYYY-MM-DD', dry_run?: boolean }  (defaults to tomorrow ET)
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
+import { WEEKEND_WINDOWS, isWeekendDate } from '../_shared/bookingWindows.ts';
+import { loadOfficeDay } from '../_shared/availability.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -39,6 +48,9 @@ function tomorrowET(): string {
 }
 
 function parseTime(t: string): { h: number; m: number } {
+  // Postgres returns appointment_time as "HH:MM:SS"; the grid uses "H:MM AM".
+  const h24 = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(t.trim());
+  if (h24) return { h: parseInt(h24[1], 10), m: parseInt(h24[2], 10) };
   const match = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(t.trim());
   if (!match) return { h: 0, m: 0 };
   let h = parseInt(match[1], 10);
@@ -55,11 +67,16 @@ function formatTime(h: number, m: number): string {
   return `${hr}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-function fullGrid(): string[] {
+function hhmmToMin(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+/** Weekend grid starts, 15-min step, 6:00 … 10:45 AM. */
+function weekendGrid(): string[] {
   const grid: string[] = [];
-  for (let h = 6; h < 19; h++) {
-    grid.push(formatTime(h, 0));
-    grid.push(formatTime(h, 30));
+  for (let t = hhmmToMin(WEEKEND_WINDOWS.open); t < hhmmToMin(WEEKEND_WINDOWS.close); t += 15) {
+    grid.push(formatTime(Math.floor(t / 60), t % 60));
   }
   return grid;
 }
@@ -73,19 +90,19 @@ async function notifyEmail(to: string, name: string, dateIso: string, bookUrl: s
     </div>
     <div style="padding:24px;border:1px solid #e5e7eb;border-top:0;border-radius:0 0 12px 12px;line-height:1.6;color:#111827;">
       <p>Hi ${name || 'there'},</p>
-      <p>You waitlisted for <strong>${nice}</strong> — a slot is open now and we're giving you first crack before opening to the public at 5:30 PM.</p>
+      <p>You waitlisted for <strong>${nice}</strong> — weekend slots open to everyone 24 hours before they start, and there's still one open. Book it before someone else does.</p>
       <div style="text-align:center;margin:20px 0;">
         <a href="${bookUrl}" style="display:inline-block;background:#B91C1C;color:#fff;padding:14px 32px;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;">Book your slot →</a>
       </div>
-      <p style="font-size:13px;color:#6b7280;">After 5:30 PM this slot is open to anyone — book before then to lock it in.</p>
+      <p style="font-size:13px;color:#6b7280;">Members book weekends free; non-members add a $10 premium-hours fee.</p>
       <p style="margin-top:16px;">— Nicodemme &ldquo;Nico&rdquo; Jean-Baptiste<br/><span style="color:#6b7280;font-size:13px;">ConveLabs</span></p>
     </div>
   </div>`;
   const fd = new FormData();
-  fd.append('from', `Nicodemme Jean-Baptiste <nico@${MAILGUN_DOMAIN}>`);
+  fd.append('from', 'Nicodemme Jean-Baptiste <info@convelabs.com>');
   fd.append('h:Reply-To', 'info@convelabs.com');
   fd.append('to', to);
-  fd.append('subject', `Slot opened for ${nice} — book before 5:30 PM`);
+  fd.append('subject', `Weekend slot open for ${nice} — book it now`);
   fd.append('html', html);
   fd.append('o:tag', 'waitlist_unlock_notification');
   try {
@@ -111,7 +128,7 @@ async function notifySms(toPhone: string, dateIso: string, bookUrl: string) {
     if (toPhone.startsWith('+')) return toPhone;
     return `+${d}`;
   })();
-  const body = `ConveLabs: Slot opened for ${nice}. You're first in line — book before 5:30 PM: ${bookUrl}`;
+  const body = `ConveLabs: A weekend slot for ${nice} is open to everyone now. Book it before it goes: ${bookUrl}`;
   const auth = btoa(`${TWILIO_SID}:${TWILIO_TOKEN}`);
   const fd = new URLSearchParams({ To: norm, From: TWILIO_FROM, Body: body });
   try {
@@ -148,60 +165,50 @@ Deno.serve(async (req) => {
       .eq('unlock_date', dateIso)
       .maybeSingle();
 
-    // VIP-locked window applies Mon-Sun (no weekend skip — owner 2026-04-25).
+    // Weekdays carry no held windows under the premium-hours model: nothing
+    // to release, nobody to message.
+    if (!isWeekendDate(dateIso)) {
+      return new Response(JSON.stringify({
+        ok: true, date: dateIso, skipped: true, reason: 'weekday_no_held_windows',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
-    // Pull tomorrow's appointments + the booking patient's email so we can
-    // check membership tier. Owner rule 2026-04-25: unlock the VIP-only
-    // 1:30-2:30 PM window only if NO VIP has booked any slot tomorrow.
+    // Closed in Settings > Office Hours = closed for online booking: nothing
+    // is released and nobody is messaged.
+    const office = await loadOfficeDay(admin, dateIso);
+    if (office.day.closed) {
+      return new Response(JSON.stringify({
+        ok: true, date: dateIso, skipped: true, reason: 'office_closed',
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    // Tomorrow's bookings → which 6–11 AM weekend starts are still open.
     const { data: appts } = await admin
       .from('appointments')
-      .select('appointment_time, patient_email, status, duration_minutes, service_type')
+      .select('appointment_time, status, duration_minutes, service_type')
       .gte('appointment_date', `${dateIso}T00:00:00`)
       .lte('appointment_date', `${dateIso}T23:59:59`)
       .neq('status', 'cancelled');
 
-    // For each appointment, look up the patient's tier. If anyone is VIP+,
-    // skip the unlock (a VIP has skin in the game tomorrow).
-    let anyVipBooked = false;
-    for (const a of (appts || []) as any[]) {
-      if (!a.patient_email) continue;
-      const email = String(a.patient_email).toLowerCase();
-      const { data: tp } = await admin.from('tenant_patients').select('user_id').ilike('email', email).maybeSingle();
-      if (!tp?.user_id) continue;
-      const { data: mem } = await admin.from('user_memberships').select('membership_plans(name)').eq('user_id', tp.user_id).eq('status', 'active').maybeSingle();
-      const planName = String((mem as any)?.membership_plans?.name || '').toLowerCase();
-      if (planName.includes('vip') || planName.includes('concierge')) { anyVipBooked = true; break; }
-    }
-
-    if (anyVipBooked) {
-      return new Response(JSON.stringify({
-        ok: true, date: dateIso, skipped: true, reason: 'vip_member_already_booked_tomorrow',
-      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
-    // Compute the VIP-locked slot range (1:30 PM – 2:30 PM) and check if any
-    // are still open (i.e., no booking is sitting on them).
     const bookedMinutes = new Set<number>();
     for (const a of (appts || []) as any[]) {
       if (!a.appointment_time) continue;
       const { h, m } = parseTime(String(a.appointment_time));
       const start = h * 60 + m;
-      const dur = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : 30;
+      const dur = (a.duration_minutes && a.duration_minutes > 0) ? a.duration_minutes : 60;
       const buf = a.service_type === 'in-office' ? 0 : 30;
-      for (let t = start; t < start + dur + buf; t += 30) bookedMinutes.add(t);
+      for (let t = start; t < start + dur + buf; t += 15) bookedMinutes.add(t);
     }
 
-    const tierLockedOpen = fullGrid().filter(t => {
+    const tierLockedOpen = weekendGrid().filter(t => {
       const { h, m } = parseTime(t);
       const min = h * 60 + m;
-      // VIP-locked weekday window: 13:30–14:30 (last slot start 2:00 PM)
-      if (min < 13 * 60 + 30 || min > 14 * 60) return false;
-      return !bookedMinutes.has(min);
+      return min >= office.openMin && min < office.closeMin && !bookedMinutes.has(min);
     });
 
     if (tierLockedOpen.length === 0) {
       return new Response(JSON.stringify({
-        ok: true, date: dateIso, skipped: true, reason: 'no_tier_locked_open_slots',
+        ok: true, date: dateIso, skipped: true, reason: 'no_open_weekend_slots',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -215,7 +222,7 @@ Deno.serve(async (req) => {
     if (!existing) {
       await admin.from('slot_unlocks' as any).insert({
         unlock_date: dateIso,
-        reason: 'daily_5pm_sweep',
+        reason: 'weekend_24h_release',
         unlocked_count: tierLockedOpen.length,
       });
     }
