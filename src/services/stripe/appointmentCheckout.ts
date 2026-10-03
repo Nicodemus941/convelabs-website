@@ -51,6 +51,9 @@ export interface AppointmentCheckoutParams {
   specialtyKitBundle?: { patients: Array<{ kits: number }>; isGenova?: boolean } | null;
   /** Promotional-recording answer saved at checkout (accept or decline). */
   recordingConsentId?: string | null;
+  /** Ask for an on-site (Stripe Embedded Checkout) session. Only set once
+   *  Stripe.js has loaded; the result then carries clientSecret. */
+  embedded?: boolean;
   /** Patient goodwill/referral credits to redeem at this checkout. Server
    *  re-verifies they belong to the booking email + are unredeemed, then
    *  subtracts from the amount and stamps them redeemed atomically. */
@@ -60,6 +63,8 @@ export interface AppointmentCheckoutParams {
 export interface AppointmentCheckoutResult {
   url?: string;
   sessionId?: string;
+  /** Present for embedded sessions — mount with stripe.initEmbeddedCheckout. */
+  clientSecret?: string;
   error?: string;
   // Slot-conflict structured payload (Hormozi: never let a buyer leave
   // empty-handed). When error === 'slot_unavailable', the UI shows a
@@ -233,7 +238,7 @@ export async function createAppointmentCheckoutSession(
       return { error: (body.message as string) || (body.error as string) };
     }
 
-    return { url: body.url, sessionId: body.sessionId };
+    return { url: body.url, sessionId: body.sessionId, clientSecret: body.clientSecret };
   } catch (err) {
     console.error('Error in createAppointmentCheckoutSession:', err);
     return { error: (err as Error).message };

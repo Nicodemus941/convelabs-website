@@ -225,6 +225,11 @@ Deno.serve(async (req) => {
       allowOutOfArea = false,
       // Cloudflare Turnstile token from the booking pay step (bot gate).
       captchaToken = null,
+      // On-site card form: create a ui_mode:'embedded' session and return its
+      // client_secret instead of a hosted-checkout URL. The client only asks
+      // for this after Stripe.js has loaded, so the hosted path stays the
+      // fallback without a second (credit-redeeming) call.
+      embedded = false,
     } = await req.json();
 
     // ── TURNSTILE BOT GATE (anon callers only, flag-gated) ──────────
@@ -1791,11 +1796,19 @@ Deno.serve(async (req) => {
       // Hormozi trust ceremony: every paid booking lands on /welcome where
       // the patient sees a clear "you paid ✓ · benefits" page. Prevents the
       // Suzanne-style double-charge pattern on every appointment flow.
-      success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: metadata.service_type === 'membership'
-        ? `${origin}/pricing?status=cancel`
-        : `${origin}/book-now?status=cancel`,
-    });
+      // Embedded sessions take return_url (no cancel_url — the patient
+      // closes the form on our page); Stripe sends them to /welcome on
+      // completion just like the hosted success_url.
+      ...(embedded ? {
+        ui_mode: 'embedded',
+        return_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+      } : {
+        success_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: metadata.service_type === 'membership'
+          ? `${origin}/pricing?status=cancel`
+          : `${origin}/book-now?status=cancel`,
+      }),
+    } as any);
 
     // ─── ITEMIZED CART CAPTURE ─────────────────────────────────────
     // Stash the cart breakdown keyed by Stripe session id. Webhook reads
@@ -1902,6 +1915,7 @@ Deno.serve(async (req) => {
       JSON.stringify({
         url: session.url,
         sessionId: session.id,
+        clientSecret: embedded ? (session as any).client_secret : undefined,
         apologyCreditApplied: apologyCreditApplied / 100,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

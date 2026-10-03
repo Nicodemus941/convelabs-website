@@ -26,6 +26,8 @@ import BookingChatAssistant from './BookingChatAssistant';
 import PriceEstimateBadge from './PriceEstimateBadge';
 import BookingTrustBadges from './BookingTrustBadges';
 import SlotConflictModal from './SlotConflictModal';
+import EmbeddedCheckoutDialog from './EmbeddedCheckoutDialog';
+import { getStripe } from '@/lib/stripeClient';
 import ReasonPicker from './ReasonPicker';
 import StepReassurance, { BookingStageKey } from './StepReassurance';
 import VisitSummaryCard from './VisitSummaryCard';
@@ -176,6 +178,10 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
   const [showLabOrder, setShowLabOrder] = useState(false);
   const viewedFunnelStagesRef = useRef<Set<string>>(new Set());
   const redirectingToCheckoutRef = useRef(false);
+  // On-site card form (Stripe Embedded Checkout). Falls back to the hosted
+  // redirect when Stripe.js can't load, or after the embedded form failed.
+  const [embeddedCheckout, setEmbeddedCheckout] = useState<{ clientSecret: string } | null>(null);
+  const forceHostedCheckoutRef = useRef(false);
 
   // Slot-conflict modal state. Fires when create-appointment-checkout returns
   // 409 slot_unavailable. Hormozi: never let a buyer leave empty-handed —
@@ -822,7 +828,13 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         if (rawCreds) redeemReferralCreditIds = JSON.parse(rawCreds) || [];
       } catch { /* private-browsing safe */ }
 
+      // Load Stripe.js BEFORE creating the session: only ask for an embedded
+      // session when the on-page form can actually mount, so the hosted
+      // fallback never needs a second (credit-redeeming) checkout call.
+      const embeddedOk = !forceHostedCheckoutRef.current && !!(await getStripe());
+
       const result = await createAppointmentCheckoutSession({
+        embedded: embeddedOk,
         serviceType: visitType,
         serviceName: service?.name || 'Blood Draw Service',
         amount: Math.round(finalSubtotal * 100),
@@ -1031,7 +1043,18 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         return;
       }
 
-      if (result.url) {
+      if (result.clientSecret) {
+        // On-site card form. Stripe returns the patient to /welcome on
+        // success, same as the hosted flow; that navigation must not count
+        // as an abandon.
+        redirectingToCheckoutRef.current = true;
+        analytics.trackFunnelStage('redirected_to_checkout', 98, {
+          source: bookingSource,
+          sessionUrlPresent: false,
+          embedded: true,
+        } as any);
+        setEmbeddedCheckout({ clientSecret: result.clientSecret });
+      } else if (result.url) {
         // Telemetry: stamp before we navigate away so we know the patient
         // got the URL. If they NEVER arrive at Stripe (DNS, blocker, etc.)
         // the booking_audit_log row is the only signal we have.
@@ -1469,6 +1492,21 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       )}
 
       {/* Slot-conflict modal — fired by handleCheckout on 409 slot_unavailable */}
+      <EmbeddedCheckoutDialog
+        clientSecret={embeddedCheckout?.clientSecret || null}
+        onClose={() => {
+          setEmbeddedCheckout(null);
+          redirectingToCheckoutRef.current = false;
+        }}
+        onError={() => {
+          setEmbeddedCheckout(null);
+          redirectingToCheckoutRef.current = false;
+          forceHostedCheckoutRef.current = true;
+          const msg = "The payment form didn't load. Tap Pay again to continue on Stripe's secure page — or call (941) 527-9169.";
+          setCheckoutError(msg);
+          toast.error(msg, { duration: 9000 });
+        }}
+      />
       <SlotConflictModal
         open={conflictModal.open}
         originalDate={conflictModal.originalDate}
