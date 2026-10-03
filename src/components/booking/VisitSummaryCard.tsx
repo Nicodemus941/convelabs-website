@@ -45,11 +45,15 @@ const VisitSummaryCard: React.FC<{ className?: string }> = ({ className = '' }) 
   // the non-member visit, so the fee line reads the same way: shown with its
   // member waiver. Same-day / after-hours slots never set this flag.
   const premiumHours = !!watch('serviceDetails.premiumHours');
+  const afterHours = !!watch('serviceDetails.extendedHours');
   const fastingLine = SLOT_GUIDANCE_SUMMARY[useFastingIntent()];
   if (!visitType) return null;
 
   const price = getServicePrice(visitType, 'none');
-  const premiumLine = premiumHours
+  // One timing fee per visit: after-hours outranks premium (bookingWindows.ts).
+  const premiumLine = afterHours
+    ? `After hours +$${SURCHARGES.extendedHours.amount}`
+    : premiumHours
     ? `Premium hours +$${SURCHARGES.premiumHours.amount} · Free for members`
     : null;
   const name = visitName(visitType);

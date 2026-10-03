@@ -11,8 +11,12 @@
 --   • compute_phleb_take_v2_inline (called at checkout time with `amount`,
 --     which already excludes the fee) needs no change.
 --
--- Precedence of the live timing fees (never stacked):
---   same-day $100  >  after-hours $50  >  premium hours $10
+-- ONE timing fee per visit (owner, 2026-10-02):
+--   same-day $100  >  after-hours $50  >  weekend $75  >  premium hours $10
+-- The after-hours $50 is now server-charged too (its own Stripe line item)
+-- and lands on the EXISTING appointments.surcharge_amount + extended_hours
+-- columns — no schema change; compute_phleb_take_v2 keeps passing
+-- surcharge_amount 100% to the phleb (unchanged business rule).
 
 BEGIN;
 

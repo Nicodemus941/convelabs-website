@@ -2119,6 +2119,9 @@ async function handleAppointmentPayment(session: any) {
     // revenue: stored on premium_fee and subtracted by compute_phleb_take_v2
     // before the phleb split, never folded into surcharge_amount.
     const premiumFeeCents = parseInt(metadata.premium_fee_cents || '0', 10) || 0;
+    // After-hours surcharge (cents), server-charged as its own line item.
+    // Stored on surcharge_amount: passes 100% to the phleb (unchanged rule).
+    const afterHoursFeeCents = parseInt(metadata.after_hours_fee_cents || '0', 10) || 0;
     const userId = metadata.user_id || null;
 
     // Build address string (include apt/unit if present)
@@ -2319,10 +2322,10 @@ async function handleAppointmentPayment(session: any) {
           metadata.instructions ? `Instructions: ${metadata.instructions}` : '',
           metadata.gate_code ? `Gate Code: ${metadata.gate_code}` : '',
         ].filter(Boolean).join(' | ') || null,
-        total_amount: (servicePrice + tipAmount + premiumFeeCents) / 100, // convert cents to dollars
+        total_amount: (servicePrice + tipAmount + premiumFeeCents + afterHoursFeeCents) / 100, // convert cents to dollars
         service_price: servicePrice / 100,
         tip_amount: tipAmount / 100,
-        surcharge_amount: 0,
+        surcharge_amount: afterHoursFeeCents / 100,
         premium_fee: premiumFeeCents / 100,
         stripe_checkout_session_id: checkoutSessionId,
         stripe_payment_intent_id: typeof payment_intent === 'string' ? payment_intent : payment_intent?.id || null,
@@ -2330,7 +2333,7 @@ async function handleAppointmentPayment(session: any) {
         // trigger will still correct to the service-type default if this is
         // missing or stuck at the 30-min column default.
         duration_minutes: metadata.duration_minutes ? parseInt(metadata.duration_minutes, 10) : undefined,
-        extended_hours: false,
+        extended_hours: afterHoursFeeCents > 0,
         weekend_service: metadata.weekend === 'true',
         booking_source: 'online',
         // H2: last-touch attribution from session — empty strings become null.

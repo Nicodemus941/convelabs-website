@@ -378,7 +378,9 @@ const CheckoutStep: React.FC<CheckoutStepProps> = ({ onBack, onCheckout, isProce
   const breakdown = calculateTotal(serviceId, {
     sameDay: serviceDetails?.sameDay,
     weekend: serviceDetails?.weekend,
+    extendedHours: serviceDetails?.extendedHours,
     premiumHours: serviceDetails?.premiumHours,
+    adventHealth: String(getValues('labOrder.labDestination') || '').toLowerCase() === 'adventhealth',
     extendedArea,
     ...(isSpecialtyKit && specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
   }, tipAmount, isSpecialtyKit ? 0 : additionalPatients.length, memberTier, isFoundingMember);

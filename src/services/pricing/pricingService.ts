@@ -1,4 +1,5 @@
 import { isTravelFeeZip } from '@/data/serviceZipCodes';
+import { resolveTimingFee } from '@/lib/bookingWindows';
 
 export interface ServiceOption {
   id: string;
@@ -18,6 +19,8 @@ export interface SurchargeOptions {
    * see src/lib/bookingWindows.ts.
    */
   premiumHours?: boolean;
+  /** Specimen goes to AdventHealth — the premium fee is never charged. */
+  adventHealth?: boolean;
   extendedArea?: boolean;
   isGenovaKit?: boolean;
   additionalGenovaKits?: number;
@@ -59,6 +62,12 @@ export interface PriceBreakdown {
    * subtracts it from the `amount` it sends to create-appointment-checkout.
    */
   premiumFee: number;
+  /**
+   * After-hours surcharge (dollars) included in `subtotal`. Same treatment:
+   * server-computed from the slot time + office hours, its own line item,
+   * excluded from the client `amount`. Paid 100% to the phleb (surcharge_amount).
+   */
+  afterHoursFee: number;
   /**
    * Specialty-kit bundle "save vs unbundled" amount, in dollars. Only set
    * when calculateSpecialtyKitBundle() ran. Surface this as a chip
@@ -166,11 +175,7 @@ export const SURCHARGES = {
 };
 
 export const PREMIUM_HOURS_LABEL = SURCHARGES.premiumHours.label;
-
-function isPremiumHoursWaived(tier: MembershipTier): boolean {
-  // Every paid member skips the premium fee — Regular, VIP and Concierge.
-  return tier === 'member' || tier === 'vip' || tier === 'concierge';
-}
+export const AFTER_HOURS_LABEL = SURCHARGES.extendedHours.label;
 
 // Additional patient pricing by tier
 function getAdditionalPatientPrice(visitType: string, tier: MembershipTier = 'none'): number {
@@ -378,17 +383,8 @@ export function calculateBasePrice(serviceId: string): number {
  *     • Concierge: also waived
  *     • Member tier: still pays (not promised at member tier)
  */
-function isSameDayWaived(tier: MembershipTier, isFoundingMember: boolean): boolean {
-  if (tier === 'concierge') return true;
-  if (tier === 'vip' && isFoundingMember) return true;
-  return false;
-}
-
-function isWeekendWaived(tier: MembershipTier): boolean {
-  // Saturday access is a STANDARD VIP perk per the public pricing card —
-  // not just a Founding-50 bonus. Every VIP gets Saturday at no surcharge.
-  return tier === 'vip' || tier === 'concierge';
-}
+// Waivers live in src/lib/bookingWindows.ts (resolveTimingFee), which the
+// server mirrors — so what the UI shows is what checkout charges.
 
 export function calculateSurcharges(
   options: SurchargeOptions,
@@ -396,14 +392,22 @@ export function calculateSurcharges(
   isFoundingMember: boolean = false,
 ): { label: string; amount: number }[] {
   const items: { label: string; amount: number }[] = [];
-  if (options.sameDay && !isSameDayWaived(tier, isFoundingMember)) items.push(SURCHARGES.sameDay);
-  if (options.weekend && !isWeekendWaived(tier)) items.push(SURCHARGES.weekend);
-  if (options.extendedHours) items.push(SURCHARGES.extendedHours);
-  // Timing fees never stack: same-day ($100) > after-hours ($50) > premium
-  // hours ($10). Only when neither of the first two made it onto the visit
-  // does the premium fee apply — and only to non-members.
-  const hasOtherTimingFee = items.some(i => i === SURCHARGES.sameDay || i === SURCHARGES.extendedHours);
-  if (options.premiumHours && !hasOtherTimingFee && !isPremiumHoursWaived(tier)) items.push(SURCHARGES.premiumHours);
+  // ONE timing fee per visit (owner, 2026-10-02):
+  //   same-day $100 > after-hours $50 > weekend $75 > premium hours $10.
+  // The first fee the tier actually owes wins; the rest are not added.
+  const timing = resolveTimingFee({
+    tier,
+    isFoundingMember,
+    sameDay: !!options.sameDay,
+    afterHours: !!options.extendedHours,
+    weekend: !!options.weekend,
+    premiumEligible: !!options.premiumHours,
+    adventHealth: !!options.adventHealth,
+  });
+  if (timing?.kind === 'same_day') items.push(SURCHARGES.sameDay);
+  else if (timing?.kind === 'after_hours') items.push(SURCHARGES.extendedHours);
+  else if (timing?.kind === 'weekend') items.push(SURCHARGES.weekend);
+  else if (timing?.kind === 'premium') items.push(SURCHARGES.premiumHours);
   if (options.extendedArea) items.push(SURCHARGES.extendedArea);
 
   if (options.additionalGenovaKits && options.additionalGenovaKits > 0) {
@@ -506,12 +510,23 @@ export function calculateTotal(
     tip: tipAmount,
     total: parseFloat((subtotal + tipAmount).toFixed(2)),
     premiumFee: premiumFeeIn(surcharges),
+    afterHoursFee: afterHoursFeeIn(surcharges),
   };
 }
 
 /** Dollars of premium-hours fee present in a surcharge list (0 when absent). */
 export function premiumFeeIn(surcharges: { label: string; amount: number }[]): number {
   return surcharges.find(s => s.label === PREMIUM_HOURS_LABEL)?.amount || 0;
+}
+
+/** Dollars of after-hours surcharge present in a surcharge list (0 when absent). */
+export function afterHoursFeeIn(surcharges: { label: string; amount: number }[]): number {
+  return surcharges.find(s => s.label === AFTER_HOURS_LABEL)?.amount || 0;
+}
+
+/** The fees the server charges as its own line items — kept OUT of the client `amount`. */
+export function serverChargedFeesIn(breakdown: { premiumFee?: number; afterHoursFee?: number }): number {
+  return (breakdown.premiumFee || 0) + (breakdown.afterHoursFee || 0);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -665,6 +680,7 @@ export function calculateSpecialtyKitBundle(
     tip: tipAmount,
     total: parseFloat((subtotal + tipAmount).toFixed(2)),
     premiumFee: premiumFeeIn(surcharges),
+    afterHoursFee: afterHoursFeeIn(surcharges),
     bundleSavings: showSavings ? savings : undefined,
     bundleLabel: showSavings ? bundleLabel(bundle, savings) : undefined,
   };

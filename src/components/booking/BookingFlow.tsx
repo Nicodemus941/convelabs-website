@@ -9,7 +9,7 @@ import { bookingFormSchema, BookingFormValues } from '@/types/appointmentTypes';
 import { useAvailableServices } from '@/hooks/useAvailableServices';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateTotal, getServiceById, isExtendedArea } from '@/services/pricing/pricingService';
+import { calculateTotal, getServiceById, isExtendedArea, serverChargedFeesIn } from '@/services/pricing/pricingService';
 import { createAppointmentCheckoutSession } from '@/services/stripe/appointmentCheckout';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -634,7 +634,9 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       const breakdown = calculateTotal(visitType, {
         sameDay: data.serviceDetails.sameDay,
         weekend: data.serviceDetails.weekend,
+        extendedHours: data.serviceDetails.extendedHours,
         premiumHours: data.serviceDetails.premiumHours,
+        adventHealth: String((data as any)?.labOrder?.labDestination || '').toLowerCase() === 'adventhealth',
         extendedArea: isExtendedArea(locationCity, locationZip),
         ...(specialtyBundle ? { specialtyKitBundle: specialtyBundle } : {}),
       }, tipAmount, isSpecialtyKit ? 0 : additionalPatientCount, memberTier, isFoundingMember);
@@ -714,12 +716,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
       // checkout validates the code and subtracts it server-side; sending a
       // pre-discounted amount AND the code gave the patient $50 off instead
       // of $25. `referralDiscount` is kept for the itemized cart record.
-      // The premium-hours fee is shown here but CHARGED by the server: create-
-      // appointment-checkout recomputes it from (date, time, verified tier)
-      // and adds its own "Premium hours" Stripe line item. Sending it inside
-      // `amount` too would bill it twice, so it comes back out here.
+      // The premium-hours fee and the after-hours surcharge are shown here but
+      // CHARGED by the server: create-appointment-checkout recomputes both
+      // from (date, time, office hours, verified tier) and adds its own
+      // Stripe line items. Sending them inside `amount` too would bill them
+      // twice, so they come back out here.
+      const serverFees = serverChargedFeesIn(breakdown);
       const finalSubtotal = Math.max(
-        breakdown.subtotal - (breakdown.premiumFee || 0) + bundleExtra + safeFamilyMemberExtra,
+        breakdown.subtotal - serverFees + bundleExtra + safeFamilyMemberExtra,
         0
       );
 
@@ -776,13 +780,14 @@ const BookingFlow: React.FC<BookingFlowProps> = ({ tenantId, onComplete, onCance
         bundle_extra: bundleExtra,
         bundle_count: bundleCount,
         subtotal: breakdown.subtotal,
-        // Premium-hours fee the client displayed; the server's own figure is
-        // stamped alongside as server_premium_fee_cents when the session is made.
+        // Fees the client displayed; the server's own figures are stamped
+        // alongside (server_premium_fee_cents / server_after_hours_fee_cents).
         premium_fee: breakdown.premiumFee || 0,
+        after_hours_fee: breakdown.afterHoursFee || 0,
         // Expected charge after the server applies the referral discount
-        // (premium fee included again — the server adds it as a line item).
-        final_subtotal: Math.max(0, finalSubtotal - referralDiscount + (breakdown.premiumFee || 0)),
-        total: parseFloat((Math.max(0, finalSubtotal - referralDiscount + (breakdown.premiumFee || 0)) + tipAmount).toFixed(2)),
+        // (server-charged fees included again — they're separate line items).
+        final_subtotal: Math.max(0, finalSubtotal - referralDiscount + serverFees),
+        total: parseFloat((Math.max(0, finalSubtotal - referralDiscount + serverFees) + tipAmount).toFixed(2)),
         location_city: locationCity,
         location_extended_area: isExtendedArea(locationCity, locationZip),
         captured_at: new Date().toISOString(),

@@ -1,9 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.38.4';
 import { stripe } from '../_shared/stripe.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { isSlotStillAvailable, getAvailableSlotsForDate, normalizeSlotTime } from '../_shared/availability.ts';
+import { isSlotStillAvailable, getAvailableSlotsForDate, normalizeSlotTime, loadOfficeDay } from '../_shared/availability.ts';
 import { timeBlockAppliesOn, timeBlockDateFilter, visitOverlapsWindow, visitMinutesForBlocks } from '../_shared/timeBlocks.ts';
-import { evaluateSlot, premiumFeeCents, todayIsoET, normalizeTime as normalizeHHMM, VIP_HOLD_LABEL } from '../_shared/bookingWindows.ts';
+import { evaluateSlot, resolveTimingFee, todayIsoET, normalizeTime as normalizeHHMM, VIP_HOLD_LABEL } from '../_shared/bookingWindows.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
@@ -468,6 +468,31 @@ Deno.serve(async (req) => {
         user_agent: req.headers.get('user-agent') || null,
       });
     } catch (e) { console.warn('audit log insert failed (non-blocking):', e); }
+
+    // ─── OFFICE HOURS (Settings > Office Hours) ────────────────────
+    // Per-day open/close/closed from system_settings 'office_hours', the row
+    // the patient grid reads. Closed means closed for online booking, for
+    // every tier and destination (AdventHealth included). Admin booking
+    // never comes through here. Membership purchases carry no slot.
+    const officeInfo = (!isMembershipPurchaseType(serviceType) && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly))
+      ? await loadOfficeDay(supabaseClient, dateOnly)
+      : null;
+    if (officeInfo && appointmentTime) {
+      const hhmmCheck = normalizeHHMM(String(appointmentTime));
+      const minCheck = hhmmCheck ? parseInt(hhmmCheck.slice(0, 2), 10) * 60 + parseInt(hhmmCheck.slice(3, 5), 10) : null;
+      const outsideHours = minCheck !== null && (minCheck < officeInfo.openMin || minCheck >= officeInfo.closeMin);
+      if (officeInfo.day.closed || outsideHours) {
+        const dayName = new Date(dateOnly + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+        console.warn(`[office-closed] ${patientDetails?.email} tried ${dateOnly} ${appointmentTime} (closed=${officeInfo.day.closed} ${officeInfo.day.open}-${officeInfo.day.close})`);
+        return new Response(JSON.stringify({
+          error: 'office_closed',
+          message: officeInfo.day.closed
+            ? `We're closed on ${dayName}s for online booking. Please pick another day.`
+            : `We're not open at ${appointmentTime} on ${dayName}s. Please pick another time.`,
+          office_hours: officeInfo.day,
+        }), { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
 
     // ─── SERVER-SIDE SLOT-LOCK ENFORCEMENT ─────────────────────────
     // Prevent double-booking: check if (date, time) is already taken by
@@ -1170,40 +1195,37 @@ Deno.serve(async (req) => {
     // checkouts. Flag is captured here for the post-session block.
     const willUseMemberBenefit = serverTier !== 'none' && priceCorrection > 0;
 
-    // ─── PREMIUM HOURS: access rules + fee, from the shared rules module ──
+    // ─── TIMING RULES + FEES, from the shared rules module ─────────────
     // _shared/bookingWindows.ts is byte-identical to src/lib/bookingWindows.ts,
     // so the grid and this check agree by construction. Enforced here:
     //   • weekend slot still held for VIP/Concierge (outside the 24 h
     //     release) and the verified tier isn't VIP/Concierge → 409
     //   • fasting visit starting at/after noon → 409
-    //   • premium fee (+$10 non-members, $0 for every paid member incl. a
-    //     membership bundled into THIS checkout) charged as its own line
-    //     item below — never trusted from the client, and never stacked on
-    //     the same-day fee or the after-hours surcharge.
-    // Left alone on purpose: the AdventHealth destination override (access
-    // bypass, fee still priced by time of day) and the after-hours set.
+    //   • ONE timing fee per visit (owner 2026-10-02):
+    //       same-day $100 > after-hours $50 > weekend $75 > premium $10
+    //     Same-day and weekend arrive inside the client `amount` (unchanged
+    //     path). After-hours and premium are computed HERE from the slot
+    //     time, office hours and the VERIFIED tier (a membership bundled into
+    //     this checkout counts), and charged as their own line items — never
+    //     trusted from the client. Premium is business revenue; after-hours
+    //     passes 100% to the phleb like every other surcharge.
+    //   • AdventHealth destination: access override left alone, premium fee
+    //     never charged.
     let premiumFeeCentsServer = 0;
+    let afterHoursFeeCentsServer = 0;
+    let timingFeeKindServer: string = 'none';
     let premiumWindowServer: string = 'n/a';
-    if (!isMembershipPurchaseType(serviceType) && appointmentTime && /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    if (officeInfo && appointmentTime) {
       const hhmm = normalizeHHMM(String(appointmentTime));
       const isAdvent = /advent/i.test(String(labDestination || ''));
       const isFastingVisit = String(serviceDetails?.selectedService || '').toLowerCase() === 'fasting-blood-draw'
         || serviceDetails?.fasting === true;
-      // After-hours boundary from Settings > Office Hours (same row the grid
-      // reads); default 5:30 PM when nothing is saved.
-      let afterHoursFromMin = 17 * 60 + 30;
-      try {
-        const { data: oh } = await supabaseClient.from('system_settings').select('value').eq('key', 'office_hours').maybeSingle();
-        const raw = String((oh as any)?.value?.afterHoursFrom || '');
-        const m = /^(\d{1,2}):(\d{2})$/.exec(raw);
-        if (m) afterHoursFromMin = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
-      } catch { /* default */ }
       const slotMin = hhmm ? parseInt(hhmm.slice(0, 2), 10) * 60 + parseInt(hhmm.slice(3, 5), 10) : -1;
-      const isAfterHoursSlot = slotMin >= afterHoursFromMin;
+      const isAfterHoursSlot = slotMin >= officeInfo.afterHoursFromMin;
       const isSameDayVisit = dateOnly === todayIsoET();
 
       if (hhmm && !isAdvent && !isAfterHoursSlot) {
-        const rule = evaluateSlot({ tier: effectiveTier, dateIso: dateOnly, time: hhmm, isFasting: isFastingVisit });
+        const rule = evaluateSlot({ tier: effectiveTier, dateIso: dateOnly, time: hhmm, isFasting: isFastingVisit, officeDay: officeInfo.day });
         if (rule.vipHold) {
           console.warn(`[premium-hours] ${patientDetails?.email} tier=${effectiveTier} tried held weekend slot ${dateOnly} ${hhmm} (releases ${rule.releaseAt})`);
           return new Response(JSON.stringify({
@@ -1221,17 +1243,22 @@ Deno.serve(async (req) => {
         premiumWindowServer = rule.window;
       }
       if (hhmm) {
-        premiumFeeCentsServer = premiumFeeCents({
+        // Classify the slot for the fee regardless of access bypasses.
+        const classify = evaluateSlot({ tier: effectiveTier, dateIso: dateOnly, time: hhmm, isFasting: false });
+        const fee = resolveTimingFee({
           tier: effectiveTier,
-          dateIso: dateOnly,
-          time: hhmm,
-          sameDayFeeApplies: isSameDayVisit,
-          afterHoursFeeApplies: isAfterHoursSlot,
+          isFoundingMember: serverIsFounding,
+          sameDay: isSameDayVisit,
+          afterHours: isAfterHoursSlot,
+          weekend: new Date(dateOnly + 'T12:00:00').getDay() % 6 === 0,
+          premiumEligible: classify.premiumEligible,
+          adventHealth: isAdvent,
         });
+        timingFeeKindServer = fee?.kind || 'none';
+        if (fee?.kind === 'premium') premiumFeeCentsServer = fee.cents;
+        if (fee?.kind === 'after_hours') afterHoursFeeCentsServer = fee.cents;
       }
-      if (premiumFeeCentsServer > 0) {
-        console.log(`[premium-hours] ${patientDetails?.email} tier=${effectiveTier} ${dateOnly} ${hhmm} window=${premiumWindowServer} fee=$${premiumFeeCentsServer / 100}`);
-      }
+      console.log(`[timing-fee] ${patientDetails?.email} tier=${effectiveTier} ${dateOnly} ${hhmm} window=${premiumWindowServer} fee=${timingFeeKindServer} premium=$${premiumFeeCentsServer / 100} afterHours=$${afterHoursFeeCentsServer / 100}`);
     }
 
     // Determine the origin for success/cancel URLs
@@ -1295,6 +1322,23 @@ Deno.serve(async (req) => {
       });
     }
 
+    // After-hours surcharge — its own line, server-computed. Passes 100% to
+    // the phleb (surcharge_amount) like every surcharge; it is outside
+    // `amount`, so it is handed to the Connect transfer math explicitly below.
+    if (afterHoursFeeCentsServer > 0) {
+      lineItems.push({
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: 'Extended Hours',
+            description: 'After-hours visit (5:30 PM or later).',
+          },
+          unit_amount: afterHoursFeeCentsServer,
+        },
+        quantity: 1,
+      });
+    }
+
     // Premium-hours fee — its own line so the receipt reads the way the slot
     // grid and checkout page did ("Premium hours"). Goes to the business:
     // it's outside `amount`, so the Connect transfer math below never sees it.
@@ -1353,6 +1397,9 @@ Deno.serve(async (req) => {
       // Premium-hours fee charged on this session (cents). Webhook / verify
       // write it to appointments.premium_fee; business revenue, not phleb.
       premium_fee_cents: String(premiumFeeCentsServer),
+      // After-hours surcharge charged on this session (cents) → appointments.
+      // surcharge_amount + extended_hours; 100% to the phleb.
+      after_hours_fee_cents: String(afterHoursFeeCentsServer),
       appointment_date: appointmentDate,
       appointment_time: appointmentTime || '',
       // UUID format check — only carry through valid UUIDs so we don't pollute
@@ -1481,7 +1528,7 @@ Deno.serve(async (req) => {
     // session can go through. The promo is still applied — visit fee is
     // zero; only the tip is collected.
     const willHaveSubscriptionLineItem = !!(subscribeToMembership && subscribeToMembership.annualPriceCents);
-    if (!willHaveSubscriptionLineItem && amount + safeTipCents + premiumFeeCentsServer < 50) {
+    if (!willHaveSubscriptionLineItem && amount + safeTipCents + premiumFeeCentsServer + afterHoursFeeCentsServer < 50) {
       return new Response(
         JSON.stringify({
           error: 'total_too_low',
@@ -1638,16 +1685,19 @@ Deno.serve(async (req) => {
           // baked into `amount` so we pass 0 for p_surcharge_cents — the
           // default-path math (amount - $87) flows the surcharge through to
           // the phleb naturally.
+          // The server-charged after-hours surcharge sits OUTSIDE `amount`, so
+          // it is passed explicitly as p_surcharge_cents (100% to the phleb).
+          // The premium-hours fee is business revenue and is NOT passed.
           const { data: v2Rows } = await supabaseClient.rpc('compute_phleb_take_v2_inline' as any, {
             p_staff_id: phleb.id,
             p_service_type: serviceType || 'mobile',
-            p_total_paid_cents: amount,
-            p_surcharge_cents: 0,
+            p_total_paid_cents: amount + afterHoursFeeCentsServer,
+            p_surcharge_cents: afterHoursFeeCentsServer,
             p_tip_cents: safeTipCents,
             p_has_companion: hasCompanion,
           });
           const v2Row: any = Array.isArray(v2Rows) ? v2Rows[0] : v2Rows;
-          const takeCents = Math.max(0, Math.min(Number(v2Row?.take_cents) || 0, amount + safeTipCents));
+          const takeCents = Math.max(0, Math.min(Number(v2Row?.take_cents) || 0, amount + afterHoursFeeCentsServer + safeTipCents));
           console.log(`[connect] v2 rule '${v2Row?.rule_used}' → phleb $${(takeCents/100).toFixed(2)} business $${(((v2Row?.business_keep_cents)||0)/100).toFixed(2)}`);
           if (takeCents > 0 && phleb.stripe_connect_account_id) {
             connectTransfer = { destination: phleb.stripe_connect_account_id, amount: takeCents };
@@ -1773,8 +1823,10 @@ Deno.serve(async (req) => {
         const enriched = {
           ...pricingBreakdown,
           stripe_session_id: session.id,
-          server_amount_charged_cents: amount + safeTipCents + premiumFeeCentsServer,
+          server_amount_charged_cents: amount + safeTipCents + premiumFeeCentsServer + afterHoursFeeCentsServer,
           server_premium_fee_cents: premiumFeeCentsServer,
+          server_after_hours_fee_cents: afterHoursFeeCentsServer,
+          server_timing_fee_kind: timingFeeKindServer,
           server_apology_credit_cents_applied: apologyCreditApplied,
           server_promo_code_applied_cents: promoCodeApplied?.applied_cents || 0,
           server_referral_discount_cents: appliedReferralDiscountCents,

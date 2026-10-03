@@ -23,19 +23,33 @@
  *     Outside 24 h non-VIP users see "VIP & Concierge — opens to everyone
  *     24 hrs before" (waitlist / upsell, never a dead-end padlock).
  *
- *   FEES NEVER STACK — see premiumFeeCents(): if the same-day fee or the
- *   after-hours surcharge already applies, the premium fee is not added.
+ *   ONE TIMING FEE PER VISIT — see resolveTimingFee():
+ *     same-day $100  >  after-hours $50  >  weekend $75  >  premium hours $10
+ *   The first fee that applies to the tier wins; the rest are not added.
+ *   AdventHealth-destination visits never carry the premium fee.
+ *
+ *   OFFICE HOURS WIN: pass the day's saved office hours (system_settings
+ *   'office_hours' → days[dow]) as `officeDay`; a closed day, or a start
+ *   outside open–close, is closed for online booking for every tier — the
+ *   weekend VIP window and the AdventHealth override included.
  *
  *   LEFT ALONE (handled by the callers, not here):
- *     • the existing after-hours surcharge set (5:30 PM+)
- *     • the AdventHealth destination override (6 AM–6 PM, all tiers)
- *     • office hours (system_settings 'office_hours') still decide whether
- *       5 AM is actually offered — these windows open at 05:00 so they never
- *       veto an early slot.
+ *     • the AdventHealth destination access override (6 AM–6 PM, all tiers)
  */
 
 export type MemberTier = 'none' | 'member' | 'vip' | 'concierge';
 
+/** One saved office day: system_settings 'office_hours' → value.days[dow]. */
+export interface OfficeDay {
+  /** 'HH:MM' 24-hour */
+  open: string;
+  close: string;
+  closed: boolean;
+}
+
+export const SAME_DAY_FEE_CENTS = 10000;
+export const AFTER_HOURS_FEE_CENTS = 5000;
+export const WEEKEND_FEE_CENTS = 7500;
 export const PREMIUM_FEE_CENTS = 1000;
 export const PREMIUM_FEE_DOLLARS = PREMIUM_FEE_CENTS / 100;
 /** A weekend slot opens to everyone this many hours before its start. */
@@ -65,6 +79,8 @@ export interface SlotRule {
   /** Can THIS tier book THIS slot right now? */
   bookable: boolean;
   window: SlotWindow;
+  /** The office is closed then (saved office hours) — closed for every tier and destination. */
+  officeClosed?: boolean;
   /** Premium fee in cents for this tier at this slot, before stacking rules. 0 for paid members. */
   feeCents: number;
   /** The slot carries the premium fee for non-members (members see "Premium hours"). */
@@ -85,6 +101,18 @@ export function isPaidMember(tier: MemberTier | string | null | undefined): bool
 
 export function isVipOrConcierge(tier: MemberTier | string | null | undefined): boolean {
   return tier === 'vip' || tier === 'concierge';
+}
+
+/**
+ * Is the office open for a start at `hhmm` on a day with these saved hours?
+ * No saved hours (undefined/null) → open (the caller has no settings yet).
+ */
+export function isOfficeOpenAt(officeDay: OfficeDay | null | undefined, hhmm: string): boolean {
+  if (!officeDay) return true;
+  if (officeDay.closed) return false;
+  const ok = (v: unknown) => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v);
+  if (!ok(officeDay.open) || !ok(officeDay.close)) return true;
+  return hhmm >= officeDay.open && hhmm < officeDay.close;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -193,6 +221,8 @@ export function evaluateSlot(opts: {
   time: string;      // any parseable
   isFasting: boolean;
   now?: Date;
+  /** Saved office hours for this weekday. Closed means closed, for everyone. */
+  officeDay?: OfficeDay | null;
 }): SlotRule {
   const hhmm = normalizeTime(opts.time);
   if (!hhmm) {
@@ -203,6 +233,18 @@ export function evaluateSlot(opts: {
   const min = toMinutes(hhmm);
   const paid = isPaidMember(tier);
   const feeForTier = paid ? 0 : PREMIUM_FEE_CENTS;
+
+  // Office hours come first: a day switched off in Settings has no online
+  // slots for any tier or destination.
+  if (!isOfficeOpenAt(opts.officeDay, hhmm)) {
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dayOfWeek(opts.dateIso)];
+    return {
+      bookable: false, window: 'closed', officeClosed: true, feeCents: 0, premiumEligible: false, vipHold: false,
+      reason: opts.officeDay?.closed
+        ? `We're closed on ${dayName}s for online booking.`
+        : `We're not open at ${formatTo12h(hhmm)} on ${dayName}s.`,
+    };
+  }
 
   // Fasting cutoff applies every day: the patient has been fasting since
   // the night before, so afternoon fasting draws are not offered.
@@ -249,33 +291,93 @@ export function evaluateSlot(opts: {
   return { bookable: true, window: 'standard', feeCents: 0, premiumEligible: false, vipHold: false };
 }
 
+// ─────────────────────────────────────────────────────────────
+// TIMING FEES — one per visit
+// ─────────────────────────────────────────────────────────────
+
+export type TimingFeeKind = 'same_day' | 'after_hours' | 'weekend' | 'premium';
+
+export interface TimingFeeInputs {
+  tier: MemberTier;
+  /** Founding-50 VIP seat (server: user_memberships.founding_member). */
+  isFoundingMember?: boolean;
+  /** The visit is booked for today (ET). */
+  sameDay?: boolean;
+  /** The start is at/after office_hours.afterHoursFrom (5:30 PM by default). */
+  afterHours?: boolean;
+  /** The date is Sat/Sun. */
+  weekend?: boolean;
+  /** The slot sits in a premium window (evaluateSlot().premiumEligible). */
+  premiumEligible?: boolean;
+  /** Specimen goes to AdventHealth — never carries the premium fee. */
+  adventHealth?: boolean;
+}
+
+/** Tier waivers, one place for both sides. */
+export function isSameDayFeeWaived(tier: MemberTier, isFoundingMember = false): boolean {
+  return tier === 'concierge' || (tier === 'vip' && isFoundingMember);
+}
+export function isWeekendFeeWaived(tier: MemberTier): boolean {
+  return isVipOrConcierge(tier);
+}
+export function isPremiumFeeWaived(tier: MemberTier): boolean {
+  return isPaidMember(tier);
+}
+
 /**
- * Premium fee actually charged, with the no-stacking rule applied:
- * same-day fee or after-hours surcharge already on the visit → $0.
- * Precedence: same-day ($100) > after-hours ($50) > premium hours ($10).
+ * The ONE timing fee this visit carries, or null. Precedence (owner,
+ * 2026-10-02): same-day $100 > after-hours $50 > weekend $75 > premium $10.
+ * A fee the tier is exempt from does not "apply", so the next one is tried.
+ */
+export function resolveTimingFee(f: TimingFeeInputs): { kind: TimingFeeKind; cents: number } | null {
+  if (f.sameDay && !isSameDayFeeWaived(f.tier, !!f.isFoundingMember)) return { kind: 'same_day', cents: SAME_DAY_FEE_CENTS };
+  if (f.afterHours) return { kind: 'after_hours', cents: AFTER_HOURS_FEE_CENTS };
+  if (f.weekend && !isWeekendFeeWaived(f.tier)) return { kind: 'weekend', cents: WEEKEND_FEE_CENTS };
+  if (f.premiumEligible && !f.adventHealth && !isPremiumFeeWaived(f.tier)) return { kind: 'premium', cents: PREMIUM_FEE_CENTS };
+  return null;
+}
+
+/**
+ * Premium fee actually charged for a (tier, date, time), with the one-fee
+ * rule applied. Weekend / premium eligibility come from the slot itself;
+ * same-day and after-hours from the caller (they depend on the clock and on
+ * office_hours.afterHoursFrom).
  */
 export function premiumFeeCents(opts: {
   tier: MemberTier;
   dateIso: string;
   time: string;
   now?: Date;
-  /** The $100 same-day fee applies to this visit (as the caller computed it). */
+  isFoundingMember?: boolean;
+  /** The visit is booked for today (ET). */
   sameDayFeeApplies?: boolean;
-  /** The $50 after-hours surcharge applies to this visit. */
+  /** The start is in the after-hours set. */
   afterHoursFeeApplies?: boolean;
+  /** Specimen goes to AdventHealth. */
+  adventHealth?: boolean;
 }): number {
-  if (opts.sameDayFeeApplies || opts.afterHoursFeeApplies) return 0;
   const rule = evaluateSlot({ tier: opts.tier, dateIso: opts.dateIso, time: opts.time, isFasting: false, now: opts.now });
   // Keyed on the window, not on `bookable`: callers that bypass the access
-  // rules (AdventHealth destination) still price the slot the same way, and a
-  // held weekend slot is rejected by the caller before any fee matters.
-  if (!rule.premiumEligible) return 0;
-  return rule.feeCents;
+  // rules (AdventHealth destination) still classify the slot the same way,
+  // and a held weekend slot is rejected by the caller before any fee matters.
+  const fee = resolveTimingFee({
+    tier: opts.tier,
+    isFoundingMember: opts.isFoundingMember,
+    sameDay: !!opts.sameDayFeeApplies,
+    afterHours: !!opts.afterHoursFeeApplies,
+    weekend: isWeekendDate(opts.dateIso),
+    premiumEligible: rule.premiumEligible,
+    adventHealth: !!opts.adventHealth,
+  });
+  return fee?.kind === 'premium' ? fee.cents : 0;
 }
 
 /** Badge text for a bookable premium-eligible slot, or null when there is nothing to say. */
 export function premiumBadge(rule: SlotRule, tier: MemberTier): string | null {
   if (!rule.premiumEligible || rule.vipHold) return null;
+  // A released weekend slot carries the $75 weekend fee (non-VIP), which
+  // outranks the premium fee, so there is no "+$10" to announce there.
+  if (rule.window === 'weekend') return null;
   return isPaidMember(tier) ? PREMIUM_BADGE_MEMBER : PREMIUM_BADGE_NON_MEMBER;
 }
 
@@ -299,10 +401,11 @@ export function isBookingAllowed(opts: {
   time: string;
   isFasting: boolean;
   now?: Date;
+  officeDay?: OfficeDay | null;
 }): AllowedCheck {
   const rule = evaluateSlot(opts);
   if (rule.bookable) return { allowed: true, suggestions: [], feeCents: rule.feeCents };
-  const suggestions = getAllowedSlotsForDate({ tier: opts.tier, dateIso: opts.dateIso, isFasting: opts.isFasting, now: opts.now }).slice(0, 5);
+  const suggestions = getAllowedSlotsForDate({ tier: opts.tier, dateIso: opts.dateIso, isFasting: opts.isFasting, now: opts.now, officeDay: opts.officeDay }).slice(0, 5);
   return { allowed: false, reason: rule.reason, suggestions, upgradeCTA: rule.upgradeCTA, feeCents: rule.feeCents };
 }
 
@@ -315,11 +418,12 @@ export function getAllowedSlotsForDate(opts: {
   dateIso: string;
   isFasting: boolean;
   now?: Date;
+  officeDay?: OfficeDay | null;
 }): string[] {
   const out: string[] = [];
   for (let m = 5 * 60; m < 15 * 60; m += 30) {
     const hhmm = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-    if (evaluateSlot({ tier: opts.tier, dateIso: opts.dateIso, time: hhmm, isFasting: opts.isFasting, now: opts.now }).bookable) {
+    if (evaluateSlot({ tier: opts.tier, dateIso: opts.dateIso, time: hhmm, isFasting: opts.isFasting, now: opts.now, officeDay: opts.officeDay }).bookable) {
       out.push(formatTo12h(hhmm));
     }
   }

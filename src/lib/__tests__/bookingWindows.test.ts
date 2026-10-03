@@ -1,9 +1,14 @@
 import {
+  AFTER_HOURS_FEE_CENTS,
   PREMIUM_FEE_CENTS,
+  SAME_DAY_FEE_CENTS,
   VIP_HOLD_LABEL,
+  WEEKEND_FEE_CENTS,
   evaluateSlot,
+  getAllowedSlotsForDate,
   isBookingAllowed,
   premiumFeeCents,
+  resolveTimingFee,
   slotStartUtcMs,
   todayIsoET,
 } from '../bookingWindows';
@@ -95,7 +100,7 @@ describe('weekend VIP hold + 24 h release', () => {
   });
 });
 
-describe('fee precedence (never stack)', () => {
+describe('fee precedence (one timing fee per visit)', () => {
   it('premium fee not added when the same-day fee applies', () => {
     expect(premiumFeeCents({ tier: 'none', dateIso: TUE, time: '6:00 AM', sameDayFeeApplies: true })).toBe(0);
     expect(premiumFeeCents({ tier: 'none', dateIso: TUE, time: '6:00 AM' })).toBe(PREMIUM_FEE_CENTS);
@@ -105,8 +110,67 @@ describe('fee precedence (never stack)', () => {
     expect(premiumFeeCents({ tier: 'none', dateIso: TUE, time: '6:00 AM', afterHoursFeeApplies: true })).toBe(0);
   });
 
+  it('non-member weekend inside 24 h pays the $75 weekend fee only, not $85', () => {
+    expect(premiumFeeCents({ tier: 'none', dateIso: SAT, time: '8:00 AM', now: twentyHoursOut })).toBe(0);
+    expect(resolveTimingFee({ tier: 'none', weekend: true, premiumEligible: true }))
+      .toEqual({ kind: 'weekend', cents: WEEKEND_FEE_CENTS });
+  });
+
+  it('Regular member weekend inside 24 h: weekend fee applies, premium waived → $75', () => {
+    expect(resolveTimingFee({ tier: 'member', weekend: true, premiumEligible: true }))
+      .toEqual({ kind: 'weekend', cents: WEEKEND_FEE_CENTS });
+  });
+
+  it('VIP weekend: weekend fee waived, premium waived → nothing', () => {
+    expect(resolveTimingFee({ tier: 'vip', weekend: true, premiumEligible: true })).toBeNull();
+  });
+
+  it('AdventHealth destination never carries the premium fee', () => {
+    expect(premiumFeeCents({ tier: 'none', dateIso: TUE, time: '6:00 AM', adventHealth: true })).toBe(0);
+    expect(resolveTimingFee({ tier: 'none', premiumEligible: true, adventHealth: true })).toBeNull();
+  });
+
+  it('same-day beats after-hours; after-hours beats weekend; concierge skips same-day', () => {
+    expect(resolveTimingFee({ tier: 'none', sameDay: true, afterHours: true, weekend: true, premiumEligible: true }))
+      .toEqual({ kind: 'same_day', cents: SAME_DAY_FEE_CENTS });
+    expect(resolveTimingFee({ tier: 'none', afterHours: true, weekend: true }))
+      .toEqual({ kind: 'after_hours', cents: AFTER_HOURS_FEE_CENTS });
+    expect(resolveTimingFee({ tier: 'concierge', sameDay: true, afterHours: true }))
+      .toEqual({ kind: 'after_hours', cents: AFTER_HOURS_FEE_CENTS });
+  });
+
   it('members never pay the premium fee', () => {
     expect(premiumFeeCents({ tier: 'member', dateIso: TUE, time: '2:00 PM' })).toBe(0);
+  });
+});
+
+describe('office hours drive online booking', () => {
+  const satClosed = { open: '06:00', close: '10:00', closed: true };
+  const tueClosed = { open: '05:00', close: '13:30', closed: true };
+  const tueShort = { open: '05:00', close: '13:30', closed: false };
+
+  it('Saturday switched off → no Saturday slots for any tier, even inside 24 h', () => {
+    for (const tier of ['none', 'member', 'vip', 'concierge'] as const) {
+      const r = evaluateSlot({ tier, dateIso: SAT, time: '8:00 AM', isFasting: false, now: twentyHoursOut, officeDay: satClosed });
+      expect(r.bookable).toBe(false);
+      expect(r.officeClosed).toBe(true);
+      expect(r.vipHold).toBe(false);
+      expect(getAllowedSlotsForDate({ tier, dateIso: SAT, isFasting: false, now: twentyHoursOut, officeDay: satClosed })).toEqual([]);
+    }
+  });
+
+  it('a closed weekday likewise', () => {
+    for (const tier of ['none', 'concierge'] as const) {
+      expect(evaluateSlot({ tier, dateIso: TUE, time: '10:00 AM', isFasting: false, officeDay: tueClosed }).bookable).toBe(false);
+      expect(getAllowedSlotsForDate({ tier, dateIso: TUE, isFasting: false, officeDay: tueClosed })).toEqual([]);
+    }
+  });
+
+  it('open hours trim the window: 13:30 close hides 2:00 PM but keeps 1:00 PM premium', () => {
+    expect(evaluateSlot({ tier: 'none', dateIso: TUE, time: '2:00 PM', isFasting: false, officeDay: tueShort }).bookable).toBe(false);
+    const r = evaluateSlot({ tier: 'none', dateIso: TUE, time: '1:00 PM', isFasting: false, officeDay: tueShort });
+    expect(r.bookable).toBe(true);
+    expect(r.window).toBe('premium');
   });
 });
 
