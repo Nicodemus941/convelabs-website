@@ -85,10 +85,22 @@ Deno.serve(async (req) => {
             updateData.stripe_payment_intent_id = invoice.payment_intent;
           }
 
-          // If we have amount_paid from Stripe and it differs from our records, note it
+          // Only adopt Stripe's amount_paid as this row's total when the
+          // invoice bills this one visit. A series/family invoice spans
+          // several rows; stamping the whole amount on each one gave every
+          // visit of Lawrence Carpenter's 13-visit $1,950 invoice a $1,950
+          // total and a $717 phleb payout (fixed 2026-10-02).
           if (invoice.amount_paid && invoice.amount_paid > 0) {
-            const stripeAmount = invoice.amount_paid / 100; // Stripe uses cents
-            updateData.total_amount = stripeAmount;
+            const { count: rowsOnInvoice } = await supabase
+              .from('appointments')
+              .select('id', { count: 'exact', head: true })
+              .eq('stripe_invoice_id', appt.stripe_invoice_id)
+              .neq('status', 'cancelled');
+            if ((rowsOnInvoice ?? 0) <= 1) {
+              updateData.total_amount = invoice.amount_paid / 100; // Stripe uses cents
+            } else {
+              console.log(`[reconcile-invoice-payments] ${appt.stripe_invoice_id} covers ${rowsOnInvoice} rows; keeping per-visit total for ${appt.id}`);
+            }
           }
 
           const { error: updateError } = await supabase
