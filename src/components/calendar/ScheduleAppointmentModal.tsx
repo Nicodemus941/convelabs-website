@@ -938,7 +938,16 @@ const ScheduleAppointmentModal: React.FC<ScheduleAppointmentModalProps> = ({
         // Subtract companion fees so primary line = base + surcharges only.
         total_amount: Math.max(0, finalPrice - companionChargeTotal),
         service_price: orgPricing ? orgFlatPerDraw : basePrice,
-        surcharge_amount: surchargeTotal,
+        // A custom price or a waiver replaces the weekend/same-day/etc.
+        // surcharges the form auto-detected. Store only what the final price
+        // actually collects above the base — surcharge_amount passes through
+        // to the phleb's payout (Mary Demetree 2026-10-02: custom $150 on a
+        // $110 visit kept $175 and computed a $217 payout).
+        surcharge_amount: discountType === 'waive'
+          ? 0
+          : discountType === 'custom' && discountValue
+            ? Math.min(surchargeTotal, Math.max(0, Math.max(0, finalPrice - companionChargeTotal) - (orgPricing ? orgFlatPerDraw : basePrice)))
+            : surchargeTotal,
         duration_minutes: duration,
         booking_source: 'manual',
         is_vip: isVip,
