@@ -34,10 +34,11 @@ const SignaturePad = React.forwardRef<SignaturePadHandle, Props>(({ onChange, he
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Layout size, not getBoundingClientRect(): the latter includes the
+    // dialog's open-animation transform.
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    canvas.width = Math.round(canvas.offsetWidth * dpr);
+    canvas.height = Math.round(canvas.offsetHeight * dpr);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.scale(dpr, dpr);
@@ -47,18 +48,38 @@ const SignaturePad = React.forwardRef<SignaturePadHandle, Props>(({ onChange, he
     ctx.lineWidth = 2;
   }, []);
 
+  // Size the backing store from the element's real size whenever it changes.
+  // Inside a dialog the pad mounts mid open-animation (scaled, sometimes 0px
+  // wide), so a one-shot size at mount left a 0×0 canvas: strokes were
+  // invisible, `empty` still flipped, and toBlob() came back null — "Sign &
+  // continue" then failed with no visible signature (owner report, 2026-10-02).
   useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     setupCanvas();
-    const onResize = () => setupCanvas();
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const ro = new ResizeObserver(() => {
+      const dpr = window.devicePixelRatio || 1;
+      if (Math.round(canvas.offsetWidth * dpr) !== canvas.width || Math.round(canvas.offsetHeight * dpr) !== canvas.height) {
+        setupCanvas();
+        // Resizing wipes the bitmap; make the state say so.
+        setEmpty(true);
+        onChange?.(true);
+      }
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setupCanvas]);
 
   const ptFrom = (e: PointerEvent | React.PointerEvent): { x: number; y: number } | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
+    // Map screen coords into layout coords so strokes land under the pointer
+    // even while a parent transform (dialog animation) is in effect.
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    const sx = rect.width ? canvas.offsetWidth / rect.width : 1;
+    const sy = rect.height ? canvas.offsetHeight / rect.height : 1;
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
   };
 
   const onDown = (e: React.PointerEvent) => {

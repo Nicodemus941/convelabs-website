@@ -3,7 +3,7 @@ import { useFormContext } from 'react-hook-form';
 import { DollarSign, ChevronDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { BookingFormValues } from '@/types/appointmentTypes';
-import { calculateTotal, isExtendedArea } from '@/services/pricing/pricingService';
+import { calculateTotal, isExtendedArea, type MembershipTier } from '@/services/pricing/pricingService';
 
 /**
  * The running estimate in the step bar — and, on tap, what it is made of.
@@ -12,23 +12,44 @@ import { calculateTotal, isExtendedArea } from '@/services/pricing/pricingServic
  * Saturday saw "Est. $225" with nothing to say why, which reads as an
  * overcharge (owner report, 2026-10-01). Every fee now shows by name.
  */
-const PriceEstimateBadge: React.FC = () => {
+interface PriceEstimateBadgeProps {
+  /** Same tier/founding flags BookingFlow charges with, so the badge and the
+   *  checkout total agree (premium hours are free for members). */
+  memberTier?: MembershipTier;
+  isFoundingMember?: boolean;
+}
+
+const PriceEstimateBadge: React.FC<PriceEstimateBadgeProps> = ({ memberTier = 'none', isFoundingMember = false }) => {
   const { watch } = useFormContext<BookingFormValues>();
   const visitType = watch('serviceDetails.visitType');
   const sameDay = watch('serviceDetails.sameDay');
   const weekend = watch('serviceDetails.weekend');
   const extendedHours = watch('serviceDetails.extendedHours' as any) as boolean | undefined;
+  const premiumHours = watch('serviceDetails.premiumHours' as any) as boolean | undefined;
+  const labDestination = watch('labOrder.labDestination' as any) as string | undefined;
   const city = watch('locationDetails.city') || '';
   const zip = watch('locationDetails.zipCode') || '';
   const additionalPatients = watch('additionalPatients') || [];
 
   if (!visitType) return null;
 
+  // Mirrors the options BookingFlow.onSubmit passes to calculateTotal. The
+  // badge used to omit premiumHours, so a 1 PM non-member slot read "Est. $1"
+  // while checkout charged $11.
   const breakdown = calculateTotal(
     visitType,
-    { sameDay, weekend, extendedHours: !!extendedHours, extendedArea: isExtendedArea(city, zip) },
+    {
+      sameDay,
+      weekend,
+      extendedHours: !!extendedHours,
+      premiumHours: !!premiumHours,
+      adventHealth: String(labDestination || '').toLowerCase() === 'adventhealth',
+      extendedArea: isExtendedArea(city, zip),
+    },
     0,
     additionalPatients.length,
+    memberTier,
+    isFoundingMember,
   );
   const fees = breakdown.surcharges.filter((s) => s.amount !== 0 || /free/i.test(s.label));
 
@@ -63,7 +84,7 @@ const PriceEstimateBadge: React.FC = () => {
         </div>
         {fees.length > 0 && (
           <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-            Weekend and same-day fees don't apply on a weekday booked a day or more ahead.
+            Weekend and same-day fees don't apply on a weekday booked a day or more ahead. Premium-hours fees are free for members.
           </p>
         )}
       </PopoverContent>

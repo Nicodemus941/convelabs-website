@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useOtherDialogOpen } from '@/hooks/useOtherDialogOpen';
 import { supabase } from '@/integrations/supabase/client';
 import { MessageCircle, X, Send, Loader2, Sparkles, Heart, Building2, Link as LinkIcon, Phone, ExternalLink, Crown, CalendarCheck, RotateCcw, Clock } from 'lucide-react';
 import { trackEvent } from '@/lib/posthog';
@@ -349,13 +350,16 @@ const ChatbotWidget: React.FC = () => {
     }
   };
 
+  // Step aside while another dialog (recording consent, payment form) is open.
+  const otherDialogOpen = useOtherDialogOpen();
+
   // Book-now shortcut carries the conversation id so the booking is attributed.
   const bookUrl = conversationId ? `/book-now?cid=${conversationId}` : '/book-now';
 
   return (
     <>
       {/* Proactive greeting speech-bubble — invites first-time visitors to chat */}
-      {!open && showGreeting && (
+      {!open && !otherDialogOpen && showGreeting && (
         <div className="fixed bottom-24 right-5 z-[9998] w-[260px] max-w-[80vw] bg-white rounded-2xl rounded-br-md shadow-2xl border border-gray-200 p-3.5 animate-in fade-in slide-in-from-bottom-2 duration-300" role="status">
           <button onClick={dismissGreeting} aria-label="Dismiss greeting"
             className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-gray-900 text-white flex items-center justify-center shadow hover:bg-gray-700">
@@ -370,7 +374,7 @@ const ChatbotWidget: React.FC = () => {
       )}
 
       {/* Floating bubble */}
-      {!open && (
+      {!open && !otherDialogOpen && (
         <button
           ref={launcherRef}
           onClick={toggleOpen}

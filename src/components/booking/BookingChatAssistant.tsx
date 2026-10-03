@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MessageCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ClaudeAIChat } from '@/components/ai/ClaudeAIChat';
+import { useOtherDialogOpen } from '@/hooks/useOtherDialogOpen';
 
 const STEP_LABELS = ['Service Selection', 'Date & Time', 'Patient Info', 'Lab Order', 'Location', 'Review', 'Checkout'];
 
@@ -40,13 +41,15 @@ const BookingChatAssistant: React.FC<BookingChatAssistantProps> = ({ currentStep
     return () => clearTimeout(timer);
   }, []);
 
+  // Step aside while another dialog (recording consent, payment form) is open.
+  const otherDialogOpen = useOtherDialogOpen();
   const stepContext = STEP_LABELS[currentStep] || 'booking';
   const systemPrompt = `${BOOKING_SYSTEM_PROMPT}\n\nThe patient is currently on the "${stepContext}" step of booking.`;
 
   return (
     <>
       {/* Floating chat button */}
-      {!isOpen && (
+      {!isOpen && !otherDialogOpen && (
         <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2">
           {showLabel && (
             <div className="bg-white shadow-lg rounded-full px-4 py-2 text-sm font-medium text-foreground animate-in fade-in slide-in-from-right-2">
